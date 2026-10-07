@@ -1,0 +1,17 @@
+# 威联通 Container Station →「创建」→「创建应用程序」，把下面全部内容粘贴进去。
+# 前提：程序文件在 /share/Container/listing-helper/app，数据在 /share/Container/listing-helper/data
+# 用 host 网络：直接占用 NAS 的 8790 端口，访问 http://NAS的IP:8790（不经过 Docker 端口转发，最稳定）
+services:
+  3d-ops:
+    image: ubuntu:24.04
+    container_name: 3d-ops
+    restart: unless-stopped
+    network_mode: host
+    command: ["sh", "/app/docker/nas-start.sh"]
+    volumes:
+      - /share/Container/listing-helper/app:/app
+      - /share/Container/listing-helper/data:/data
+    environment:
+      - TZ=Asia/Bangkok
+      - INSTALL_ORCA=1
+      - PORT=8790

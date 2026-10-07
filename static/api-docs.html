@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D 运营管理系统 API</title>
+<style>
+:root{--ink:#1d2330;--muted:#6b7280;--line:#e3e6eb;--bg:#f6f7f9;--code:#0f172a}
+body{margin:0;font:14px/1.65 "Segoe UI","Microsoft YaHei","Leelawadee UI",sans-serif;color:var(--ink);background:var(--bg)}
+main{max-width:920px;margin:0 auto;padding:24px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 8px;padding-top:8px;border-top:1px solid var(--line)}
+h3{font-size:14px;margin:18px 0 6px}
+.muted{color:var(--muted)}
+code{background:#eef1f5;padding:1px 5px;border-radius:4px;font-family:Consolas,monospace;font-size:13px}
+pre{background:var(--code);color:#e2e8f0;padding:12px 14px;border-radius:8px;overflow:auto;font-size:12.5px;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;background:#fff;font-size:13px}
+th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+th{background:#f9fafb}
+.m{display:inline-block;font-weight:700;font-size:12px;padding:1px 7px;border-radius:5px;margin-right:6px;color:#fff}
+.get{background:#16a34a}.post{background:#2563eb}.put{background:#9333ea}
+.box{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>3D 运营管理系统 对外接口（API v1）</h1>
+<p class="muted">以后接 Lazada / Shopee / TikTok 开放平台、BigSeller 自动化，或者自己写脚本，都用这套接口把订单送进系统。
+送进来的订单和表格导入一样：自动对上产品 SKU、生成生产任务、计入利润和耗材计划。</p>
+
+<div class="box">
+<b>地址</b>：<code>{{BASE}}/api/v1/...</code>（局域网里用 NAS 的 IP，例如 <code>http://192.168.31.200:8790/api/v1/ping</code>）<br>
+<b>认证</b>：在「账号」页 → 「API 与店铺对接」创建 API 密钥，请求头带
+<code>Authorization: Bearer lh_xxxx</code>（或 <code>X-API-Key: lh_xxxx</code>）。<br>
+<b>格式</b>：请求和返回都是 JSON（UTF-8）。返回里 <code>ok</code> 为 false 时看 <code>error</code>。
+</div>
+
+<h2><span class="m get">GET</span>/api/v1/ping</h2>
+<p>测试密钥和网络是否正常。</p>
+<pre><code>curl -H "Authorization: Bearer lh_xxxx" {{BASE}}/api/v1/ping
+→ {"ok": true, "version": "2.26.0", "time": 1791200000}</code></pre>
+
+<h2><span class="m post">POST</span>/api/v1/orders　推送订单（新增或更新）</h2>
+<p>平台 + 订单号相同视为同一个订单：再次推送只更新状态等信息，不会重复，也不会覆盖你在系统里写的定制备注和加急。
+已经开始生产的订单，商品明细不会再改。一次最多 1000 个订单。</p>
+<pre><code>POST /api/v1/orders
+{
+  "source": "lazada-sync",          // 可选，来源名称（显示在同步记录里）
+  "platform": "lazada",             // 可选，订单里没写平台时用这个
+  "orders": [{
+    "platform": "lazada",           // lazada / shopee / tiktok / 其他
+    "shop": "My3DShop",
+    "order_no": "26100512345",      // 必填
+    "status": "to_ship",            // 见下面「状态」，也可以直接传平台原文（如 READY_TO_SHIP、待发货）
+    "order_time": "2026-10-05T10:00:00+07:00",   // Unix 秒 / 毫秒 / ISO / "2026-10-05 10:00"（支持佛历）
+    "ship_by": 1791300000,
+    "buyer": "Somchai",
+    "buyer_note": "ขอสีชมพูเข้มๆ",
+    "seller_note": "",
+    "order_total": 258,
+    "shipping_fee": 0,
+    "platform_fee": 15.5,           // 平台佣金/手续费；不传就按设置里的扣点估算
+    // v2.11 起可选：付款方式和金额拆分（有就传，利润按真实扣费算）
+    "payment": "COD",               // 货到付款填 COD（或 cod 金额 > 0）；会用于审单和拒收风险
+    "commission": 12, "service_fee": 3.5, "payment_fee": 0,
+    "seller_discount": 0, "platform_discount": 20, "settlement": 242.5,   // settlement = 平台实际结算到账
+    "tracking_no": "",
+    "items": [
+      {"sku": "3DP0001-PK", "name": "猫咪手办", "variation": "粉色", "qty": 2, "unit_price": 129, "item_total": 258}
+    ]
+  }]
+}
+→ {"ok": true, "orders_new": 1, "orders_updated": 0, "items": 1,
+   "unmatched": [], "skipped_items_locked": 0, "errors": [], "jobs": {"created": 1, "cancelled": 0}}</code></pre>
+<p><code>unmatched</code>：产品库里找不到的 SKU（不会生成生产任务）。<code>errors</code>：格式不对、被跳过的订单。
+<code>held</code>（v2.11）：新订单里命中审单规则、被挂起到「待审核」的个数——挂起的订单要在 ERP 里人工审核通过后才排产。</p>
+
+<h3>状态</h3>
+<table>
+<tr><th>status</th><th>含义</th><th>会不会生产</th></tr>
+<tr><td><code>unpaid</code></td><td>未付款</td><td>不会</td></tr>
+<tr><td><code>to_ship</code></td><td>待发货</td><td>会（自动生成打印任务）</td></tr>
+<tr><td><code>shipped</code></td><td>已发货</td><td>不会</td></tr>
+<tr><td><code>completed</code></td><td>已完成</td><td>不会</td></tr>
+<tr><td><code>cancelled</code></td><td>已取消（还没开始打印的任务会自动删除）</td><td>不会</td></tr>
+<tr><td><code>returned</code></td><td>退货/退款</td><td>不会</td></tr>
+<tr><td><code>delivery_failed</code></td><td>拒收 / 派送失败（v2.11 新增；平台原文如 Failed Delivery、Package Returned、拒收 会自动识别）。会自动登记一条售后等包裹退回验货</td><td>不会</td></tr>
+<tr><td><code>quote</code></td><td>报价/预订单</td><td>会排产估算，不计收入</td></tr>
+</table>
+
+<h2><span class="m post">POST</span>/api/v1/orders/status　只更新状态 / 运单号</h2>
+<pre><code>POST /api/v1/orders/status
+{"platform": "shopee", "order_no": "SP777", "status": "shipped", "tracking_no": "TH123456"}
+// 或批量：{"orders": [{...}, {...}]}
+→ {"ok": true, "updated": 1, "not_found": []}</code></pre>
+
+<h2><span class="m get">GET</span>/api/v1/orders　查询订单</h2>
+<p>参数：<code>since</code>（Unix 秒，按更新时间，只返回之后有变化的），<code>status</code>，<code>platform</code>，<code>limit</code>（最多 1000）。
+返回订单、商品明细和生产进度（<code>jobs</code>）。v2.9.1 起每个订单多一个 <code>cost</code>：本系统算的收入、平台费、材料、机时、包材、失败损耗和利润。
+用<b>只读密钥</b>查询时，不返回买家姓名、收件人、电话、地址、邮编、买家留言、买家识别码。</p>
+<p><b>v2.11 新增字段</b>（只加不改）：<code>hold</code>（1 = 挂起待审核，不排产）、<code>hold_reason</code>、<code>reviewed_at</code> / <code>reviewed_by</code>、
+<code>payment</code>（<code>cod</code> = 货到付款）、<code>ship_method</code>（<code>pickup</code> 上门揽收 / <code>dropoff</code> 送到网点 / <code>self</code>）、
+<code>handover_id</code>（发货交接单号）、<code>buyer_key</code>（同一买家的识别码，只读密钥不返回），
+金额拆分 <code>item_amount</code>、<code>buyer_shipping</code>、<code>platform_discount</code>、<code>seller_discount</code>、<code>commission</code>、<code>service_fee</code>、<code>payment_fee</code>、<code>settlement</code>（没有就是 null）。
+<code>status</code> 多了一个值 <code>delivery_failed</code>。
+<code>cost</code> 里多了 <code>fee_source</code>（平台费怎么来的：<code>settlement</code> = 订单金额 − 结算到账；<code>detail</code> = 佣金 + 服务费 + 支付手续费 + 卖家优惠；<code>import</code> = 导入的平台费；<code>estimate</code> = 按扣点估算）和 <code>fee_detail</code>。</p>
+<pre><code>GET /api/v1/orders?since=1791200000&amp;status=to_ship</code></pre>
+
+<h2><span class="m get">GET</span>/api/v1/skus　产品 SKU 列表</h2>
+<p>所有产品变体的 SKU、颜色、克数、打印时长。v2.9.1 起还返回：材质、售价（最终价 / 建议价 / 最低价）、单件成本拆分 <code>unit_cost</code>、
+预估包裹重量 <code>est_package_weight_g</code>（克数 + 包材重量）、包裹尺寸、Lazada / Shopee 类目、导出时间。
+参数 <code>since</code>（Unix 秒）：只返回之后改过的产品。</p>
+<p>每条都有 <code>product_id</code>（产品编号，如 <code>3DP0012</code>）和 <code>updated_at</code>（产品最后修改时间，Unix 秒；改资料、改上架状态都会变）。
+v2.12.1 起多 <code>variant</code>（规格中文名，和 <code>spec</code> 一样；没有规格为空）。v2.12 起多返回：<code>product_code</code>（和 <code>product_id</code> 一样，给选品工具用）、<code>draft</code>（选品工具推过来、还没填颜色的草稿为 true）、
+<code>source</code>（选品工具来的：<code>{"source": "3d-curator", "source_id": "7"}</code>，其他为 null）。
+数据多时用 <code>since</code> 分段拉：按 <code>updated_at</code> 记住拉到哪里，往回多拉 10 分钟。</p>
+<p><b>v2.11.1 新增 <code>listing</code></b>（每个 SKU 都带，同一产品的 SKU 一样），按平台分 <code>lazada</code> / <code>shopee</code>，状态按<b>平台自己的商品状态</b>：</p>
+<table>
+<tr><th>status</th><th>含义</th><th>Lazada 后台</th><th>Shopee 后台</th></tr>
+<tr><td><code>none</code></td><td>未导出</td><td>—</td><td>—</td></tr>
+<tr><td><code>pending</code></td><td>已导出表格，还没上传</td><td>—</td><td>—</td></tr>
+<tr><td><code>failed</code></td><td>上传表格时报错，平台上没生成商品</td><td>批量上传失败</td><td>批量上传失败</td></tr>
+<tr><td><code>uploaded</code></td><td>已上传，平台审核中</td><td>Pending QC</td><td>审核中</td></tr>
+<tr><td><code>rejected</code></td><td>平台审核不通过 / 违规</td><td>QC Rejected</td><td>违规 / 禁止</td></tr>
+<tr><td><code>live</code></td><td>审核通过、在售</td><td>Active</td><td>在售 Live</td></tr>
+<tr><td><code>inactive</code></td><td>平台上已下架</td><td>Inactive</td><td>已下架 Unlisted</td></tr>
+<tr><td><code>update</code></td><td>平台上已有，ERP 资料改过还没同步（看 <code>platform_status</code> 知道平台上现在是什么状态）</td><td colspan="2">—</td></tr>
+</table>
+<pre><code>"listing": {
+  "lazada": {"status": "live", "platform_status": "live",
+             "first_uploaded_at": 1791200000,   // 第一次上传到平台
+             "last_uploaded_at": 1791200000,    // 最近一次上传
+             "first_listed_at": 1791290000,     // 第一次审核通过、在售（测款期从这里算；还没上线过为 null）
+             "live_at": 1791290000,             // 最近一次变成在售
+             "delisted_at": null,               // 最近一次在平台下架
+             "erp_active": true,                // ERP 里被下架（例如运营写回下架）为 false
+             "batch_id": 3, "batch": "Lazada 10-05 第 1 批", "note": null},
+  "shopee": {"status": "none", ...}
+}</code></pre>
+<p>状态是人在 ERP 里按平台后台标记的（导出页 / 上架批次），时间是标记的时间。上架状态变化会更新产品的 <code>updated_at</code>，用 <code>since</code> 增量能拉到。
+2.11.1 以前标成「已上传」的，<code>first_uploaded_at</code> 用当时标记的时间，<code>first_listed_at</code> 为 null（不知道哪天过审）。</p>
+
+<h2><span class="m get">GET</span>/api/v1/cost-params　成本参数（v2.9.1）</h2>
+<p>设置页里的成本、扣点、加价率、包材、打印机列表（编码、机型、是否启用）、每天可用打印小时、颜色代码表。不含任何密钥。
+外部系统算成本和利润时用这一套数，保证两边口径一致。</p>
+
+<h2><span class="m get">GET</span>/api/v1/profit　利润报表（v2.9.1）</h2>
+<p>和「利润」页一样：每日、按 SKU、按平台的收入和利润。参数 <code>days</code>（默认 30，最多 366）。</p>
+
+<h2>只读密钥（v2.9.1）</h2>
+<p>创建密钥时勾选「只读」：只能用 GET 查询，不能推送订单、改状态，也不能调用客服接口；查询订单时不返回买家个人信息。
+给运营分析系统等只需要看数据的程序用这种密钥。</p>
+
+<h2>运营写回（v2.10，对接规范 v1.1 第 6 条）</h2>
+<p>用<b>「运营写回」权限的密钥</b>（scope = ops）调用；这种密钥只能调 <code>/api/v1/ops/...</code> 和 <code>/api/v1/ping</code>。
+能改：泰文标题 <code>title_th</code>、类目属性 <code>attributes</code>、售价 <code>price</code>、上下架 <code>active</code>。
+硬性限制：售价不能低于该 SKU 的 <code>floor_price</code>；每个 SKU 每天（泰国时间）最多改 1 次售价；不能删除产品，只能下架；标题 10–255 个字符。
+ERP 设置「写回方式」为 auto（默认）时直接生效，为 confirm 时记成「待确认」，人工通过后才生效。改过的产品在导出页标「有修改待同步」。</p>
+
+<h2><span class="m post">POST</span>/api/v1/ops/products/&lt;SKU 或 产品编号&gt;</h2>
+<pre><code>{"changes": {"title_th": "...", "attributes": {"catProperty.p-20000": "No Brand"}, "price": 299, "active": false},
+ "reason": "测款期点击率低于同类，换标题关键词", "source_action_id": "A-20261020-001"}
+→ {"ok": true, "change_id": 123, "applied": true, "status": "applied", "product_id": "3DP0001", "sku": "3DP0001-WH",
+   "before": {"price": 259, ...}, "after": {"price": 299, ...}}
+被拦下时（HTTP 400）：{"ok": false, "error": "售价低于最低价 179", "code": "below_floor"}</code></pre>
+<p>错误代码 <code>code</code>：<code>below_floor</code> 低于最低价、<code>price_daily_limit</code> 今天已改过价、<code>sku_required</code> 多 SKU 产品改价要用 SKU、
+<code>title_length</code> 标题长度不对、<code>invalid_field</code> 不支持的字段、<code>invalid</code> 格式不对、<code>not_found</code>（404）找不到产品 / SKU。
+<code>price</code> 只能用 SKU 调用（单 SKU 产品也可以用产品编号）；标题、属性、上下架是产品级的。一次调用的几个字段要么全部生效，要么都不生效。</p>
+
+<h2><span class="m post">POST</span>/api/v1/ops/changes/&lt;change_id&gt;/revert　撤回</h2>
+<p>恢复成改之前的值（「待确认」的会变成「已拒绝」）。返回 <code>{"ok": true, "change": {...}}</code>。</p>
+
+<h2><span class="m get">GET</span>/api/v1/ops/changes?since=&amp;status=&amp;limit=　写入记录</h2>
+<p>按更新时间返回：<code>id, ts, product_id, sku, requested, before, after, reason, source_action_id,
+status（applied 已生效 / pending 待确认 / rejected 已拒绝 / reverted 已撤回）, decided_by, decided_at</code>。也返回当前写回方式 <code>mode</code>。</p>
+
+<h2><span class="m get">GET</span>/api/v1/production　生产概况</h2>
+<p>每台打印机的排队任务数和小时数、待打包、待发货数量。</p>
+
+<h2><span class="m get">GET</span>/api/v1/materials　耗材库存与采购建议</h2>
+<p>每个材料 + 颜色一行：库存公斤、待打印还要多少、每天用量、还能用几天、最晚下单日、建议买几卷。
+v2.12 起每行多 <code>spools</code>：<code>{"sealed": 未开封卷数, "open": 已开封在库卷数, "loaded": 在机上卷数, "on": [{"code","printer","slot","remaining_g"}]}</code>；
+返回里多 <code>alerts</code>：<code>[{"level": "bad"/"warn", "key": [材料, 颜色], "printer": 机器编码（有时）, "text": 中文提醒}]</code>。</p>
+
+<h2>3D选品工具建产品（v2.12，对接规范 v1.5 第 4.2 条）</h2>
+<p>密钥权限选「建产品」（scope = <code>catalog</code>）：只能调下面两个接口和 <code>/api/v1/ping</code>，不能读订单、改价、上下架、推订单。
+操作日志里操作人显示为 <code>api:&lt;密钥名&gt;</code>。</p>
+
+<h2><span class="m get">GET</span>/api/v1/categories　类目</h2>
+<p>只读、建产品、完整密钥都可以调。返回 ERP 里能用的类目（已上传 Lazada 模板的类目，导出上架表格要用），推送时 <code>category</code> 填 <code>name</code>（也接受 <code>id</code> 或 <code>lazada_cat_id</code>）。
+另外返回 ERP 的产品分组 <code>groups</code>（参考用）。</p>
+<pre><code>{"ok": true, "categories": [{"name": "园艺 &gt; 花盆", "id": "lazada_xxx.xlsx|กระถางปลูกต้นไม้", "lazada_cat_id": "12345", "path": "..."}],
+ "groups": [{"id": 1, "name": "猫咪系列"}]}</code></pre>
+
+<h2><span class="m post">POST</span>/api/v1/catalog/products　新建产品（草稿）</h2>
+<p>请求字段按《接口需求单：选品工具 → ERP 新建产品》：<code>source</code>、<code>source_id</code>（两个一起防重复）、<code>source_version</code>、
+<code>name_zh</code> / <code>name_th</code>（中 / 泰品名，至少一个；也认早期的 <code>title_zh</code> / <code>title_th</code>）、<code>description_zh</code> / <code>description_th</code>、
+<code>category</code>（必填）、<code>material</code>（PLA / PETG / TPU / ABS / ASA / 树脂 / 其他）、<code>print_minutes</code>、<code>filament_grams</code>、
+<code>images</code>（<code>[{position, is_cover, url}]</code>，按 <code>is_cover</code>、<code>position</code> 排序）、<code>files</code>（<code>[{name, bytes, kind, url}]</code>，可空）、
+<code>source_url</code>、<code>license_name</code>、<code>license_verified</code>（必须为 true）、<code>package_url</code>。不带成本和售价，ERP 按自己的成本参数算。
+多带的字段（例如 <code>tags</code>、<code>author</code>）ERP 会存进来源信息或忽略，不会报错。</p>
+<p>ERP 会：生成产品编号（<code>3DP</code> + 流水号）；建成草稿（颜色、SKU、售价在 ERP 里补齐，填了颜色后草稿标记自动去掉）；
+用 ERP「系统 → 账号与对接 → 3D选品工具对接」里填的选品工具密钥，把图片下载到 ERP（相对地址按设置里的选品工具地址拼）；模型文件（STL / 3MF / ZIP）也下载，第一个 STL / 3MF 设为产品 3D 模型。
+图片下载失败整单不建（可以重推）；模型文件下载失败只在 <code>warnings</code> 里提醒。</p>
+<pre><code>→ 201 {"ok": true, "product_code": "3DP0012", "created": true, "skus": ["3DP0012"], "images": 5, "files": 1, "warnings": []}
+同一个 source + source_id 再推：→ 200 {"ok": true, "product_code": "3DP0012", "created": false, ...}
+失败：{"ok": false, "error": "中文说明", "code": "invalid_category"}</code></pre>
+<table>
+<tr><th>code</th><th>HTTP</th><th>含义</th></tr>
+<tr><td><code>invalid_category</code></td><td>400</td><td>类目不在 <code>/api/v1/categories</code> 里</td></tr>
+<tr><td><code>title_required</code></td><td>400</td><td>中文、泰文标题都没有</td></tr>
+<tr><td><code>license_not_verified</code></td><td>400</td><td><code>license_verified</code> 不是 true</td></tr>
+<tr><td><code>invalid_field</code></td><td>400</td><td>字段格式不对（缺 source / source_id、材料不对、数组不是数组等）</td></tr>
+<tr><td><code>image_download_failed</code></td><td>502</td><td>从选品工具下载图片失败（密钥不对、地址不通、不是 JPG / PNG、太大）</td></tr>
+</table>
+<h2><span class="m get">GET</span>/api/v1/finance/events　财务事件（v2.18）</h2>
+<p>「财务」密钥（scope = finance）。库存 / 采购里跟钱有关的事：<code>purchase_payment</code> 采购付款、<code>purchase_received</code> 采购到货入库。参数 <code>since</code>（Unix 秒）、<code>kind</code>、<code>limit</code>（最多 5000）。
+字段：<code>id, ts, day, source, kind, amount, currency, category, ref_type, ref_no, method, note, username</code>。</p>
+<h2><span class="m get">GET</span>/api/v1/finance/inventory?month=YYYY-MM　库存月汇总（v2.18）</h2>
+<p>这个月库存消耗（按分类 / 类型，按加权平均价）、到货入库金额、采购付款、现在各分类的库存金额。详见对接规范第 11 条。</p>
+<h2><span class="m get">GET</span>/api/v1/finance/pl · breakdown · cashflow · expenses · tax　财务报表（v2.21）</h2>
+<p>「财务」密钥，只读。期间：<code>month=YYYY-MM</code> 或 <code>start=YYYY-MM-DD&amp;end=YYYY-MM-DD</code>。<code>pl</code> 损益表；<code>breakdown?by=platform|shop|product|sku|day|month</code> 利润分析；
+<code>cashflow</code> 现金流；<code>expenses</code> 收支明细；<code>tax</code> VAT 和平台代扣税。字段和口径见对接规范 11.1。</p>
+<h2><span class="m put">PUT</span>/api/v1/catalog/products/&lt;产品编号&gt;/variants　同步规格（v2.16，对接规范 4.3）</h2>
+<p>「建产品」密钥。选品工具的规格有变化时调用，<b>每次传全部现有规格</b>，ERP 按 <code>spec_id</code> 对比；同样的内容重复推送不改任何东西。
+规格字段见对接规范 4.3.4：<code>spec_id</code>（固定编号，必填）、<code>position</code>、<code>kind</code>（size / version / bundle / style）、<code>name_zh</code>、<code>name_th</code>、
+<code>name_en</code>、<code>is_default</code>、<code>size_mm</code>、<code>scale_pct</code>、<code>pack_qty</code>、<code>parts</code>、<code>filament_grams</code>、<code>print_minutes</code>、<code>files</code>、
+<code>recognize</code>（<code>{method: rule/ai/manual, confidence, evidence}</code>）。规格不含颜色，最多 12 个（多的只保留前 12 个并在 <code>warnings</code> 提醒）。</p>
+<pre><code>PUT /api/v1/catalog/products/3DP0012/variants
+{"source": "3d-curator", "source_id": "7", "product_code": "3DP0012", "source_colors": ["粉色"],
+ "variants": [{"spec_id": "v7-1", "position": 1, "kind": "size", "name_zh": "小号 8cm", "name_th": "ขนาดเล็ก 8 ซม.", "filament_grams": 28, "print_minutes": 95,
+               "recognize": {"method": "rule", "confidence": 0.95, "evidence": "文件名 cat_small.3mf"}}]}
+→ {"ok": true, "added": ["小号 8cm"], "updated": [], "unchanged": 0, "removed": [], "removed_pending": [], "skus": [...], "warnings": []}</code></pre>
+<ul>
+<li>产品还没导出过上架表格：新增 / 修改 / 删除直接生效。已导出（SKU 锁定）：新增照加；修改照改（SKU 不变）；列表里没有了的规格<b>不删</b>，标记「选品工具已删除·待确认」（<code>removed_pending</code>），由 ERP 里的人决定。</li>
+<li>AI 识别 <code>confidence</code> &lt; 0.8、名字里有颜色词、没有泰文名的规格标记「待确认」（<code>spec_status = review</code>），确认前不能导出上架表格、自动库存算 0。</li>
+<li>在 ERP 切片过 / 手改过克数的变体，选品工具改克数不会覆盖。</li>
+<li>建档 <code>POST /api/v1/catalog/products</code> 的 <code>variants</code> 也按这套字段（v2.16 起）。没有 <code>spec_id</code> 的老版本先用规格名代替。</li>
+<li>错误：404 <code>not_found</code>；400 <code>invalid_field</code>（规格名 / spec_id 重复、缺中文名、数字格式不对、不是这条选品记录建的产品）。</li>
+</ul>
+<p><b>v2.16 建档新字段（选品工具 2.2）</b>：<code>listing</code>（结构化商品文案：<code>title_zh/th</code>、<code>highlights_zh/th</code>、<code>intro</code>、<code>scenes</code>、<code>package</code>、
+<code>notes</code>、<code>keywords</code>、<code>ip_risk:[{term, reason}]</code>、<code>method</code>、<code>version</code>、<code>generated_at</code>）——原样保存，并填进 ERP 的泰文标题、Shopee 标题、卖点、包装内容、关键词；
+<code>ip_risk</code> 不为空时产品「侵权待确认」，确认前不能导出。<code>source_description_zh/th</code> 存进来源信息。泰文详情的段落文字（【…】、•）自动转成 HTML。</p>
+<p><b>v2.16 <code>GET /api/v1/skus</code> 新字段</b>：<code>spec_id</code>、<code>color_code</code>、<code>random_color</code>（随机颜色 SKU，颜色码 RND）、
+<code>stock</code>（ERP 算出的可售库存：开了按耗材自动算时 = 这个颜色剩余耗材能做几件，上限默认 50；没开时 = 手填或默认库存）、
+<code>stock_sync</code>（这个产品是否按耗材自动算）、<code>spec_status</code>（ok / review / removed_pending）。</p>
+<h2><span class="m post">POST</span>/api/v1/catalog/products/&lt;产品编号&gt;/files　补传模型文件（v2.12.2）</h2>
+<p>「建产品」密钥。给已建档的产品补传模型文件（建档时还没下载好的，或 2.12 以前手动对接的产品）。只加文件，不改其他资料。</p>
+<pre><code>POST /api/v1/catalog/products/3DP0012/files
+{"source": "3d-curator", "source_id": 12, "product_code": "3DP0012",
+ "files": [{"name": "small_part.stl", "bytes": 684123, "kind": "stl", "variant": "小号", "url": "http://…/api/v1/catalog/12/files/45"}]}
+→ {"ok": true, "added": 1, "skipped": 0, "warnings": [], "files": [{"name": "small_part.stl", "variant": "小号", "bytes": 684123}]}</code></pre>
+<ul>
+<li>下载方式同建档（用「系统 → 账号与对接 → 3D选品工具对接」里填的选品工具密钥），存到 ERP 的 data 文件夹，在产品编辑页「原始文件」里能下载。</li>
+<li>防重复：同一产品里 <code>url</code> 相同，或「文件名 + 字节数」相同的跳过（算在 <code>skipped</code>），不报错。</li>
+<li><code>variant</code> = 规格中文名：挂到这个规格（这个规格还没有模型文件时设为它的模型文件）；ERP 里没有这个规格时当整个产品的文件保存，并在 <code>warnings</code> 里提醒。</li>
+<li>产品还没有 3D 模型时，第一个 STL / 3MF 设为产品 3D 模型；已经有的不改。STEP / OBJ 等只保存，不设为模型。</li>
+<li>某个文件下载失败放进 <code>warnings</code>（带文件名），其他文件照常保存。一次最多 20 个文件。</li>
+<li>错误：产品编号不存在 404 <code>not_found</code>；产品是别的选品记录建的（<code>source</code> / <code>source_id</code> 对不上）400 <code>invalid_field</code>。
+产品在 ERP 里还没有来源信息（2.12 以前手动建的）：第一次补传时自动对上这条选品记录（这条选品记录已经对应别的产品时 400 <code>invalid_field</code>）。</li>
+</ul>
+<p><b>v2.12.1 多规格</b>（选品工具 1.8 的需求单）：有 2 个及以上规格（尺寸 / 版本 / 套装数量，不是颜色）时带 <code>variants</code>：
+<code>[{position, name_zh, name_th, print_minutes, filament_grams, files:[{name, bytes, kind, url}]}]</code>。ERP 每个规格建一个变体（第二个选项「规格」），
+各自保存时长、克数，对应的模型文件记在这个规格上（下载时和顶层 <code>files</code> 按 <code>url</code> 去重）；产品的 3D 模型用第 1 个规格的文件。
+<code>name_th</code> 写进泰文选项名。规格中文名不能空、不能重复（否则 <code>invalid_field</code>），最多 30 个。
+在 ERP 加颜色时按 <b>规格 × 颜色</b> 展开，SKU = <code>产品编号-颜色码-规格码</code>（ERP 现有规则，例如 <code>3DP0012-WH-S</code>；还没加颜色时是 <code>3DP0012-S</code>）。
+规格码：小 / 中 / 大号等用 S / M / L，其他取英文和数字，取不到按顺序 O1、O2…。</p>
+<p><code>print_minutes</code> / <code>filament_grams</code>（顶层和规格里）都可以是 0 或不传，表示还不知道：照常建草稿，不报错，在 ERP 编辑页补上后再算成本。</p>
+<p>SKU：草稿只有一个变体、没颜色，SKU 就是产品编号；在 ERP 里填了颜色后变成 <code>产品编号-颜色码</code>（如 <code>3DP0012-WH</code>），按 <code>/api/v1/skus</code> 同步。</p>
+
+<h2><span class="m post">POST</span>/api/v1/webhook/&lt;平台&gt;　平台主动推送</h2>
+<p>给平台开放后台填的「推送地址（Push URL）」，例如 <code>https://你的域名/api/v1/webhook/shopee</code>。
+不用 API 密钥，由平台签名验证。所有推送内容都会记录在「API 与店铺对接」页面，方便联调。
+注意：平台推送需要公网能访问到这台 NAS（需要域名/内网穿透），只在局域网里时用定时拉取就够了。</p>
+
+<h2>店铺自动导入（定时拉取）</h2>
+<p>在「账号」页 → 「API 与店铺对接」添加店铺，填开放平台的授权信息并启用，系统每隔设定的分钟数自动拉一次订单（第一次拉最近 7 天）。</p>
+<table>
+<tr><th>平台</th><th>状态</th><th>需要</th></tr>
+<tr><td>Lazada</td><td>已写好，待联调</td><td>Lazada 开放平台 App Key / App Secret + 店铺授权</td></tr>
+<tr><td>Shopee</td><td>已写好，待联调</td><td>Shopee 开放平台 Partner ID / Partner Key + 店铺授权</td></tr>
+<tr><td>TikTok Shop</td><td>预留</td><td>TikTok Shop Partner Center 开发者应用</td></tr>
+<tr><td>BigSeller</td><td>预留</td><td>没有公开接口：用表格导入，或用自动化工具调用 POST /api/v1/orders</td></tr>
+</table>
+
+<h2>Python 示例</h2>
+<pre><code>import requests
+API = "{{BASE}}/api/v1"
+H = {"Authorization": "Bearer lh_xxxx"}
+r = requests.post(API + "/orders", headers=H, json={"orders": [{
+    "platform": "tiktok", "order_no": "TT001", "status": "to_ship",
+    "items": [{"sku": "3DP0001-PK", "qty": 1, "unit_price": 129}]}]})
+print(r.json())</code></pre>
+</main>
+</body>
+</html>

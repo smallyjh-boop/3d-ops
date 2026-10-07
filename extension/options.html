@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>AI 客服设置</title>
+<style>
+body{font:14px/1.5 system-ui,-apple-system,"Segoe UI","Noto Sans Thai","Microsoft YaHei",sans-serif;margin:0;padding:16px;width:360px;color:#1d2330;background:#fff}
+h3{margin:0 0 10px}label{display:block;margin:8px 0}input,select{width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #cfd5dd;border-radius:6px;font:inherit}
+button{padding:7px 14px;border-radius:6px;border:1px solid #0f6fde;background:#0f6fde;color:#fff;font:inherit;cursor:pointer;margin-right:6px}
+button.sec{background:#fff;color:#0f6fde}.muted{color:#6b7280;font-size:12px}#st{margin-top:10px;font-size:13px}.ok{color:#1b7f3b}.bad{color:#c62828}
+</style></head><body>
+<h3>3D 运营管理系统 · AI 客服</h3>
+<label><span data-t="server">局域网地址（NAS 或电脑）</span><input id="server" placeholder="http://192.168.1.20:8790"></label>
+<label><span data-t="server2">外网地址（Tailscale，可不填）</span><input id="server2" placeholder="http://100.x.x.x:8790"></label>
+<p class="muted" data-t="s2help">不在店里时用：电脑装好 Tailscale 并登录同一个账号，局域网地址连不上会自动换这个。</p>
+<label><span data-t="key">API 密钥</span><input id="key" placeholder="lh_..."></label>
+<p class="muted" data-t="keyhelp">在 3D 运营管理系统：客服 → 知识库与话术 →「员工的扩展密钥」生成一个（每个员工一个，回复会记在这个名字下）。</p>
+<label><span data-t="lang">面板语言</span><select id="lang"><option value="zh">中文</option><option value="th">ภาษาไทย</option></select></label>
+<button id="save" data-t="save">保存并测试</button>
+<div id="st"></div>
+<script src="options.js"></script>
+</body></html>

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D 运营管理系统 · 登录</title>
+<style>
+  :root{--bg:#f4f5f7;--card:#fff;--ink:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#2563eb;--bad:#dc2626}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);
+       font-family:system-ui,-apple-system,"Segoe UI","Noto Sans Thai","Microsoft YaHei",sans-serif;color:var(--ink);padding:16px}
+  .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:28px;width:100%;max-width:360px;box-shadow:0 8px 24px rgba(0,0,0,.06)}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+  label{display:block;font-size:13px;margin:12px 0 4px}
+  .rem{display:flex;align-items:center;gap:8px;font-size:13px;margin:10px 0 2px;color:#475569}.rem input{width:auto}
+  input,select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:15px}
+  button{width:100%;margin-top:18px;padding:11px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:15px;cursor:pointer}
+  button:disabled{opacity:.6}
+  .err{color:var(--bad);font-size:13px;min-height:18px;margin-top:10px}
+  .lang{float:right;font-size:12px}
+  .lang a{color:var(--muted);margin-left:8px;cursor:pointer;text-decoration:none}
+  .lang a.on{color:var(--accent);font-weight:600}
+  .hidden{display:none}
+  .ver{color:var(--muted);font-size:11px;text-align:center;margin-top:14px}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="lang"><a data-l="zh">中文</a><a data-l="th">ไทย</a></div>
+  <h1 id="t-title"></h1>
+  <div class="sub" id="t-sub"></div>
+  <form id="f">
+    <div id="row-name" class="hidden"><label id="t-name"></label><input id="display_name" autocomplete="name"></div>
+    <label id="t-user"></label><input id="username" autocomplete="username" autocapitalize="off" required>
+    <label id="t-pw"></label><input id="password" type="password" autocomplete="current-password" required>
+    <div id="row-pw2" class="hidden"><label id="t-pw2"></label><input id="password2" type="password" autocomplete="new-password"></div>
+    <label class="rem" id="row-rem"><input type="checkbox" id="remember" checked> <span id="t-rem"></span></label>
+    <button id="btn" type="submit"></button>
+    <div class="err" id="err"></div>
+  </form>
+  <div class="ver">v{{VERSION}}</div>
+</div>
+<script>
+const T = {
+  zh: { title: "3D 运营管理系统", sub: "请登录", setupTitle: "第一次使用：创建老板账号", setupSub: "这个账号有全部权限，之后可以给员工开账号。",
+        name: "称呼（可空）", user: "用户名（英文/数字）", pw: "密码", pw2: "再输一次密码", login: "登录", create: "创建并进入",
+        mismatch: "两次密码不一样", short: "密码至少 6 位", rem: "在这台电脑记住登录（公用电脑不要勾）" },
+  th: { title: "ระบบบริหารจัดการ 3D", sub: "กรุณาเข้าสู่ระบบ", setupTitle: "ใช้ครั้งแรก: สร้างบัญชีเจ้าของ", setupSub: "บัญชีนี้มีสิทธิ์ทั้งหมด สามารถสร้างบัญชีให้พนักงานได้ภายหลัง",
+        name: "ชื่อเรียก (เว้นว่างได้)", user: "ชื่อผู้ใช้ (อังกฤษ/ตัวเลข)", pw: "รหัสผ่าน", pw2: "ยืนยันรหัสผ่าน", login: "เข้าสู่ระบบ", create: "สร้างและเข้าใช้",
+        mismatch: "รหัสผ่านไม่ตรงกัน", short: "รหัสผ่านอย่างน้อย 6 ตัว", rem: "จดจำการเข้าสู่ระบบในเครื่องนี้ (เครื่องสาธารณะไม่ต้องติ๊ก)" },
+};
+const ERR_TH = { "用户名或密码不对": "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", "已经有账号了，请直接登录": "มีบัญชีแล้ว กรุณาเข้าสู่ระบบ",
+  "用户名只能用英文字母、数字、下划线，最多 32 个字符": "ชื่อผู้ใช้ใช้ได้เฉพาะอักษรอังกฤษ ตัวเลข และ _ ไม่เกิน 32 ตัว",
+  "密码至少 6 位": "รหัสผ่านอย่างน้อย 6 ตัว", "这个用户名已经存在": "ชื่อผู้ใช้นี้มีอยู่แล้ว" };
+const setup = location.pathname.startsWith("/setup");
+let lang = "zh";
+try { lang = localStorage.getItem("ui_lang") || "zh"; } catch (e) {}
+const $ = (id) => document.getElementById(id);
+function render() {
+  const t = T[lang];
+  document.documentElement.lang = lang;
+  $("t-title").textContent = setup ? t.setupTitle : t.title;
+  $("t-sub").textContent = setup ? t.setupSub : t.sub;
+  $("t-name").textContent = t.name; $("t-user").textContent = t.user; $("t-pw").textContent = t.pw; $("t-pw2").textContent = t.pw2;
+  $("btn").textContent = setup ? t.create : t.login;
+  $("t-rem").textContent = t.rem; $("row-rem").classList.toggle("hidden", setup);
+  $("row-name").classList.toggle("hidden", !setup); $("row-pw2").classList.toggle("hidden", !setup);
+  document.querySelectorAll(".lang a").forEach((a) => a.classList.toggle("on", a.dataset.l === lang));
+}
+document.querySelectorAll(".lang a").forEach((a) => a.addEventListener("click", () => {
+  lang = a.dataset.l; try { localStorage.setItem("ui_lang", lang); } catch (e) {} render();
+}));
+$("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const t = T[lang]; $("err").textContent = "";
+  const body = { username: $("username").value.trim(), password: $("password").value, remember: $("remember").checked };
+  if (setup) {
+    if (body.password.length < 6) { $("err").textContent = t.short; return; }
+    if (body.password !== $("password2").value) { $("err").textContent = t.mismatch; return; }
+    body.display_name = $("display_name").value.trim(); body.lang = lang;
+  }
+  $("btn").disabled = true;
+  try {
+    const r = await fetch(setup ? "/api/auth/setup" : "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { $("err").textContent = (lang === "th" && ERR_TH[d.error]) || d.error || r.status; return; }
+    try { localStorage.setItem("ui_lang", d.user.lang || lang); } catch (e) {}
+    location.href = "/";
+  } catch (err) { $("err").textContent = String(err); }
+  finally { $("btn").disabled = false; }
+});
+render();
+$("username").focus();
+</script>
+</body>
+</html>

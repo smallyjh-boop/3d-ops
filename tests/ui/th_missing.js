@@ -1,0 +1,3 @@
+(sel)=>{const out=new Set();const root=document.querySelector(sel);if(!root)return [];const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT);let n;
+while(n=w.nextNode()){if(n.nodeType===1){for(const a of ['placeholder','title']){const v=n.getAttribute(a);if(v&&/[\u4e00-\u9fff]/.test(v)&&!n.closest('[data-notr]'))out.add(v)}if(n.tagName==='OPTION'&&/[\u4e00-\u9fff]/.test(n.textContent)&&!n.closest('[data-notr]'))out.add(n.textContent);continue}
+const el=n.parentElement;if(!el||el.closest('[data-notr],script,style'))continue;if(/[\u4e00-\u9fff]/.test(n.nodeValue))out.add(n.nodeValue.trim())}return [...out]}

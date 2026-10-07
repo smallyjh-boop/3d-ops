@@ -1,0 +1,79 @@
+3D 运营管理系统 —— 装到 NAS（威联通 TS-453D / Container Station）
+==========================================================
+推荐方法（不用 SSH，全部在 QTS 网页里点）：
+1. File Station → 打开共享文件夹 Container → 新建文件夹 listing-helper → 进去再新建 app 和 data 两个文件夹。
+2. 进入 app 文件夹 → 上传 listing-helper-nas-app.zip → 右键这个 zip →「解压缩」→「解压缩到当前文件夹」
+   （解压后 app 里直接能看到 app.py、docker 文件夹等）。
+3. （可选）把原来电脑上 data 文件夹里的内容上传到 data 文件夹，保留以前做的产品。
+4. Container Station →「应用程序」→「创建」→ 应用程序名称填 3d-ops →
+   把 qnap-container-station.yml 的全部内容粘贴到 YAML 框 →「创建」。
+5. 第一次启动会自动安装（10-20 分钟），在 Container Station 里点容器 listing-helper 看「日志」，
+   出现「启动3D 运营管理系统」就好了。然后浏览器打开 http://NAS的IP:8790
+升级（v2.7 起推荐）：系统 →「系统检查与升级」→ 上传新的 zip，会自动备份、覆盖、重启。
+手动升级：把新的 nas-app zip 解压到 Container/listing-helper/app 里面（注意是 app 里面），选覆盖，然后在 Container Station 里重启容器 3d-ops。
+
+下面是另一种方法（SSH + docker build），会用命令行的可以用：
+3D 运营管理系统 —— 装到 NAS（QNAP TS-453D / Container Station）让局域网所有人使用
+==========================================================================
+
+装好以后：NAS 24 小时运行，你和员工在任何电脑、手机、平板的浏览器里打开
+  http://NAS的IP:8765
+就能用，不用每台电脑装 Python。数据都在 NAS 上，统一备份。
+
+一、准备（只做一次）
+1. 给 NAS 固定 IP：在路由器里给 NAS 做「DHCP 地址保留」（或 QTS 网络设置里设静态 IP），
+   例如 192.168.1.50。下面都用这个地址举例。
+2. 打开 SSH：QTS「控制台 → 网络和文件服务 → Telnet/SSH」→ 勾选「允许 SSH 连接」，端口 22 → 应用。
+3. 确认 Container Station 已安装并启动过（会自动建立共享文件夹 Container）。
+
+二、放程序和数据
+1. 在 Windows 文件资源管理器地址栏输入  \\192.168.1.50\Container  （用 NAS 管理员账号登录）。
+2. 新建文件夹 listing-helper，里面再建两个文件夹：
+     listing-helper\app    ← 把这个压缩包解压后的全部文件放进来（能看到 app.py、docker-compose.yml）
+     listing-helper\data   ← 把你 Windows 电脑上原来程序里的 data 文件夹里的全部内容复制进来
+                             （产品、图片、设置都会保留；第一次用也可以留空）
+
+三、启动（第一次大约 10-20 分钟，要下载约 1GB）
+1. Windows 开始菜单搜索「PowerShell」打开，输入：
+     ssh admin@192.168.1.50
+   （admin 换成你的 NAS 管理员账号，输入密码时屏幕不显示，正常）
+2. 输入：
+     cd /share/Container/listing-helper/app
+     docker compose up -d --build
+   看到 Started / Running 就好了。
+   如果提示 docker: command not found，先输入这一行再重试：
+     export PATH=$PATH:/share/CACHEDEV1_DATA/.qpkg/container-station/bin
+3. 浏览器打开  http://192.168.1.50:8765  （收藏起来；员工电脑/手机也打开这个地址）
+4. Container Station 里能看到容器 listing-helper，NAS 重启后会自动启动。
+
+四、OrcaSlicer 自动切片
+镜像里已经装好 Linux 版 OrcaSlicer。设置页点「自动匹配配置」→「测试切片」即可。
+NAS 的 CPU 比电脑慢，切一个模型可能要 1-3 分钟；嫌慢可以在电脑上切好后用「导入切片文件」。
+不需要自动切片：把 docker-compose.yml 里 INSTALL_ORCA: "1" 改成 "0" 再执行第三步（镜像小很多）。
+
+五、升级到新版本
+1. 用新压缩包里的文件覆盖 listing-helper\app（不要动 data 文件夹）。
+2. SSH 里执行：
+     cd /share/Container/listing-helper/app
+     docker compose up -d --build
+
+六、备份（强烈建议）
+QTS「存储与快照总管」给 Container 共享文件夹开启每日快照；
+或用 HBS 3 把 /Container/listing-helper/data 每天备份到 USB 硬盘或云端。
+
+七、在外面也想用（可选，以后再弄）
+不要在路由器上直接开放 8765 端口。建议在 App Center 安装 Tailscale，
+手机/电脑装 Tailscale 登录同一账号后，在外面也能安全访问。
+
+八、常见问题
+- 打不开网页：确认 NAS IP、端口 8765；在 Container Station 里看容器是否「运行中」，点进去看日志。
+- 查看日志：SSH 里  docker logs --tail 100 listing-helper
+- 重启：      docker restart listing-helper
+- 目前还没有登录账号功能：局域网里能打开网页的人都能看到全部数据（包括成本利润）。
+  下一版会加老板/员工账号和权限。
+
+九、电脑加速（v2.20，可选，推荐）
+NAS 的 CPU 慢：切片、读大模型、3D 预览、抠图可以交给一台一直开着的 Windows 电脑做。
+网页：设置 → 电脑加速 → 下载电脑加速程序 / 生成密钥，然后在电脑上双击 4_start_worker.bat（第一次会自动安装 Python 组件），
+填 NAS 地址（例 http://192.168.31.200:8790）和密钥；再双击 5_worker_autostart.bat 开机自动运行。
+电脑上要装 OrcaSlicer 才能帮忙切片。电脑关机时 NAS 自己做，只是慢一些。NAS 升级后电脑上的程序会自动更新。

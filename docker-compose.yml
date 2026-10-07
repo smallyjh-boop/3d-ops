@@ -1,0 +1,19 @@
+# NAS 部署：把整个程序文件夹放到 NAS，例如 /share/Container/listing-helper/app
+# 然后在这个文件夹里运行：docker compose up -d --build
+services:
+  listing-helper:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        INSTALL_ORCA: "1"          # 不要自动切片可改成 "0"（镜像小很多、构建更快）
+    image: listing-helper:latest
+    container_name: listing-helper
+    restart: unless-stopped
+    ports:
+      - "8765:8765"                # 局域网访问 http://NAS的IP:8765
+    volumes:
+      - ../data:/data              # 数据（产品、图片、订单、设置）放在程序文件夹旁边的 data 文件夹
+    environment:
+      - TZ=Asia/Bangkok
+    mem_limit: 2g
