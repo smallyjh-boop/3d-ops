@@ -1,7 +1,7 @@
 """在线更新（v2.26）：从 GitHub 仓库下载新版本，用和「上传升级包」同一套流程升级（先备份程序，不碰数据）。
 
-发版：开发者把代码推到 GitHub，并打标签 vX.Y.Z（例如 v2.26.0）。
-NAS：每天检查一次有没有比现在更新的标签（设置里可以关），有就在「系统检查与升级」页和顶部提示；
+发版：开发者把代码推到 GitHub 的 main 分支（app.py 里的 VERSION 就是版本号）。
+NAS：每 12 小时检查一次 main 分支的版本是不是比现在新（设置里可以关），有就在「系统检查与升级」页和顶部提示；
      老板点「立即更新」才会下载并升级、自动重启。
 
 私有仓库要在设置里填 GitHub 只读令牌（只存在 NAS 上，不发回浏览器，也不写进日志）。
@@ -17,6 +17,7 @@ import time
 from .config import DATA_DIR, load_config
 
 API = "https://api.github.com"
+BRANCH = "main"
 STATE_PATH = os.path.join(DATA_DIR, "update_state.json")
 CHECK_EVERY = 12 * 3600
 _lock = threading.Lock()
@@ -107,8 +108,21 @@ def status():
             "auto": bool(cfg.get("update_check")), "busy": dict(_busy)}
 
 
+def _latest(cfg, repo):
+    """最新版本：main 分支最新提交里 app.py 的 VERSION（不需要打标签）。返回 (版本, 提交号)。"""
+    c = _get(cfg, f"/repos/{repo}/commits/{BRANCH}").json()
+    sha = str(c.get("sha") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("仓库里还没有程序（main 分支是空的）")
+    from .sysadmin import _version_of
+    ver = _version_of(_get(cfg, f"/repos/{repo}/contents/app.py?ref={sha}", raw=True).text)
+    if not ver:
+        raise RuntimeError("仓库里的 app.py 认不出版本号")
+    return ver, sha
+
+
 def check(force=True):
-    """问 GitHub 最新的版本标签。force=False 时距离上次检查不到 12 小时就不问。"""
+    """问 GitHub 最新的版本。force=False 时距离上次检查不到 12 小时就不问。"""
     from .sysadmin import current_version
     st = _state()
     if not force and time.time() - (st.get("checked_at") or 0) < CHECK_EVERY:
@@ -116,14 +130,10 @@ def check(force=True):
     cfg = load_config()
     try:
         repo = _repo(cfg)
-        tags = _get(cfg, f"/repos/{repo}/tags?per_page=100").json()
-        vers = [t["name"] for t in tags if re.fullmatch(r"v?\d+\.\d+\.\d+", str(t.get("name") or ""))]
-        if not vers:
-            raise RuntimeError("仓库里还没有版本标签（vX.Y.Z）")
-        latest = max(vers, key=_vt)
+        latest, sha = _latest(cfg, repo)
         cur = current_version()
-        st = {"checked_at": time.time(), "latest": latest.lstrip("vV"), "tag": latest, "error": "",
-              "notes": _notes(cfg, repo, latest, cur) if _vt(latest) > _vt(cur) else []}
+        st = {"checked_at": time.time(), "latest": latest, "tag": sha, "error": "",
+              "notes": _notes(cfg, repo, sha, cur) if _vt(latest) > _vt(cur) else []}
     except (RuntimeError, ValueError) as e:
         st.update(checked_at=time.time(), error=str(e))
     _save(st)
@@ -147,8 +157,8 @@ def apply(tag=None, user=""):
                 raise RuntimeError(st["error"])
             if not st["available"]:
                 raise RuntimeError(f"已经是最新版本 v{st['current']}")
-            tag = _state().get("tag") or ("v" + st["latest"])
-        if not re.fullmatch(r"v?\d+\.\d+\.\d+", str(tag)):
+            tag = _state().get("tag")
+        if not re.fullmatch(r"v?\d+\.\d+\.\d+|[0-9a-f]{40}", str(tag)):
             raise ValueError("版本号不对")
         _busy["step"] = "下载新版本"
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -163,7 +173,7 @@ def apply(tag=None, user=""):
         os.replace(path + ".part", path)
         _busy["step"] = "安装新版本"
         res = sysadmin.upgrade(path, user=user)
-        res["source"] = f"GitHub {repo} {tag}"
+        res["source"] = f"GitHub {repo} {str(tag)[:7]}"
         return res
     finally:
         _busy.update(on=False, step="")

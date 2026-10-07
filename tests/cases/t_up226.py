@@ -39,7 +39,7 @@ README = """更新记录
    · 旧的
 """
 SEEN = {"auth": [], "paths": []}
-TAGS = [{"name": "v2.26.0"}, {"name": "v2.27.1"}, {"name": "v2.27.0"}, {"name": "latest"}]
+SHA = "a" * 40
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
@@ -47,11 +47,14 @@ class H(http.server.BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path); SEEN["paths"].append(u.path)
         if self.headers.get("Authorization") != "Bearer good-token":
             self.send_response(401); self.end_headers(); return
-        if u.path == "/repos/smallyjh-boop/3d-ops/tags":
-            body = json.dumps(TAGS).encode()
-        elif u.path == "/repos/smallyjh-boop/3d-ops/contents/README.txt":
+        q = urllib.parse.parse_qs(u.query)
+        if u.path == "/repos/smallyjh-boop/3d-ops/commits/main":
+            body = json.dumps({"sha": SHA}).encode()
+        elif u.path == "/repos/smallyjh-boop/3d-ops/contents/app.py" and q.get("ref") == [SHA]:
+            body = b'import os\nVERSION = "2.27.1"   # x\n'
+        elif u.path == "/repos/smallyjh-boop/3d-ops/contents/README.txt" and q.get("ref") == [SHA]:
             body = README.encode()
-        elif u.path == "/repos/smallyjh-boop/3d-ops/zipball/v2.27.1":
+        elif u.path == "/repos/smallyjh-boop/3d-ops/zipball/" + SHA:
             body = mkzip("2.27.1")
         else:
             self.send_response(404); self.end_headers(); return
@@ -80,13 +83,13 @@ ok(g["config"]["update_token"] == "******" and config.load_config()["update_toke
 C.post("/api/config", json={"update_token": "******"})
 ok(config.load_config()["update_token"] == "good-token", "****** keeps saved token")
 st = C.post("/api/system/update/check", json={}).get_json()
-ok(st["available"] and st["latest"] == "2.27.1" and not st["error"], f"check finds newest tag {st}")
+ok(st["available"] and st["latest"] == "2.27.1" and not st["error"], f"check finds main branch version {st}")
 ok([n["version"] for n in st["notes"]] == ["2.27.1", "2.27.0"] and st["notes"][0]["points"] == ["修复 A", "修复 B"], f"notes {st['notes']}")
 ok(SEEN["auth"][-1] == "Bearer good-token", "token sent to GitHub")
 # 仓库名写错
 C.post("/api/config", json={"update_repo": "https://github.com/smallyjh-boop/nope.git"})
 st = C.post("/api/system/update/check", json={}).get_json()
-ok("找不到仓库" in st["error"] and SEEN["paths"][-1] == "/repos/smallyjh-boop/nope/tags", f"repo url normalized, 404 explained {st['error']}")
+ok("找不到仓库" in st["error"] and SEEN["paths"][-1] == "/repos/smallyjh-boop/nope/commits/main", f"repo url normalized, 404 explained {st['error']}")
 C.post("/api/config", json={"update_repo": "bad repo"})
 ok("拥有者/仓库名" in C.post("/api/system/update/check", json={}).get_json()["error"], "bad repo format")
 C.post("/api/config", json={"update_repo": "smallyjh-boop/3d-ops"})
