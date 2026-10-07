@@ -94,7 +94,7 @@
     const b = await api("/api/production");
     BOARD = b;
     const warn = [];
-    if (!b.lanes.length) warn.push("还没有设置打印机（系统 → 设置 → 打印机与切片），任务没法分配。");
+    if (!b.lanes.length) warn.push("还没有设置打印机（系统 → 设置 → 生产），任务没法分配。");
     if (b.missing_data.length) warn.push(`${b.missing_data.length} 个任务的产品缺少克数/时长，也没有切片文件，排单时间不准。请到产品的「打印方案」里切片。`);
     $("#prod-warn").innerHTML = warn.map((w) => `<p class="card warn small">${esc(w)}</p>`).join("");
     const lanes = b.lanes.map((l) => `<div class="lane card ${l.enabled ? "" : "lane-off"}" data-lane="${l.index}"><div class="row between"><h3><span class="pcode" data-notr>${esc(l.code)}</span> <span class="small muted" data-notr>${esc(l.name)}${l.note ? " · " + esc(l.note) : ""}</span>${l.tech === "resin" ? ' <span class="pill resin-pill">光固化</span>' : ""}</h3>${l.enabled ? H().stChip(l.status, l.status_zh) : '<span class="pill">停用</span>'}</div>
@@ -292,20 +292,7 @@
       ${m ? `<details class="maint" ${m.items.some((x) => x.due) ? "open" : ""}><summary>保养（累计打印 ${m.hours} 小时）${m.items.some((x) => x.due) ? ' <span class="pill bad-pill">该保养了</span>' : ""}</summary>
         ${m.items.map((it) => `<div class="row between small ${it.due ? "bad" : ""}"><span>${esc(it.label)}：每 ${it.every_h} 小时，已 ${it.since_h} 小时</span>
           <button class="mini" data-maint="${it.item}">已保养</button></div>`).join("")}</details>` : ""}
-      ${own ? `<details class="conn"><summary>连接设置 <span class="muted small">${esc(CONN_ZH[c.type || "none"] || c.type)}${c.detected && c.type === "auto" ? "：" + esc(CONN_ZH[c.detected] || c.detected) : ""}</span></summary>
-        <div class="lockbar pr-lockbar"></div>
-        <div class="form2 pr-connform">
-          <label>连接方式<select data-c="type">${Object.entries(CONN_ZH).map(([k, v]) => `<option value="${k}" ${k === (c.type || "none") ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
-          <label>IP 地址<input data-c="host" value="${esc(c.host || "")}" placeholder="例如 192.168.31.50" data-notr></label>
-          <label>序列号（拓竹）<input data-c="serial" value="${esc(c.serial || "")}" data-notr></label>
-          <label>访问码（拓竹）<input data-c="access_code" type="password" autocomplete="new-password" value="${esc(c.access_code || "")}" data-notr></label>
-          <label>端口（一般不用填）<input data-c="port" value="${esc(c.port || "")}" data-notr></label>
-          <label class="row" style="align-self:end"><input type="checkbox" data-c="auto_complete" ${c.auto_complete === false ? "" : "checked"}> 打印机报告完成时自动记录</label>
-        </div>
-        <p class="muted small">拓竹：打印机屏幕 → 设置 → 网络（WLAN）里看 IP 和访问码，序列号在 设置 → 设备信息。新固件需要打开「局域网模式」和「开发者模式」才能由第三方软件发送打印。<br>
-          Creality K1：屏幕 设置 → 网络 看 IP。原厂固件和 root 过的（Fluidd/Mainsail）都可以，选「自动识别」即可。</p>
-        <div class="row gap"><button data-ctest>测试连接</button></div>
-      </details>` : ""}
+      ${own ? `<div class="small muted">连接方式：${esc(CONN_ZH[c.type || "none"] || c.type)}${c.detected && c.type === "auto" ? "：" + esc(CONN_ZH[c.detected] || c.detected) : ""} · <a href="#" data-goto-cfg="production">连接设置 →</a></div>` : ""}
     </div>`;
   }
   async function loadPrinters() {
@@ -313,19 +300,8 @@
     if (Object.entries(LOCKS).some(([k, v]) => k.startsWith("printer-conn-") && v.editing)) return;   // 正在改连接设置时不刷新
     const r = await api("/api/printers");
     const open = new Set($$("#pr-cards details.conn[open]").map((d) => d.closest("[data-pi]").dataset.pi));
-    $("#pr-cards").innerHTML = r.printers.map(prCard).join("") || '<p class="muted">还没有打印机（系统 → 设置 → 打印机与切片 添加）</p>';
+    $("#pr-cards").innerHTML = r.printers.map(prCard).join("") || '<p class="muted">还没有打印机（系统 → 设置 → 生产 添加）</p>';
     open.forEach((i) => { const d = $(`#pr-cards [data-pi="${i}"] details.conn`); if (d) d.open = true; });
-    $$("#pr-cards [data-pi]").forEach((card) => {
-      const i = card.dataset.pi, f = card.querySelector(".pr-connform");
-      if (!f) return;
-      lockBox(f, { id: "printer-conn-" + i, bar: card.querySelector(".pr-lockbar"), label: "✏ 修改连接设置",
-        onCancel: () => { LOCKS["printer-conn-" + i].editing = false; loadPrinters(); },
-        onSave: async () => {
-          const o = {}; f.querySelectorAll("[data-c]").forEach((x) => (o[x.dataset.c] = x.type === "checkbox" ? x.checked : x.value));
-          await api(`/api/printers/${i}/conn`, { json: o }); toast("已保存");
-          LOCKS["printer-conn-" + i].editing = false; setTimeout(loadPrinters, 100);
-        } });
-    });
   }
   $("#btn-pr-reload").addEventListener("click", (e) => busy(e.target, loadPrinters));
   $("#pr-cards").addEventListener("click", async (e) => {
@@ -527,5 +503,53 @@
     } catch (err) { toast(err.message, true); }
   });
 
-  window.PROD = { show, loadBoard, startDialog };
+
+  // v2.27：打印机连接设置搬到 设置 → 生产（每台单独「✏ 修改」）
+  async function connSettings(box) {
+    if (!box) return;
+    if (Object.entries(LOCKS).some(([k, v]) => k.startsWith("cfg-prconn-") && v.editing)) return;
+    const h = H();
+    const r = await api("/api/printers");
+    box.innerHTML = `<h3>打印机连接</h3><p class="muted small">连上以后生产看板能看到实时状态、一键开始打印、打完自动记录。每台打印机单独修改。</p>` +
+      (r.printers.map((p) => { const c = p.conn || {}, st = p.status || {};
+        return `<div class="sub-card pr-conn" data-pi="${p.index}"><div class="row between"><b><span class="pcode" data-notr>${esc(p.code || "")}</span> <span data-notr>${esc(p.name)}</span></b>
+          <span class="row gap">${h.stChip(st, p.status_zh)}<span class="lockbar pr-lockbar"></span></span></div>
+        <div class="form2 pr-connform">
+            <label>连接方式<select data-c="type">${Object.entries(CONN_ZH).map(([k, v]) => `<option value="${k}" ${k === (c.type || "none") ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
+            <label>IP 地址<input data-c="host" value="${esc(c.host || "")}" placeholder="例如 192.168.31.50" data-notr></label>
+            <label>序列号（拓竹）<input data-c="serial" value="${esc(c.serial || "")}" data-notr></label>
+            <label>访问码（拓竹）<input data-c="access_code" type="password" autocomplete="new-password" value="${esc(c.access_code || "")}" data-notr></label>
+            <label>端口（一般不用填）<input data-c="port" value="${esc(c.port || "")}" data-notr></label>
+            <label class="row" style="align-self:end"><input type="checkbox" data-c="auto_complete" ${c.auto_complete === false ? "" : "checked"}> 打印机报告完成时自动记录</label>
+          </div>
+          <p class="muted small">拓竹：打印机屏幕 → 设置 → 网络（WLAN）里看 IP 和访问码，序列号在 设置 → 设备信息。新固件需要打开「局域网模式」和「开发者模式」才能由第三方软件发送打印。<br>
+            Creality K1：屏幕 设置 → 网络 看 IP。原厂固件和 root 过的（Fluidd/Mainsail）都可以，选「自动识别」即可。</p>
+            <div class="row gap"><button class="mini" data-ctest>测试连接</button></div></div>`; }).join("") || '<p class="muted">还没有打印机（在上面「打印机与 OrcaSlicer 配置文件」里添加）</p>');
+    $$(".pr-conn", box).forEach((card) => {
+      const i = card.dataset.pi, f = card.querySelector(".pr-connform");
+      const id = "cfg-prconn-" + i;
+      if (LOCKS[id]) LOCKS[id].editing = false;
+      lockBox(f, { id, bar: card.querySelector(".pr-lockbar"), label: "✏ 修改",
+        onCancel: () => { LOCKS[id].editing = false; connSettings(box); },
+        onSave: async () => {
+          const o = {}; f.querySelectorAll("[data-c]").forEach((x) => (o[x.dataset.c] = x.type === "checkbox" ? x.checked : x.value));
+          await api(`/api/printers/${i}/conn`, { json: o }); toast("已保存");
+          LOCKS[id].editing = false; setTimeout(() => connSettings(box), 100);
+        } });
+    });
+    if (!box.dataset.bound) {
+      box.dataset.bound = "1";
+      box.addEventListener("click", async (e) => {
+        const t = e.target; if (t.dataset.ctest === undefined) return;
+        const card = t.closest("[data-pi]"), i = card.dataset.pi;
+        const o = {}; card.querySelectorAll("[data-c]").forEach((x) => (o[x.dataset.c] = x.type === "checkbox" ? x.checked : x.value));
+        try {
+          if (LOCKS["cfg-prconn-" + i] && LOCKS["cfg-prconn-" + i].editing) await api(`/api/printers/${i}/conn`, { json: o });
+          const r2 = await busy(t, () => api(`/api/printers/${i}/test`, { json: {} }));
+          if (r2) toast(`连接成功：${CONN_ZH[r2.type] || r2.type}，状态：${r2.status_zh}`);
+        } catch (err) { toast(err.message, true); }
+      });
+    }
+  }
+  window.PROD = { show, loadBoard, startDialog, connSettings };
 })();

@@ -290,7 +290,7 @@
       value = prompt("挂起原因（例如：等买家确认颜色 / 疑似重复下单）", "等买家确认");
       if (value === null) return;
     }
-    if (act === "status" && ["cancelled", "delivery_failed"].includes(val) && !CAN("orders.cancel")) { toast("你的账号没有「取消订单 / 标记拒收」的权限，请老板在 系统 → 账号与对接 里开通", true); return; }
+    if (act === "status" && ["cancelled", "delivery_failed"].includes(val) && !CAN("orders.cancel")) { toast("你的账号没有「取消订单 / 标记拒收」的权限，请老板在 系统 → 设置 → 账号与权限 里开通", true); return; }
     if (act === "status" && val === "delivery_failed" && !confirm(`把这 ${ids.length} 个订单标记为「拒收/派送失败」？会自动登记售后，等包裹退回验货。`)) return;
     if (act === "tag_add" || act === "tag_remove") {
       value = prompt(act === "tag_add" ? "要加的标签（例如：VIP、催单、待确认设计）" : "要去掉的标签");
@@ -621,7 +621,7 @@
     const p = r.params;
     $("#mat-params").textContent = `每天用量 = 实际消耗（近 7 天 / 30 天）和按订单销量预测（近 14 天权重大）中较大的；` +
       `待打印任务还要的料按打印文件算。到货要 ${p.filament_lead_days} 天，安全库存 ${p.filament_safety_days} 天，每次买够 ${p.filament_cover_days} 天用量，每卷 ${p.filament_spool_kg} kg。` +
-      (isOwner() ? "（可在设置页「耗材采购」修改）" : "");
+      (isOwner() ? "（可在 设置 → 库存与采购 修改）" : "");
     $("#mat-h-forecast").textContent = `未来 ${r.horizon_days} 天需要 kg`;
     const td = today();
     $("#mat-table tbody").innerHTML = r.rows.map((x) => {
@@ -672,7 +672,7 @@
   }
   $("#btn-mat-add").addEventListener("click", (e) => busy(e.target, () => matSave("add", $("#mat-material").value, $("#mat-color").value.trim(), $("#mat-kg").value)));
   $("#btn-mat-set").addEventListener("click", (e) => {
-    if (!CAN("materials.adjust")) { toast("你的账号没有「耗材盘点改数 / 删除料卷」的权限，请老板在 系统 → 账号与对接 里开通", true); return; }
+    if (!CAN("materials.adjust")) { toast("你的账号没有「耗材盘点改数 / 删除料卷」的权限，请老板在 系统 → 设置 → 账号与权限 里开通", true); return; }
     if (!confirm(`盘点：把 ${$("#mat-material").value} ${$("#mat-color").value.trim()} 的库存直接设为 ${$("#mat-kg").value} kg？（不是加减，原来的数会被覆盖）`)) return;
     busy(e.target, () => matSave("set", $("#mat-material").value, $("#mat-color").value.trim(), $("#mat-kg").value));
   });

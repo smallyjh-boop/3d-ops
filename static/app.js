@@ -1,5 +1,5 @@
 "use strict";
-const APP_JS_VERSION = "2.26.1";   // 必须和 app.py 的 VERSION 一致
+const APP_JS_VERSION = "2.27.0";   // 必须和 app.py 的 VERSION 一致
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -202,8 +202,11 @@ const LAST_TAB = {};
 function visibleTabs(mod) {
   return $$(`#subnav .tab[data-mod="${mod}"]`).filter((b) => !b.classList.contains("role-hidden") && !b.classList.contains("ghost"));
 }
+// v2.27：搬进设置的旧页面
+const TAB_ALIAS = { users: "accounts", csext: "accounts" };
 function showTab(name) {
   if (name === "edit" && !P) name = "library";
+  if (TAB_ALIAS[name]) { CFG_MOD = TAB_ALIAS[name]; name = "settings"; }
   const btn = $(`#subnav .tab[data-tab="${name}"]`);
   const mod = btn ? btn.dataset.mod : "goods";
   LAST_TAB[mod] = name;
@@ -219,7 +222,6 @@ function showTab(name) {
   if (name === "library") loadLibrary();
   if (name === "export") { loadExport(); if (window.loadStockPending) window.loadStockPending(); }
   if (name === "settings") renderSettings();
-  if (name === "users") loadUsers();
   if (name === "logs") loadAudit();
   if (window.OPS) window.OPS.show(name);
   if (window.INV) window.INV.show(name);
@@ -1757,7 +1759,8 @@ document.addEventListener("click", async (e) => {
   if (e.target.dataset.force && !confirm("重新下载全部 Lazada 类目模板（约 160 个文件）？")) return;
   try { api("/api/templates/sync?async=1", { json: { force: !!e.target.dataset.force } }); setTimeout(renderTplSync, 1500); } catch (err) { toast(err.message, true); }
 });
-async function loadExport() {
+// v2.27：类目模板库搬到 设置 → 商品与上架
+async function renderTplLib() {
   renderTplSync();
   await loadCats();
   const byFile = {};
@@ -1775,6 +1778,12 @@ async function loadExport() {
         <td class="small" style="width:110px">${esc(c.cat_id)}</td></tr>`).join("")}</tbody></table>
     </div>`).join("") : '<p class="muted">还没有模板</p>';
   if (TPL_MANAGE) $("#tpl-details").open = true;
+  if (!PRODUCT_LIST.length) { try { PRODUCT_LIST = await api("/api/products"); } catch { /* 忽略 */ } }
+}
+async function loadExport() {
+  await loadCats();
+  const nf = new Set(CATS.map((c) => c.template)).size;
+  $("#exp-tplinfo").textContent = CATS.length ? `${CATS.length} 个类目 · ${nf} 个模板文件` : "还没有模板";
   const [list, g] = await Promise.all([api("/api/products"), api("/api/groups").catch(() => ({ groups: [] }))]);
   PRODUCT_LIST = list; EXP_GROUPS = g.groups || [];
   const cur = $("#exp-group").value;
@@ -1928,7 +1937,7 @@ $("#exp-batches").addEventListener("click", async (e) => {
 });
 let TPL_MANAGE = false;
 let PRODUCT_LIST = [];
-$("#btn-tpl-manage").addEventListener("click", () => { TPL_MANAGE = !TPL_MANAGE; loadExport(); });
+$("#btn-tpl-manage").addEventListener("click", () => { TPL_MANAGE = !TPL_MANAGE; renderTplLib(); });
 $("#tpl-list").addEventListener("click", async (e) => {
   const t = e.target.dataset.deltpl; if (!t) return;
   const cats = CATS.filter((c) => c.template === t);
@@ -1943,7 +1952,7 @@ $("#tpl-list").addEventListener("click", async (e) => {
     await api(`/api/templates/${encodeURIComponent(t)}`, { method: "DELETE" });
     toast("模板已移到 _deleted 文件夹");
   } catch (err) { toast(err.message, true); }
-  loadExport();
+  renderTplLib();
 });
 $("#tpl-input").addEventListener("change", async (e) => {
   const f = e.target.files[0]; if (!f) return;
@@ -1951,7 +1960,7 @@ $("#tpl-input").addEventListener("change", async (e) => {
   try {
     const r = await api("/api/templates", { method: "POST", body: fd });
     toast(`模板已添加，包含类目：${r.categories.join("、")}`);
-    await loadExport();
+    await renderTplLib();
   } catch (err) { toast(err.message, true); }
   e.target.value = "";
 });
@@ -2053,6 +2062,8 @@ function cfgSpecial(name) {
   if (name === "printers") return PRINTERS_CARD();
   if (name === "colors") return COLORS_CARD();
   if (name === "accel") return window.ACCEL ? ACCEL.card() : "";
+  if (name === "remote") return `<div class="card cfg-group" id="sys-remote"><div class="row between"><h3>外网访问（Tailscale）</h3><div class="lockbar" id="sys-remote-bar"></div></div><div id="sys-remote-body" class="small">…</div></div>`;
+  if (name === "components") return `<div class="card cfg-group" id="cfg-comps" data-lock-skip><div class="row between"><h3>组件安装情况</h3><button class="mini" id="cfg-comps-reload">重新检查</button></div><div id="cfg-comps-body" class="small">…</div></div>`;
   if (name === "pack_rules") return `<div class="card cfg-group"><h3>发货自动扣包材：扣哪些</h3>
       <p class="muted small">打开上面的开关后，订单从「待发货」变成「已发货」时，按这里的规则从库存领用包材（库存管理里记「发货包材」）。物品要先在「库存 → 库存管理」建好（分类：包材）。</p>
       <table class="grid small" id="pack-rules"><thead><tr><th>包材</th><th>数量</th><th>按</th><th></th></tr></thead><tbody>${(CFG.inv_pack_rules || []).map(packRuleRow).join("")}</tbody></table>
@@ -2067,13 +2078,71 @@ document.addEventListener("click", (e) => {
   if (e.target.id === "pack-add") $("#pack-rules tbody").insertAdjacentHTML("beforeend", packRuleRow());
   if (e.target.dataset && e.target.dataset.prdelPack !== undefined) e.target.closest("tr").remove();
   const m = e.target.closest && e.target.closest("[data-cfgtab]");
-  if (m) {
-    CFG_MOD = m.dataset.cfgtab; try { localStorage.setItem("cfg_mod", CFG_MOD); } catch { /* 忽略 */ }
-    $$("[data-cfgtab]").forEach((x) => x.classList.toggle("on", x.dataset.cfgtab === CFG_MOD));
-    $$("[data-cfgmod]").forEach((x) => x.classList.toggle("hidden", x.dataset.cfgmod !== CFG_MOD));
-    $("#cost-summary").classList.toggle("hidden", CFG_MOD !== "cost");
-  }
+  if (m) cfgShowMod(m.dataset.cfgtab);
+  const g = e.target.closest && e.target.closest("[data-goto-cfg]");
+  if (g) { e.preventDefault(); CFG_MOD = g.dataset.gotoCfg; goTab("settings"); }
 });
+// v2.27：设置按大分类；每张卡片单独「✏ 修改」→ 保存；其它地方的设置（账号、对接、客服、模板、组件）也都搬到这里
+function cfgShowMod(id) {
+  if (cfgEditingOther(null) && !confirm("有一张卡片正在修改还没保存，确定切换？（没保存的修改会丢掉）")) return;
+  cfgStopEdits();
+  CFG_MOD = id; try { localStorage.setItem("cfg_mod", CFG_MOD); } catch { /* 忽略 */ }
+  $$("[data-cfgtab]").forEach((x) => x.classList.toggle("on", x.dataset.cfgtab === CFG_MOD));
+  $$("[data-cfgmod]").forEach((x) => x.classList.toggle("hidden", x.dataset.cfgmod !== CFG_MOD));
+  $$("[data-cfgext]").forEach((x) => x.classList.toggle("hidden", x.dataset.cfgext !== CFG_MOD));
+  $("#cost-summary").classList.toggle("hidden", CFG_MOD !== "cost");
+  cfgLoadExt(CFG_MOD);
+}
+function cfgLoadExt(id) {
+  const err = (e) => toast(e.message || String(e), true);
+  if (id === "accounts") { loadUsers(); if (window.CS) CS.show("csext"); if (window.CSREC) CSREC.show("csext"); }
+  if (id === "goods") renderTplLib().catch(err);
+  if (id === "cs" && window.CS) CS.show("cskb");
+  if (id === "production" && window.PROD && PROD.connSettings) PROD.connSettings($("#cfg-prconn")).catch(err);
+  if (id === "ai" && window.OPS) OPS.show("users");
+  if (id === "general" && window.SYS) SYS.loadRemote().catch(() => {});
+  if (id === "addons" && window.SYS) SYS.loadComps().catch(() => {});
+}
+function cfgEditingOther(id) {
+  return Object.entries(LOCKS).some(([k, v]) => k.startsWith("cfg-") && k !== id && v.editing && v.changed && v.changed());
+}
+function cfgStopEdits() {
+  Object.entries(LOCKS).forEach(([k, v]) => { if (k.startsWith("cfg-") && v.editing) { v.editing = false; if (v.apply) v.apply(); } });
+}
+async function saveCfgCard(card) {
+  const body = {};
+  card.querySelectorAll("[data-c]").forEach((el) => (body[el.dataset.c] = el.value));
+  if (card.querySelector("#printer-table")) body.printers = collectPrinters();
+  if (card.querySelector("#pack-rules")) body.inv_pack_rules = collectPackRules();
+  if (!Object.keys(body).length) return;
+  const r = await api("/api/config", { json: body });
+  CFG = r.config; renderSummary(r.summary); await loadConfig(); toast("已保存");
+  $$("#printer-table tbody tr").forEach((tr, i) => {
+    const p = (CFG.printers || [])[i]; const inp = tr.querySelector('[data-p="code"]');
+    if (p && inp) inp.value = p.code || "";
+  });
+}
+function cfgLockCards() {
+  $$("#cfg-form .cfg-group").forEach((card, i) => {
+    if (card.hasAttribute("data-lock-skip") || card.id === "sys-remote" || !card.querySelector("[data-c], #printer-table, #pack-rules")) return;
+    const h = card.querySelector("h3"); if (!h) return;
+    const mod = card.closest("[data-cfgmod]").dataset.cfgmod;
+    let bar = card.querySelector(":scope > .row > .lockbar");
+    if (!bar) {
+      const row = document.createElement("div"); row.className = "row between cfg-head";
+      h.replaceWith(row); row.appendChild(h);
+      bar = document.createElement("div"); bar.className = "lockbar"; row.appendChild(bar);
+    }
+    const id = `cfg-${mod}-${i}`;
+    if (LOCKS[id]) LOCKS[id].editing = false;
+    lockBox(card, { id, bar, label: "✏ 修改", keep: "[data-test], #btn-find-profiles, .cfg-head",
+      onEdit: () => {
+        if (cfgEditingOther(id) && !confirm("另一张卡片还没保存，先放弃那边的修改？")) { LOCKS[id].editing = false; LOCKS[id].apply(); return; }
+        Object.entries(LOCKS).forEach(([k, v]) => { if (k.startsWith("cfg-") && k !== id && v.editing) { v.editing = false; v.apply(); } });
+      },
+      onSave: () => saveCfgCard(card), onCancel: () => renderSettings() });
+  });
+}
 async function renderSettings() {
   const r = await loadConfig();
   if (!window.PR_MODELS) { try { window.PR_MODELS = (await api("/api/printer-models")).models; } catch { window.PR_MODELS = []; } }
@@ -2086,9 +2155,10 @@ async function renderSettings() {
   $("#cfg-form").innerHTML = `<div class="chips cfg-mods" style="margin-bottom:10px">${CFG_SCHEMA.map((m) => `<span class="chip ${m.id === CFG_MOD ? "on" : ""}" data-cfgtab="${m.id}">${esc(th ? m.th : m.zh)}</span>`).join("")}</div>` +
     CFG_SCHEMA.map((m) => `<div class="cfg-mod ${m.id === CFG_MOD ? "" : "hidden"}" data-cfgmod="${m.id}">` +
       m.groups.map((g) => `<div class="card cfg-group"><h3>${g.title}</h3><div class="form3">${g.fields.map((f) => cfgSafe(() => cfgField(f), f.key)).join("")}</div></div>`).join("") +
-      (m.special || []).map((n) => cfgSafe(() => cfgSpecial(n), n)).join("") + "</div>").join("") +
-    `<p class="muted small">去背景组件：${CFG_REMBG ? '<span class="ok">已安装</span>' : '<span class="warn">未安装（可选，运行 3_install_bg_removal.bat）</span>'}</p>`;
-  lockBox($("#cfg-form"), { id: "settings", bar: $("#cfg-lockbar"), label: "✏ 修改设置", keep: "[data-test], #btn-find-profiles", onSave: saveSettings, onCancel: () => renderSettings() });
+      (m.special || []).map((n) => cfgSafe(() => cfgSpecial(n), n)).join("") + "</div>").join("");
+  $$("[data-cfgext]").forEach((x) => x.classList.toggle("hidden", x.dataset.cfgext !== CFG_MOD));
+  cfgLockCards();
+  cfgLoadExt(CFG_MOD);
 }
 function renderSummary(s) {
   if (!s) { $("#cost-summary").innerHTML = ""; return; }
@@ -2219,20 +2289,6 @@ $("#cfg-form").addEventListener("click", async (e) => {
     });
   }
 });
-async function saveSettings() {
-  const body = {};
-  $$("#cfg-form [data-c]").forEach((el) => (body[el.dataset.c] = el.value));
-  if ($("#printer-table")) body.printers = collectPrinters();
-  if ($("#pack-rules")) body.inv_pack_rules = collectPackRules();
-  const r = await api("/api/config", { json: body });
-  CFG = r.config; renderSummary(r.summary); await loadConfig(); toast("设置已保存");
-  // 新加的打印机：显示服务器自动编好的机器编码
-  $$("#printer-table tbody tr").forEach((tr, i) => {
-    const p = (CFG.printers || [])[i]; const inp = tr.querySelector('[data-p="code"]');
-    if (p && inp) inp.value = p.code || "";
-  });
-}
-
 // ---------------- 账号 ----------------
 let ME = null;
 const ROLE_ZH = { owner: "老板", listing: "上架客服", production: "生产打包" };

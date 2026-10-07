@@ -42,7 +42,7 @@ diag.setup(app)
 
 
 def _no_perm(key):
-    return f"你的账号没有「{dict(db.PERMS).get(key, key)}」的权限，请老板在 系统 → 账号与对接 里开通"
+    return f"你的账号没有「{dict(db.PERMS).get(key, key)}」的权限，请老板在 系统 → 设置 → 账号与权限 里开通"
 
 
 def _need(key):

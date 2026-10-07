@@ -2,7 +2,7 @@
 // 系统检查与在线升级（只有老板）
 (function () {
   const ICON = { ok: "✅", warn: "⚠️", err: "❌" };
-  function show(name) { if (name === "system") { load(); loadErrs().catch(() => {}); loadI18n().catch(() => {}); loadGh().catch(() => {}); loadRemote().catch(() => {}); } }
+  function show(name) { if (name === "system") { load(); loadErrs().catch(() => {}); loadI18n().catch(() => {}); loadGh().catch(() => {}); } }
 
   // ---- v2.26 在线更新（GitHub） ----
   function renderGh(st) {
@@ -35,15 +35,16 @@
   // ---- v2.26 外网访问（Tailscale） ----
   const isTs = (h) => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h) || /\.ts\.net$/.test(h);
   async function loadRemote() {
+    const box = $("#sys-remote-body"); if (!box) return;
     const r = await api("/api/system/remote");
     const here = location.origin;
     const lan = isTs(location.hostname) ? "" : here;
     const guess = `http://${r.tailscale_ips[0] || "100.81.34.58"}${location.port ? ":" + location.port : ""}`;
-    $("#sys-remote-body").innerHTML = `
+    box.innerHTML = `
       <div>现在打开的地址：<b data-notr>${esc(here)}</b> ${isTs(location.hostname) ? '<span class="chip ok">🌐 外网（Tailscale）</span>' : '<span class="chip">局域网</span>'}</div>
       ${r.tailscale_ips.length ? `<div>NAS 上检测到 Tailscale 地址：<b data-notr>${esc(r.tailscale_ips.join("、"))}</b></div>` : ""}
       <div class="row gap wrap" style="margin-top:6px"><label>外网地址 <input id="sys-remote-url" size="32" value="${esc(r.remote_url || guess)}" placeholder="http://100.81.34.58:8790" data-notr></label>
-        <button class="mini primary" id="sys-remote-save">保存</button><button class="mini" id="sys-remote-test">测试这台设备能不能打开</button></div>
+        <button class="mini" id="sys-remote-test">测试这台设备能不能打开</button></div>
       <div id="sys-remote-res"></div>
       <ol class="muted small" style="margin:8px 0 0 18px">
         <li>NAS 上装好 Tailscale（威联通 App Center 搜 Tailscale）并登录；它显示的 100.x.x.x 地址就是 NAS 的外网地址，后面加上端口 <b>:${esc(location.port || r.port || "8790")}</b>。</li>
@@ -52,12 +53,30 @@
         <li>浏览器 AI 客服扩展（2.8.0）：设置里「外网地址」填这个地址，在店外会自动切换。${lan ? `局域网地址填 <b data-notr>${esc(lan)}</b>。` : ""}</li>
       </ol>
       <p class="muted small">Tailscale 是加密的点对点连接，只有登录了你账号（或你授权）的设备能连上，不需要在路由器上开端口，比直接暴露到公网安全。</p>`;
+    lockBox(box, { id: "cfg-general-remote", bar: $("#sys-remote-bar"), label: "✏ 修改", keep: "#sys-remote-test",
+      onCancel: () => { LOCKS["cfg-general-remote"].editing = false; loadRemote(); },
+      onSave: async () => {
+        const r2 = await api("/api/system/remote", { json: { remote_url: $("#sys-remote-url").value } });
+        $("#sys-remote-url").value = r2.remote_url; toast("已保存");
+      } });
+  }
+
+  // ---- v2.27 组件与插件：装了没装都在这里 ----
+  const COMP_NAMES = ["依赖组件", "抠图组件（可选）", "去水印增强模型 LaMa（可选）", "泰语字体（卖点图）", "OrcaSlicer"];
+  async function loadComps() {
+    const box = $("#cfg-comps-body"); if (!box) return;
+    const r = await api("/api/system/check");
+    const items = r.items.filter((x) => COMP_NAMES.includes(x.name));
+    let ext = null;
+    try { ext = await api("/api/cs/extension/info"); } catch { ext = null; }
+    box.innerHTML = `<table class="grid small sys-tbl"><tbody>${items.map((x) => `<tr class="st-${x.status}"><td class="nowrap">${ICON[x.status]} ${esc(x.name)}</td>
+        <td data-notr>${esc(x.detail)}</td><td>${x.fix ? `<span class="muted">怎么处理：</span>${esc(x.fix)}` : ""}
+        ${x.action ? ` <button class="mini primary" data-sys-act="${esc(x.action)}">安装</button>` : ""}</td></tr>`).join("")}
+      ${ext ? `<tr class="st-ok"><td class="nowrap">✅ 浏览器 AI 客服扩展</td><td>最新版本 ${esc(ext.latest)}${ext.in_use && ext.in_use.length ? " · 在用：" + ext.in_use.map((u) => `<span data-notr>${esc(u.name)}</span> ${esc(u.version || "?")}`).join("，") : ""}</td><td>下载和安装方法在下面</td></tr>` : ""}
+      </tbody></table>`;
   }
   document.addEventListener("click", async (e) => {
-    if (e.target.id === "sys-remote-save") {
-      try { const r = await api("/api/system/remote", { json: { remote_url: $("#sys-remote-url").value } }); $("#sys-remote-url").value = r.remote_url; toast("已保存"); }
-      catch (err) { toast(err.message, true); }
-    }
+    if (e.target.id === "cfg-comps-reload") return busy(e.target, loadComps);
     if (e.target.id === "sys-remote-test") {
       let u = $("#sys-remote-url").value.trim().replace(/\/+$/, "");
       if (!u) return toast("先填外网地址", true);
@@ -135,20 +154,21 @@
 
   $("#sys-recheck").addEventListener("click", (e) => busy(e.target, load));
   $("#sys-errs").addEventListener("click", (e) => busy(e.target, loadErrs));
-  $("#sys-items").addEventListener("click", async (e) => {
-    const act = e.target.dataset.sysAct;
+  document.addEventListener("click", async (e) => {
+    const act = e.target.dataset && e.target.dataset.sysAct;
+    if (!act) return;
     if (act === "install_lama") {
       if (!confirm("下载去水印增强模型 LaMa？需要联网下载约 208MB（从 Hugging Face），期间系统可以照常使用。")) return;
       await api("/api/imgtool/install-lama", { json: {} });
       toast("开始下载了，过几分钟点「重新检查」看结果", false, 8000);
-      load();
+      if ($("#sys-items") && $("#sys-items").offsetParent) load(); else loadComps();
       return;
     }
     if (act !== "install_rembg") return;
     if (!confirm("安装抠图组件？需要联网下载约 200MB，大约 5–15 分钟，期间系统可以照常使用。")) return;
     await api("/api/system/install-rembg", { json: {} });
     toast("开始安装了，过 5–15 分钟点「重新检查」看结果", false, 8000);
-    load();
+    if ($("#sys-items") && $("#sys-items").offsetParent) load(); else loadComps();
   });
   $("#sys-upfile").addEventListener("change", async (e) => {
     const f = e.target.files[0]; e.target.value = "";
@@ -175,5 +195,5 @@
     $("#sys-upres").innerHTML = "正在重启…";
     waitBack(null);
   });
-  window.SYS = { show, load };
+  window.SYS = { show, load, loadRemote, loadComps };
 })();

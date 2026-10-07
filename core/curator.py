@@ -77,7 +77,7 @@ def _abs(url):
         return url
     base = (load_config().get("curator_base_url") or "").strip()
     if not base:
-        raise CatalogError("图片 / 文件地址是相对地址，请在 ERP「系统 → 账号与对接 → 3D选品工具对接」填选品工具地址", "image_download_failed", 502)
+        raise CatalogError("图片 / 文件地址是相对地址，请在 ERP「系统 → 设置 → AI 与对接 → 3D选品工具对接」填选品工具地址", "image_download_failed", 502)
     return urljoin(base.rstrip("/") + "/", url.lstrip("/"))
 
 
@@ -88,7 +88,7 @@ def _download(sess, url, dest_dir, max_bytes, kind):
     except Exception as e:  # noqa: BLE001
         raise CatalogError(f"下载{kind}失败：{e}", "image_download_failed", 502)
     if r.status_code in (401, 403):
-        raise CatalogError(f"下载{kind}被选品工具拒绝（{r.status_code}）：请在 ERP「系统 → 账号与对接 → 3D选品工具对接」填对选品工具的密钥",
+        raise CatalogError(f"下载{kind}被选品工具拒绝（{r.status_code}）：请在 ERP「系统 → 设置 → AI 与对接 → 3D选品工具对接」填对选品工具的密钥",
                            "image_download_failed", 502)
     if r.status_code != 200:
         raise CatalogError(f"下载{kind}失败：HTTP {r.status_code}（{url}）", "image_download_failed", 502)
@@ -380,7 +380,7 @@ def _rollback(pid):
         shutil.rmtree(d, ignore_errors=True)
 
 
-# ---------------- 系统 → 账号与对接：选品工具连接 ----------------
+# ---------------- 系统 → 设置 → 账号与权限：选品工具连接 ----------------
 def status():
     cfg = load_config()
     c = db.conn()

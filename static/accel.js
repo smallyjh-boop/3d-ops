@@ -1,7 +1,7 @@
 // 任务中心 + 电脑加速（v2.20）
 // · 右上角「任务」：所有耗时的操作（切片、上传模型、抠图、AI 文案…）都在后台做，这里看进度、读秒、在电脑还是 NAS 上做、失败重试；
 //   离开页面也会继续做，做完弹提示（自己正在等的那个不重复提示）。
-// · 设置 → 电脑加速：在线的电脑、下载加速程序、生成密钥。
+// · 设置 → 组件与插件：在线的电脑、下载加速程序、生成密钥。
 (function () {
   const $ = (s, r = document) => r.querySelector(s);
   let OPEN = false, ALL = false, LAST = {}, TIMER = null, DATA = { jobs: [], counts: {}, accel: {} };
@@ -95,7 +95,7 @@
   });
   document.addEventListener("change", (e) => { if (e.target.id === "task-all") { ALL = e.target.checked; poll(); } });
 
-  // ---------------- 设置 → 电脑加速 ----------------
+  // ---------------- 设置 → 组件与插件 ----------------
   function ago(s) { return s < 90 ? TR("task.secs", { s }) : s < 7200 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`; }
   async function fillCard() {
     const box = $("#accel-card-body"); if (!box) return;
@@ -133,7 +133,7 @@
       <div id="accel-key-out"></div><div id="accel-card-body" class="muted small">…</div></div>`;
   }
   document.addEventListener("click", async (e) => {
-    if (e.target.id === "accel-refresh" || (e.target.closest && e.target.closest('[data-cfgtab="accel"]'))) fillCard();
+    if (e.target.id === "accel-refresh" || (e.target.closest && e.target.closest('[data-cfgtab="addons"]'))) fillCard();
     if (e.target.id === "accel-key") {
       try {
         const r = await api("/api/accel/key", { json: {} });

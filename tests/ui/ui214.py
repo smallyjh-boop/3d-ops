@@ -165,7 +165,7 @@ async def main():
         await pg.select_option("#cs-rkind", "todo"); await pg.fill("#cs-rtext", "下周三前要 30 个粉色"); await pg.click("[data-cs=rec-add]"); await pg.wait_for_timeout(1500)
         if LANG=="th": miss|=set(await pg.evaluate(JS,"#cs-main .cs-cust"))
         print(" v224 cust:", (await pg.inner_text("#cs-main .cs-cust"))[:160].replace("\n"," | "))
-        for tab, sel in (("csrec", "#tab-csrec"), ("csrep", "#tab-csrep"), ("csext", "#tab-csext")):
+        for tab, sel in (("csrec", "#tab-csrec"), ("csrep", "#tab-csrep"), ("csext", "#tab-settings")):
             await pg.evaluate(f"goTab('{tab}')"); await pg.wait_for_timeout(2000)
             if LANG=="th": miss|=set(await pg.evaluate(JS, sel))
             await pg.screenshot(path=SP+f"/v224_{tab}_{LANG}.png", full_page=True)
@@ -199,15 +199,25 @@ async def main():
         print(" v221 settle:", (await pg.inner_text("#fin-st"))[:200].replace("\n"," | "))
         await pg.evaluate("showTab('settings')"); await pg.wait_for_timeout(2500)
         for mid in await pg.evaluate("[...document.querySelectorAll('[data-cfgtab]')].map(x=>x.dataset.cfgtab)"):
-            await pg.click(f"[data-cfgtab={mid}]"); await pg.wait_for_timeout(300)
+            await pg.click(f"[data-cfgtab={mid}]"); await pg.wait_for_timeout(1500)
             if LANG=="th": miss|=set(await pg.evaluate(JS,"#tab-settings"))
+            await pg.screenshot(path=SP+f"/v227_cfg_{mid}_{LANG}.png", full_page=True)
+        # v2.27：每张卡片单独解锁
+        await pg.click("[data-cfgtab=general]"); await pg.wait_for_timeout(800)
+        nlock = await pg.evaluate("document.querySelectorAll('#tab-settings [data-lk-act=edit]').length")
+        await pg.click("[data-cfgmod=general] .cfg-group [data-lk-act=edit]"); await pg.wait_for_timeout(300)
+        nedit = await pg.evaluate("document.querySelectorAll('#tab-settings .is-editing').length")
+        dis = await pg.evaluate("[...document.querySelectorAll('[data-cfgmod=general] .cfg-group')].map(c=>c.querySelector('[data-c]')?.disabled)")
+        print(" v227 locks:", nlock, "editing:", nedit, "disabled:", dis)
+        if nedit != 1 or dis[0] or not all(x for x in dis[1:] if x is not None): ERR.append("v227 per-card lock wrong")
+        await pg.click("[data-cfgmod=general] .cfg-group [data-lk-act=cancel]"); await pg.wait_for_timeout(800)
         await pg.click("[data-cfgtab=inventory]"); await pg.wait_for_timeout(300)
         await pg.screenshot(path=SP+f"/v218_settings_{LANG}.png", full_page=True)
         # ---- v2.20：电脑加速、任务中心 ----
         await pg.evaluate("""(async()=>{const k=(await api('/api/accel/key',{json:{}})).key;
             await fetch('/api/v1/accel/hello',{method:'POST',headers:{'Authorization':'Bearer '+k,'Content-Type':'application/json'},
               body:JSON.stringify({name:'Office-PC',caps:['mesh','preview','slice','removebg'],cpu:12,gpu:'NVIDIA RTX 3060',version:'2.20.0',proto:1})});})()""")
-        await pg.click("[data-cfgtab=accel]"); await pg.wait_for_timeout(1500)
+        await pg.click("[data-cfgtab=addons]"); await pg.wait_for_timeout(2500)
         if LANG=="th": miss|=set(await pg.evaluate(JS,"#tab-settings"))
         await pg.screenshot(path=SP+f"/v220_accel_{LANG}.png", full_page=True)
         await pg.evaluate("(async()=>{const id=(await api('/api/products')).items?.[0]?.id||(await api('/api/products'))[0]?.id; window.__j=apiJob(`/api/products/${id}/models/reanalyze`,{json:{}}).catch(e=>e);})()")

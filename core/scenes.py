@@ -231,7 +231,7 @@ def _openai_generate(cfg, prompt):
 def ai_background(cfg, preset, extra=""):
     """AI 生成一张空背景（没有产品），存进背景库。"""
     if not (cfg.get("image_api_key") or "").strip():
-        raise SceneError("还没有填写图片 AI 的接口密钥（设置页 → 场景图 AI）")
+        raise SceneError("还没有填写图片 AI 的接口密钥（设置 → 商品与上架 → 场景图 AI）")
     name, desc = BG_PRESETS.get(preset, (preset[:20] or "AI 背景", preset))
     prompt = f"Photorealistic empty product-display background: {desc}.{BG_SUFFIX}" + (f" Additional: {extra}" if extra else "")
     provider = cfg.get("image_provider") or "openai"
@@ -254,7 +254,7 @@ def ai_background(cfg, preset, extra=""):
 
 def ai_generate(cfg, product, scene_key, product_png_b64, extra=""):
     if not (cfg.get("image_api_key") or "").strip():
-        raise SceneError("还没有填写图片 AI 的接口密钥（设置页 → 场景图 AI）")
+        raise SceneError("还没有填写图片 AI 的接口密钥（设置 → 商品与上架 → 场景图 AI）")
     png = _png_b64_to_bytes(product_png_b64)
     prompt = build_prompt(product, scene_key, extra)
     provider = cfg.get("image_provider") or "openai"

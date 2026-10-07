@@ -238,7 +238,7 @@
     const it = e.target.closest("#cs-items .cs-item");
     if (it) { openConv(+it.dataset.cid).catch((err) => toast(err.message, true)); return; }
     if (e.target.id === "cs-new") { newDialog(); return; }
-    const b = e.target.closest("#cs-main [data-cs], #tab-cskb [data-kb], #tab-csext [data-kb]");
+    const b = e.target.closest("#cs-main [data-cs], #tab-cskb [data-kb], #tab-settings [data-kb]");
     if (!b) return;
     const act = b.dataset.cs;
     try {

@@ -44,7 +44,6 @@
   <button class="tab" data-mod="cs" data-tab="csrec" data-roles="owner,listing">登记中心</button>
   <button class="tab" data-mod="cs" data-tab="csrep" data-roles="owner,listing">客服报表</button>
   <button class="tab" data-mod="cs" data-tab="cskb" data-roles="owner,listing">知识库与话术</button>
-  <button class="tab" data-mod="cs" data-tab="csext" data-roles="owner,listing">浏览器扩展与密钥</button>
   <button class="tab" data-mod="prod" data-tab="production" data-roles="owner,production">生产看板</button>
   <button class="tab" data-mod="prod" data-tab="printers" data-roles="owner,production">打印机</button>
   <button class="tab" data-mod="prod" data-tab="files" data-roles="owner,production,listing">文件管理</button>
@@ -65,7 +64,6 @@
   <button class="tab" data-mod="biz" data-tab="fin_tax" data-roles="owner">税务</button>
   <button class="tab" data-mod="biz" data-tab="profit" data-roles="owner">每单利润</button>
   <button class="tab" data-mod="sys" data-tab="settings" data-roles="owner">设置</button>
-  <button class="tab" data-mod="sys" data-tab="users" data-roles="owner">账号与对接</button>
   <button class="tab" data-mod="sys" data-tab="logs" data-roles="owner">操作日志</button>
   <button class="tab" data-mod="sys" data-tab="backup" data-roles="owner">数据备份</button>
   <button class="tab" data-mod="sys" data-tab="system" data-roles="owner">系统检查与升级</button>
@@ -375,23 +373,9 @@
 <!-- 导出 -->
 <section id="tab-export" class="panel hidden">
   <h2>导出批量上新表格（Lazada / Shopee）</h2>
+  <div class="card small" id="exp-tplbar">类目模板库：<span id="exp-tplinfo" class="muted">…</span> <a href="#" data-goto-cfg="goods">管理模板 →</a></div>
   <div class="card">
-    <div class="row between wrap gap">
-      <h3>1. 类目模板库 <span id="tpl-count" class="muted small"></span></h3>
-      <div class="row gap">
-        <label class="filebtn">上传模板<input id="tpl-input" type="file" accept=".xlsx" hidden></label>
-        <button id="btn-tpl-manage">管理模板</button>
-      </div>
-    </div>
-    <div id="tpl-sync" class="small"></div>
-    <p class="muted small">系统会自动下载 Lazada 全部类目的模板（约 2900 个类目，在后台下载）。你自己在卖家中心「批量添加」下载的模板也可以上传到这里，同一个类目以最新的模板为准。</p>
-    <details id="tpl-details">
-      <summary>展开 / 收起类目列表</summary>
-      <div id="tpl-list"></div>
-    </details>
-  </div>
-  <div class="card">
-    <h3>2. 选择要导出的产品</h3>
+    <h3>1. 选择要导出的产品</h3>
     <p class="muted small">按分组分批上架：先筛选分组 / 状态，勾选后导出。导出后产品自动变成「待上传」；上传到平台后是「平台审核中」，过审后标「已上线」，没过审标「审核不通过」（写上原因）。同一个模板里的多个类目会写进同一个文件。</p>
     <div class="row gap wrap exp-bar">
       <label class="small">分组<select id="exp-group"></select></label>
@@ -836,6 +820,7 @@
       <input id="cs-q" placeholder="搜索买家 / 订单号 / 内容">
       <div class="row gap"><select id="cs-shopf" style="flex:1"><option value="">全部店铺</option></select><select id="cs-agentf" style="flex:1"><option value="">全部客服</option></select></div>
       <div id="cs-stats" class="small muted"></div>
+      <div class="small muted">浏览器 AI 客服扩展：<a href="/api/cs/extension.zip">⬇ 下载</a>（安装方法问老板，或看 设置 → 组件与插件）</div>
       <div id="cs-items"></div>
     </aside>
     <main id="cs-main" class="card"><div class="cs-empty"><h3>AI 客服</h3><p class="muted">左边选一个会话，或者点「＋ 新消息」。</p></div></main>
@@ -862,21 +847,7 @@
   <p class="muted small">按客服：接待会话、回复条数、首次响应、平均响应、超时次数、AI 草稿直接采用率、自动回复、登记和完成的待办。按店铺：咨询量、新客户 / 老客户、关联到订单的会话、新销售线索、结束时还没回复的。员工只看到自己的绩效。</p>
   <div id="rep-body"></div>
 </section>
-<section id="tab-csext" class="panel hidden">
-  <h2>浏览器扩展与密钥</h2>
-  <p class="muted small">装了扩展，员工可以在 Lazada / Shopee / TikTok 卖家中心的聊天页面直接用 AI 读取消息、写回复（手动 / 半自动 / 全自动）。每个员工用自己的密钥连接本系统。</p>
-  <div class="card" id="cskb-keys"></div>
-  <div class="card" id="cs-agents"></div>
-  <div class="card"><div class="row between"><h3>浏览器扩展（在卖家中心聊天页面直接用 AI）</h3><a class="btn" href="/api/cs/extension.zip">⬇ 下载扩展</a></div>
-    <ol class="small">
-      <li>下载后解压到一个固定的文件夹（不要删）。</li>
-      <li>Chrome 地址栏打开 <span class="mono" data-notr>chrome://extensions</span> → 右上角打开「开发者模式」→「加载已解压的扩展程序」→ 选刚才解压的文件夹。</li>
-      <li>老板在上面「员工的扩展密钥」里给每个员工生成一个密钥。</li>
-      <li>点 Chrome 右上角的扩展图标：填软件地址（例如 <span class="mono" data-notr>http://NAS的IP:8790</span>）和密钥，选面板语言，点「保存并测试」。</li>
-      <li>打开 Lazada / Shopee / TikTok 卖家中心的聊天页面，右上角有「💬 AI」按钮：读取对话 → 检查回复 → 填入回复框 → 在平台按发送。</li>
-    </ol>
-    <p class="small muted">每个店铺用自己的浏览器窗口登录（多个店铺可以用 Chrome 的不同「用户」）。账号密码只在浏览器里，扩展不会读取。勾选「自动」后，买家发新消息时会自动读取并写好回复草稿，仍然由员工按发送。</p></div>
-</section>
+
 
 <section id="tab-cskb" class="panel hidden">
   <h2>知识库与话术</h2>
@@ -884,7 +855,6 @@
   <div class="card" id="cskb-perf"></div>
   <div class="card" id="cskb-weekly"></div>
   <div class="card" id="cskb-learn"></div>
-  <div class="card"><div class="row between"><h3>店铺政策</h3><div class="lockbar" id="cskb-setbar"></div></div><div id="cskb-settings" class="form1"></div></div>
   <div class="card"><div class="row between"><h3>常见问答</h3><div class="row gap"><span id="cskb-presets"></span><button data-kb="add">＋ 添加</button></div></div>
     <p class="small muted">已内置 3D 打印网店常见情况的标准话术（现货与 24–48 小时发货时效、材料与耐热、纹路色差、定制刻字、版权、批发、物流、改单取消、破损少件发错、退款、差评、平台规则等）。可以直接改成你们自己的说法；AI 回复时会参考。</p>
     <table class="grid"><thead><tr><th>问题</th><th>回答</th><th>标签</th><th>用过</th><th>状态</th><th></th></tr></thead><tbody id="cskb-list"></tbody></table></div>
@@ -911,10 +881,6 @@
     <p class="muted small">新版本发布到 GitHub 后，NAS 每天自动检查一次，有新版本会在这里和顶部提示；点「立即更新」才会升级（先自动备份程序，数据不会动，升级后自动重启）。
       仓库名和只读令牌在 设置 → 通用 → 在线更新。</p>
   </div>
-  <div class="card" id="sys-remote">
-    <h3>外网访问（Tailscale）</h3>
-    <div id="sys-remote-body" class="small"></div>
-  </div>
   <div class="card">
     <h3>上传升级包</h3>
     <p class="muted small">收到新版本的压缩包后，直接在这里上传就能升级，不用再到 NAS / 电脑里手动覆盖文件。
@@ -939,7 +905,7 @@
   <div class="row between"><h2>运营改动（运营分析系统写回）</h2><button id="oc-reload">刷新</button></div>
   <p class="muted small">运营分析系统通过接口改的泰文标题、属性、售价、上下架都记在这里：改前 → 改后、原因。可以一键撤回。
     硬性限制：售价不能低于最低价；每个 SKU 每天最多改 1 次价；只能下架不能删除。改过的产品在「导出上架表格」里显示「有修改待同步」，重新导出上传到平台才会生效。
-    设置页「运营分析系统写回」可以切换为「只做建议，人工确认后生效」。</p>
+    设置 → AI 与对接「运营分析系统写回」可以切换为「只做建议，人工确认后生效」。</p>
   <div id="oc-mode" class="small"></div>
   <div class="row gap wrap"><label class="small">状态<select id="oc-status"><option value="">全部</option><option value="pending">待确认</option><option value="applied">已生效</option><option value="reverted">已撤回</option><option value="rejected">已拒绝</option></select></label>
     <input id="oc-q" placeholder="产品编号 / SKU" style="width:180px" data-notr></div>
@@ -948,9 +914,14 @@
 
 <div id="modal" class="modal hidden"><div class="modal-in" id="modal-in"></div></div>
 
-<!-- 账号 -->
-<section id="tab-users" class="panel hidden">
-  <div class="row between"><h2>账号与权限</h2></div>
+
+
+<section id="tab-settings" class="panel hidden">
+  <div class="row between"><h2>设置</h2></div>
+  <p class="muted small">所有设置都在这里，按大分类放。每张卡片平时是锁住的：点卡片右上角「✏ 修改」只解锁这一张，改完点「保存」。</p>
+  <div id="cost-summary" class="card summary"></div>
+  <div id="cfg-form"></div>
+  <div class="cfg-ext hidden" data-cfgext="accounts">
   <div class="card">
     <h3>员工账号</h3>
     <p class="muted small">老板：全部权限。上架客服：上架、文案、图片、导出，看不到成本利润和设置。生产打包：生产、3D 模型、切片，看不到价格。
@@ -966,6 +937,33 @@
       <button id="btn-nu" class="primary">新建</button>
     </div>
   </div>
+  <div class="card" id="cskb-keys"></div>
+  <div class="card" id="cs-agents"></div>
+  </div>
+  <div class="cfg-ext hidden" data-cfgext="goods">
+  <div class="card">
+    <div class="row between wrap gap">
+      <h3>上架类目模板库 <span id="tpl-count" class="muted small"></span></h3>
+      <div class="row gap">
+        <label class="filebtn">上传模板<input id="tpl-input" type="file" accept=".xlsx" hidden></label>
+        <button id="btn-tpl-manage">管理模板</button>
+      </div>
+    </div>
+    <div id="tpl-sync" class="small"></div>
+    <p class="muted small">系统会自动下载 Lazada 全部类目的模板（约 2900 个类目，在后台下载）。你自己在卖家中心「批量添加」下载的模板也可以上传到这里，同一个类目以最新的模板为准。</p>
+    <details id="tpl-details">
+      <summary>展开 / 收起类目列表</summary>
+      <div id="tpl-list"></div>
+    </details>
+  </div>
+  </div>
+  <div class="cfg-ext hidden" data-cfgext="cs">
+  <div class="card"><div class="row between"><h3>客服设置（店铺政策、自动回复、提醒、邮件）</h3><div class="lockbar" id="cskb-setbar"></div></div><div id="cskb-settings" class="form1"></div></div>
+  </div>
+  <div class="cfg-ext hidden" data-cfgext="production">
+  <div class="card" id="cfg-prconn"></div>
+  </div>
+  <div class="cfg-ext hidden" data-cfgext="ai">
   <details class="card" id="intg" open>
     <summary class="row between"><h3>API 与店铺对接（自动导入订单）</h3><a class="btn" href="/api-docs" target="_blank">接口说明</a></summary>
     <p class="muted small">现在用表格导入订单就可以。以后接上平台开放接口后，订单会自动进来（和表格导入效果一样：对上 SKU、生成生产任务、算利润）。
@@ -999,13 +997,19 @@
     <h4>最近推送过来的产品 <span id="cur-count" class="muted small"></span></h4>
     <table class="grid small" id="cur-recent"><thead><tr><th>时间</th><th>编号</th><th>品名</th><th>SKU</th><th>状态</th><th>选品记录</th></tr></thead><tbody></tbody></table>
   </div>
-</section>
-
-<section id="tab-settings" class="panel hidden">
-  <div class="row between"><h2>设置</h2><div class="row gap lockbar" id="cfg-lockbar"></div></div>
-  <p class="muted small">设置平时是锁住的，点「✏ 修改设置」才能改，改完点「保存」。</p>
-  <div id="cost-summary" class="card summary"></div>
-  <div id="cfg-form"></div>
+  </div>
+  <div class="cfg-ext hidden" data-cfgext="addons">
+  <div class="card"><div class="row between"><h3>浏览器 AI 客服扩展（在卖家中心聊天页面直接用 AI）</h3><a class="btn" href="/api/cs/extension.zip">⬇ 下载扩展</a></div>
+    <p class="small">装了扩展，员工可以在 Lazada / Shopee / TikTok 卖家中心的聊天页面直接用 AI 读取消息、写回复（手动 / 半自动 / 全自动）。每个员工用自己的密钥连接本系统。</p>
+    <ol class="small">
+      <li>下载后解压到一个固定的文件夹（不要删）。</li>
+      <li>Chrome 地址栏打开 <span class="mono" data-notr>chrome://extensions</span> → 右上角打开「开发者模式」→「加载已解压的扩展程序」→ 选刚才解压的文件夹。</li>
+      <li>老板在 设置 → 账号与权限「员工的扩展密钥」里给每个员工生成一个密钥。</li>
+      <li>点 Chrome 右上角的扩展图标：填局域网地址（例如 <span class="mono" data-notr>http://NAS的IP:8790</span>）、外网地址（Tailscale，可不填）和密钥，选面板语言，点「保存并测试」。</li>
+      <li>打开 Lazada / Shopee / TikTok 卖家中心的聊天页面，右上角有「💬 AI」按钮：读取对话 → 检查回复 → 填入回复框 → 在平台按发送。</li>
+    </ol>
+    <p class="small muted">每个店铺用自己的浏览器窗口登录（多个店铺可以用 Chrome 的不同「用户」）。账号密码只在浏览器里，扩展不会读取。勾选「自动」后，买家发新消息时会自动读取并写好回复草稿，仍然由员工按发送。</p></div>
+  </div>
 </section>
 </main>
 <script src="/static/i18n_keys.js"></script>

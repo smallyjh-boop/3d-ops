@@ -143,7 +143,7 @@ def check():
         exe = slicer.find_orca(cfg)
         if not exe:
             items.append(_item(G, "OrcaSlicer", "warn", "没有找到，自动切片不能用（可以上传电脑上切好的文件）",
-                               "设置页「手动选择程序」；NAS 版第一次启动会自动安装"))
+                               "设置 → 生产「手动选择程序」；NAS 版第一次启动会自动安装"))
         else:
             idx = op.build_index(exe)
             sm = op.summary(idx)
@@ -162,11 +162,11 @@ def check():
                         note = "（设置里存的配置在这台机器上找不到，已自动改用匹配的）"
                     if not _profile_matches(p.get("name"), machine):
                         items.append(_item(G, name, "warn", f"打印机配置是「{os.path.basename(machine)}」，看起来不是这台打印机的",
-                                           "设置页 → 打印机：把这一行的打印机配置清空，再点「自动匹配配置」"))
+                                           "设置 → 生产 → 打印机：把这一行的打印机配置清空，再点「自动匹配配置」"))
                     else:
                         items.append(_item(G, name, "ok", f"打印机：{os.path.basename(machine)} · 工艺：{os.path.basename(process)}{note}"))
                 except Exception as e:  # noqa: BLE001
-                    items.append(_item(G, name, "err", str(e), "设置页 → 打印机：点「自动匹配配置」"))
+                    items.append(_item(G, name, "err", str(e), "设置 → 生产 → 打印机：点「自动匹配配置」"))
     except Exception as e:  # noqa: BLE001
         items.append(_item(G, "OrcaSlicer", "warn", str(e)))
 
@@ -181,7 +181,7 @@ def check():
     G = "AI 与客服"
     items.append(_item(G, "AI 接口密钥", "ok" if cfg.get("ai_api_key") else "err",
                        f"{cfg.get('ai_provider')} · {cfg.get('ai_model')}" if cfg.get("ai_api_key") else "没有填写：AI 文案和 AI 客服都不能用",
-                       "" if cfg.get("ai_api_key") else "系统 → 设置 → AI 接口密钥"))
+                       "" if cfg.get("ai_api_key") else "系统 → 设置 → AI 与对接"))
     try:
         c = db.conn()
         kb = c.execute("SELECT COUNT(*) FROM cs_kb WHERE active=1").fetchone()[0]
@@ -191,7 +191,7 @@ def check():
                            "客服 → 知识库与话术 →「＋ 补充标准话术」" if miss_p else ""))
         keys = c.execute("SELECT COUNT(*) FROM api_keys WHERE active=1").fetchone()[0] if _has_table(c, "api_keys") else 0
         items.append(_item(G, "扩展密钥", "ok" if keys else "warn", f"{keys} 个",
-                           "" if keys else "客服 →「浏览器扩展与密钥」里给要用扩展的人新建密钥"))
+                           "" if keys else "设置 → 账号与权限「员工的扩展密钥」里给要用扩展的人新建密钥"))
         s = csd.settings()
         tg = bool(s.get("tg_token") and s.get("tg_chat"))
         items.append(_item(G, "未回复提醒（手机）", "ok" if tg else "warn", "已设置 Telegram" if tg else "没有设置，超时没回复只在系统里提醒",
@@ -252,11 +252,11 @@ def _check_backups():
     if copy_dir:
         good = os.path.isdir(copy_dir)
         out.append(_item(G, "备份副本位置", "ok" if good else "err", copy_dir if good else f"找不到文件夹：{copy_dir}",
-                         "" if good else "设置页「备份另存一份到」改成存在的文件夹（U 盘 / 网盘同步文件夹）"))
+                         "" if good else "设置 → 通用「备份另存一份到」改成存在的文件夹（U 盘 / 网盘同步文件夹）"))
     else:
         out.append(_item(G, "备份副本位置", "warn", "备份只存在本机：硬盘坏了会一起丢",
                          ("NAS：用 HBS 3 把 Container/listing-helper/data/backups 每天同步到 U 盘或云盘" if IN_DOCKER
-                          else "设置页「备份另存一份到」填一个 U 盘或网盘同步文件夹")))
+                          else "设置 → 通用「备份另存一份到」填一个 U 盘或网盘同步文件夹")))
     return out
 
 

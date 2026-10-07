@@ -1,7 +1,7 @@
 """客服模块的网页接口（Flask Blueprint）。
 
 /api/cs/...     软件界面用（登录后）
-/api/v1/cs/...  浏览器扩展用（API 密钥，在 系统 → 账号与对接 → API 密钥 里新建）
+/api/v1/cs/...  浏览器扩展用（API 密钥，在 系统 → 设置 → AI 与对接 → API 密钥 里新建）
 """
 import base64
 import re
@@ -305,6 +305,15 @@ def alert_chat_id():
     b = request.get_json(force=True) or {}
     cid, name = alerts.find_chat_id(b.get("tg_token") or data.settings().get("tg_token"))
     return jsonify({"chat_id": cid, "name": name})
+
+
+@bp.get("/api/cs/extension/info")
+@_wrap
+def ext_info():
+    """v2.27：设置 → 组件与插件：扩展最新版本、哪些员工在用哪个版本。"""
+    from .. import integrations
+    return jsonify({"latest": integrations.EXT_LATEST,
+                    "in_use": [{"name": n, "version": v} for n, v in sorted(integrations.EXT_SEEN.items())]})
 
 
 @bp.get("/api/cs/extension.zip")

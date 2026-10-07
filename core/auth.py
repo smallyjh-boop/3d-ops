@@ -118,7 +118,7 @@ def _match(rules, method, path):
     return any((m == "*" or m == method) and re.search(p, path) for m, p in rules)
 
 
-# 需要特别权限的操作（老板在「系统 → 账号与对接」里给员工单独开）
+# 需要特别权限的操作（老板在「系统 → 设置 → 账号与权限」里给员工单独开）
 PERM_RULES = [
     ("DELETE", r"^/api/print-files/\d+$", "files.delete"),
     ("DELETE", r"^/api/products/[^/]+/model$", "models.delete"),
@@ -370,7 +370,7 @@ def install(app):
         if not allowed(u, request.method, path):
             mp = missing_perm(u, request.method, path)
             if path.startswith("/api/"):
-                return jsonify({"error": f"你的账号没有「{mp}」的权限，请老板在 系统 → 账号与对接 里开通" if mp
+                return jsonify({"error": f"你的账号没有「{mp}」的权限，请老板在 系统 → 设置 → 账号与权限 里开通" if mp
                                 else "你的账号没有这个权限"}), 403
             return "没有权限", 403
         return None
