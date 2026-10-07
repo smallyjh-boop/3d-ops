@@ -1,0 +1,5 @@
+# 不做换行转换（.bat 要保持 CRLF，在线更新下载的文件和发布包一模一样）
+* -text
+# GitHub 下载的源码包（在线更新用）不带测试
+tests export-ignore
+.github export-ignore
