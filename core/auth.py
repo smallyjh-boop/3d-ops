@@ -18,7 +18,7 @@ from flask import g, jsonify, redirect, request, session
 
 from . import db
 
-PUBLIC = ("/login", "/setup", "/api/auth/", "/static/", "/api/version", "/api/shutdown", "/favicon")
+PUBLIC = ("/login", "/setup", "/api/auth/", "/static/", "/api/version", "/api/shutdown", "/favicon", "/api/desktop/dl/")
 
 # 只有老板能用
 OWNER_ONLY = [
@@ -35,6 +35,7 @@ OWNER_ONLY = [
     ("POST", r"^/api/printers/\d+/(conn|test)$"),
     ("*", r"^/api/backups"),
     ("*", r"^/api/system/"),
+    ("*", r"^/api/desktop/devices"),
     ("POST", r"^/api/ops/changes/"),
     ("POST", r"^/api/calib/"),
     ("POST", r"^/api/cs/settings$"),
@@ -44,6 +45,11 @@ OWNER_ONLY = [
 # 生产角色能用的（其他全部拒绝）
 PRODUCTION_ALLOW = [
     ("GET", r"^/$"),
+    ("POST", r"^/api/desktop/(pair|dltoken)$"),           # v2.28 桌面客户端
+    ("GET", r"^/api/desktop/package$"),
+    ("GET", r"^/api/accel/(package|status)$"),
+    ("GET", r"^/api/bg/list$"),
+    ("POST", r"^/api/bg/(clear|[a-f0-9]+/retry)$"),
     ("GET", r"^/api/(config|colors|me|products|categories|scenes|slicer/info|slicer/presets|shopee/tree)$"),
     ("GET", r"^/api/products/[^/]+$"),
     ("POST", r"^/api/client-(error|timing)$"),

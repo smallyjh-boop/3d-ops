@@ -15,7 +15,7 @@ sc = C.get("/api/settings/schema").get_json()["modules"]
 ids = [m["id"] for m in sc]
 ok(ids == ["general", "accounts", "cost", "goods", "orders", "cs", "production", "inventory", "finance", "ai", "addons"], f"modules {ids}")
 by = {m["id"]: m for m in sc}
-ok(by["addons"]["special"] == ["components", "accel"] and any(f["key"] == "accel_on" for g in by["addons"]["groups"] for f in g["fields"]), "addons has accel + components")
+ok(by["addons"]["special"] == ["desktop", "components", "accel"] and any(f["key"] == "accel_on" for g in by["addons"]["groups"] for f in g["fields"]), "addons has accel + components")
 ok("remote" in by["general"]["special"] and not any(f["key"] == "remote_url" for g in by["general"]["groups"] for f in g["fields"]), "remote card instead of field")
 ok(all(by[x]["ext"] for x in ("accounts", "goods", "cs", "production", "ai", "addons")), "ext modules flagged")
 # 一张卡片单独保存：只改这几个，其它不动

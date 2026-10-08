@@ -92,7 +92,7 @@ class heavy:
 
 
 # ---------------- 电脑（worker）登记 ----------------
-def hello(name, info, ip=""):
+def hello(name, info, ip="", user=""):
     name = (str(name or "PC").strip() or "PC")[:40]
     caps = [c for c in (info.get("caps") or []) if c in KINDS]
     with _cv:
@@ -102,7 +102,8 @@ def hello(name, info, ip=""):
                  orca=str(info.get("orca") or "")[:80], os=str(info.get("os") or "")[:60], last=time.time(), ip=ip,
                  missing={k: str(v)[:200] for k, v in (info.get("missing") or {}).items() if k in KINDS},
                  installing=str(info.get("installing") or "")[:100],
-                 paused=bool(info.get("paused")))
+                 paused=bool(info.get("paused")), user=str(user or "")[:40], share=bool(info.get("share")),
+                 desktop=bool(info.get("desktop")))
         _cv.notify_all()
     return {"ok": True, "proto": PROTO, "server_version": _server_version(), "enabled": enabled()}
 
@@ -135,13 +136,32 @@ def workers():
     return out
 
 
-def _capable(kind, params=None):
+def _eligible(w, user):
+    """v2.28 每个人加速自己的：桌面端（有主人的电脑）只做主人的活；共享加速电脑（老板手动配的，没有主人）谁的都做；
+    主人打开「也帮别人加速」的电脑也做别人的。没有发起人的活（外部接口、系统自己）谁都可以做。"""
+    return not user or not w.get("user") or w.get("user") == user or bool(w.get("share"))
+
+
+def _task_user():
+    from . import bgjobs
+    u = (bgjobs.current() or {}).get("user") or ""
+    if not u:
+        try:
+            from flask import g, has_request_context
+            if has_request_context() and getattr(g, "user", None) and g.user.get("id", -1) != -1:
+                u = g.user.get("username") or ""
+        except Exception:  # noqa: BLE001
+            u = ""
+    return u
+
+
+def _capable(kind, params=None, user=""):
     """返回 (能不能交给电脑, 不能时的原因代码, 说明)。原因：no_pc 没有电脑在线 / pc_cant 电脑做不了这个（缺组件）/
     pc_stuck 电脑程序没在领活 / pc_worse 电脑的方法不如 NAS。"""
     now = time.time()
     why, msg = "no_pc", ""
     for w in _workers.values():
-        if not _online(w, now) or w.get("paused") or w.get("proto") != PROTO:
+        if not _online(w, now) or w.get("paused") or w.get("proto") != PROTO or not _eligible(w, user):
             continue
         if kind not in (w.get("caps") or []):
             why, msg = "pc_cant", ((w.get("missing") or {}).get(kind) or "")
@@ -168,13 +188,14 @@ def run(kind, params, files, local, remote_done=None, timeout=1800, claim_wait=N
     cfg = load_config()
     size = sum(os.path.getsize(p) for p in files.values() if p and os.path.exists(p))
     why, msg = ("off", "") if not enabled(cfg) else ("small", "") if size < min_bytes else ("", "")
+    user = _task_user()
     if not why:
         with _cv:
-            ok, why, msg = _capable(kind, params)
+            ok, why, msg = _capable(kind, params, user)
         if ok:
             if claim_wait is None:
                 claim_wait = _cfg_int(cfg, "accel_claim_wait", 8, 2, 120)
-            res = _remote(kind, params, files, remote_done, timeout, claim_wait, err_cls)
+            res = _remote(kind, params, files, remote_done, timeout, claim_wait, err_cls, user)
             if not isinstance(res, _Fallback):
                 return res
             why, msg = res.why, res.msg
@@ -198,9 +219,9 @@ class _Fallback:
 _last_local = {}           # 每种活最近一次为什么在 NAS 上做（系统页显示）
 
 
-def _remote(kind, params, files, remote_done, timeout, claim_wait, err_cls):
+def _remote(kind, params, files, remote_done, timeout, claim_wait, err_cls, user=""):
     tid = uuid.uuid4().hex[:12]
-    t = {"id": tid, "kind": kind, "params": params, "files": {k: v for k, v in files.items() if v}, "status": "queued",
+    t = {"id": tid, "kind": kind, "params": params, "files": {k: v for k, v in files.items() if v}, "status": "queued", "user": user,
          "created": time.time(), "worker": "", "result": None, "error": "", "final": False, "out": {}, "dir": "",
          "job": (bgjobs.current() or {}).get("label", "")}
     with _cv:
@@ -278,24 +299,44 @@ def next_task(name, caps, wait=25):
                 w["last_poll"] = time.time()
 
 
+OWN_FIRST_S = 1.5     # 发起人自己的电脑空着时，别的（共享）电脑先让它 1.5 秒
+
+
+def _own_idle(user, kind, now):
+    for x in _workers.values():
+        if x.get("user") == user and _online(x, now) and not x.get("paused") and kind in (x.get("caps") or []) \
+                and x.get("polling") and x.get("busy", 0) < (x.get("slots") or 1):
+            return True
+    return False
+
+
 def _wait_task(name, w, caps, end):
     """（调用方已经拿着 _cv）"""
     while True:
+        now = time.time()
+        defer = False
         for tid in list(_queue):
             t = _tasks.get(tid)
-            if t and t["status"] == "queued" and t["kind"] in caps:
-                _queue.remove(tid)
-                t.update(status="claimed", worker=name, claimed=time.time())
-                if w:
-                    w["busy"] = w.get("busy", 0) + 1
-                _cv.notify_all()
-                return {"id": tid, "kind": t["kind"], "params": t["params"], "files": list(t["files"]),
-                        "sizes": {k: os.path.getsize(p) for k, p in t["files"].items() if os.path.exists(p)},
-                        "ext": {k: os.path.splitext(p)[1].lower()[:8] for k, p in t["files"].items()}}
+            if not t or t["status"] != "queued" or t["kind"] not in caps:
+                continue
+            tu = t.get("user") or ""
+            if w and not _eligible(w, tu):
+                continue
+            if tu and w and w.get("user") != tu and now - t["created"] < OWN_FIRST_S and _own_idle(tu, t["kind"], now):
+                defer = True
+                continue
+            _queue.remove(tid)
+            t.update(status="claimed", worker=name, claimed=time.time())
+            if w:
+                w["busy"] = w.get("busy", 0) + 1
+            _cv.notify_all()
+            return {"id": tid, "kind": t["kind"], "params": t["params"], "files": list(t["files"]),
+                    "sizes": {k: os.path.getsize(p) for k, p in t["files"].items() if os.path.exists(p)},
+                    "ext": {k: os.path.splitext(p)[1].lower()[:8] for k, p in t["files"].items()}, "user": tu}
         left = end - time.time()
         if left <= 0:
             return None
-        _cv.wait(left)
+        _cv.wait(min(left, 0.3) if defer else left)
 
 
 def task_file(tid, name):

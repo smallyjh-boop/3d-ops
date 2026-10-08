@@ -26,7 +26,12 @@ def _wname():
 @app.post("/api/v1/accel/hello")
 def accel_hello():
     b = request.get_json(force=True) or {}
-    return jsonify(accel.hello(b.get("name") or _wname(), b, request.remote_addr or ""))
+    from core import desktop
+    kname = (g.user or {}).get("display_name") or ""
+    user = desktop.user_of_key(kname)
+    if user:
+        desktop.touch(kname, str(b.get("version") or ""))
+    return jsonify(accel.hello(b.get("name") or _wname(), b, request.remote_addr or "", user))
 
 
 @app.get("/api/v1/accel/next")
@@ -70,7 +75,7 @@ def accel_fail(tid):
     return jsonify({"ok": True})
 
 
-PKG_DIRS = ("core", "web")
+PKG_DIRS = ("core", "web", "desktop")
 PKG_FILES = ("app.py", "worker.py", "requirements.txt", "check_env.py")
 # 电脑上用的启动脚本（NAS 上可能没有这几个文件，下载时用这里的内容补上）
 BAT_TEXT = {'4_start_worker.bat': '@echo off\ncd /d "%~dp0"\ntitle 3D Ops - PC accelerator - keep this window open\nchcp 65001 >nul\nset PYTHONIOENCODING=utf-8\nif exist ".venv\\Scripts\\python.exe" goto check\necho Not installed yet, running setup first...\ncall 1_setup.bat\nif not exist ".venv\\Scripts\\python.exe" exit /b 1\n:check\n".venv\\Scripts\\python.exe" -c "import numpy, requests, PIL" 2>nul || ".venv\\Scripts\\python.exe" -m pip install -q -r requirements.txt\n:loop\n".venv\\Scripts\\python.exe" worker.py\nif errorlevel 3 if not errorlevel 4 goto updated\nif errorlevel 2 if not errorlevel 3 goto nosetup\necho.\necho Accelerator stopped. Restarting in 10 seconds - close this window to quit.\ntimeout /t 10 /nobreak >nul\ngoto loop\n:updated\necho Updated from NAS, restarting...\ntimeout /t 2 /nobreak >nul\ngoto loop\n:nosetup\npause\nexit /b 2\n',
@@ -110,10 +115,29 @@ def accel_package():
 
 @app.get("/api/accel/package")
 def accel_package_full():
-    """系统页「下载电脑加速程序」：解压到电脑上，双击 4_start_worker.bat。"""
-    if not auth.is_owner() and auth.current_user():
-        return err("只有老板可以下载", 403)
-    return send_file(_package(True), mimetype="application/zip", as_attachment=True, download_name=f"3d-ops-worker-{VERSION}.zip")
+    """下载电脑加速程序：解压到电脑上，双击 4_start_worker.bat。
+    v2.28：?personal=1（员工下载时一定是）= 「我的加速器」：包里带好 NAS 地址和只属于这个账号的密钥，双击就能用，只做自己的活。
+    老板不带 personal 下载 = 共享加速电脑（自己在设置里生成密钥填进去，谁的活都做）。"""
+    import json as _json
+    u = auth.current_user()
+    if not u or u.get("id", -1) == -1:
+        return err("请先登录", 401)
+    personal = request.args.get("personal") == "1" or not auth.is_owner()
+    buf = _package(True)
+    if not personal:
+        return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=f"3d-ops-worker-{VERSION}.zip")
+    import secrets
+    from core import desktop
+    r = desktop.pair(u, secrets.token_hex(16), "浏览器+加速器")
+    out = io.BytesIO()
+    with zipfile.ZipFile(buf) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for it in zin.infolist():
+            z.writestr(it, zin.read(it.filename))
+        z.writestr("data/worker.json", _json.dumps({"server": request.host_url.rstrip("/"), "key": r["key"],
+                                                     "name_prefix": (u.get("display_name") or u.get("username") or "")[:14]}, ensure_ascii=False))
+    out.seek(0)
+    db.audit(_uname(), "下载我的加速器", VERSION)
+    return send_file(out, mimetype="application/zip", as_attachment=True, download_name=f"3d-ops-accelerator-{VERSION}.zip")
 
 
 @app.get("/api/accel/status")

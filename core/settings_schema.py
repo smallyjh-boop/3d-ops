@@ -97,7 +97,7 @@ MODULES = [
         ("运营分析系统写回（标题、属性、售价、上下架）", [
             ("ops_write_mode", "写回方式：auto = 自动生效（默认）；confirm = 只做建议，到「商品 → 运营改动」人工确认后才生效", ["auto", "confirm"])]),
     ]},
-    {"id": "addons", "zh": "组件与插件", "th": "ส่วนประกอบและปลั๊กอิน", "special": ["components", "accel"], "ext": True, "groups": [
+    {"id": "addons", "zh": "组件与插件", "th": "ส่วนประกอบและปลั๊กอิน", "special": ["desktop", "components", "accel"], "ext": True, "groups": [
         ("电脑加速（切片、读大模型、3D 预览、抠图交给一直开着的电脑做；电脑不在线时 NAS 自己做）", [
             ("accel_on", "开启电脑加速", "bool"), ("accel_local_slots", "NAS 自己做重活时同时最多几个（1 = 一个一个来，其余排队；内存大可以 2）"),
             ("accel_claim_wait", "电脑几秒内没接手（都在忙）就 NAS 自己做")]),

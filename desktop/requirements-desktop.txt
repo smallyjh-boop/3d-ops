@@ -1,0 +1,4 @@
+# 桌面客户端：系统本身的依赖 + 窗口（WebView2）+ 托盘
+-r ../requirements.txt
+pywebview>=5.0
+pystray>=0.19

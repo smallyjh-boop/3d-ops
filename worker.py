@@ -97,6 +97,11 @@ class Worker:
         self.server_version = ""
         self.done = self.failed = 0
         self.no_install = False
+        self.paused = False          # v2.28 桌面端：暂停加速
+        self.share = False           # v2.28 桌面端：也帮别人加速（默认只做自己的活）
+        self.desktop = False
+        self.auto_update = True
+        self.current = ""            # 正在做什么（桌面端托盘显示）
 
     # ---- 报到 ----
     def detect(self):
@@ -151,7 +156,7 @@ class Worker:
         body = {"name": self.name, "caps": self.caps, "cpu": os.cpu_count(), "gpu": self.gpu, "version": self.version,
                 "proto": accel.PROTO, "slots": self.slots, "inpaint": self.info.get("inpaint", ""), "orca": self.info.get("orca", ""),
                 "os": f"{platform.system()} {platform.release()}", "missing": self.info.get("missing") or {},
-                "installing": self.installing}
+                "installing": self.installing, "paused": self.paused, "share": self.share, "desktop": self.desktop}
         r = self.s.post(self.server + "/api/v1/accel/hello", json=body, timeout=15)
         if r.status_code in (401, 403):
             raise PermissionError(r.json().get("error") or "密钥不对")
@@ -217,6 +222,9 @@ class Worker:
         threading.Thread(target=self.heartbeat, daemon=True).start()
         threading.Thread(target=self.auto_install, daemon=True).start()
         while not self.stop.is_set():
+            if self.paused:
+                time.sleep(2)
+                continue
             self.free.acquire()
             try:
                 r = self.s.get(self.server + "/api/v1/accel/next", params={"name": self.name, "caps": ",".join(self.caps), "wait": 25},
@@ -254,6 +262,7 @@ class Worker:
                 files[n] = p
             mb = sum(os.path.getsize(p) for p in files.values()) / 1048576
             log(f"开始 {label}（{mb:.1f} MB）")
+            self.current = label
             out_dir = os.path.join(d, "out")
             os.makedirs(out_dir, exist_ok=True)
             res, outs = kernels.execute(kind, t.get("params") or {}, files, out_dir)
@@ -281,6 +290,7 @@ class Worker:
             except Exception:  # noqa: BLE001
                 pass
         finally:
+            self.current = ""
             shutil.rmtree(d, ignore_errors=True)
             self.free.release()
 
@@ -306,7 +316,8 @@ def main():
     elif a.server or a.key:
         save_conf(c)
     print(f"\n  3D 运营管理系统 · 电脑加速 v{my_version()}  →  {c['server']}\n  关掉这个窗口就停止（NAS 会自己做，只是慢一些）。\n")
-    w = Worker(c["server"], c["key"], c.get("name") or platform.node(), c.get("slots") or max(1, min(2, (os.cpu_count() or 2) // 4)))
+    name = c.get("name") or ((c["name_prefix"] + "@" + platform.node())[:40] if c.get("name_prefix") else platform.node())
+    w = Worker(c["server"], c["key"], name, c.get("slots") or max(1, min(2, (os.cpu_count() or 2) // 4)))
     w.auto_update = not a.no_update and not c.get("no_update")
     w.no_install = bool(c.get("no_install"))
     if c.get("orca_path"):

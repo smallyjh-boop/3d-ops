@@ -25,13 +25,21 @@ subprocess.run([sys.executable, os.path.join(HERE, "seed2131.py")], cwd=T, env=e
 srv = subprocess.Popen([sys.executable, os.path.join(HERE, "run_cs_server.py")], cwd=T, env=env,
                        stdout=open(os.path.join(T, "server.log"), "w"), stderr=subprocess.STDOUT)
 bad = 0
+SCRIPTS = [a for a in sys.argv[1:] if a.startswith("ui")] or ["ui214", "ui228"]
 try:
     time.sleep(6)
     for lang in ("zh", "th"):
-        r = subprocess.run([sys.executable, os.path.join(HERE, "ui214.py"), lang], cwd=T, env=env, capture_output=True, text=True, timeout=900)
-        out = r.stdout + r.stderr
-        miss = json.load(open(os.path.join(T, "miss214.json"), encoding="utf-8")) if lang == "th" and os.path.exists(os.path.join(T, "miss214.json")) else []
-        errs = "ERR []" not in out
+        out, miss, errs, rc = "", [], False, 0
+        for script in SCRIPTS:
+            r = subprocess.run([sys.executable, os.path.join(HERE, script + ".py"), lang], cwd=T, env=env, capture_output=True, text=True, timeout=900)
+            o = r.stdout + r.stderr
+            out += o
+            mf = os.path.join(T, "miss" + script[2:] + ".json")
+            if lang == "th" and os.path.exists(mf):
+                miss += [m for m in json.load(open(mf, encoding="utf-8")) if m not in miss]
+            errs = errs or "ERR []" not in o
+            rc = rc or r.returncode
+        r = type("R", (), {"returncode": rc})
         ok = r.returncode == 0 and not errs and not miss
         bad += not ok
         print(f"{'通过' if ok else '失败'}  界面测试 {lang}" + ("" if ok else f"：{'有 JS 报错 ' if errs else ''}{('漏翻 ' + str(len(miss)) + ' 处：' + '、'.join(miss[:10])) if miss else ''}"))

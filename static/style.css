@@ -650,3 +650,13 @@ td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 /* v2.26 在线更新 */
 .gh-notes{margin:2px 0 0 18px;padding:0}
 #upd-badge{text-decoration:none;cursor:pointer}
+
+/* v2.28 桌面客户端 / 拖文件上传 */
+#drop-overlay{position:fixed;inset:0;z-index:9999;background:rgba(15,111,222,.12);border:3px dashed #0f6fde;display:flex;align-items:center;justify-content:center;pointer-events:none}
+#drop-overlay div{background:#0f6fde;color:#fff;padding:14px 22px;border-radius:10px;font-size:18px}
+#drop-overlay.hidden{display:none}
+.is-desktop #desk-dl{display:none}
+#desk-dl{text-decoration:none;margin-left:6px}
+.desk-chip{margin-left:6px;cursor:pointer;border:1px solid rgba(255,255,255,.25);background:transparent;color:inherit}
+.desk-opts label{display:flex;gap:8px;align-items:center;margin:6px 0;text-align:left}
+.desk-opts input[type=checkbox]{width:auto;margin:0}
