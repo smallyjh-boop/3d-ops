@@ -1,3 +1,8 @@
 /* 订单模块的样式（v2.32 起模块自己的样式放这里） */
 .pk-img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #f3f4f6 }
 .pk-table td { vertical-align: middle }
+/* v2.33 面单模板预览 */
+.lt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px }
+.lt-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background: #fafafa }
+.lt-fr { height: 330px; overflow: hidden; margin-top: 6px; background: #ddd; border-radius: 4px }
+.lt-fr iframe { width: 420px; height: 600px; border: 0; transform: scale(.55); transform-origin: 0 0 }

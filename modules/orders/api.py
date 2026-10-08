@@ -499,10 +499,14 @@ def orders_print():
                 a = agg.setdefault(k, {"name": it.get("name") or "", "qty": 0, "orders": []})
                 a["qty"] += it.get("qty") or 1
                 a["orders"].append(f"{o['order_no']}×{it.get('qty') or 1}")
+        from core import modules as _mods
+        _inv = _mods.public("inv")            # v2.33：有成品库存的 SKU 显示在哪个货位，按货位顺序排（走一趟拣完）
+        where = {sku: (_inv.where_is(sku) if _inv else []) for (sku, _c) in agg}
         out.append(f"<h2>拣货 / 生产汇总单 ใบรวมสินค้า</h2><p>{len(orders)} 个订单 · 打印时间 {fmt(time.time())}</p>"
-                   "<table><tr><th></th><th>SKU</th><th>商品</th><th>颜色</th><th>数量</th><th>订单</th></tr>")
-        for (sku, color), a in sorted(agg.items()):
-            out.append(f"<tr><td><span class='box'></span></td><td><b>{h(sku)}</b></td><td>{h(a['name'])}</td><td>{h(color)}</td>"
+                   "<table><tr><th></th><th>货位</th><th>SKU</th><th>商品</th><th>颜色</th><th>数量</th><th>订单</th></tr>")
+        for (sku, color), a in sorted(agg.items(), key=lambda kv: ((where.get(kv[0][0]) or [("~", 0)])[0][0], kv[0])):
+            w = "、".join(f"{c_} ×{q_:g}" for c_, q_ in where.get(sku) or []) or "—"
+            out.append(f"<tr><td><span class='box'></span></td><td><b>{h(w)}</b></td><td><b>{h(sku)}</b></td><td>{h(a['name'])}</td><td>{h(color)}</td>"
                        f"<td><b>{a['qty']}</b></td><td style='font-size:11px'>{h(', '.join(a['orders']))}</td></tr>")
         out.append("</table>")
         notes = [o for o in orders if o.get("custom_note") or o.get("buyer_note")]
@@ -588,4 +592,19 @@ def labels_print():
                          download_name=f"labels_{dt.datetime.now().strftime('%m%d_%H%M')}.pdf")
     orders = [o for o in (orders_mod.get_order(i) for i in ids) if o]
     labels.mark_printed([o["id"] for o in orders], _uname(), "自制面单")
-    return app.response_class(labels.self_made_html(orders, load_config()), mimetype="text/html")
+    from modules.orders import carriers          # v2.33：按快递公司的版式（?tpl=flash&size=100x150 可以指定）
+    return app.response_class(carriers.html(orders, load_config(), request.args.get("tpl"), request.args.get("size")), mimetype="text/html")
+
+
+@bp.get("/print/label-preview")
+def label_preview():
+    """v2.33：面单模板预览（示例数据）。?carrier=flash&size=100x150"""
+    from modules.orders import carriers
+    return app.response_class(carriers.preview_html(load_config(), request.args.get("carrier"), request.args.get("size")), mimetype="text/html")
+
+
+@bp.get("/api/label-templates")
+def label_templates():
+    from modules.orders import carriers
+    return jsonify({"carriers": [{"id": k, "name": v["name"] or "通用", "th": v["th"], "color": v["color"]} for k, v in carriers.CARRIERS.items()],
+                    "sizes": [{"id": k, "zh": v} for k, v in carriers.SIZE_ZH.items()]})

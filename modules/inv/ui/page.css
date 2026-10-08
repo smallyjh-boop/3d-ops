@@ -1,0 +1,6 @@
+/* 库存模块样式（v2.33 货位） */
+.loc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px }
+.loc-cell { display: flex; flex-direction: column; align-items: center; padding: 8px 4px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #fff; cursor: pointer }
+.loc-cell.on { border: 1px solid #16a34a; background: #f0fdf4 }
+.loc-cell b { font-family: monospace; font-size: 13px }
+.warn-btn { border-color: #f59e0b; color: #b45309 }

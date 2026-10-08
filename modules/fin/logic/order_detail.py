@@ -13,7 +13,8 @@ from core.config import load_config
 from .common import period, r2, settings, ts
 
 SETTLE_ZH = {"settled": "已回款", "pending": "待回款", "overdue": "超时未回款"}
-FEE_SRC_ZH = {"settlement": "结算表", "detail": "费用明细", "import": "导入的平台费", "estimate": "按扣点估算"}
+FEE_SRC_ZH = {"settlement": "结算表", "detail": "费用明细", "import": "导入的平台费", "estimate": "按扣点估算", "none": "无平台费（手工单）"}
+PLAT_ZH = {"lazada": "Lazada", "shopee": "Shopee", "tiktok": "TikTok", "manual": "手工单", "other": "其他"}
 MONEY = ("order_total", "shipping_fee", "buyer_shipping", "platform_discount", "seller_discount", "commission", "service_fee",
          "payment_fee", "platform_fee", "settlement")
 
@@ -67,7 +68,7 @@ def rows(start=None, end=None, month=None, platform="", shop="", settle="", q=""
                "order_time": o["order_time"], "items": sum((i["qty"] or 0) for i in its),
                "skus": ", ".join(f"{i['sku']}×{i['qty']}" for i in its if i["sku"])[:200],
                **{k: (r2(o[k]) if o[k] is not None else None) for k in MONEY if k in o.keys()},
-               "revenue": r2(p["revenue"]), "fee": r2(p["fee"]), "fee_source": p.get("fee_source") or ("estimate" if p.get("fee_estimated") else ""),
+               "revenue": r2(p["revenue"]), "fee": r2(p["fee"]), "fee_source": "none" if o["platform"] == "manual" and not p["fee"] else (p.get("fee_source") or ("estimate" if p.get("fee_estimated") else "")),
                "net": r2(net), "net_estimated": o["settlement"] is None,
                "material": r2(p["material"]), "machine": r2(p["machine"]), "packaging": r2(p["packaging"]), "failure": r2(p["failure"]),
                "cost": r2(p["cost"]), "profit": r2(p["profit"]),
@@ -108,6 +109,11 @@ def export_xlsx(**kw):
                 v = dt.datetime.fromtimestamp(v).strftime("%Y-%m-%d %H:%M")
             elif k == "fee_source":
                 v = FEE_SRC_ZH.get(v, v)
+            elif k == "platform":
+                v = PLAT_ZH.get(v, v)
+            elif k == "status":
+                from core.orders import STATUS_ZH
+                v = STATUS_ZH.get(v, v)
             elif k == "settle":
                 v = SETTLE_ZH.get(v, v)
             line.append(v)

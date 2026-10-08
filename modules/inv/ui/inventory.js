@@ -20,6 +20,7 @@
   let SUPS = [];
   async function load() {
     META = await api("/api/inv/meta");
+    if (window.INVLOC) INVLOC.loadLocs().catch(() => {});      // v2.33：物品资料里选默认货位用
     try { SUPS = (await api("/api/inv/suppliers")).suppliers; } catch { SUPS = []; }
     render();
   }
@@ -33,6 +34,7 @@
     $("#inv-alerts").innerHTML = al.length ? `<div class="warnbox small"><b>低于补货线</b>：` +
       al.map((a) => `<span class="chip" data-notr>${esc(TH() && a.name_th ? a.name_th : a.name_zh)} ${num(a.qty, 1)}/${num(a.reorder_point, 1)} ${esc(uLab(a.unit))}</span>`).join(" ") + "</div>" : "";
     if (VIEW === "items" || VIEW === "catalog") return renderItems();
+    if (VIEW === "locations") return window.INVLOC && INVLOC.render($("#inv-body")).catch((e) => toast(e.message, true));
     if (VIEW === "docs") return renderDocs();
     if (VIEW === "moves") return renderMoves();
     if (VIEW === "expense") return renderExpense();
@@ -103,8 +105,10 @@
         ${f("brand", "品牌")}${f("spec", "规格")}${f("reorder_point", "补货线（低于就提醒）", 'type="number" step="any"')}
         ${f("reorder_qty", "每次补多少（空 = 自动）", 'type="number" step="any"')}
         <label>默认供应商<select data-k="supplier_id" data-notr ${edit ? "" : "disabled"}><option value="">—</option>${(SUPS || []).map((x) => `<option value="${x.id}" ${x.id === it.supplier_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
-        ${f("location", "存放位置")}${f("link", "购买链接")}${f("note", "备注")}
+        ${f("location", "默认货位（入库自动放这里）", 'list="loc-dl"')}<datalist id="loc-dl">${((window.INVLOC && INVLOC.list()) || []).map((l) => `<option value="${esc(l.code)}">`).join("")}</datalist>${f("link", "购买链接")}${f("note", "备注")}
       </div>
+      ${id && r.loc && (r.loc.locations.length || r.loc.unplaced) ? `<p class="small">📍 货位：${r.loc.locations.map((x) => `<a href="#" data-locgo="${x.loc_id}" class="mono" data-notr>${esc(x.code)}</a> ×${num(x.qty, 2)}`).join("、") || "—"}
+        ${r.loc.unplaced > 1e-9 ? ` · <span class="warn">未上架 ${num(r.loc.unplaced, 2)}</span>${r.loc.suggest ? `（推荐放 <b class="mono" data-notr>${esc(r.loc.suggest.code)}</b>）` : ""}` : ""}</p>` : ""}
       ${id ? `<p class="small">库存 ${qtyText(it)} · 平均单价 ฿${num(it.avg_cost, fil ? 3 : 2)} · 金额 ฿${num(it.value, 0)}
         ${edit ? `<label class="small"><input type="checkbox" data-k="active" ${it.active ? "checked" : ""}> 启用</label>` : ""}</p>` : ""}
       <div class="row gap">${edit ? '<button class="primary" id="inv-it-save">保存</button>' : ""}<button data-mclose>关闭</button></div>
@@ -259,6 +263,10 @@
   }
 
   // ---------------- 事件 ----------------
+  document.addEventListener("click", (e) => {     // 物品弹窗里点货位编号 → 打开货位（v2.33）
+    const lg = e.target.closest && e.target.closest("#modal-in [data-locgo]");
+    if (lg) { e.preventDefault(); if (window.INVLOC) INVLOC.detail(+lg.dataset.locgo).catch((er) => toast(er.message, true)); }
+  });
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#tab-inventory")) return;
     const gv = e.target.closest("[data-goiv]"); if (gv) { e.preventDefault(); VIEW = gv.dataset.goiv; SUB = "zero"; return render(); }

@@ -37,6 +37,8 @@ xl = C.get("/api/fin/orders/export?start=2000-01-01")
 import openpyxl
 wb = openpyxl.load_workbook(io.BytesIO(xl.data)); ws = wb.active
 ok(ws["A1"].value == "订单号" and ws.max_row == len(r["rows"]) + 2, f"excel rows {ws.max_row}")
+vals = [c.value for c in ws[2]]
+ok(not any(v in ("manual", "to_ship") for v in vals) and ("手工单" in vals or "Lazada" in vals or "Shopee" in vals), f"excel uses Chinese labels {vals[:6]}")
 ms = {m["id"]: m for m in C.get("/api/modules?all=1").get_json()["modules"]}
 ok(any(mn["tab"] == "fin_orders" for mn in ms["fin"]["menus"]), "menu 订单明细")
 C.post("/api/modules/fin", json={"on": False}); ok(C.get("/api/fin/orders").status_code == 404, "404 when fin off"); C.post("/api/modules/fin", json={"on": True})

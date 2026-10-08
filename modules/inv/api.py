@@ -10,7 +10,7 @@ bp = Blueprint("m_inv", __name__)
 def _views():
     from modules.inv import views
     return views
-PREFIXES = ['/api/inv/', '/api/v1/finance/events', '/api/v1/finance/inventory']
+PREFIXES = ['/api/inv/', '/api/v1/finance/events', '/api/v1/finance/inventory', '/print/inv-locations']
 PATTERNS = []
 
 
@@ -48,7 +48,9 @@ def inv_item(iid):
     it = inv.get_item(iid)
     if not it:
         return err("没有这个物品", 404)
-    return jsonify({"ok": True, "item": it, "moves": inv.moves(item_id=it["id"], limit=100)})
+    from modules.inv import locations
+    return jsonify({"ok": True, "item": it, "moves": inv.moves(item_id=it["id"], limit=100),
+                    "loc": {**locations.item_locations(it["id"]), "suggest": locations.suggest(it)}})   # v2.33 货位
 
 
 @bp.post("/api/inv/items")
@@ -188,3 +190,93 @@ def inv_finance_ui():
     if _need("inv.pay"):
         return _need("inv.pay")
     return jsonify({"ok": True, "events": list(reversed(inv.finance_events(0, 5000)))[:200], "month": inv.finance_month(request.args.get("month") or None)})
+
+
+# ---------------- 货位（v2.33）----------------
+from modules.inv import locations as _loc  # noqa: E402
+_loc.init()
+
+
+def _ok(fn):
+    try:
+        return jsonify({"ok": True, **fn()})
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.get("/api/inv/locations")
+def inv_locations():
+    a = request.args
+    return jsonify({"ok": True, "locations": _loc.locations(a.get("all") != "1"), "unplaced": len(_loc.unplaced()),
+                    "zones": _loc.zones_setting()})
+
+
+@bp.post("/api/inv/locations")
+def inv_location_save():
+    if _need("inv.in"):
+        return _need("inv.in")
+    return _ok(lambda: {"location": _loc.save_loc(request.get_json(force=True) or {}, _uname())})
+
+
+@bp.post("/api/inv/locations/bulk")
+def inv_location_bulk():
+    if _need("inv.in"):
+        return _need("inv.in")
+    b = request.get_json(force=True) or {}
+    return _ok(lambda: {"made": _loc.bulk_create(b.get("zone"), b.get("shelves"), b.get("cells"), _uname())})
+
+
+@bp.delete("/api/inv/locations/<int:lid>")
+def inv_location_delete(lid):
+    if _need("inv.adjust"):
+        return _need("inv.adjust")
+    return _ok(lambda: (_loc.delete_loc(lid, _uname()) or {}))
+
+
+@bp.get("/api/inv/locations/find")
+def inv_location_find():
+    """扫货位条码 / 输入编号打开货位。"""
+    loc = _loc.get_loc((request.args.get("code") or "").strip())
+    if not loc:
+        return err("没有这个货位", 404)
+    return jsonify({"ok": True, **_loc.loc_detail(loc["id"])})
+
+
+@bp.get("/api/inv/locations/unplaced")
+def inv_unplaced():
+    return jsonify({"ok": True, "items": _loc.unplaced()})
+
+
+@bp.post("/api/inv/locations/putaway")
+def inv_putaway():
+    if _need("inv.in"):
+        return _need("inv.in")
+    return _ok(lambda: {"done": _loc.putaway_all(_uname())})
+
+
+@bp.post("/api/inv/locations/move")
+def inv_loc_move():
+    if _need("inv.in"):
+        return _need("inv.in")
+    b = request.get_json(force=True) or {}
+    return _ok(lambda: _loc.move(b.get("item_id"), b.get("from_loc"), b.get("to_loc"), b.get("qty"), _uname()))
+
+
+@bp.get("/api/inv/locations/<int:lid>")
+def inv_location_detail(lid):
+    return _ok(lambda: _loc.loc_detail(lid))
+
+
+@bp.post("/api/inv/locations/<int:lid>/check")
+def inv_location_check(lid):
+    if _need("inv.in"):
+        return _need("inv.in")
+    return _ok(lambda: _loc.check(lid, (request.get_json(force=True) or {}).get("counts") or {}, _uname()))
+
+
+@bp.get("/print/inv-locations")
+def inv_location_labels():
+    ids = [x for x in (request.args.get("ids") or "").split(",") if x.strip()]
+    locs = [l for l in (_loc.get_loc(i) for i in ids) if l] if ids else _loc.locations()
+    return app.response_class(_loc.labels_html(locs), mimetype="text/html")
+
