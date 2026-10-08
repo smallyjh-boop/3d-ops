@@ -1,0 +1,16 @@
+# 升级时删掉的旧文件（v2.30 起这些功能搬进了 modules/ 下面的模块）。在线升级读这个文件，只删程序文件，不碰 data。
+core/cs
+core/fin
+core/seo.py
+core/curator.py
+core/opsapi.py
+web/fin.py
+web/desktop.py
+static/cs.js
+static/csrec.js
+static/csalert.js
+static/finance.js
+static/purchase.js
+static/seo.js
+static/opschg.js
+static/desktop.js

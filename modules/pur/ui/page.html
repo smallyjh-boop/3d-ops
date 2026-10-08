@@ -1,0 +1,12 @@
+<!-- 采购模块的页面（v2.30 从 index.html 搬过来）：采购单 / 补货建议 / 供应商 / 付款记录 共用这一页 -->
+<section id="tab-purchase" class="panel hidden">
+  <div class="row between wrap gap"><h2>采购</h2>
+    <div class="row gap wrap"><button class="primary" id="po-new" data-perm="inv.in">＋ 新采购单</button>
+      <button id="sup-new" data-perm="inv.in">＋ 供应商</button><button id="po-reload">刷新</button></div></div>
+  <p class="muted small">采购单：草稿 → 下单（在途）→ 到货入库（可以分几次到）。到货时运费按金额分摊进单价，库存和流水自动记；
+    付款记在采购单上，同时给财务模块记一笔。补货建议按「库存 + 在途 ≤ 补货线」和耗材用量算，可以一键生成采购单。</p>
+  <div class="chips" id="po-views" style="margin:8px 0">
+    <span class="chip on" data-pv="open">进行中</span><span class="chip" data-pv="all">全部采购单</span></div>
+  <div id="po-sum" class="card summary small"></div>
+  <div id="po-body"></div>
+</section>

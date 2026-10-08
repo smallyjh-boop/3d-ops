@@ -9,7 +9,7 @@
 """
 import re
 
-from . import ai_copy, seo
+from . import ai_copy, copyfacts as seo
 
 GROUPS = [
     ("need", "买家想要什么"), ("core", "核心词"), ("synonym", "同义词/口语"), ("english", "英文词"), ("attribute", "属性词"),

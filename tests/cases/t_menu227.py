@@ -15,7 +15,7 @@ sc = C.get("/api/settings/schema").get_json()["modules"]
 ids = [m["id"] for m in sc]
 ok(ids == ["general", "modules", "accounts", "cost", "goods", "orders", "cs", "production", "inventory", "finance", "ai", "addons"], f"modules {ids}")
 by = {m["id"]: m for m in sc}
-ok(by["addons"]["special"] == ["desktop", "components", "accel"] and any(f["key"] == "accel_on" for g in by["addons"]["groups"] for f in g["fields"]), "addons has accel + components")
+ok(by["addons"]["special"] == ["components", "accel"] and any(f["key"] == "accel_on" for g in by["addons"]["groups"] for f in g["fields"]), "addons has accel + components")
 ok("remote" in by["general"]["special"] and not any(f["key"] == "remote_url" for g in by["general"]["groups"] for f in g["fields"]), "remote card instead of field")
 ok(all(by[x]["ext"] for x in ("accounts", "goods", "cs", "production", "ai", "addons")), "ext modules flagged")
 # 一张卡片单独保存：只改这几个，其它不动
@@ -29,6 +29,8 @@ from core import integrations
 ok(info["latest"] == integrations.EXT_LATEST and isinstance(info["in_use"], list), f"extension info {info}")
 html = C.get("/").get_data(as_text=True)
 ok('data-tab="users"' not in html and 'data-tab="csext"' not in html, "old menu tabs removed")
-ok(all(f'data-cfgext="{x}"' in html for x in ("accounts", "goods", "cs", "production", "ai", "addons")), "moved blocks in settings")
-ok('id="users-table"' in html and 'id="intg-keys"' in html and 'id="cur-url"' in html and 'id="tpl-list"' in html and 'id="cskb-settings"' in html, "moved elements present")
+ok(all(f'data-cfgext="{x}"' in html for x in ("accounts", "goods", "production", "ai", "addons")), "moved blocks in settings")
+ok('id="users-table"' in html and 'id="intg-keys"' in html and 'id="tpl-list"' in html, "moved elements present")
+# v2.30：客服设置、选品工具对接在模块的页面文件里
+ok('id="cskb-settings"' in C.get("/m/cs/page.js").get_data(as_text=True) and 'id="cur-url"' in C.get("/m/link/settings.html").get_data(as_text=True), "module settings cards")
 print("ERRORS", E_)

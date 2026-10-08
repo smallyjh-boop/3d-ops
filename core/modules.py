@@ -42,6 +42,7 @@ _handlers = {}        # 事件名 → [(模块 id, 函数)]
 _event_log = []       # 最近的事件处理记录（系统检查里看）
 _loaded = False
 _prefixes = {}        # 接口前缀 → 模块 id（关掉的模块：接口返回 404）
+_patterns = []        # v2.30：(正则, 模块 id)——地址中间有编号的接口，例如 /api/products/<id>/seo
 
 ID_RE = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
 
@@ -179,6 +180,12 @@ def load_all(app):
                 for k in meta.get("secrets") or []:
                     if k not in auth.SECRET_KEYS:
                         auth.SECRET_KEYS = tuple(auth.SECRET_KEYS) + (k,)
+                for pth in meta.get("public_paths") or []:          # 不用登录的地址（例如一次性下载码）
+                    if pth not in auth.PUBLIC:
+                        auth.PUBLIC = tuple(auth.PUBLIC) + (pth,)
+                        _prefixes.setdefault(pth, mid)
+                for rule in meta.get("perm_rules") or []:           # 需要特别权限的接口 (方法, 正则, 权限键)
+                    auth.PERM_RULES.append(tuple(rule))
                 for rule in meta.get("owner_only") or []:
                     auth.OWNER_ONLY.append(tuple(rule))
                 for rule in meta.get("production_allow") or []:
@@ -195,6 +202,8 @@ def load_all(app):
                         rec["bp"] = bp
                         for p in getattr(api, "PREFIXES", []) or []:
                             _prefixes[p] = mid
+                        for p in getattr(api, "PATTERNS", []) or []:
+                            _patterns.append((re.compile(p), mid))
                 _prefixes.setdefault(f"/api/m/{mid}/", mid)
             except Exception as e:  # noqa: BLE001
                 rec["error"] = f"装载出错：{e}"
@@ -243,6 +252,9 @@ def module_of_path(path):
     for p, mid in _prefixes.items():
         if path.startswith(p):
             return mid
+    for rx, mid in _patterns:
+        if rx.match(path):
+            return mid
     return None
 
 
@@ -283,9 +295,19 @@ def recent_events(n=50, errors_only=False):
 
 
 # ---------------- 给前台 ----------------
+UI_NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}\.(html|js|css)$")
+
+
 def _ui_files(rec):
+    """页面文件：html（多个页面写在一个 page.html 里，每页一个 <section id="tab-…">）、page_js（打开页面时加载）、
+    boot_js（程序一打开就加载：例如右上角提醒、产品编辑里的小部件）、css。说明书里可以写 "ui": {...} 改默认值。"""
     ui = os.path.join(rec["dir"], "ui")
-    return {k: os.path.isfile(os.path.join(ui, "page." + k)) for k in ("html", "js", "css")}
+    has = lambda n: os.path.isfile(os.path.join(ui, n))  # noqa: E731
+    conf = dict(rec["meta"].get("ui") or {})
+    return {"html": conf.get("html", "page.html") if has(conf.get("html", "page.html")) else "",
+            "page_js": [n for n in conf.get("page_js", ["page.js"]) if has(n)],
+            "boot_js": [n for n in conf.get("boot_js", ["boot.js"]) if has(n)],
+            "css": [n for n in conf.get("css", ["page.css"]) if has(n)]}
 
 
 def listing(user=None, all_=False):
@@ -303,12 +325,13 @@ def listing(user=None, all_=False):
             if user and user.get("role") not in roles and user.get("role") != "owner":
                 continue
             menus.append({"tab": m["tab"], "mod": m.get("mod") or "sys", "zh": m.get("zh") or m["tab"], "th": m.get("th") or m.get("zh") or m["tab"],
-                          "roles": ",".join(roles), "after": m.get("after") or ""})
+                          "roles": ",".join(roles), "after": m.get("after") or "", "before": m.get("before") or "", "panel": m.get("panel") or m["tab"],
+                          "ghost": bool(m.get("ghost"))})
         out.append({"id": mid, "name_zh": meta.get("name_zh") or mid, "name_th": meta.get("name_th") or meta.get("name_zh") or mid,
                     "desc_zh": meta.get("desc_zh") or "", "desc_th": meta.get("desc_th") or "", "version": meta.get("version"),
                     "depends": meta.get("depends") or [], "core": bool(meta.get("core")), "enabled": on_, "error": rec["error"],
                     "menus": menus, "ui": _ui_files(rec), "dependents": dependents(mid),
-                    "settings_module": meta.get("settings_module") or "addons", "settings_card": bool(meta.get("settings_card"))})
+                    "settings_cards": list(meta.get("settings_cards") or ([meta.get("settings_module") or "addons"] if meta.get("settings_card") else []))})
     return out
 
 
@@ -329,7 +352,7 @@ def i18n_th():
 
 def ui_path(mid, name):
     rec = _mods.get(mid)
-    if not rec or name not in ("page.html", "page.js", "page.css"):
+    if not rec or not UI_NAME.match(name or ""):
         return None
     p = os.path.join(rec["dir"], "ui", name)
     return p if os.path.isfile(p) else None
@@ -337,3 +360,12 @@ def ui_path(mid, name):
 
 def get(mid):
     return _mods.get(mid)
+
+
+def public(mid):
+    """别的模块 / 内核调用这个模块的对外函数：模块开着就返回说明书里的 public（一个 python 模块），关着返回 None。
+    用法：d = modules.public("desk"); user = d.user_of_key(name) if d else """""
+    rec = _mods.get(mid)
+    if not rec or not enabled(mid):
+        return None
+    return rec["meta"].get("public")

@@ -152,69 +152,6 @@ def v1_skus():
     return jsonify({"ok": True, "skus": out, "count": len(out)})
 
 
-@app.get("/api/curator")
-def curator_status():
-    return jsonify(curator.status())
-
-
-@app.post("/api/curator")
-def curator_save():
-    b = request.get_json(force=True) or {}
-    return jsonify(curator.save(b.get("base_url"), b.get("api_key")))
-
-
-@app.post("/api/curator/test")
-def curator_test():
-    b = request.get_json(force=True) or {}
-    return jsonify(curator.test(b.get("base_url"), b.get("api_key")))
-
-
-@app.get("/api/v1/categories")
-def v1_categories():
-    """ERP 里能用的类目（已上传 Lazada 模板的类目）。name 就是推送时 category 要填的值。"""
-    from core import extras as _ex
-    return jsonify({"ok": True, "categories": curator.categories(),
-                    "groups": [{"id": g["id"], "name": g["name"]} for g in _ex.groups()]})
-
-
-@app.post("/api/v1/catalog/products")
-def v1_catalog_create():
-    b = request.get_json(force=True, silent=True)
-    if b is None:
-        return jsonify({"ok": False, "error": "请求体必须是 JSON", "code": "invalid_field"}), 400
-    try:
-        r = curator.create(b, auth.current_user()["username"])
-    except curator.CatalogError as e:
-        return jsonify({"ok": False, "error": str(e), "code": e.code}), e.http
-    return jsonify({"ok": True, **r}), (201 if r["created"] else 200)
-
-
-@app.post("/api/v1/catalog/products/<code>/files")
-def v1_catalog_add_files(code):
-    """选品工具补传模型文件（已建档的产品）。"""
-    b = request.get_json(force=True, silent=True)
-    if b is None:
-        return jsonify({"ok": False, "error": "请求体必须是 JSON", "code": "invalid_field"}), 400
-    try:
-        r = curator.add_files(code, b, auth.current_user()["username"])
-    except curator.CatalogError as e:
-        return jsonify({"ok": False, "error": str(e), "code": e.code}), e.http
-    return jsonify({"ok": True, **r})
-
-
-@app.put("/api/v1/catalog/products/<code>/variants")
-def v1_catalog_sync_variants(code):
-    """选品工具同步规格（对接规范 4.3.5，v2.16）：传完整列表，按 spec_id 对比；已导出的产品删掉的规格只标记待确认。"""
-    b = request.get_json(force=True, silent=True)
-    if b is None:
-        return jsonify({"ok": False, "error": "请求体必须是 JSON", "code": "invalid_field"}), 400
-    try:
-        r = curator.sync_variants(code, b, auth.current_user()["username"])
-    except curator.CatalogError as e:
-        return jsonify({"ok": False, "error": str(e), "code": e.code}), e.http
-    return jsonify({"ok": True, **r})
-
-
 @app.get("/api/v1/cost-params")
 def v1_cost_params():
     """成本参数（只读，不含任何密钥）：两个系统算成本、利润用同一套数。"""
@@ -243,62 +180,6 @@ def v1_profit():
     return jsonify({"ok": True, **finance.report(days)})
 
 
-@app.post("/api/v1/ops/products/<target>")
-def v1_ops_product(target):
-    from core import opsapi
-    b = request.get_json(force=True, silent=True) or {}
-    try:
-        ch = opsapi.submit(target, b.get("changes"), b.get("reason") or "", b.get("source_action_id") or "", _uname())
-    except opsapi.OpsError as e:
-        return _ops_err(e)
-    return jsonify({"ok": True, "change_id": ch["id"], "applied": ch["applied"], "status": ch["status"],
-                    "product_id": ch["product_id"], "sku": ch["sku"], "before": ch["before"], "after": ch["after"]})
-
-
-@app.post("/api/v1/ops/changes/<int:cid>/revert")
-def v1_ops_revert(cid):
-    from core import opsapi
-    try:
-        ch = opsapi.revert(cid, _uname())
-    except opsapi.OpsError as e:
-        return _ops_err(e)
-    return jsonify({"ok": True, "change": ch})
-
-
-@app.get("/api/v1/ops/changes")
-def v1_ops_changes():
-    from core import opsapi
-    a = request.args
-    return jsonify({"ok": True, "mode": opsapi.mode(),
-                    "changes": opsapi.list_changes(a.get("since") or 0, a.get("status") or "", a.get("limit") or 200)})
-
-
-# ERP 页面里查看 / 通过 / 拒绝 / 撤回
-@app.get("/api/ops/changes")
-def ops_changes_ui():
-    from core import opsapi
-    a = request.args
-    return jsonify({"changes": opsapi.list_changes(0, a.get("status") or "", a.get("limit") or 300, a.get("q") or ""),
-                    "counts": opsapi.counts(), "mode": opsapi.mode(), "status_zh": opsapi.STATUS_ZH})
-
-
-@app.post("/api/ops/changes/<int:cid>/<act>")
-def ops_change_act(cid, act):
-    from core import opsapi
-    try:
-        if act == "approve":
-            ch = opsapi.approve(cid, _uname())
-        elif act == "reject":
-            ch = opsapi.reject(cid, _uname(), (request.get_json(force=True, silent=True) or {}).get("note") or "")
-        elif act == "revert":
-            ch = opsapi.revert(cid, _uname())
-        else:
-            return err("动作不对")
-    except opsapi.OpsError as e:
-        return err(str(e))
-    return jsonify({"change": ch})
-
-
 @app.get("/api/v1/production")
 def v1_production():
     b = production.board()
@@ -312,17 +193,6 @@ def v1_production():
 def v1_materials():
     pl = materials.plan()
     return jsonify({"ok": True, **pl, "alerts": materials.alerts(pl["rows"])})
-
-
-@app.route("/api/v1/webhook/<platform>", methods=["GET", "POST"])
-def v1_webhook(platform):
-    """平台主动推送。GET 用于平台校验地址是否可用。"""
-    if request.method == "GET":
-        return jsonify({"ok": True})
-    if platform not in connectors.REGISTRY:
-        return _v1_err("不支持的平台", 404)
-    res = integrations.webhook(platform, request.headers, request.get_data()[:1_000_000], request.url)
-    return jsonify({"ok": True, "result": res})
 
 
 # ---- 老板在界面上管理：API 密钥、店铺对接、同步记录 ----
@@ -351,47 +221,3 @@ def apikey_update(kid):
 def apikey_delete(kid):
     integrations.delete_key(kid)
     return jsonify({"keys": integrations.list_keys()})
-
-
-@app.post("/api/shops")
-def shop_save():
-    try:
-        sid = integrations.save_shop(request.get_json(force=True) or {})
-    except ValueError as e:
-        return err(str(e))
-    return jsonify({"id": sid, "shops": integrations.list_shops()})
-
-
-@app.delete("/api/shops/<int:sid>")
-def shop_delete(sid):
-    integrations.delete_shop(sid)
-    return jsonify({"shops": integrations.list_shops()})
-
-
-@app.post("/api/shops/<int:sid>/sync")
-def shop_sync(sid):
-    b = request.get_json(force=True, silent=True) or {}
-    try:
-        st = integrations.sync_shop(sid, full=bool(b.get("full")))
-    except Exception as e:  # 连接器错误原样告诉老板
-        return err(f"同步失败：{e}")
-    return jsonify(st)
-
-
-@app.post("/api/shops/<int:sid>/auth-url")
-def shop_auth_url(sid):
-    b = request.get_json(force=True) or {}
-    try:
-        return jsonify({"url": integrations.authorize_url(sid, b.get("redirect") or request.host_url)})
-    except Exception as e:  # 缺 App Key 等
-        return err(str(e))
-
-
-@app.post("/api/shops/<int:sid>/auth-code")
-def shop_auth_code(sid):
-    b = request.get_json(force=True) or {}
-    try:
-        integrations.exchange_code(sid, b.get("code") or "")
-    except Exception as e:  # 授权失败
-        return err(f"授权失败：{e}")
-    return jsonify({"ok": True, "shops": integrations.list_shops()})

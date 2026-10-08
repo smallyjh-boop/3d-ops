@@ -62,7 +62,7 @@ MODULES = [
             ("as_due_hours", "售后默认处理期限（小时）"), ("as_return_days", "等买家寄回 / 拒收退回 默认几天")]),
         ("发货（自制面单的寄件人）", [("sender_name", "寄件人 / 店名"), ("sender_phone", "寄件人电话"), ("sender_address", "寄件地址")]),
     ]},
-    {"id": "cs", "zh": "客服", "th": "แชทลูกค้า", "ext": True, "groups": []},
+    {"id": "cs", "zh": "客服", "th": "แชทลูกค้า", "ext": True, "module": "cs", "groups": []},
     {"id": "production", "zh": "生产", "th": "การผลิต", "special": ["printers"], "ext": True, "groups": [
         ("切片与估算", [
             ("orca_path", "OrcaSlicer 程序路径（留空自动查找）"), ("est_infill", "估算：填充率（0.15=15%）"),
@@ -81,7 +81,7 @@ MODULES = [
             ("filament_cover_days", "每次补货够用天数"), ("filament_spool_kg", "每卷公斤数")]),
         ("发货自动扣包材", [("inv_pack_auto", "订单变成「已发货」时自动扣包材", "bool")]),
     ]},
-    {"id": "finance", "zh": "财务", "th": "การเงิน", "groups": [
+    {"id": "finance", "zh": "财务", "th": "การเงิน", "module": "fin", "groups": [
         ("税（VAT）", [
             ("fin_vat_on", "已注册 VAT（开了以后报表按含税价拆出销项税、记进项税；还没注册就关着）", "bool"),
             ("fin_vat_rate", "VAT 税率（0.07 = 7%）"), ("fin_prices_incl_vat", "商品售价含 VAT", "bool")]),
@@ -95,10 +95,8 @@ MODULES = [
         ("AI", [
             ("ai_provider", "接口类型", ["anthropic", "openai_compatible"]), ("ai_model", "模型名称"),
             ("ai_api_key", "接口密钥", "password"), ("ai_base_url", "接口地址（openai_compatible 用）")]),
-        ("运营分析系统写回（标题、属性、售价、上下架）", [
-            ("ops_write_mode", "写回方式：auto = 自动生效（默认）；confirm = 只做建议，到「商品 → 运营改动」人工确认后才生效", ["auto", "confirm"])]),
     ]},
-    {"id": "addons", "zh": "组件与插件", "th": "ส่วนประกอบและปลั๊กอิน", "special": ["desktop", "components", "accel"], "ext": True, "groups": [
+    {"id": "addons", "zh": "组件与插件", "th": "ส่วนประกอบและปลั๊กอิน", "special": ["components", "accel"], "ext": True, "groups": [
         ("电脑加速（切片、读大模型、3D 预览、抠图交给一直开着的电脑做；电脑不在线时 NAS 自己做）", [
             ("accel_on", "开启电脑加速", "bool"), ("accel_local_slots", "NAS 自己做重活时同时最多几个（1 = 一个一个来，其余排队；内存大可以 2）"),
             ("accel_claim_wait", "电脑几秒内没接手（都在忙）就 NAS 自己做")]),
@@ -122,6 +120,8 @@ def schema():
     from . import modules
     out = []
     for m in MODULES:
+        if m.get("module") and not modules.enabled(m["module"]):
+            continue                     # 这个大分类属于一个关掉的模块
         groups = [g for g in m["groups"] if len(g) < 3 or modules.enabled(g[2])]
         out.append({"id": m["id"], "zh": m["zh"], "th": m["th"], "special": m.get("special", []), "summary": bool(m.get("summary")),
                     "ext": bool(m.get("ext")),

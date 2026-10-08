@@ -551,10 +551,16 @@ from core import extras  # noqa: E402
 extras.init()
 from core import listing  # noqa: E402  上架进度 / 批次
 listing.init()
-from core import opsapi  # noqa: E402  运营写回
-opsapi.init()
-from core import cs  # noqa: E402  AI 客服（独立模块，只通过 core/cs/erp_link.py 读写 ERP）
-cs.install(app)
+
+
+@app.after_request
+def _ext_cors(resp):   # 浏览器扩展跨域访问 /api/v1/…（v2.30 从客服模块搬到内核：运营写回也用）
+    o = request.headers.get("Origin", "")
+    if request.path.startswith("/api/v1/") and o.startswith(("chrome-extension://", "moz-extension://")):
+        resp.headers["Access-Control-Allow-Origin"] = o
+        resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-API-Key"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
 
 
 def _strip_as(d):
@@ -586,20 +592,10 @@ def _v1_read_only():
     return (getattr(g, "user", None) or {}).get("scope") == "read"
 
 
-# ---- 3D选品工具（规范 v1.5 第 4.2 条） ----
-from core import curator  # noqa: E402
-curator.init()
 from core import specs, stockcalc  # noqa: E402,F401
 stockcalc.init()
 from core import inventory  # noqa: E402
 inventory.init()
-from core import fin  # noqa: E402  电商财务（v2.21）
-fin.init()
-
-
-# ---------------- 运营写回（对接规范 v1.1 第 6 条，B 类；scope = ops 的密钥） ----------------
-def _ops_err(e):
-    return jsonify({"ok": False, "error": str(e), "code": getattr(e, "code", "invalid")}), getattr(e, "http", 400)
 
 
 # ---------------- 登录 / 账号 ----------------

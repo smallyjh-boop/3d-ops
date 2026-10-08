@@ -6,7 +6,8 @@ D=T+"/v2141"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T+"/v13", D)
 import sqlite3; c0=sqlite3.connect(D+"/app.db"); c0.execute("delete from users"); c0.commit(); c0.close()
 os.environ["LH_DATA_DIR"]=D; sys.path.insert(0,APP)
 import app as A
-from core import store, diag, opsapi
+from core import store, diag
+from modules.link import opsapi
 @A.app.get("/api/_boom_test")
 def _boom(): raise RuntimeError("测试用的异常")
 c=A.app.test_client(); E=0

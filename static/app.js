@@ -1,5 +1,5 @@
 "use strict";
-const APP_JS_VERSION = "2.29.0";   // 必须和 app.py 的 VERSION 一致
+const APP_JS_VERSION = "2.30.0";   // 必须和 app.py 的 VERSION 一致
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -197,7 +197,7 @@ window.addEventListener("beforeunload", (e) => { if (unsavedEdits()) { e.prevent
 
 // ---------------- 菜单：模块 → 页面 ----------------
 let CUR_TAB = null;
-const PANEL_OF = { po_suggest: "purchase", po_suppliers: "purchase", po_pay: "purchase" };
+const PANEL_OF = {};   // 几个菜单共用一个页面：{菜单: 页面}（v2.30 起模块在说明书里写 menus[].panel）
 const LAST_TAB = {};
 function visibleTabs(mod) {
   return $$(`#subnav .tab[data-mod="${mod}"]`).filter((b) => !b.classList.contains("role-hidden") && !b.classList.contains("ghost"));
@@ -225,9 +225,6 @@ function showTab(name) {
   if (name === "logs") loadAudit();
   if (window.OPS) window.OPS.show(name);
   if (window.INV) window.INV.show(name);
-  if (window.PURCHASE) window.PURCHASE.show(name);
-  if (window.FIN) window.FIN.show(name);
-  if (window.CSREC) window.CSREC.show(name);
   if (window.MODKIT) window.MODKIT.show(name);       // v2.29：模块的页面（第一次打开时才加载）
   try { history.replaceState(null, "", "#" + name); } catch { /* 忽略 */ }
 }
@@ -2064,10 +2061,6 @@ function cfgSpecial(name) {
   if (name === "colors") return COLORS_CARD();
   if (name === "accel") return window.ACCEL ? ACCEL.card() : "";
   if (name === "remote") return `<div class="card cfg-group" id="sys-remote"><div class="row between"><h3>外网访问（Tailscale）</h3><div class="lockbar" id="sys-remote-bar"></div></div><div id="sys-remote-body" class="small">…</div></div>`;
-  if (name === "desktop") { setTimeout(() => window.DESKTOP && DESKTOP.loadDevices(), 0); return `<div class="card cfg-group" id="cfg-desk" data-lock-skip><div class="row between"><h3>💻 桌面客户端（Windows）</h3><a class="btn primary" href="/api/desktop/package">⬇ 下载桌面客户端</a></div>
-      <p class="small">一个窗口就是整个系统（和网页版一样），自带电脑加速：切片、读大模型、3D 预览、抠图、去水印在自己电脑上做，只做自己账号的活。拖文件进窗口直接上传；模型、切片文件点「下载」直接用本机 Bambu Studio / Orca 打开；新消息弹 Windows 通知；关窗口收到右下角托盘，开机自动启动。局域网连不上会自动换外网地址（Tailscale）。</p>
-      <ol class="small muted"><li>下载后解压，双击 <b>Install.bat</b>（第一次要联网装 3–10 分钟；电脑没有 Python 会自动装）。</li><li>桌面出现「3D Ops」图标，打开后用自己的账号登录，就自动连好加速。</li><li>以后 NAS 升级，客户端会自动跟着更新。员工也可以在顶部「💻 下载桌面版」自己下载。</li></ol>
-      <div id="cfg-desk-body" class="small"></div></div>`; }
   if (name === "components") return `<div class="card cfg-group" id="cfg-comps" data-lock-skip><div class="row between"><h3>组件安装情况</h3><button class="mini" id="cfg-comps-reload">重新检查</button></div><div id="cfg-comps-body" class="small">…</div></div>`;
   if (name === "pack_rules") return `<div class="card cfg-group"><h3>发货自动扣包材：扣哪些</h3>
       <p class="muted small">打开上面的开关后，订单从「待发货」变成「已发货」时，按这里的规则从库存领用包材（库存管理里记「发货包材」）。物品要先在「库存 → 库存管理」建好（分类：包材）。</p>
@@ -2101,9 +2094,8 @@ function cfgShowMod(id) {
 function cfgLoadExt(id) {
   const err = (e) => toast(e.message || String(e), true);
   if (window.MODKIT) MODKIT.settings(id).catch(err);   // v2.29：模块管理 + 模块自己的设置卡片
-  if (id === "accounts") { loadUsers(); if (window.CS) CS.show("csext"); if (window.CSREC) CSREC.show("csext"); }
+  if (id === "accounts") { loadUsers(); if (window.EXTKEYS) EXTKEYS.load(); }
   if (id === "goods") renderTplLib().catch(err);
-  if (id === "cs" && window.CS) CS.show("cskb");
   if (id === "production" && window.PROD && PROD.connSettings) PROD.connSettings($("#cfg-prconn")).catch(err);
   if (id === "ai" && window.OPS) OPS.show("users");
   if (id === "general" && window.SYS) SYS.loadRemote().catch(() => {});

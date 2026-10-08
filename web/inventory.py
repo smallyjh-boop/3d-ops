@@ -10,11 +10,6 @@ def _perms():
     return {k: auth.has_perm(u, k) for k in ("inv.in", "inv.out", "inv.adjust", "inv.pay")} if u else {"inv.in": True, "inv.out": True, "inv.adjust": True, "inv.pay": True}
 
 
-@app.get("/api/inv/po-summary")
-def inv_po_summary():
-    return jsonify({"ok": True, **inv.po_summary()})
-
-
 @app.get("/api/inv/meta")
 def inv_meta():
     return jsonify({"ok": True, "categories": inv.categories(), "units": inv.UNITS,
@@ -150,63 +145,6 @@ def inv_supplier_save():
         return jsonify({"ok": True, "supplier": inv.save_supplier(request.get_json(force=True) or {}, _uname())})
     except (TypeError, ValueError) as e:
         return err(str(e))
-
-
-@app.get("/api/inv/po")
-def inv_po_list():
-    return jsonify({"ok": True, "po": inv.list_po(request.args.get("status") or "", request.args.get("days") or None),
-                    "status": inv.PO_STATUS, "methods": inv.PAY_METHODS})
-
-
-@app.get("/api/inv/po/<pid>")
-def inv_po_get(pid):
-    try:
-        return jsonify({"ok": True, "po": inv.get_po(pid)})
-    except ValueError as e:
-        return err(str(e), 404)
-
-
-@app.post("/api/inv/po")
-def inv_po_save():
-    if _need("inv.in"):
-        return _need("inv.in")
-    try:
-        return jsonify({"ok": True, "po": inv.save_po(request.get_json(force=True) or {}, _uname())})
-    except (TypeError, ValueError) as e:
-        return err(str(e))
-
-
-@app.post("/api/inv/po/<int:pid>/<act>")
-def inv_po_act(pid, act):
-    b = request.get_json(force=True, silent=True) or {}
-    key = "inv.pay" if act == "pay" else "inv.in"
-    if _need(key):
-        return _need(key)
-    try:
-        if act == "receive":
-            po = inv.receive_po(pid, b.get("qtys"), _uname(), b.get("note") or "")
-        elif act == "pay":
-            po = inv.pay_po(pid, b.get("amount"), b.get("method") or "转账", b.get("day"), b.get("note") or "", _uname())
-        elif act in ("order", "cancel", "close", "tracking"):
-            po = inv.po_action(pid, act, _uname(), b.get("tracking"))
-        else:
-            return err("操作不对")
-    except (TypeError, ValueError) as e:
-        return err(str(e))
-    return jsonify({"ok": True, "po": po})
-
-
-@app.get("/api/inv/suggest")
-def inv_suggest():
-    return jsonify({"ok": True, "items": inv.suggest()})
-
-
-@app.post("/api/inv/suggest/po")
-def inv_suggest_po():
-    if _need("inv.in"):
-        return _need("inv.in")
-    pos = inv.po_from_suggest((request.get_json(force=True) or {}).get("item_ids") or [], _uname())
-    return jsonify({"ok": True, "po": pos})
 
 
 # ---------------- 财务模块对接（v2.18，对接规范第 11 条） ----------------

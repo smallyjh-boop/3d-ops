@@ -27,7 +27,7 @@ time.sleep(1.1); listing.set_status([pids[0]],"lazada","live")
 v=listing.v1_view(store.load(pids[0]))["lazada"]
 ok(v["first_listed_at"]==fl and v["live_at"]>fl and v["delisted_at"], "relist keeps first_listed")
 # ops change on live product -> update with platform_status live
-p=store.load(pids[2]); from core import opsapi
+p=store.load(pids[2]); from modules.link import opsapi
 opsapi._mark_unsynced(p,["title_th"]); store.save(p)
 v=listing.v1_view(store.load(pids[2]))["lazada"]
 ok(v["status"]=="update" and v["platform_status"]=="live", f"update keeps platform_status {v['platform_status']}")

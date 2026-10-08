@@ -9,7 +9,7 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand">3D 运营管理系统 <span id="ver" class="muted"></span> <a id="desk-dl" class="chip small" href="/api/desktop/package" title="Windows 桌面客户端：自带电脑加速，拖文件上传，开机自动启动">💻 下载桌面版</a></div>
+  <div class="brand">3D 运营管理系统 <span id="ver" class="muted"></span></div>
   <nav id="modnav">
     <button class="mod" data-mod="home">工作台</button>
     <button class="mod" data-mod="goods">商品</button>
@@ -34,16 +34,11 @@
   <button class="tab" data-mod="goods" data-tab="library">产品库</button>
   <button class="tab ghost" data-mod="goods" data-tab="edit">编辑产品</button>
   <button class="tab" data-mod="goods" data-tab="export" data-roles="owner,listing">导出上架表格</button>
-  <button class="tab" data-mod="goods" data-tab="opschg" data-roles="owner,listing">运营改动</button>
   <button class="tab" data-mod="orders" data-tab="orders">订单列表</button>
   <button class="tab" data-mod="orders" data-tab="pack">打包核对</button>
   <button class="tab" data-mod="orders" data-tab="handover">发货交接</button>
   <button class="tab" data-mod="orders" data-tab="aftersales" data-roles="owner,listing">售后</button>
   <button class="tab" data-mod="orders" data-tab="buyers" data-roles="owner,listing">买家档案</button>
-  <button class="tab" data-mod="cs" data-tab="cs" data-roles="owner,listing">客服工作台</button>
-  <button class="tab" data-mod="cs" data-tab="csrec" data-roles="owner,listing">登记中心</button>
-  <button class="tab" data-mod="cs" data-tab="csrep" data-roles="owner,listing">客服报表</button>
-  <button class="tab" data-mod="cs" data-tab="cskb" data-roles="owner,listing">知识库与话术</button>
   <button class="tab" data-mod="prod" data-tab="production" data-roles="owner,production">生产看板</button>
   <button class="tab" data-mod="prod" data-tab="printers" data-roles="owner,production">打印机</button>
   <button class="tab" data-mod="prod" data-tab="files" data-roles="owner,production,listing">文件管理</button>
@@ -52,16 +47,6 @@
   <button class="tab" data-mod="inv" data-tab="materials" data-roles="owner,production">耗材料卷</button>
   <button class="tab" data-mod="inv" data-tab="stock" data-roles="owner,production">成品备货</button>
   <button class="tab" data-mod="prod" data-tab="quality" data-roles="owner,production">质量统计</button>
-  <button class="tab" data-mod="pur" data-tab="purchase" data-roles="owner,production,listing">采购单</button>
-  <button class="tab" data-mod="pur" data-tab="po_suggest" data-roles="owner,production,listing">补货建议</button>
-  <button class="tab" data-mod="pur" data-tab="po_suppliers" data-roles="owner,production,listing">供应商</button>
-  <button class="tab" data-mod="pur" data-tab="po_pay" data-roles="owner">付款记录</button>
-  <button class="tab" data-mod="biz" data-tab="fin_overview" data-roles="owner">总览与损益</button>
-  <button class="tab" data-mod="biz" data-tab="fin_profit" data-roles="owner">利润分析</button>
-  <button class="tab" data-mod="biz" data-tab="fin_settle" data-roles="owner">平台对账</button>
-  <button class="tab" data-mod="biz" data-tab="fin_book" data-roles="owner">收支记账</button>
-  <button class="tab" data-mod="biz" data-tab="fin_cash" data-roles="owner">现金流</button>
-  <button class="tab" data-mod="biz" data-tab="fin_tax" data-roles="owner">税务</button>
   <button class="tab" data-mod="biz" data-tab="profit" data-roles="owner">每单利润</button>
   <button class="tab" data-mod="sys" data-tab="settings" data-roles="owner">设置</button>
   <button class="tab" data-mod="sys" data-tab="logs" data-roles="owner">操作日志</button>
@@ -77,7 +62,7 @@
   <div class="row between wrap gap">
     <h2>产品库</h2>
     <div class="row gap">
-      <button id="btn-seo-batch" title="搜索分低于 80 的产品，AI 从买家角度重写标题、关键词、详情、标签，直接更新（可以在编辑页撤销）">🔍 批量搜索优化</button>
+      <button id="btn-seo-batch" data-needmod="seo" title="搜索分低于 80 的产品，AI 从买家角度重写标题、关键词、详情、标签，直接更新（可以在编辑页撤销）">🔍 批量搜索优化</button>
       <button id="btn-fill-copy" title="所有产品里空着的文案字段（英文、Shopee 标签、包装内容、变体名称……）用 AI 补上，后台做">✨ 批量补全文案</button>
       <a class="btn c-cost" href="/api/catalog" id="btn-catalog">导出全部产品资料（Excel）</a>
       <button id="btn-new" class="primary">＋ 新建产品</button>
@@ -92,7 +77,7 @@
     <div class="lib-main">
       <div class="row gap wrap lib-filter">
         <input id="lib-q" placeholder="搜索 编号 / SKU / 品名 / 泰文标题 / 关键词 / 颜色" style="width:300px" data-notr>
-        <select id="lib-status"><option value="">全部状态</option><option value="ok">可导出</option><option value="todo">待补资料</option><option value="exported">已上架过</option><option value="new">没上架过</option><option value="seo_low">搜索分低于 80</option></select>
+        <select id="lib-status"><option value="">全部状态</option><option value="ok">可导出</option><option value="todo">待补资料</option><option value="exported">已上架过</option><option value="new">没上架过</option><option value="seo_low" data-needmod="seo">搜索分低于 80</option></select>
         <select id="lib-print"><option value="">打印：全部</option><option value="nomodel">没有 3D 模型</option><option value="nofile">没有可用切片文件</option><option value="reviewed">未试打</option><option value="verified">已试打验证</option></select>
         <select id="lib-sort"><option value="updated">最近修改</option><option value="id">编号</option><option value="sold">近 30 天销量</option><option value="name">品名</option></select>
         <span id="lib-count" class="muted small"></span>
@@ -100,7 +85,7 @@
       <div id="lib-bulk" class="ord-bulk">
         <span id="lib-selinfo" class="small muted">勾选产品后批量处理</span>
         <select id="lib-grp-pick"></select><button id="btn-grp-add">加入分组</button><button id="btn-grp-rm">移出分组</button>
-        <button id="btn-seo-sel">🔍 搜索优化选中</button>
+        <button id="btn-seo-sel" data-needmod="seo">🔍 搜索优化选中</button>
         <button id="btn-lib-zip">⬇ 下载模型和切片文件</button>
         <button id="btn-lib-del" class="danger">删除选中</button>
         <button id="btn-lib-clear" class="mini">取消勾选</button>
@@ -287,14 +272,14 @@
     <div class="row between">
       <h3>⑤ 上架文案（泰文 + 英文，中文回译核对）</h3>
       <div class="row gap">
-        <button id="btn-seo" class="primary" title="从买家角度找搜索词（原来的「关键词扩展」），按平台搜索规则重写标题（泰文为主 + 几个英文关键词）、简短清楚的详情、标签、变体名，直接更新，可以撤销">🔍 AI 搜索优化（关键词 + 标题 + 详情 + 标签）</button>
+        <button id="btn-seo" data-needmod="seo" class="primary" title="从买家角度找搜索词（原来的「关键词扩展」），按平台搜索规则重写标题（泰文为主 + 几个英文关键词）、简短清楚的详情、标签、变体名，直接更新，可以撤销">🔍 AI 搜索优化（关键词 + 标题 + 详情 + 标签）</button>
         <button id="btn-kw" class="hidden">AI 关键词扩展</button>
         <button id="btn-ai" class="hidden">AI 生成文案</button>
         <button id="btn-back" title="回译成中文核对，同时按泰文更新英文标题和英文详情">泰文改过后重新回译（含英文）</button>
         <button id="btn-complete" title="英文标题 / 详情、Shopee 标题和标签、包装内容、变体名称、选项泰文……空着的都补上，已经填的不动">✨ 补全空着的文案</button>
       </div>
     </div>
-    <div id="seo-panel" class="seo-panel"></div>
+    <div id="seo-panel" class="seo-panel" data-needmod="seo"></div>
     <div id="kw-panel" class="kw-panel hidden"></div>
     <div id="curator-copy"></div>
     <div class="copy-grid">
@@ -568,17 +553,6 @@
     <span class="chip" data-iv="stocktake">盘点</span><span class="chip" data-iv="expense">支出统计</span></div>
   <div id="inv-body"></div>
 </section>
-<section id="tab-purchase" class="panel hidden">
-  <div class="row between wrap gap"><h2>采购</h2>
-    <div class="row gap wrap"><button class="primary" id="po-new" data-perm="inv.in">＋ 新采购单</button>
-      <button id="sup-new" data-perm="inv.in">＋ 供应商</button><button id="po-reload">刷新</button></div></div>
-  <p class="muted small">采购单：草稿 → 下单（在途）→ 到货入库（可以分几次到）。到货时运费按金额分摊进单价，库存和流水自动记；
-    付款记在采购单上，同时给财务模块记一笔。补货建议按「库存 + 在途 ≤ 补货线」和耗材用量算，可以一键生成采购单。</p>
-  <div class="chips" id="po-views" style="margin:8px 0">
-    <span class="chip on" data-pv="open">进行中</span><span class="chip" data-pv="all">全部采购单</span></div>
-  <div id="po-sum" class="card summary small"></div>
-  <div id="po-body"></div>
-</section>
 <section id="tab-materials" class="panel hidden">
   <div class="row between"><h2>耗材库存与采购</h2><button id="btn-mat-reload">刷新</button></div>
   <p class="muted small">所有耗材都在同一个仓库，按「卷」管理（树脂按「瓶」）：每卷有编号（F0001），可以打标签贴在料盘上。装到哪台打印机就点「上机」，那台打完一盘自动从那卷扣克数； 某个颜色的库存 = 所有没用完的卷剩余之和。快没了、没有备用卷、机上那卷不够下一盘、开封太久要烘干，都会在下面提醒（工作台也有）。</p>
@@ -629,12 +603,6 @@
 </section>
 
 <!-- 利润 -->
-<section id="tab-fin_overview" class="panel hidden"><h2>财务总览与损益</h2><div id="fin-ov"></div></section>
-<section id="tab-fin_profit" class="panel hidden"><h2>利润分析</h2><div id="fin-pa"></div></section>
-<section id="tab-fin_settle" class="panel hidden"><h2>平台结算对账</h2><div id="fin-st"></div></section>
-<section id="tab-fin_book" class="panel hidden"><h2>收支记账</h2><div id="fin-bk"></div></section>
-<section id="tab-fin_cash" class="panel hidden"><h2>现金流</h2><div id="fin-cf"></div></section>
-<section id="tab-fin_tax" class="panel hidden"><h2>税务</h2><div id="fin-tx"></div></section>
 <section id="tab-profit" class="panel hidden">
   <div class="row between"><h2>利润</h2>
     <select id="pf-days" style="min-width:140px"><option value="7">最近 7 天</option><option value="30" selected>最近 30 天</option><option value="90">最近 90 天</option><option value="365">最近一年</option></select>
@@ -646,7 +614,7 @@
   </div>
   <div class="lanes two">
     <div class="card"><h3>按平台</h3><table class="grid" id="pf-plat"><thead><tr><th>平台</th><th>订单</th><th>收入</th><th>利润</th><th>利润率</th></tr></thead><tbody></tbody></table></div>
-    <div class="card"><h3>其他支出（广告费等）</h3>
+    <div class="card" data-needmod="fin"><h3>其他支出（广告费等）</h3>
       <p class="muted small">完整的收支（带票据、收入、房租工资）在「财务 → 收支记账」。</p>
       <div class="row gap wrap">
         <input id="ex-day" type="date" style="width:150px">
@@ -811,57 +779,6 @@
 </section>
 
 <!-- AI 客服 -->
-<section id="tab-cs" class="panel hidden">
-  <div id="cs-presence" class="cs-presence"></div>
-  <div class="cs-wrap">
-    <aside class="cs-list card">
-      <div class="row gap"><button class="primary" id="cs-new">＋ 新消息</button>
-        <select id="cs-filter"><option value="active">进行中</option><option value="human">需人工</option><option value="open">待回复</option><option value="follow">今天要跟进</option><option value="leads">销售线索</option><option value="closed">已结束</option><option value="">全部</option></select></div>
-      <input id="cs-q" placeholder="搜索买家 / 订单号 / 内容">
-      <div class="row gap"><select id="cs-shopf" style="flex:1"><option value="">全部店铺</option></select><select id="cs-agentf" style="flex:1"><option value="">全部客服</option></select></div>
-      <div id="cs-stats" class="small muted"></div>
-      <div class="small muted">浏览器 AI 客服扩展：<a href="/api/cs/extension.zip">⬇ 下载</a>（安装方法问老板，或看 设置 → 组件与插件）</div>
-      <div id="cs-items"></div>
-    </aside>
-    <main id="cs-main" class="card"><div class="cs-empty"><h3>AI 客服</h3><p class="muted">左边选一个会话，或者点「＋ 新消息」。</p></div></main>
-  </div>
-</section>
-<section id="tab-csrec" class="panel hidden">
-  <div class="row between wrap gap"><h2>登记中心</h2><div class="row gap"><button class="primary" id="rec-new">＋ 新登记</button><a class="btn" id="rec-export" href="#">⬇ 导出 Excel</a></div></div>
-  <p class="muted small">客服登记的备注、待办跟进、售后、投诉、特殊需求都在这里统一管理：按店铺、客服、类型、状态、日期筛选；到期没处理的标红，工作台也会提醒。备注挂在客户档案上，下次这个买家再来时客服都能看到。</p>
-  <div class="row gap wrap rec-filters">
-    <select id="rec-kind"><option value="">全部类型</option></select>
-    <select id="rec-status"><option value="open">待处理</option><option value="overdue">已超期</option><option value="done">已完成</option><option value="">全部状态</option></select>
-    <select id="rec-shop"><option value="">全部店铺</option></select>
-    <select id="rec-agent"><option value="">全部登记人</option></select>
-    <select id="rec-period"><option value="">全部时间</option><option value="today">今天</option><option value="7d">近 7 天</option><option value="30d">近 30 天</option></select>
-    <input id="rec-q" placeholder="搜索内容 / 买家" style="width:200px">
-    <span id="rec-counts" class="small muted"></span>
-  </div>
-  <div class="card"><table class="grid small" id="rec-table"><thead><tr><th>类型</th><th>状态</th><th>店铺 / 买家</th><th>内容</th><th>处理结果</th><th>到期</th><th>登记人</th><th>时间</th><th></th></tr></thead><tbody></tbody></table></div>
-</section>
-<section id="tab-csrep" class="panel hidden">
-  <div class="row between wrap gap"><h2>客服报表</h2><div class="row gap">
-    <select id="rep-period"><option value="today">今天</option><option value="yesterday">昨天</option><option value="7d" selected>近 7 天</option><option value="30d">近 30 天</option></select>
-    <a class="btn" id="rep-export" href="#">⬇ 导出 Excel</a></div></div>
-  <p class="muted small">按客服：接待会话、回复条数、首次响应、平均响应、超时次数、AI 草稿直接采用率、自动回复、登记和完成的待办。按店铺：咨询量、新客户 / 老客户、关联到订单的会话、新销售线索、结束时还没回复的。员工只看到自己的绩效。</p>
-  <div id="rep-body"></div>
-</section>
-
-
-<section id="tab-cskb" class="panel hidden">
-  <h2>知识库与话术</h2>
-  <p class="muted small">AI 回复买家时只用这里的店铺政策、常见问答、产品库里的资料和订单信息，不会自己编价格和日期。员工发出去的回复会自动记下来，AI 下次参考。</p>
-  <div class="card" id="cskb-perf"></div>
-  <div class="card" id="cskb-weekly"></div>
-  <div class="card" id="cskb-learn"></div>
-  <div class="card"><div class="row between"><h3>常见问答</h3><div class="row gap"><span id="cskb-presets"></span><button data-kb="add">＋ 添加</button></div></div>
-    <p class="small muted">已内置 3D 打印网店常见情况的标准话术（现货与 24–48 小时发货时效、材料与耐热、纹路色差、定制刻字、版权、批发、物流、改单取消、破损少件发错、退款、差评、平台规则等）。可以直接改成你们自己的说法；AI 回复时会参考。</p>
-    <table class="grid"><thead><tr><th>问题</th><th>回答</th><th>标签</th><th>用过</th><th>状态</th><th></th></tr></thead><tbody id="cskb-list"></tbody></table></div>
-  <div class="card"><h3>学到的回复（员工实际发出去的）</h3>
-    <table class="grid"><thead><tr><th>买家问</th><th>实际回复（划线的是 AI 原稿）</th><th>时间</th><th></th></tr></thead><tbody id="cskb-ex"></tbody></table></div>
-</section>
-
 <!-- 数据备份 -->
 <section id="tab-backup" class="panel hidden">
   <div class="row between"><h2>数据备份</h2><button id="btn-backup-now" class="primary">立即备份</button></div>
@@ -901,16 +818,6 @@
   <div class="card" id="sys-i18n"></div>
 </section>
 
-<section id="tab-opschg" class="panel hidden">
-  <div class="row between"><h2>运营改动（运营分析系统写回）</h2><button id="oc-reload">刷新</button></div>
-  <p class="muted small">运营分析系统通过接口改的泰文标题、属性、售价、上下架都记在这里：改前 → 改后、原因。可以一键撤回。
-    硬性限制：售价不能低于最低价；每个 SKU 每天最多改 1 次价；只能下架不能删除。改过的产品在「导出上架表格」里显示「有修改待同步」，重新导出上传到平台才会生效。
-    设置 → AI 与对接「运营分析系统写回」可以切换为「只做建议，人工确认后生效」。</p>
-  <div id="oc-mode" class="small"></div>
-  <div class="row gap wrap"><label class="small">状态<select id="oc-status"><option value="">全部</option><option value="pending">待确认</option><option value="applied">已生效</option><option value="reverted">已撤回</option><option value="rejected">已拒绝</option></select></label>
-    <input id="oc-q" placeholder="产品编号 / SKU" style="width:180px" data-notr></div>
-  <table class="grid small" id="oc-table"><thead><tr><th>时间</th><th>产品 / SKU</th><th>改了什么（改前 → 改后）</th><th>原因</th><th>来源</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
-</section>
 
 <div id="modal" class="modal hidden"><div class="modal-in" id="modal-in"></div></div>
 
@@ -937,8 +844,7 @@
       <button id="btn-nu" class="primary">新建</button>
     </div>
   </div>
-  <div class="card" id="cskb-keys"></div>
-  <div class="card" id="cs-agents"></div>
+  <div class="card" id="ext-keys"></div>
   </div>
   <div class="cfg-ext hidden" data-cfgext="goods">
   <div class="card">
@@ -957,49 +863,20 @@
     </details>
   </div>
   </div>
-  <div class="cfg-ext hidden" data-cfgext="cs">
-  <div class="card"><div class="row between"><h3>客服设置（店铺政策、自动回复、提醒、邮件）</h3><div class="lockbar" id="cskb-setbar"></div></div><div id="cskb-settings" class="form1"></div></div>
-  </div>
   <div class="cfg-ext hidden" data-cfgext="production">
   <div class="card" id="cfg-prconn"></div>
   </div>
   <div class="cfg-ext hidden" data-cfgext="ai">
   <details class="card" id="intg" open>
-    <summary class="row between"><h3>API 与店铺对接（自动导入订单）</h3><a class="btn" href="/api-docs" target="_blank">接口说明</a></summary>
-    <p class="muted small">现在用表格导入订单就可以。以后接上平台开放接口后，订单会自动进来（和表格导入效果一样：对上 SKU、生成生产任务、算利润）。
-      外部程序用「API 密钥」调用本系统接口推送订单。</p>
-    <h4>API 密钥</h4>
+    <summary class="row between"><h3>API 密钥（外部程序调用本系统）</h3><a class="btn" href="/api-docs" target="_blank">接口说明</a></summary>
+    <p class="muted small">外部程序（运营分析系统、3D选品工具、自己写的程序）用「API 密钥」调用本系统接口。每个程序一把，名字写清楚，方便停用。</p>
     <table class="grid small" id="intg-keys"><thead><tr><th>名称</th><th>密钥开头</th><th>权限</th><th>创建</th><th>最后使用</th><th>次数</th><th>启用</th><th></th></tr></thead><tbody></tbody></table>
     <div class="row gap"><input id="key-name" placeholder="名称，例如 Lazada 同步" style="width:220px" data-notr><label class="small">权限<select id="key-scope"><option value="full">完整（可推送订单）</option><option value="read">只读（运营分析系统查询用）</option><option value="ops">运营写回（只能改标题、属性、售价、上下架）</option><option value="catalog">建产品（3D选品工具用）</option></select></label><button id="btn-key-new">创建密钥</button></div>
     <div id="key-new-out"></div>
-    <h4>店铺</h4>
-    <table class="grid small" id="intg-shops"><thead><tr><th>平台</th><th>店铺</th><th>自动同步</th><th>间隔</th><th>上次同步</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
-    <button id="btn-shop-new">＋ 添加店铺</button>
-    <div id="shop-form" class="sub-card hidden"></div>
-    <details><summary class="small">同步记录 / 平台推送记录</summary>
-      <table class="grid small" id="intg-log"><thead><tr><th>时间</th><th>来源</th><th>结果</th><th>新/更新</th><th>说明</th></tr></thead><tbody></tbody></table>
-      <table class="grid small" id="intg-hooks"><thead><tr><th>时间</th><th>平台</th><th>处理结果</th><th>内容</th></tr></thead><tbody></tbody></table>
-    </details>
   </details>
-  <div class="card" id="cur-card">
-    <div class="row between wrap gap"><h3>3D选品工具对接 <span id="cur-badge"></span></h3><a id="cur-open" class="btn hidden" target="_blank" rel="noopener">打开选品工具 ↗</a></div>
-    <p class="muted small">新产品从选品工具推送过来，ERP 自动建草稿、生成编号、下载图片和模型文件。两边各要一把密钥：①「ERP 访问选品工具」：填在下面，ERP 下载图片用；②「选品工具访问 ERP」：下面一键新建「建产品」密钥，复制填到选品工具「设置 → ERP 对接 → 建产品密钥」。</p>
-    <div class="form3">
-      <label>选品工具地址<input id="cur-url" placeholder="http://192.168.31.200:18765" data-notr></label>
-      <label>选品工具的密钥（选品工具「设置 → ERP 对接 → ERP 访问本系统的密钥」）<input id="cur-key" type="password" autocomplete="off" data-notr></label>
-      <div class="row gap" style="align-self:end"><button id="cur-save" class="primary">保存</button><button id="cur-test">测试连接</button></div>
-    </div>
-    <div id="cur-result" class="small"></div>
-    <h4>选品工具访问 ERP 的密钥（建产品）</h4>
-    <div id="cur-keys" class="small"></div>
-    <div class="row gap"><button id="cur-newkey" class="mini">＋ 一键新建「建产品」密钥</button><button id="cur-newread" class="mini">＋ 新建只读密钥（选品工具同步编号、售价用）</button></div>
-    <div id="cur-keyout"></div>
-    <h4>最近推送过来的产品 <span id="cur-count" class="muted small"></span></h4>
-    <table class="grid small" id="cur-recent"><thead><tr><th>时间</th><th>编号</th><th>品名</th><th>SKU</th><th>状态</th><th>选品记录</th></tr></thead><tbody></tbody></table>
-  </div>
   </div>
   <div class="cfg-ext hidden" data-cfgext="addons">
-  <div class="card"><div class="row between"><h3>浏览器 AI 客服扩展（在卖家中心聊天页面直接用 AI）</h3><a class="btn" href="/api/cs/extension.zip">⬇ 下载扩展</a></div>
+  <div class="card" data-needmod="cs"><div class="row between"><h3>浏览器 AI 客服扩展（在卖家中心聊天页面直接用 AI）</h3><a class="btn" href="/api/cs/extension.zip">⬇ 下载扩展</a></div>
     <p class="small">装了扩展，员工可以在 Lazada / Shopee / TikTok 卖家中心的聊天页面直接用 AI 读取消息、写回复（手动 / 半自动 / 全自动）。每个员工用自己的密钥连接本系统。</p>
     <ol class="small">
       <li>下载后解压到一个固定的文件夹（不要删）。</li>
@@ -1024,24 +901,18 @@
 <script src="/static/recipe.js"></script>
 <script src="/static/stock.js"></script>
 <script src="/static/inventory.js"></script>
-<script src="/static/purchase.js"></script>
 <script src="/static/prod.js"></script>
 <script src="/static/home.js"></script>
-<script src="/static/cs.js"></script>
 <script src="/static/files.js"></script>
 <script src="/static/system.js"></script>
 <script src="/static/adimg.js"></script>
 <script src="/static/imgedit.js"></script>
-<script src="/static/opschg.js"></script>
 <script src="/static/aftersales.js"></script>
 <script src="/static/shipping.js"></script>
 <script src="/static/spools.js"></script>
 <script src="/static/accel.js"></script>
-<script src="/static/finance.js"></script>
 <script src="/static/specmodel.js"></script>
-<script src="/static/seo.js"></script>
-<script src="/static/csalert.js"></script>
-<script src="/static/csrec.js"></script>
-<script src="/static/desktop.js"></script>
+<script src="/static/extkeys.js"></script>
+<script src="/static/dragdrop.js"></script>
 </body>
 </html>

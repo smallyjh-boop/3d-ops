@@ -18,7 +18,7 @@ from flask import g, jsonify, redirect, request, session
 
 from . import db
 
-PUBLIC = ("/login", "/setup", "/api/auth/", "/static/", "/api/version", "/api/shutdown", "/favicon", "/api/desktop/dl/")
+PUBLIC = ("/login", "/setup", "/api/auth/", "/static/", "/api/version", "/api/shutdown", "/favicon")
 
 # 只有老板能用
 OWNER_ONLY = [
@@ -35,22 +35,16 @@ OWNER_ONLY = [
     ("POST", r"^/api/printers/\d+/(conn|test)$"),
     ("*", r"^/api/backups"),
     ("*", r"^/api/system/"),
-    ("*", r"^/api/desktop/devices"),
     ("POST", r"^/api/modules/"),                 # v2.29 模块开关
     ("GET", r"^/api/modules/events"),
     ("POST", r"^/api/ops/changes/"),
     ("POST", r"^/api/calib/"),
-    ("POST", r"^/api/cs/settings$"),
-    ("POST", r"^/api/cs/mail/test$"),
-    ("DELETE", r"^/api/cs/(convs|examples)/"),
 ]
 # 生产角色能用的（其他全部拒绝）
 PRODUCTION_ALLOW = [
     ("GET", r"^/$"),
     ("GET", r"^/api/modules$"),                          # v2.29 模块菜单
-    ("GET", r"^/m/[a-z0-9_]+/page\.(html|js|css)$"),
-    ("POST", r"^/api/desktop/(pair|dltoken)$"),           # v2.28 桌面客户端
-    ("GET", r"^/api/desktop/package$"),
+    ("GET", r"^/m/[a-z0-9_]+/[A-Za-z0-9_-]+\.(html|js|css)$"),
     ("GET", r"^/api/accel/(package|status)$"),
     ("GET", r"^/api/bg/list$"),
     ("POST", r"^/api/bg/(clear|[a-f0-9]+/retry)$"),
@@ -73,7 +67,6 @@ PRODUCTION_ALLOW = [
     ("GET", r"^/api/inv/"),                              # 库存管理（v2.17）：能做什么由 inv.* 权限决定
     ("POST", r"^/api/inv/(docs|stocktake)(/\d+/(save|confirm|void))?$"),
     ("POST", r"^/api/inv/(items|suppliers|po|suggest/po|presets)$"),
-    ("POST", r"^/api/inv/po/\d+/(receive|pay|order|cancel|close|tracking)$"),
     ("POST", r"^/api/spools(/[A-Za-z0-9]+/(load|unload|weigh|empty|dry|edit))?$"),
     ("GET", r"^/api/handovers(/\d+)?$"),
     ("POST", r"^/api/handovers(/\d+/(scan|remove|close))?$"),
@@ -137,7 +130,6 @@ PERM_RULES = [
     ("POST", r"^/api/products/[^/]+/models/current$", "models.change"),
     ("POST", r"^/api/products/[^/]+/model/restore$", "models.change"),
     ("POST", r"^/api/spools/[A-Za-z0-9]+/delete$", "materials.adjust"),
-    ("DELETE", r"^/api/cs/(messages|convs)/\d+$", "cs.delete"),
     ("POST", r"^/api/products/[^/]+/model(/restore)?$", "files.upload"),
     ("POST", r"^/api/files/models$", "files.upload"),
     ("POST", r"^/api/print-files$", "files.upload"),

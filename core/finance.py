@@ -136,18 +136,26 @@ def report(days=30):
             "margin": round(total["profit"] / total["revenue"] * 100, 1) if total["revenue"] else None}
 
 
+def _fin():
+    from . import modules
+    m = modules.public("fin")
+    if not m:
+        raise ValueError("「财务」模块没有打开（设置 → 模块管理）")
+    return m
+
+
 def add_expense(day, kind, amount, note="", user=""):
-    """（旧接口）记一笔支出：v2.21 起在财务模块 core/fin 里。"""
-    from . import fin
+    """（旧接口）记一笔支出：v2.21 起在财务模块里（v2.30 起 modules/fin）。"""
+    fin = _fin()
     return fin.save_expense({"day": day, "category": kind, "amount": amount, "note": note}, user)
 
 
 def list_expenses(days=60):
-    from . import fin
+    fin = _fin()
     since = _day(time.time() - int(days) * 86400)
     return [dict(r, kind=r["category"]) for r in fin.expenses(start=since, direction="out")]
 
 
 def delete_expense(eid, user=""):
-    from . import fin
+    fin = _fin()
     fin.delete_expense(eid, user)

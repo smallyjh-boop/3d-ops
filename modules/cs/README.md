@@ -1,0 +1,34 @@
+# 模块：AI 客服（cs）
+
+AI 客服——v2.30 从内核搬出来的模块（原来的 core/cs/ 现在是 modules/cs/logic/）。
+
+客服工作台、登记中心、客服报表、知识库与话术；顶部「有客户在问」提醒；浏览器扩展的聊天接口；
+超时未回复的手机提醒（Telegram）和周报邮件。只通过 logic/erp_link.py 读写产品、订单、生产。
+
+## 文件
+
+- `__init__.py`
+- `api.py`
+- `logic/__init__.py`
+- `logic/alerts.py`
+- `logic/api.py`
+- `logic/brain.py`
+- `logic/crm.py`
+- `logic/data.py`
+- `logic/erp_link.py`
+- `logic/mailer.py`
+- `logic/presets.py`
+- `logic/report.py`
+- `logic/service.py`
+- `module.py`
+- `tests/t_cs.py`
+- `tests/t_cs224.py`
+- `ui/cs.js`
+- `ui/csalert.js`
+- `ui/csrec.js`
+- `ui/page.html`
+- `ui/page.js`
+
+## 改动记录
+
+- 1.0（系统 v2.30.0）：从内核搬成模块。

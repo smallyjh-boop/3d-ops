@@ -184,18 +184,22 @@ def check():
                        "" if cfg.get("ai_api_key") else "系统 → 设置 → AI 与对接"))
     try:
         c = db.conn()
-        kb = c.execute("SELECT COUNT(*) FROM cs_kb WHERE active=1").fetchone()[0]
-        from .cs import data as csd
-        miss_p = csd.presets_missing()
-        items.append(_item(G, "客服话术", "warn" if miss_p else "ok", f"常见问答 {kb} 条" + (f"，还有 {miss_p} 条新的标准话术没加" if miss_p else ""),
+        from . import modules as _mods
+        _cs = _mods.public("cs")          # v2.30：客服是模块，关着就不检查客服的几项
+        kb = c.execute("SELECT COUNT(*) FROM cs_kb WHERE active=1").fetchone()[0] if _cs else 0
+        csd = _cs.data if _cs else None
+        miss_p = csd.presets_missing() if csd else 0
+        if csd:
+            items.append(_item(G, "客服话术", "warn" if miss_p else "ok", f"常见问答 {kb} 条" + (f"，还有 {miss_p} 条新的标准话术没加" if miss_p else ""),
                            "客服 → 知识库与话术 →「＋ 补充标准话术」" if miss_p else ""))
         keys = c.execute("SELECT COUNT(*) FROM api_keys WHERE active=1").fetchone()[0] if _has_table(c, "api_keys") else 0
         items.append(_item(G, "扩展密钥", "ok" if keys else "warn", f"{keys} 个",
                            "" if keys else "设置 → 账号与权限「员工的扩展密钥」里给要用扩展的人新建密钥"))
-        s = csd.settings()
+        s = csd.settings() if csd else {}
         tg = bool(s.get("tg_token") and s.get("tg_chat"))
-        items.append(_item(G, "未回复提醒（手机）", "ok" if tg else "warn", "已设置 Telegram" if tg else "没有设置，超时没回复只在系统里提醒",
-                           "" if tg else "客服 → 知识库与话术 → 店铺政策下面「手机提醒」"))
+        if csd:
+            items.append(_item(G, "未回复提醒（手机）", "ok" if tg else "warn", "已设置 Telegram" if tg else "没有设置，超时没回复只在系统里提醒",
+                               "" if tg else "客服 → 知识库与话术 → 店铺政策下面「手机提醒」"))
     except Exception as e:  # noqa: BLE001
         items.append(_item(G, "客服", "warn", str(e)))
 
@@ -368,6 +372,7 @@ def upgrade(zip_path, force=False, user=""):
                 shutil.copyfileobj(src, out)
             os.replace(tmp, dest)
             written += 1
+        removed = _remove_stale(z, prefix, root_abs)
     new_pkgs = sorted(set(_requirements()) - old_req)
     pip_msg = ""
     if not IN_DOCKER and (new_pkgs or missing_packages()):
@@ -378,9 +383,36 @@ def upgrade(zip_path, force=False, user=""):
             pip_msg = "新依赖已安装" if r.returncode == 0 else ("安装依赖出错：" + (r.stderr or r.stdout)[-400:])
         except Exception as e:  # noqa: BLE001
             pip_msg = f"安装依赖出错：{e}"
-    db.audit(user, "在线升级", f"v{cur}→v{new_ver}", f"{written} 个文件，程序备份 {saved}")
+    db.audit(user, "在线升级", f"v{cur}→v{new_ver}", f"{written} 个文件，删掉旧文件 {removed} 个，程序备份 {saved}")
     return {"from": cur, "to": new_ver, "files": written, "skipped": skipped, "app_backup": saved,
             "new_packages": new_pkgs, "pip": pip_msg, "restart": "auto" if IN_DOCKER else "manual"}
+
+
+def _remove_stale(z, prefix, root_abs):
+    """v2.30：功能搬进模块后，旧位置的文件（例如 core/cs/、web/fin.py）没用了。升级包里的 removed_files.txt 列出这些路径，
+    升级时删掉（只删程序文件夹里的，不碰 data；升级前已经备份过程序）。"""
+    try:
+        text = z.read(prefix + "removed_files.txt").decode("utf-8")
+    except KeyError:
+        return 0
+    n = 0
+    for line in text.splitlines():
+        rel = line.split("#")[0].strip().strip("/")
+        if not rel or rel.split("/")[0] in SKIP_TOP or ".." in rel.split("/"):
+            continue
+        p = os.path.abspath(os.path.join(APP_DIR, rel))
+        if not p.startswith(root_abs + os.sep):
+            continue
+        try:
+            if os.path.isdir(p):
+                shutil.rmtree(p)
+                n += 1
+            elif os.path.isfile(p):
+                os.remove(p)
+                n += 1
+        except OSError:
+            pass
+    return n
 
 
 def restart_later(delay=2.0):

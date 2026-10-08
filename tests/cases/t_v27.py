@@ -5,7 +5,7 @@ import os, sys, io, time, json, zipfile
 os.environ["LH_DATA_DIR"]=T+"/v27"; sys.path.insert(0,APP)
 import app as A
 from core import db, config
-from core.cs import data as csd, presets
+from modules.cs.logic import data as csd, presets
 for u,r in (("boss","owner"),("som","production"),("nok","listing")):
     try: db.create_user(u,"pass123" if u!="boss" else "secret1",r,u,"th")
     except Exception: pass
@@ -40,7 +40,7 @@ print("perf", boss.get("/api/cs/perf").get_json()["perf"])
 print("stats", nok.get("/api/cs/stats").get_json())
 print("convs wait", [(x["buyer"], x["wait_min"]) for x in nok.get("/api/cs/convs").get_json()["convs"]], nok.get("/api/cs/convs").get_json()["alert_minutes"])
 # telegram mocked
-from core.cs import alerts
+from modules.cs.logic import alerts
 class R:
     headers={"content-type":"application/json"}
     def __init__(s,j): s._j=j

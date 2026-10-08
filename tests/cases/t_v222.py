@@ -211,7 +211,7 @@ from core import pricing
 _e, w = lazada_template.check_product(qq, pricing.price_product(config.load_config(), qq), None, config.load_config()) if False else ([], [])
 
 # ---- 智能客服 ----
-from core.cs import data as csd, service as css, brain as csb, alerts as csa, report as csr, mailer
+from modules.cs.logic import data as csd, service as css, brain as csb, alerts as csa, report as csr, mailer
 c = C.post("/api/cs/convs", json={"buyer": "Somchai", "platform": "lazada", "text": "อยากได้ 100 ชิ้น ใช้เป็นของขวัญงานบริษัท"}).get_json()
 cid = c["id"]
 c = C.post(f"/api/cs/convs/{cid}/draft", json={}).get_json()

@@ -309,27 +309,6 @@ def profit_report():
     return jsonify(finance.report(int(request.args.get("days") or 30)))
 
 
-@app.get("/api/expenses")
-def expenses_list():
-    return jsonify({"items": finance.list_expenses()})
-
-
-@app.post("/api/expenses")
-def expenses_add():
-    b = request.get_json(force=True) or {}
-    try:
-        finance.add_expense(b.get("day"), b.get("kind"), float(b.get("amount")), b.get("note"), _uname())
-    except (TypeError, ValueError):
-        return err("请填写金额")
-    return jsonify({"items": finance.list_expenses()})
-
-
-@app.delete("/api/expenses/<int:eid>")
-def expenses_delete(eid):
-    finance.delete_expense(eid)
-    return jsonify({"items": finance.list_expenses()})
-
-
 @app.post("/api/labels/import")
 def labels_import():
     f = request.files.get("file")

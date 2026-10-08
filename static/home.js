@@ -52,7 +52,7 @@
         ${list("打印机该保养了", d.maintenance, (m) => `<div class="small" data-notr>${esc(m.printer)}：${esc(m.label)}</div>`, "printers")}
         ${list("建议备货", d.stock_suggest, (s) => `<div class="small"><span class="mono" data-notr>${esc(s.sku)}</span> 建议打 ${s.suggest} 个</div>`, "stock")}
       </div>`;
-    if (cs && window.CSREC) CSREC.dash($("#dash-cs"));
+    if (cs && window.MODKIT) MODKIT.load("cs").then(() => window.CSREC && CSREC.dash($("#dash-cs"))).catch(() => {});   // v2.30：客服是模块
   }
   // （v2.24 客服报告在上面：loadDash 末尾填）
   $("#btn-dash-reload").addEventListener("click", (e) => busy(e.target, loadDash));

@@ -57,8 +57,9 @@ def new_id(prefix):
 
 def _seo_score(p):
     try:
-        from . import seo
-        return seo.quick_score(p)
+        from . import modules           # v2.30：搜索优化是模块，关掉就不算分
+        m = modules.public("seo")
+        return m.quick_score(p) if m else None
     except Exception:  # noqa: BLE001
         return None
 

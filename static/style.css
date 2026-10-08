@@ -662,3 +662,6 @@ td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .desk-opts input[type=checkbox]{width:auto;margin:0}
 .switch-l{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
 .switch-l input{width:auto;margin:0}
+
+/* v2.30 模块：属于某个模块的按钮 / 区块，模块开着才显示 */
+[data-needmod]:not(.mod-on){display:none !important}

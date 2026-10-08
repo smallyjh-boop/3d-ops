@@ -86,6 +86,94 @@ BAT_TEXT = {'4_start_worker.bat': '@echo off\ncd /d "%~dp0"\ntitle 3D Ops - PC a
 PKG_BATS = ("1_setup.bat", "3_install_bg_removal.bat", "4_start_worker.bat", "5_worker_autostart.bat")
 
 
+# ---- 安装包（桌面客户端 / 托盘加速器共用，v2.30 从 web/desktop.py 搬过来）----
+INSTALL_BAT_T = r'''@echo off
+chcp 65001 >nul
+title {TITLE} - Install
+cd /d "%~dp0"
+set "DEST=%LOCALAPPDATA%\{DIR}"
+echo.
+echo   Installing {TITLE} to %DEST% ...
+echo.
+if not exist "%DEST%" mkdir "%DEST%"
+xcopy /e /i /y /q "%~dp0app" "%DEST%\app" >nul
+if exist "%~dp0server.json" copy /y "%~dp0server.json" "%DEST%\server.json" >nul
+set "PYCMD="
+if exist "%DEST%\.venv\Scripts\pythonw.exe" goto deps
+py -3.12 --version >nul 2>nul && set "PYCMD=py -3.12"
+if not defined PYCMD py -3.13 --version >nul 2>nul && set "PYCMD=py -3.13"
+if not defined PYCMD py -3.11 --version >nul 2>nul && set "PYCMD=py -3.11"
+if not defined PYCMD if exist "%LocalAppData%\Programs\Python\Python312\python.exe" set PYCMD="%LocalAppData%\Programs\Python\Python312\python.exe"
+if defined PYCMD goto venv
+echo   Python not found - downloading Python 3.12 (about 25 MB) ...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol='Tls12'; Invoke-WebRequest 'https://www.python.org/ftp/python/3.12.7/python-3.12.7-amd64.exe' -OutFile '%TEMP%\py312.exe'"
+if not exist "%TEMP%\py312.exe" goto pyfail
+"%TEMP%\py312.exe" /quiet InstallAllUsers=0 PrependPath=0 Include_launcher=1 Include_test=0
+if exist "%LocalAppData%\Programs\Python\Python312\python.exe" set PYCMD="%LocalAppData%\Programs\Python\Python312\python.exe"
+if not defined PYCMD goto pyfail
+:venv
+echo   Creating environment ...
+%PYCMD% -m venv "%DEST%\.venv"
+if not exist "%DEST%\.venv\Scripts\pythonw.exe" goto pyfail
+:deps
+echo   Installing components (first time 3-10 minutes, needs internet) ...
+"%DEST%\.venv\Scripts\python.exe" -m pip install -q --upgrade pip
+"%DEST%\.venv\Scripts\python.exe" -m pip install -q -r "%DEST%\app\desktop\{REQ}"
+if errorlevel 1 goto pipfail
+"%DEST%\.venv\Scripts\python.exe" "%DEST%\app\desktop\setup_shortcuts.py" {SC_ARGS}
+echo.
+echo   DONE. Starting {TITLE} ...
+start "" "%DEST%\.venv\Scripts\pythonw.exe" "%DEST%\app\desktop\{ENTRY}" --installed
+timeout /t 3 /nobreak >nul
+exit /b 0
+:pyfail
+echo.
+echo   [ERROR] Could not install Python automatically.
+echo   Please install Python 3.12 from python.org, then run this file again.
+pause
+exit /b 1
+:pipfail
+echo.
+echo   [ERROR] Installing components failed. Check internet and run this file again.
+pause
+exit /b 1
+'''
+
+
+
+def install_bat(accel=False):
+    t = INSTALL_BAT_T
+    for k, v in ({"TITLE": "3D Ops Accelerator", "DIR": "3D-Ops-Accelerator", "REQ": "requirements-accel.txt", "SC_ARGS": "--accel",
+                  "ENTRY": "accel_tray.py"} if accel else
+                 {"TITLE": "3D Ops Desktop", "DIR": "3D-Ops-Desktop", "REQ": "requirements-desktop.txt", "SC_ARGS": "",
+                  "ENTRY": "desktop_app.py"}).items():
+        t = t.replace("{" + k + "}", v)
+    return t.replace("\n", "\r\n")
+
+
+def app_zip(top, extra):
+    """安装包：<top>/app/（程序：core、web、desktop、worker.py…）+ <top>/ 下的 extra 文件（{相对路径: 内容}）。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for d in PKG_DIRS:
+            for root, dirs, files in os.walk(os.path.join(BASE_DIR, d)):
+                dirs[:] = [x for x in dirs if x != "__pycache__" and not x.startswith(".")]
+                for f in files:
+                    if f.endswith((".pyc", ".pyo")):
+                        continue
+                    fp = os.path.join(root, f)
+                    z.write(fp, top + "/app/" + os.path.relpath(fp, BASE_DIR).replace(os.sep, "/"))
+        for f in PKG_FILES:
+            fp = os.path.join(BASE_DIR, f)
+            if os.path.exists(fp):
+                z.write(fp, top + "/app/" + f)
+        for k, v in extra.items():
+            z.writestr(top + "/" + k, v)
+    buf.seek(0)
+    return buf
+
+
+
 def _package(with_bats):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -123,7 +211,6 @@ def accel_package_full():
     if not u or u.get("id", -1) == -1:
         return err("请先登录", 401)
     personal = request.args.get("personal") == "1" or not auth.is_owner()
-    from web.desktop import app_zip, install_bat
     extra = {"Install.bat": install_bat(accel=True)}
     if personal:
         import secrets

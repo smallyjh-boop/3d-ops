@@ -20,7 +20,7 @@ ids = {m["id"]: m for m in C.get("/api/modules?all=1").get_json()["modules"]}
 ok("demo" in ids and "demo2" in ids and "tailscale" in ids and "Bad_Name" not in ids, f"discover {sorted(ids)}")
 ok(ids["broken"]["error"] and not ids["broken"]["enabled"], f"broken module isolated: {ids['broken']['error'][:60]}")
 ok(ids["demo"]["enabled"] and not ids["demo2"]["enabled"], "default_on respected")
-ok(ids["demo"]["menus"][0]["tab"] == "demo_page" and ids["demo"]["ui"] == {"html": True, "js": True, "css": False}, "menus + ui files")
+ok(ids["demo"]["menus"][0]["tab"] == "demo_page" and ids["demo"]["ui"]["html"] == "page.html" and ids["demo"]["ui"]["page_js"] == ["page.js"] and not ids["demo"]["ui"]["css"], "menus + ui files")
 time.sleep(0.5)
 ok(("startup",) in demo_mod.CALLS, "startup ran")
 # 接口、权限

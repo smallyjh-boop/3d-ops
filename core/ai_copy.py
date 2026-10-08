@@ -170,7 +170,7 @@ def generate_copy(cfg, product, plan=None):
     extras = (EXTRA_LEAD if lead_on else EXTRA_NO_LEAD) + (EXTRA_CUSTOM if cfg.get("copy_mention_custom", True) else "") + \
              (EXTRA_WHOLESALE if cfg.get("copy_mention_wholesale", True) else "")
     system = SYSTEM_PROMPT.replace("{extras}", extras)
-    from . import seo
+    from . import copyfacts as seo
     user = USER_TEMPLATE.format(
         weight=weight,
         name=product.get("name_zh", ""),
@@ -275,7 +275,7 @@ def complete_copy(cfg, product, plan=None):
         }.items() if k in miss}
         if opts:
             want["options_th"] = {o: "<Thai>" for o in opts}
-        from . import seo
+        from . import copyfacts as seo
         info = {"产品名称": product.get("name_zh", ""), "用途卖点": seo.clean_source(product.get("features_zh", ""))[:3000], "尺寸": product.get("size_text", ""),
                 "系统事实（只能用这些数字）": seo.facts(product),
                 "材料": product.get("material", ""), "关键词": product.get("keywords", ""),
