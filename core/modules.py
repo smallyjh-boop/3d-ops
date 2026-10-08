@@ -97,14 +97,38 @@ def _discover_in(pkg, root):
 
 
 # ---------------- 开关 ----------------
+_sets_cache = {"key": None, "off": set(), "on": set()}
+
+
+def _sets():
+    """模块开关只看设置里的 modules_off / modules_on；按设置文件的修改时间缓存（生产、库存里每次记账都要问一次，不能每次读文件）。"""
+    from .config import CONFIG_PATH
+    try:
+        st = os.stat(CONFIG_PATH)
+        key = (CONFIG_PATH, st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = (CONFIG_PATH, None, None)
+    if _sets_cache["key"] != key:
+        cfg = load_config()
+        _sets_cache.update(key=key, off=set(cfg.get("modules_off") or []), on=set(cfg.get("modules_on") or []))
+    return _sets_cache
+
+
 def _off_set(cfg=None):
-    cfg = cfg or load_config()
+    if cfg is None:
+        return set(_sets()["off"])
     return set(cfg.get("modules_off") or [])
 
 
 def _on_set(cfg=None):
-    cfg = cfg or load_config()
+    if cfg is None:
+        return set(_sets()["on"])
     return set(cfg.get("modules_on") or [])
+
+
+def is_loaded():
+    """程序已经装载了模块（app 启动过）。单独用 core 的脚本 / 电脑加速程序里没有装载，主链路按「全开」处理。"""
+    return _loaded
 
 
 def enabled(mid, cfg=None):
@@ -114,7 +138,6 @@ def enabled(mid, cfg=None):
     meta = rec["meta"]
     if meta.get("core"):
         return True
-    cfg = cfg or load_config()
     if mid in _off_set(cfg):
         return False
     if not meta.get("default_on", True) and mid not in _on_set(cfg):
@@ -249,9 +272,9 @@ def module_of_path(path):
     if path.startswith("/m/"):
         mid = path.split("/")[2] if len(path.split("/")) > 2 else ""
         return mid if mid in _mods else None
-    for p, mid in _prefixes.items():
-        if path.startswith(p):
-            return mid
+    best = max((p for p in _prefixes if path.startswith(p)), key=len, default=None)   # 最长的前缀优先（/api/inv/po 属于采购，不属于库存）
+    if best is not None:
+        return _prefixes[best]
     for rx, mid in _patterns:
         if rx.match(path):
             return mid
@@ -307,7 +330,30 @@ def _ui_files(rec):
     return {"html": conf.get("html", "page.html") if has(conf.get("html", "page.html")) else "",
             "page_js": [n for n in conf.get("page_js", ["page.js"]) if has(n)],
             "boot_js": [n for n in conf.get("boot_js", ["boot.js"]) if has(n)],
-            "css": [n for n in conf.get("css", ["page.css"]) if has(n)]}
+            "css": [n for n in conf.get("css", ["page.css"]) if has(n)],
+            # v2.31：inline = 页面直接写进首页（主链路的页面，一打开就要用）；eager_js = 跟着首页按顺序加载的 js
+            "inline": bool(conf.get("inline")),
+            "eager_js": [n for n in conf.get("eager_js", []) if has(n)]}
+
+
+def inline_parts():
+    """首页要直接放进去的模块页面和 js（开着的、inline 的模块，按 order 排）。返回 (html, [(模块, js 文件)])。"""
+    html, js = [], []
+    cfg = load_config()
+    for mid, rec in sorted(_mods.items(), key=lambda kv: (kv[1]["meta"].get("order", 50), kv[0])):
+        if rec["error"] or not enabled(mid, cfg):
+            continue
+        ui = _ui_files(rec)
+        if ui["inline"] and ui["html"]:
+            try:
+                with open(os.path.join(rec["dir"], "ui", ui["html"]), encoding="utf-8") as f:
+                    t = f.read()
+                t = re.sub(r'<section id="(tab-[\w-]+)" class="panel hidden"', rf'<section id="\1" class="panel hidden" data-module="{mid}" data-ready="1"', t)
+                html.append(f"<!-- 模块 {mid} -->\n" + t)
+            except OSError as e:
+                _log("ui", mid, str(e), "")
+        js += [(mid, n) for n in ui["eager_js"]]
+    return "\n".join(html), js
 
 
 def listing(user=None, all_=False):

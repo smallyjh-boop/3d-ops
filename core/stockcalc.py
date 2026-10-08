@@ -72,9 +72,18 @@ def available(cfg=None, fresh=True):
         return _cache["v"]
     cfg = cfg or load_config()
     st = settings(cfg)
-    from . import inventory, materials
+    from . import chain, materials
     out = {}
-    for (m, ck), g in inventory.filament_available().items():     # v2.17：耗材数量以库存管理为准
+    inv = chain.inv()
+    if inv:
+        avail = inv.filament_available()                            # v2.17：耗材数量以库存管理为准
+    else:                                                           # v2.31：库存模块关着 → 按耗材料卷的公斤数
+        avail = {}
+        from . import db as _db
+        for r in _db.conn().execute("SELECT material, color, kg FROM inventory"):
+            k2 = ((r["material"] or "PLA").upper(), r["color"] or "")
+            avail[k2] = avail.get(k2, 0.0) + float(r["kg"] or 0) * 1000
+    for (m, ck), g in avail.items():
         k = (m, ck if ck in names_codes(cfg) else _ckey(cfg, ck))
         out[k] = out.get(k, 0.0) + max(0.0, g - st["safety_g"])
     try:

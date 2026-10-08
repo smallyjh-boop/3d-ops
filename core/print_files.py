@@ -64,6 +64,9 @@ def _kind(name):
     if n.endswith(".gcode") or n.endswith(".gco"):
         return "gcode"
     if os.path.splitext(n)[1] in RESIN_EXT:
+        from . import chain
+        if not chain.resin_on():
+            raise ValueError("「树脂打印（光固化）」模块没有打开，不能上传光固化文件（设置 → 模块管理）")
         return "resin"
     raise ValueError("只支持切片好的 .gcode.3mf / .3mf（拓竹）、.gcode（Creality），"
                      "或光固化切片文件（.pm5s / .pwmx / .ctb / .goo 等）")

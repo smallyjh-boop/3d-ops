@@ -11,7 +11,7 @@ MODULE = {
     "version": "1.0",
     "desc_zh": "采购单（下单、到货入库、付款）、补货建议、供应商、付款记录。",
     "desc_th": "ใบสั่งซื้อ (สั่ง รับของเข้าสต็อก จ่ายเงิน) แนะนำเติมสต็อก ผู้ขาย ประวัติการจ่ายเงิน",
-    "depends": [],
+    "depends": ["inv"],
     "order": 30,
     "menus": [
         {"tab": "purchase", "mod": "pur", "zh": "采购单", "th": "ใบสั่งซื้อ", "roles": "owner,production,listing"},

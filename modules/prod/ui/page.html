@@ -1,0 +1,134 @@
+<!-- 模块 prod 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上） -->
+<!-- 生产 -->
+<section id="tab-production" class="panel hidden">
+  <div class="row between wrap gap">
+    <h2>生产看板</h2>
+    <div class="row gap"><button id="btn-prod-ticket">打印工单贴纸</button><button id="btn-prod-sched">重新排单</button><button id="btn-prod-reload">刷新</button></div>
+  </div>
+  <p class="muted small">每台打印机一列：上面是正在打的「这一盘」，下面是排队的任务。点「▶ 开始打印」选数量（按订单 / 满盘 / 指定），
+    同产品同颜色的任务可以拼成一盘。每次开始前都要确认热床已清空。打完自动扣耗材，多打的进成品库存。</p>
+  <div id="prod-warn"></div>
+  <div id="prod-lanes" class="lanes"></div>
+  <div class="lanes two">
+    <div class="card"><h3>后处理 / 待打包 <span id="prod-post-n" class="muted"></span></h3><div id="prod-post"></div></div>
+    <div class="card"><h3>已打包 / 待发货 <span id="prod-packed-n" class="muted"></span></h3><div id="prod-packed"></div></div>
+  </div>
+</section>
+
+<!-- 打印机 -->
+<section id="tab-printers" class="panel hidden">
+  <div class="row between"><h2>打印机</h2><button id="btn-pr-reload">刷新</button></div>
+  <p class="muted small">连上打印机以后：这里实时显示每台打印机在打什么、进度、温度、料盘颜色；生产看板可以一键发送开始打印，打完自动记录、自动扣耗材。
+    没连上的打印机也能用，员工在生产看板手动点按钮即可。下面是保养提醒（按累计打印小时）。</p>
+  <div id="pr-cards" class="lanes"></div>
+</section>
+
+<!-- 文件管理 -->
+<section id="tab-files" class="panel hidden">
+  <div class="row between wrap gap"><h2>文件管理</h2>
+    <div class="row gap"><label class="filebtn primary-file">⬆ 批量上传模型<input type="file" id="fm-bulk-models" accept=".stl,.3mf" multiple hidden></label>
+      <label class="filebtn primary-file">⬆ 批量上传切片文件<input type="file" id="fm-bulk-slices" accept=".3mf,.gcode,.gco,.pm5s,.pm5,.pm7,.pwmx,.pwma,.pwmb,.pm3,.pm4n,.ctb,.goo,.prz" multiple hidden></label></div></div>
+  <p class="muted small">所有产品的 3D 模型文件和切片文件都在这里：预览、下载、替换、恢复旧版本。批量上传模型或切片文件时，文件名以产品编号开头就能自动对应（例如 3DP0001.stl、3DP0001_K1Max_x6.gcode.3mf）；切片文件的打印机和一盘几个会从文件里自动认出来。也可以在每个产品那一行点「⬆ 上传切片文件」。
+    替换模型后，这个产品的切片文件会退回「草稿」，需要重新切片或复核。</p>
+  <div id="fm-sum" class="small"></div>
+  <div class="row gap wrap lib-filter">
+    <input id="fm-q" placeholder="搜索 编号 / 品名 / SKU / 文件名" style="width:280px" data-notr>
+    <select id="fm-kind"><option value="">全部产品</option><option value="model">有模型</option><option value="nomodel">没有模型</option><option value="slice">有切片文件</option><option value="noslice">没有可用切片文件</option></select>
+    <select id="fm-status"><option value="">切片状态：全部</option><option value="draft">草稿（未复核）</option><option value="reviewed">已复核（未试打）</option><option value="verified">已试打验证</option></select>
+    <select id="fm-printer"><option value="">全部打印机</option></select>
+  </div>
+  <div id="fm-bulk" class="ord-bulk"><span id="fm-selinfo" class="small muted"></span><button id="fm-zip">⬇ 下载选中产品的全部文件（zip）</button><button id="fm-clear" class="mini">取消勾选</button></div>
+  <table class="grid" id="fm-table"><thead><tr><th><input type="checkbox" id="fm-all"></th><th></th><th>产品</th><th>3D 模型</th><th>切片文件</th></tr></thead><tbody></tbody></table>
+</section>
+
+<!-- 打印方案 / 切片文件 -->
+<section id="tab-recipes" class="panel hidden">
+  <div class="row between wrap gap"><h2>打印方案 / 切片文件</h2>
+    <div class="row gap wrap">
+      <input id="rc-q" placeholder="搜索 编号 / 品名" style="width:200px" data-notr>
+      <select id="rc-filter"><option value="">全部产品</option><option value="none">没有可用文件</option><option value="draft">有草稿待复核</option><option value="reviewed">未试打</option><option value="verified">已试打验证</option></select>
+    </div></div>
+  <p class="muted small">每个产品一份打印方案（方向、支撑、参数、一盘几个）。按方案切片后：程序先自动检查，可以再让 AI 检查，最后由人复核确认才能用于生产；
+    试打合格后标记「已试打验证」。也可以上传在切片软件里切好的文件，同样要复核。</p>
+  <table class="grid" id="rc-table"><thead><tr><th>产品</th><th>打印方案</th><th>切片文件</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
+</section>
+
+<!-- 质量统计 -->
+<section id="tab-quality" class="panel hidden">
+  <div class="row between"><h2>质量统计</h2>
+    <select id="q-days" style="min-width:140px"><option value="7">最近 7 天</option><option value="30" selected>最近 30 天</option><option value="90">最近 90 天</option></select></div>
+  <div id="q-summary" class="card summary"></div>
+  <div class="lanes two">
+    <div class="card"><h3>失败原因</h3><table class="grid small" id="q-reason"><tbody></tbody></table></div>
+    <div class="card"><h3>失败最多的商品</h3><table class="grid small" id="q-sku"><tbody></tbody></table></div>
+    <div class="card"><h3>按打印机</h3><table class="grid small" id="q-printer"><tbody></tbody></table></div>
+    <div class="card"><h3>售后原因</h3><table class="grid small" id="q-as"><tbody></tbody></table></div>
+  </div>
+  <div class="card" id="q-calib"></div>
+  <div class="card"><h3>最近的失败记录</h3><table class="grid small" id="q-recent"><thead><tr><th>时间</th><th>打印机</th><th>SKU</th><th>原因</th><th>说明</th><th>浪费 g</th><th>账号</th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<section id="tab-materials" class="panel hidden">
+  <div class="row between"><h2>耗材库存与采购</h2><button id="btn-mat-reload">刷新</button></div>
+  <p class="muted small">所有耗材都在同一个仓库，按「卷」管理（树脂按「瓶」）：每卷有编号（F0001），可以打标签贴在料盘上。装到哪台打印机就点「上机」，那台打完一盘自动从那卷扣克数； 某个颜色的库存 = 所有没用完的卷剩余之和。快没了、没有备用卷、机上那卷不够下一盘、开封太久要烘干，都会在下面提醒（工作台也有）。</p>
+  <div id="mat-alerts"></div>
+  <div class="card">
+    <h3>入库（按卷）</h3>
+    <div class="row gap wrap">
+      <label>材料<input id="sp-material" list="sp-mat-list" value="PLA" style="width:110px" data-notr></label>
+      <datalist id="sp-mat-list"><option>PLA</option><option>PETG</option><option>TPU</option><option>ABS</option><option>ASA</option><option>PLA-CF</option><option>SILK PLA</option><option data-needmod="resin">RESIN</option></datalist>
+      <label>颜色<input id="sp-color" list="color-list" style="width:140px" data-notr></label>
+      <label>品牌<input id="sp-brand" list="sp-brands" style="width:120px" data-notr></label>
+      <datalist id="sp-brands"><option>Bambu Lab</option><option>eSUN</option><option>Sunlu</option><option>Polymaker</option><option>Creality</option><option>Anycubic</option><option>Elegoo</option></datalist>
+      <label>每卷克数<input id="sp-net" type="number" min="10" step="50" value="1000" style="width:90px"></label>
+      <label>卷数<input id="sp-count" type="number" min="1" max="200" value="1" style="width:70px"></label>
+      <label>每卷价格 ฿（可空）<input id="sp-price" type="number" min="0" style="width:100px"></label>
+      <label class="row small"><input type="checkbox" id="sp-label" checked> 入库后打印标签</label>
+      <button id="btn-sp-receive" class="primary">入库</button>
+    </div>
+    <details class="small" style="margin-top:8px"><summary>按公斤盘点（整色对账用）</summary>
+      <div class="row gap wrap">
+        <label>材料<input id="mat-material" list="sp-mat-list" value="PLA" style="width:110px" data-notr></label>
+        <label>颜色<input id="mat-color" list="color-list" style="width:140px" data-notr></label>
+        <label>公斤<input id="mat-kg" type="number" step="0.1" min="0" value="1" style="width:90px"></label>
+        <button id="btn-mat-add">入库（加上）</button>
+        <button id="btn-mat-set">盘点（设为这个数）</button>
+      </div>
+      <p class="muted small">按公斤操作时：整卷算未开封，零头加到已开封的那卷上；盘点的差额加到 / 扣在已开封的卷上。平时建议按卷入库、按卷称重。</p>
+    </details>
+  </div>
+  <div class="card">
+    <h3>采购建议</h3>
+    <p class="muted small" id="mat-params"></p>
+    <table class="grid" id="mat-table"><thead><tr><th>材料</th><th>颜色</th><th>库存 kg / 卷</th><th>待打印任务还要</th><th>每天用量 kg</th><th>还能用</th><th>预计用完</th><th>最晚下单</th><th id="mat-h-forecast">未来需要 kg</th><th>建议买（卷）</th><th>主要用在</th><th></th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <div class="row between wrap gap"><h3>料卷（每卷一行）</h3>
+      <div class="row gap wrap"><input id="sp-scan" placeholder="扫料卷标签 / 输入编号 F0001" style="width:220px" data-notr>
+        <select id="sp-status"><option value="active">在用和库存（没用完的）</option><option value="loaded">在机上</option><option value="open">已开封（在库）</option><option value="sealed">未开封</option><option value="empty">用完的</option><option value="">全部</option></select>
+        <input id="sp-q-material" placeholder="材料" style="width:90px" data-notr><input id="sp-q-color" list="color-list" placeholder="颜色" style="width:110px" data-notr>
+        <button id="sp-print" class="mini">🖨 打印勾选的标签</button></div></div>
+    <table class="grid" id="sp-table"><thead><tr><th><input type="checkbox" id="sp-all"></th><th>编号</th><th>材料 / 颜色</th><th>品牌</th><th>剩余</th><th>状态</th><th>在哪台</th><th>开封</th><th></th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card"><h3>打印机上的料</h3><p class="muted small">拓竹 AMS 会自动读出每个料盘的颜色和剩余；登记了「上机」的卷显示编号和记录剩余。排单时会优先把同颜色的任务排到已经装着这个颜色的打印机。</p>
+    <div id="mat-printers" class="lanes"></div></div>
+  <details class="card"><summary>库存变动记录</summary>
+    <table class="grid small" id="mat-log"><thead><tr><th>时间</th><th>材料</th><th>颜色</th><th>变动 kg</th><th>原因</th><th>账号</th></tr></thead><tbody></tbody></table>
+  </details>
+</section>
+
+<!-- 成品库存 / 备货 -->
+<section id="tab-stock" class="panel hidden">
+  <div class="row between"><h2>成品库存 / 备货</h2><button id="btn-stock-reload">刷新</button></div>
+  <div class="card"><h3>备货建议</h3>
+    <p class="muted small">按近 30 天销量，给卖得好的商品建议常备数量（设置里可改常备天数）。建议只是参考：在打印机排完订单、空闲的时候打，
+      不和订单抢打印机；要不要打由你决定，点「生成备货任务」后才会排进生产。</p>
+    <table class="grid" id="sg-table"><thead><tr><th>SKU</th><th>商品</th><th>近30天销量</th><th>每天约</th><th>常备数量</th><th>现有库存</th><th>订单还要</th><th>备货中</th><th>建议打</th><th>建议时间</th><th></th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card"><h3>成品库存</h3>
+    <p class="muted small">多打的、备货打好的成品。有订单时在生产看板点「用库存」直接出货。</p>
+    <div class="row gap wrap"><input id="st-sku" list="sku-list" placeholder="SKU" style="width:160px" data-notr><input id="st-qty" type="number" placeholder="现有数量" style="width:110px">
+      <input id="st-target" type="number" placeholder="常备数量（可空=自动）" style="width:170px"><button id="btn-st-save">保存</button></div>
+    <table class="grid" id="st-table"><thead><tr><th>SKU</th><th>商品</th><th>颜色</th><th>库存</th><th>常备数量</th><th>更新</th></tr></thead><tbody></tbody></table>
+  </div>
+</section>

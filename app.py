@@ -3,13 +3,14 @@
 程序结构（v2.15 起）：
   app.py        入口：版本号、启动服务器
   web/common.py Flask 应用、权限、通用小工具
-  web/*.py      各模块的接口（产品、上架、订单、生产、对接、系统）；接口路径和以前完全一样
-  core/*.py     业务逻辑
+  web/*.py      系统本身的接口（登录、设置、系统检查、电脑加速、API 密钥、模块管理）
+  modules/*/    功能模块（v2.29 起）：每个模块自己的页面、接口、权限、设置、事件、测试；接口路径和以前完全一样
+  core/*.py     业务逻辑和数据（主链路的数据层：产品、订单、生产、库存都在这里，模块之间通过 core/chain.py 的事件联动）
 """
-VERSION = "2.30.0"   # 改版本号时同时改 static/app.js 的 APP_JS_VERSION、static/api-docs.html 里的示例
+VERSION = "2.31.0"   # 改版本号时同时改 static/app.js 的 APP_JS_VERSION、static/api-docs.html 里的示例
 
 from web.common import *  # noqa: F401,F403,E402
-import web.products, web.listing, web.orders, web.production, web.integrations, web.system, web.inventory, web.accel, web.modules  # noqa: F401,E402  注册路由（不要用 from web import …，会把 core 的同名模块盖掉）
+import web.integrations, web.system, web.accel, web.modules  # noqa: F401,E402  注册路由（不要用 from web import …，会把 core 的同名模块盖掉）
 from core import modules as _modules  # noqa: E402
 _modules.load_all(app)   # v2.29：modules/ 文件夹里的功能模块（接口、权限、设置、事件）
 
@@ -31,7 +32,8 @@ def main():
     lazada_sync.start_background()   # v2.25：还没下载的 Lazada 类目模板在后台自动下载
     from core import updater
     updater.start_background()       # v2.26：每 12 小时看一下 GitHub 有没有新版本（只提醒）
-    printers_mod.start()             # 打印机状态轮询
+    if _modules.enabled("prod"):
+        printers_mod.start()         # 打印机状态轮询（v2.31：生产模块开着才轮询）
     extras.start_backup()            # 每天自动备份
     from core import preview
     preview.warm_all()               # 开机后把大模型的 3D 预览提前算好（第一次打开就快）

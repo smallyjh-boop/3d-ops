@@ -303,9 +303,11 @@ def stock_add(sku, delta, reason, user="", product_id=None, name="", color=""):
               (sku.upper(), product_id, name or "", color or "", int(delta), _now()))
     c.execute("INSERT INTO stock_log(ts, sku, delta, reason, username) VALUES(?,?,?,?,?)",
               (_now(), sku.upper(), int(delta), reason, user))
-    try:   # v2.18：成品也在库存管理里，每次变化记一笔流水
-        from .inventory import goods as _g
-        _g.on_change(c, sku, int(delta), reason, user, product_id, name, color)
+    try:   # v2.18：成品也在库存管理里，每次变化记一笔流水（v2.31：库存模块开着才记）
+        from . import chain
+        if chain.inv():
+            from .inventory import goods as _g
+            _g.on_change(c, sku, int(delta), reason, user, product_id, name, color)
     except Exception as e:  # noqa: BLE001
         import logging
         logging.getLogger("3dops").warning("成品库存流水没记上（%s %+d）：%s", sku, int(delta), e)
@@ -778,8 +780,8 @@ def set_status(job_id, status, user="", printer=None, note=None):
                                 (now, now, j["order_id"])).rowcount
     c.commit()
     if status == "done" and j["order_id"] and locals().get("shipped"):
-        from .inventory import packing
-        packing.pack_order(j["order_id"], user)
+        from . import chain
+        chain.order_status(j["order_id"], "shipped", "to_ship", user)
     if status:
         _olog(j["order_id"], user, f"生产任务 #{job_id} {STATUS_ZH.get(status, status)}", j["sku"] or "")
     schedule()
@@ -854,7 +856,8 @@ def maintenance_status():
 
 def maintenance_done(idx, item, user="", note="", parts=None):
     """记一次保养。parts：[{item_id, qty}] 这次用掉的备件 —— 从库存领用出库，记到这台打印机上（v2.18）。"""
-    if parts:
+    from . import chain
+    if parts and chain.inv():           # v2.31：库存模块关着就不领用备件
         prs = load_config().get("printers") or []
         code = (prs[idx].get("code") or f"#{idx + 1}") if 0 <= idx < len(prs) else ""
         inventory.create_doc("issue", [{"item_id": p["item_id"], "qty": p["qty"]} for p in parts], f"保养：{item}" + (f"（{note}）" if note else ""),

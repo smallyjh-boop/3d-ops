@@ -1,22 +1,49 @@
 """公共部分：Flask 应用、权限、通用小工具（err、_uname、_need…）。各模块的路由在 web/ 下面的其他文件里，
 都用 `from web.common import *` 拿到这里的东西。"""
+
+
 import datetime as dt
+
+
 import os
+
+
 import re
+
+
 import shutil
+
+
 import sys
+
+
 import threading
+
+
 import time
+
+
 import uuid
+
+
 import webbrowser
+
+
 import zipfile
 
+
 from PIL import Image
+
+
 from flask import Flask, abort, jsonify, redirect, request, send_file, send_from_directory, session
+
 
 from core import (ai_copy, scenes, attributes, catalog, categories, codes, images, imghost,
                   lazada_template, pricing, shopee, slicer, store)
+
+
 from core.config import BASE_DIR, DATA_DIR, DEFAULT_CONFIG, LIST_KEYS, load_config, save_config
+
 
 def _read_version():
     """版本号只写在 app.py 里（在线升级按它认版本），这里读出来给页面和接口用。"""
@@ -29,15 +56,32 @@ def _read_version():
 
 
 VERSION = _read_version()
+
+
 TEMPLATE_DIR = categories.TEMPLATE_DIR
+
+
 EXPORT_DIR = os.path.join(DATA_DIR, "exports")
+
+
 ALLOWED_IMG = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
+
 app = Flask("app", root_path=BASE_DIR, static_folder="static", static_url_path="/static")
+
+
 from core import auth, db  # noqa: E402  登录与权限
+
+
 auth.install(app)
+
+
 app.config["MAX_CONTENT_LENGTH"] = 60 * 1024 * 1024
+
+
 from core import diag  # noqa: E402  运行日志 / 诊断包（v2.14.1）
+
+
 diag.setup(app)
 
 
@@ -80,7 +124,8 @@ ASYNC_ROUTES = {"ai_category": "ai_cat", "ai_shopee_category": "ai_cat", "fill_a
 
 @app.before_request
 def _async_replay():
-    if request.args.get("async") != "1" or request.endpoint not in ASYNC_ROUTES:
+    short = (request.endpoint or "").split(".")[-1]          # v2.31：模块的接口 endpoint 是「m_goods.ai_category」
+    if request.args.get("async") != "1" or short not in ASYNC_ROUTES:
         return None
     from core import bgjobs
     user = auth.current_user() or {}
@@ -95,7 +140,7 @@ def _async_replay():
             g.user = user
             return app.view_functions[ep](**va)
     pid = va.get("pid") or ""
-    j = bgjobs.start(run, f"{ep} {pid}".strip(), user.get("username", ""), ASYNC_ROUTES[ep], pid)
+    j = bgjobs.start(run, f"{short} {pid}".strip(), user.get("username", ""), ASYNC_ROUTES[short], pid)
     return jsonify({"ok": True, "job": j["id"]}), 202
 
 
@@ -395,6 +440,8 @@ def _after_export(platform, pids, files, body):
 
 # ---------------- 订单 / 生产 / 耗材 / 利润 ----------------
 from core import finance, materials, orders as orders_mod, production  # noqa: E402
+
+
 for _m in (orders_mod, production, materials, finance):
     _m.init()
 
@@ -436,8 +483,14 @@ from core import labels  # noqa: E402
 
 # ---------------- 打印机 / 打印文件库 ----------------
 from core import print_files, printers as printers_mod  # noqa: E402
+
+
 print_files.init()
+
+
 printers_mod.on_change(production.on_printer_change)
+
+
 CONN_SECRET = ("access_code",)
 
 
@@ -483,73 +536,16 @@ from core import modellib  # noqa: E402
 _MESH_CACHE = {}
 
 
-@app.get("/api/products/<pid>/recipe")
-def recipe_get(pid):
-    """打印方案 + 各方向几何分析 + 每台打印机一盘能放几个 + 这个产品的切片文件。"""
-    from core import mesh, recipes, specmodel
-    try:
-        p0 = store.load(pid)
-    except FileNotFoundError:
-        return err("产品不存在", 404)
-    # v2.22：?spec= 看某个规格（规格有自己的模型时，模型、方案、切片文件都是这个规格的）
-    spec = request.args.get("spec") or ""
-    p = specmodel.view(p0, spec)
-    r = recipes.get(p)
-    out = {"recipe": r, "summary_zh": recipes.summary_zh(r), "has_model": bool(p.get("model")),
-           "orient_zh": mesh.ORIENT_ZH, "support_zh": recipes.SUPPORT_ZH, "bed_types": recipes.BED_TYPES,
-           "printers": _model_names(), "printer_idx": _model_first_idx(),
-           "files": print_files.list_files(pid), "status_zh": print_files.STATUS_ZH,
-           "review_items": print_files.REVIEW_ITEMS, "material": recipes.norm_material(p.get("material") or "PLA"),
-           "materials": recipes.MATERIALS, "temp_range": recipes.TEMP_RANGE,
-           "advice": {k: (p.get("print_advice") or {}).get(k) for k in ("risks", "temp_speed", "support_why", "orientation")}
-           if p.get("print_advice") else None}
-    out["files"] = [print_files.ensure_params(f) for f in out["files"]]
-    out["spec"] = p.get("_spec") or ""
-    out["spec_asked"] = spec
-    out["specs"] = [{"spec": s_, "own": specmodel.own(p0, s_)} for s_ in specmodel.specs(p0)]
-    if any(x["own"] for x in out["specs"]):
-        out["files"] = [f for f in out["files"] if (f.get("spec") or "") == out["spec"]]
-    from core import filemgr
-    mp = specmodel.model_path(p) if p.get("_spec") else filemgr.model_path(p)
-    out["model"] = ({k: p["model"].get(k) for k in ("file", "orig_name", "uploaded_at", "uploaded_by", "metrics", "ext", "parts_of")}
-                    | {"size": os.path.getsize(mp), "history": len(filemgr.model_history(pid)), "spec_model": bool(p.get("_spec"))}) if mp else None
-    out["setup"] = []
-    for i in out["printer_idx"]:      # 同机型只算一次
-        st = recipes.setup_info(p, r, i)
-        out["setup"].append(st)
-        if "OrcaSlicer" in str(st.get("error") or ""):      # 没装切片软件：不用每台都找一遍
-            out["setup"] += [st] * (len(out["printers"]) - i - 1)
-            break
-    if p.get("model"):
-        try:
-            tris = mesh.load(specmodel.model_path(p))
-            out["orientations"] = mesh.analyze_all(tris)
-            out["per_printer"] = []
-            for i in out["printer_idx"]:
-                g = recipes.geometry(p, r, i)
-                out["per_printer"].append({"index": i, "capacity": g.get("capacity"), "bed_mm": g.get("bed_mm")})
-            g0 = recipes.geometry(p, r, 0)
-            out["geometry"] = g0
-            out["checks"] = recipes.check(r, g0, None, p.get("material") or "PLA")
-        except Exception as e:  # 模型读不了
-            out["model_error"] = str(e)
-    return jsonify(out)
-
-
-@app.get("/api/stock")
-def stock_get():
-    return jsonify({"items": production.stock_list(), "suggest": production.stock_suggest()})
-
-
-@app.get("/api/maintenance")
-def maintenance_get():
-    return jsonify({"printers": production.maintenance_status()})
-
-
 # ---------------- 售后 / 备份 / 分组 / 工作台 / 打包核对 ----------------
 from core import extras  # noqa: E402
+
+
 extras.init()
+
+
 from core import listing  # noqa: E402  上架进度 / 批次
+
+
 listing.init()
 
 
@@ -574,8 +570,11 @@ def _strip_as(d):
 def groups_get():
     return jsonify({"groups": extras.groups()})
 
+
 # ---------------- 对外 API（/api/v1，用 API 密钥）与店铺对接 ----------------
 from core import connectors, integrations  # noqa: E402
+
+
 integrations.init()
 
 
@@ -593,8 +592,14 @@ def _v1_read_only():
 
 
 from core import specs, stockcalc  # noqa: E402,F401
+
+
 stockcalc.init()
+
+
 from core import inventory  # noqa: E402
+
+
 inventory.init()
 
 
@@ -651,4 +656,3 @@ def _free_port(port):
 
 # 给各路由模块用 `from web.common import *`（包括下划线开头的小工具）
 __all__ = [_n for _n in dir() if not _n.startswith("__")]
-

@@ -113,8 +113,10 @@ def _logrow(c, k, delta_kg, reason, user):
               (time.time(), k[0], k[1], delta_kg, reason, user))
     # v2.17：耗材数量以库存管理为准，每一笔变化同步记一笔库存流水（同一个事务）
     try:
-        from .inventory import filament as _inv
-        _inv.on_change(c, k, delta_kg, reason, user, getattr(_CTX, "v", None))
+        from . import chain
+        if chain.inv():                   # v2.31：库存模块开着才同步记库存流水
+            from .inventory import filament as _inv
+            _inv.on_change(c, k, delta_kg, reason, user, getattr(_CTX, "v", None))
     except Exception as e:  # noqa: BLE001  库存流水记不上不能影响打印 / 入库；启动时会自动对齐
         logging.getLogger("3dops").warning("库存流水没记上（%s %s %+.3f kg）：%s", k[0], k[1], delta_kg or 0, e)
 

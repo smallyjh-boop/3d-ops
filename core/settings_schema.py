@@ -63,23 +63,23 @@ MODULES = [
         ("发货（自制面单的寄件人）", [("sender_name", "寄件人 / 店名"), ("sender_phone", "寄件人电话"), ("sender_address", "寄件地址")]),
     ]},
     {"id": "cs", "zh": "客服", "th": "แชทลูกค้า", "ext": True, "module": "cs", "groups": []},
-    {"id": "production", "zh": "生产", "th": "การผลิต", "special": ["printers"], "ext": True, "groups": [
+    {"id": "production", "zh": "生产", "th": "การผลิต", "special": ["printers"], "ext": True, "module": "prod", "groups": [
         ("切片与估算", [
             ("orca_path", "OrcaSlicer 程序路径（留空自动查找）"), ("est_infill", "估算：填充率（0.15=15%）"),
             ("est_shell_mm", "估算：外壁+顶底厚度（毫米）"), ("est_support_factor", "估算：支撑损耗系数"),
             ("est_overhead_h", "估算：每次打印额外时间（小时）")]),
         ("光固化（树脂）", [
             ("resin_thb_per_kg", "树脂每公斤价格（铢）"), ("resin_extra_rate", "额外耗材比例（酒精、离型膜、手套，0.15=15%）"),
-            ("resin_density", "树脂密度（克/毫升）"), ("resin_plate_hours", "没有切片文件时，每盘按几小时估算")]),
+            ("resin_density", "树脂密度（克/毫升）"), ("resin_plate_hours", "没有切片文件时，每盘按几小时估算")], "resin"),
     ]},
     {"id": "inventory", "zh": "库存与采购", "th": "สต็อกและจัดซื้อ", "special": ["pack_rules"], "groups": [
         ("库存", [
             ("inv_loss_rate", "打印扣耗材的损耗率（0.05 = 产品克数的 5%，每个耗材也能单独设）"),
-            ("inv_categories", "自己加的物品分类（逗号分隔；内置：耗材、备件、包材、成品、工具、其他）", "list")]),
+            ("inv_categories", "自己加的物品分类（逗号分隔；内置：耗材、备件、包材、成品、工具、其他）", "list")], "inv"),
         ("耗材补货", [
             ("filament_lead_days", "耗材到货天数（从下单到收货）"), ("filament_safety_days", "安全库存天数"),
-            ("filament_cover_days", "每次补货够用天数"), ("filament_spool_kg", "每卷公斤数")]),
-        ("发货自动扣包材", [("inv_pack_auto", "订单变成「已发货」时自动扣包材", "bool")]),
+            ("filament_cover_days", "每次补货够用天数"), ("filament_spool_kg", "每卷公斤数")], "prod"),
+        ("发货自动扣包材", [("inv_pack_auto", "订单变成「已发货」时自动扣包材", "bool")], "inv"),
     ]},
     {"id": "finance", "zh": "财务", "th": "การเงิน", "module": "fin", "groups": [
         ("税（VAT）", [
@@ -116,6 +116,9 @@ def register(module_id, group_title, fields, module_zh=None, module_th=None, mod
     mod["groups"].append((group_title, list(fields), module_of) if module_of else (group_title, list(fields)))
 
 
+SPECIAL_MODULE = {"pack_rules": "inv", "printers": "prod"}     # 设置页的特殊卡片属于哪个模块（v2.31）
+
+
 def schema():
     from . import modules
     out = []
@@ -123,7 +126,8 @@ def schema():
         if m.get("module") and not modules.enabled(m["module"]):
             continue                     # 这个大分类属于一个关掉的模块
         groups = [g for g in m["groups"] if len(g) < 3 or modules.enabled(g[2])]
-        out.append({"id": m["id"], "zh": m["zh"], "th": m["th"], "special": m.get("special", []), "summary": bool(m.get("summary")),
+        special = [x for x in m.get("special", []) if modules.enabled(SPECIAL_MODULE.get(x, "goods"))]
+        out.append({"id": m["id"], "zh": m["zh"], "th": m["th"], "special": special, "summary": bool(m.get("summary")),
                     "ext": bool(m.get("ext")),
                     "groups": [{"title": g[0], "fields": [{"key": f[0], "label": f[1], "type": (f[2] if len(f) > 2 else "")} for f in g[1]]}
                                for g in groups]})

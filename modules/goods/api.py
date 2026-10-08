@@ -1,8 +1,16 @@
-"""产品资料、图片、修图、模型库、场景图、分组。"""
+"""商品模块（基础模块，不能关）的接口：产品资料、图片、修图、场景图、文案 AI、分组、类目与类目模板、Shopee 类目。
+v2.31 从 web/products.py、web/listing.py 搬过来。"""
+from flask import Blueprint
+
 from web.common import *  # noqa: F401,F403
 
+bp = Blueprint("m_goods", __name__)
+PREFIXES = []
+PATTERNS = []
+
+
 # ---------------- 产品 ----------------
-@app.get("/api/products")
+@bp.get("/api/products")
 def products():
     cfg = load_config()
     lib = categories.library()
@@ -35,7 +43,7 @@ def products():
     return jsonify(out)
 
 
-@app.post("/api/products/new")
+@bp.post("/api/products/new")
 def product_new():
     cfg = load_config()
     p = store.blank_product(store.new_id(_prefix(cfg)))
@@ -44,7 +52,7 @@ def product_new():
     return jsonify(p)
 
 
-@app.get("/api/products/<pid>")
+@bp.get("/api/products/<pid>")
 def product_get(pid):
     try:
         p = store.load(pid)
@@ -54,7 +62,7 @@ def product_get(pid):
     return jsonify(p)
 
 
-@app.post("/api/products/<pid>")
+@bp.post("/api/products/<pid>")
 def product_save(pid):
     p = request.get_json(force=True)
     c = _conflict(pid, p)
@@ -63,7 +71,7 @@ def product_save(pid):
     return jsonify(_save_from_client(pid, p))
 
 
-@app.post("/api/products/<pid>/regen-skus")
+@bp.post("/api/products/<pid>/regen-skus")
 def regen_skus(pid):
     p = request.get_json(force=True)
     c = _conflict(pid, p)
@@ -80,13 +88,13 @@ def regen_skus(pid):
     return jsonify(_save_from_client(pid, p))
 
 
-@app.delete("/api/products/<pid>")
+@bp.delete("/api/products/<pid>")
 def product_delete(pid):
     store.delete(pid)
     return jsonify({"ok": True})
 
 
-@app.post("/api/products/<pid>/duplicate")
+@bp.post("/api/products/<pid>/duplicate")
 def product_duplicate(pid):
     cfg = load_config()
     src = store.load(pid)
@@ -101,7 +109,7 @@ def product_duplicate(pid):
     return jsonify(p)
 
 
-@app.post("/api/pricing")
+@bp.post("/api/pricing")
 def pricing_preview():
     data = request.get_json(force=True) or {}
     cfg = load_config()
@@ -113,14 +121,14 @@ def pricing_preview():
                                for v in data.get("variants", [])]})
 
 
-@app.post("/api/products/<pid>/check")
+@bp.post("/api/products/<pid>/check")
 def product_check(pid):
     p = request.get_json(force=True) or store.load(pid)
     errs, warns = _check(load_config(), p)
     return jsonify({"errors": errs, "warnings": warns})
 
 
-@app.post("/api/products/<pid>/ai-category")
+@bp.post("/api/products/<pid>/ai-category")
 def ai_category(pid):
     p = request.get_json(force=True)
     cfg = load_config()
@@ -143,7 +151,7 @@ def ai_category(pid):
     return jsonify(p)
 
 
-@app.post("/api/products/<pid>/fill-attrs")
+@bp.post("/api/products/<pid>/fill-attrs")
 def fill_attrs(pid):
     p = request.get_json(force=True)
     cfg = load_config()
@@ -157,7 +165,7 @@ def fill_attrs(pid):
     return jsonify({"product": p, "used_ai": use_ai})
 
 
-@app.post("/api/products/<pid>/ai-shopee-category")
+@bp.post("/api/products/<pid>/ai-shopee-category")
 def ai_shopee_category(pid):
     p = request.get_json(force=True)
     cfg = load_config()
@@ -168,7 +176,7 @@ def ai_shopee_category(pid):
     return jsonify(_save_from_client(pid, p))
 
 
-@app.post("/api/products/<pid>/check-shopee")
+@bp.post("/api/products/<pid>/check-shopee")
 def product_check_shopee(pid):
     p = request.get_json(force=True) or store.load(pid)
     errs, warns = _check_shopee(load_config(), p)
@@ -176,123 +184,12 @@ def product_check_shopee(pid):
 
 
 # ---------------- 3D 模型 / 克数时长 ----------------
-@app.get("/api/colors")
+@bp.get("/api/colors")
 def colors():
     return jsonify(codes.color_hex(load_config()))
 
 
-@app.post("/api/products/<pid>/model")
-def model_upload(pid):
-    f = request.files.get("file")
-    ext = os.path.splitext((f.filename if f else "") or "")[1].lower()
-    if not f or ext not in (".stl", ".3mf"):
-        return err("请上传 .stl 或 .3mf 模型文件")
-    from core import filemgr
-    tmp = os.path.join(DATA_DIR, "tmp")
-    os.makedirs(tmp, exist_ok=True)
-    path = os.path.join(tmp, uuid.uuid4().hex + ext)
-    try:
-        has_model = bool((store.load(pid).get("model") or {}).get("file"))
-    except FileNotFoundError:
-        has_model = False
-    if has_model and not auth.has_perm(auth.current_user() or {"role": "owner"}, "models.change"):
-        return err(_no_perm("models.change"), 403)
-    f.save(path)
-    fname = f.filename
-
-    def go():
-        try:
-            r = filemgr.set_model(pid, path, fname, _uname())
-        except (ValueError, OSError) as e:
-            return err(f"模型文件读不了：{e}")
-        finally:
-            if os.path.exists(path):
-                os.remove(path)
-        p = r["product"]
-        p["_model_replaced"] = r["replaced"]
-        p["_files_reset"] = r["files_reset"]
-        return jsonify(p)
-    return maybe_async(f"上传模型 {pid}", go, "model", pid)    # v2.20：?async=1 时后台读模型（大文件交给电脑）
-
-
-@app.post("/api/products/<pid>/model/metrics")
-def model_metrics(pid):
-    m = request.get_json(force=True) or {}
-    cfg = load_config()
-    p = store.load(pid)
-    if not p.get("model"):
-        return err("还没有上传模型")
-    est = slicer.estimate(_advised_cfg(cfg, p), m, p.get("material", "PLA"))
-    p["model"]["metrics"] = {"volume_mm3": m.get("volume_mm3"), "area_mm2": m.get("area_mm2"), "size": m.get("size")}
-    p["model"]["estimate"] = est
-    store.save(p)
-    return jsonify({"estimate": est, "product": p})
-
-
-@app.post("/api/products/<pid>/print-advice")
-def print_advice_api(pid):
-    """AI 打印建议 + 产品描述。body: analysis（模型几何分析）, prompt, image（渲染图 dataURL，可选）"""
-    from core import print_advice
-    body = request.get_json(force=True) or {}
-    cfg = load_config()
-    p = store.load(pid)
-    img = body.get("image") or ""
-    if "," in img:
-        img = img.split(",", 1)[1]
-    try:
-        adv = print_advice.advise(cfg, p, body.get("analysis") or {}, body.get("prompt") or "", img or None)
-    except ai_copy.AIError as e:
-        return err(str(e))
-    adv["analysis"] = body.get("analysis") or {}
-    adv["prompt"] = body.get("prompt") or ""
-    adv["created_at"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-    adv["applied"] = bool((p.get("print_advice") or {}).get("applied"))
-    p["print_advice"] = adv
-    store.save(p)
-    return jsonify({"product": p})
-
-
-@app.post("/api/products/<pid>/print-advice/apply")
-def print_advice_apply(pid):
-    """applied=true：估算和 OrcaSlicer 自动切片按建议参数来；false：恢复默认参数。"""
-    body = request.get_json(force=True) or {}
-    p = store.load(pid)
-    if not p.get("print_advice"):
-        return err("还没有打印建议")
-    p["print_advice"]["applied"] = bool(body.get("applied", True))
-    cfg = load_config()
-    mt = (p.get("model") or {}).get("metrics")
-    if mt and mt.get("volume_mm3"):
-        p["model"]["estimate"] = slicer.estimate(_advised_cfg(cfg, p), mt, p.get("material", "PLA"))
-    store.save(p)
-    return jsonify({"product": p})
-
-
-@app.post("/api/products/<pid>/slice")
-def model_slice(pid):
-    body = request.get_json(force=True) or {}
-    return maybe_async(f"切片 {pid}", lambda: _model_slice(pid, body), "slice", pid)
-
-
-def _model_slice(pid, body):
-    cfg = load_config()
-    p = store.load(pid)
-    m = p.get("model")
-    if not m:
-        return err("还没有上传模型")
-    path = os.path.join(store.image_dir(pid, "model"), m["file"])
-    try:
-        from core import print_advice
-        adv = p.get("print_advice") or {}
-        ov = print_advice.slice_overrides(adv) if adv.get("applied") else None
-        r = slicer.orca_slice(cfg, path, int(body.get("printer", 0)), p.get("material", "PLA"), overrides=ov)
-    except slicer.SliceError as e:
-        return err(str(e))
-    _learn(cfg, p, r.get("grams"))
-    return jsonify(r)
-
-
-@app.post("/api/products/<pid>/images/rendered")
+@bp.post("/api/products/<pid>/images/rendered")
 def images_rendered(pid):
     """保存浏览器里渲染/合成好的图（商品图或场景图）。"""
     body = request.get_json(force=True) or {}
@@ -310,7 +207,7 @@ def images_rendered(pid):
 
 
 # ---------------- 卖点图（AI 推荐文字，人确认位置和内容） ----------------
-@app.get("/fonts/thai.css")
+@bp.get("/fonts/thai.css")
 def fonts_css():
     from core import adimg
     r = app.response_class(adimg.thai_css(), mimetype="text/css")
@@ -318,13 +215,13 @@ def fonts_css():
     return r
 
 
-@app.get("/fonts/f/<name>")
+@bp.get("/fonts/f/<name>")
 def fonts_file(name):
     from core import adimg
     return send_from_directory(adimg.FONT_DIR, os.path.basename(name), max_age=31536000)
 
 
-@app.post("/api/products/<pid>/ad/suggest")
+@bp.post("/api/products/<pid>/ad/suggest")
 def ad_suggest(pid):
     from core import adimg
     try:
@@ -344,7 +241,7 @@ def ad_suggest(pid):
         return err(f"AI 出错：{e}")
 
 
-@app.post("/api/products/<pid>/ad/save")
+@bp.post("/api/products/<pid>/ad/save")
 def ad_save(pid):
     """保存卖点图：浏览器里合成好的图 + 设计稿（以后可以再打开修改）。同一个设计再次保存会替换原来那张图。"""
     from PIL import Image
@@ -386,14 +283,14 @@ def ad_save(pid):
 
 
 # ---------------- 场景图 ----------------
-@app.get("/api/scenes")
+@bp.get("/api/scenes")
 def scenes_list():
     return jsonify({"library": scenes.library(),
                     "presets": [{"key": k, "name": v[0]} for k, v in scenes.PRESETS.items()],
                     "bg_presets": [{"key": k, "name": v[0]} for k, v in scenes.BG_PRESETS.items()]})
 
 
-@app.post("/api/scenes/ai")
+@bp.post("/api/scenes/ai")
 def scenes_ai_bg():
     """AI 生成一张空背景存进背景库（不含产品，所有产品通用）。"""
     b = request.get_json(force=True) or {}
@@ -406,7 +303,7 @@ def scenes_ai_bg():
     return jsonify({"added": sid, "library": scenes.library()})
 
 
-@app.post("/api/scenes")
+@bp.post("/api/scenes")
 def scenes_upload():
     fs = request.files.getlist("files")
     if not fs:
@@ -418,14 +315,14 @@ def scenes_upload():
     return jsonify({"added": ids, "library": scenes.library()})
 
 
-@app.post("/api/scenes/<sid>")
+@bp.post("/api/scenes/<sid>")
 def scenes_update(sid):
     b = request.get_json(force=True) or {}
     scenes.update_user(sid, floor_y=b.get("floor_y"), scale=b.get("scale"), name=b.get("name"))
     return jsonify({"library": scenes.library()})
 
 
-@app.delete("/api/scenes/<sid>")
+@bp.delete("/api/scenes/<sid>")
 def scenes_delete(sid):
     try:
         scenes.delete_user(sid)
@@ -434,12 +331,12 @@ def scenes_delete(sid):
     return jsonify({"library": scenes.library()})
 
 
-@app.get("/scenes/<sid>")
+@bp.get("/scenes/<sid>")
 def scenes_file(sid):
     return send_from_directory(scenes.USER_DIR, sid)
 
 
-@app.post("/api/products/<pid>/scene-ai")
+@bp.post("/api/products/<pid>/scene-ai")
 def scene_ai(pid):
     """AI 生成一张场景图。body: image（产品透明 PNG 或白底图 dataURL）, scene（预设 key 或自己写的场景描述）, extra"""
     b = request.get_json(force=True) or {}
@@ -458,14 +355,14 @@ def scene_ai(pid):
 
 
 # ---------------- 图片 ----------------
-@app.get("/files/<pid>/<kind>/<name>")
+@bp.get("/files/<pid>/<kind>/<name>")
 def files(pid, kind, name):
     if kind not in ("raw", "out", "model", "source_files"):
         abort(404)
     return send_from_directory(store.image_dir(pid, kind), name, as_attachment=kind == "source_files")
 
 
-@app.post("/api/products/<pid>/images")
+@bp.post("/api/products/<pid>/images")
 def image_upload(pid):
     p = store.load(pid)
     added = []
@@ -483,7 +380,7 @@ def image_upload(pid):
     return jsonify(p)
 
 
-@app.post("/api/products/<pid>/images/process")
+@bp.post("/api/products/<pid>/images/process")
 def image_process(pid):
     body = request.get_json(force=True) or {}
     return maybe_async(f"处理图片 {pid}", lambda: _image_process(pid, body), "image", pid)
@@ -511,7 +408,7 @@ def _image_process(pid, body):
     return jsonify({"product": p, "processed": done})
 
 
-@app.post("/api/products/<pid>/images/white")
+@bp.post("/api/products/<pid>/images/white")
 def image_white(pid):
     body = request.get_json(force=True) or {}
     return maybe_async(f"白底图 {pid}", lambda: _image_white(pid, body), "image", pid)
@@ -534,12 +431,12 @@ def _image_white(pid, body):
     return jsonify(p)
 
 
-@app.get("/api/imgtool/status")
+@bp.get("/api/imgtool/status")
 def imgtool_status():
     return jsonify(imgtools.status())
 
 
-@app.post("/api/imgtool/removebg")
+@bp.post("/api/imgtool/removebg")
 def imgtool_removebg():
     b = request.get_json(force=True) or {}
     return maybe_async("抠图", lambda: _removebg(b), "removebg")
@@ -553,7 +450,7 @@ def _removebg(b):
     return jsonify({"data": imgtools.to_data_url(out)})
 
 
-@app.post("/api/imgtool/inpaint")
+@bp.post("/api/imgtool/inpaint")
 def imgtool_inpaint():
     b = request.get_json(force=True) or {}
     return maybe_async("去水印 / 杂物", lambda: _inpaint(b), "inpaint")
@@ -570,14 +467,14 @@ def _inpaint(b):
     return jsonify({"data": imgtools.to_data_url(out, "PNG" if out.mode == "RGBA" else "JPEG"), "method": used})
 
 
-@app.post("/api/imgtool/install-lama")
+@bp.post("/api/imgtool/install-lama")
 def imgtool_install_lama():
     if not auth.is_owner() and auth.current_user():
         return err("只有老板可以安装组件", 403)
     return jsonify(imgtools.install_lama())
 
 
-@app.post("/api/products/<pid>/images/edited")
+@bp.post("/api/products/<pid>/images/edited")
 def image_edited(pid):
     """保存修好的图：mode=new 加成一张新图（排在原图后面）；mode=replace 替换原图（第一次替换时备份原图，可以恢复）。"""
     b = request.get_json(force=True) or {}
@@ -630,7 +527,7 @@ def image_edited(pid):
     return jsonify(p)
 
 
-@app.post("/api/products/<pid>/images/restore")
+@bp.post("/api/products/<pid>/images/restore")
 def image_restore(pid):
     """恢复修图前的原图。"""
     b = request.get_json(force=True) or {}
@@ -653,7 +550,7 @@ def image_restore(pid):
     return jsonify(p)
 
 
-@app.post("/api/products/<pid>/images/reorder")
+@bp.post("/api/products/<pid>/images/reorder")
 def image_reorder(pid):
     body = request.get_json(force=True) or {}
     order = body.get("order") or []
@@ -676,7 +573,7 @@ def image_reorder(pid):
     return jsonify(p)
 
 
-@app.post("/api/products/<pid>/images/host")
+@bp.post("/api/products/<pid>/images/host")
 def image_host(pid):
     cfg = load_config()
     p = store.load(pid)
@@ -699,7 +596,7 @@ def image_host(pid):
     return jsonify({"product": p, "uploaded": n})
 
 
-@app.post("/api/products/<pid>/images/url")
+@bp.post("/api/products/<pid>/images/url")
 def image_set_url(pid):
     body = request.get_json(force=True) or {}
     p = store.load(pid)
@@ -712,7 +609,7 @@ def image_set_url(pid):
     return jsonify(p)
 
 
-@app.post("/api/products/<pid>/keywords")
+@bp.post("/api/products/<pid>/keywords")
 def ai_keywords(pid):
     """AI 关键词扩展：按泰国平台搜索习惯列出所有相关搜索词。"""
     from core import keywords
@@ -724,7 +621,7 @@ def ai_keywords(pid):
     return jsonify({"plan": plan, "keywords": keywords.keywords_field(plan)})
 
 
-@app.post("/api/products/<pid>/ai")
+@bp.post("/api/products/<pid>/ai")
 def ai_generate(pid):
     """生成文案。还没有关键词扩展时先自动做一次。"""
     p = request.get_json(force=True) or store.load(pid)
@@ -747,7 +644,7 @@ def _ai_generate(p):
     return jsonify(data)
 
 
-@app.post("/api/products/<pid>/ai-en")
+@bp.post("/api/products/<pid>/ai-en")
 def ai_english(pid):
     """按泰文生成英文标题和英文详情（v2.22）。body 可以带编辑页里还没保存的产品。"""
     p = request.get_json(silent=True) or store.load(pid)
@@ -757,7 +654,7 @@ def ai_english(pid):
         return err(str(e))
 
 
-@app.post("/api/products/<pid>/ai-complete")
+@bp.post("/api/products/<pid>/ai-complete")
 def ai_complete(pid):
     """把空着的文案字段补完整（英文标题 / 详情、Shopee 标题和标签、包装内容、变体名称和选项泰文……），已经有的不动（v2.22）。
     body 可以带编辑页里还没保存的产品；返回补出来的字段，由页面合进去。"""
@@ -768,7 +665,7 @@ def ai_complete(pid):
         return err(str(e))
 
 
-@app.post("/api/products/fill-copy")
+@bp.post("/api/products/fill-copy")
 def fill_copy_bulk():
     """批量补全文案：有空字段的产品（或指定 ids）。后台做，进任务中心。"""
     b = request.get_json(silent=True) or {}
@@ -810,7 +707,7 @@ def fill_copy(ids=None, user=""):
     return {"ok": True, "done": done, "failed": failed, "total": len(todo)}
 
 
-@app.post("/api/ai/back-translate")
+@bp.post("/api/ai/back-translate")
 def ai_back():
     body = request.get_json(force=True) or {}
     try:
@@ -819,7 +716,7 @@ def ai_back():
         return err(str(e))
 
 
-@app.get("/api/skus")
+@bp.get("/api/skus")
 def skus_list():
     """所有产品的 SKU（手工订单输入时提示用）。生产角色不返回价格。"""
     cfg = load_config()
@@ -839,370 +736,7 @@ def skus_list():
     return jsonify(out)
 
 
-_STL_CACHE = {}
-
-
-def _stl_response(fp):
-    """把模型（3MF / OBJ 等）转成二进制 STL 给 3D 预览用：拓竹、Orca 的项目 3MF 浏览器读不了时用这个。"""
-    import tempfile as _tf
-    from core import mesh, modellib
-    key = (fp, os.path.getmtime(fp))
-    data = _STL_CACHE.get(key)
-    if data is None:
-        parts = modellib.load_parts(fp)
-        import numpy as _np
-        tris = _np.concatenate([t for _n, t in parts])
-        with _tf.NamedTemporaryFile(suffix=".stl", delete=False) as f:
-            tmp = f.name
-        try:
-            mesh.write_stl(tris, tmp)
-            with open(tmp, "rb") as f:
-                data = f.read()
-        finally:
-            os.remove(tmp)
-        if len(_STL_CACHE) > 8:
-            _STL_CACHE.clear()
-        _STL_CACHE[key] = data
-    return app.response_class(data, mimetype="model/stl")
-
-
-def _preview_response(fp):
-    """?nowait=1（新版页面）：大文件还没算好时不让浏览器干等，回 202 并在后台排队算，浏览器先读完整模型，下次打开就快了。"""
-    from core import filemgr, preview
-    if request.args.get("nowait") and not preview.ready(fp) and os.path.getsize(fp) >= preview.SYNC_BYTES:
-        preview.warm(fp)
-        return jsonify({"ok": False, "pending": True, "msg": "预览模型正在后台生成"}), 202
-    etag = os.path.basename(preview.cache_path(fp))
-    if request.if_none_match and etag in request.if_none_match:      # 浏览器里已经有这份：不用再下载（304）
-        r = app.response_class(status=304)
-    else:
-        r = app.response_class(preview.build(fp, filemgr.metrics), mimetype="application/octet-stream")
-        r.headers["Content-Encoding"] = "gzip"
-    r.set_etag(etag)
-    r.headers["Cache-Control"] = "no-cache"
-    return r
-
-
-@app.get("/api/products/<pid>/model/preview")
-def model_preview(pid):
-    """3D 预览用的精简模型（大模型先快速显示，放大 / 出图时浏览器再读完整模型）。"""
-    from core import filemgr
-    try:
-        p = store.load(pid)
-    except FileNotFoundError:
-        return err("产品不存在", 404)
-    fp = filemgr.model_path(p)
-    if not fp:
-        return err("这个产品没有模型文件", 404)
-    try:
-        return _preview_response(fp)
-    except Exception as e:  # noqa: BLE001
-        return err(f"模型读不了：{e}")
-
-
-@app.get("/api/products/<pid>/model/stl")
-def model_stl(pid):
-    from core import filemgr
-    try:
-        p = store.load(pid)
-    except FileNotFoundError:
-        return err("产品不存在", 404)
-    fp = filemgr.model_path(p)
-    if not fp:
-        return err("这个产品没有模型文件", 404)
-    try:
-        return _stl_response(fp)
-    except Exception as e:  # noqa: BLE001  文件坏了
-        return err(f"模型读不了：{e}")
-
-
-@app.get("/api/products/<pid>/model/download")
-def model_download(pid):
-    from core import filemgr
-    try:
-        p = store.load(pid)
-    except FileNotFoundError:
-        return err("产品不存在", 404)
-    fp = filemgr.model_path(p)
-    if not fp:
-        return err("这个产品没有模型文件", 404)
-    name = f"{p['id']}_{p['model'].get('orig_name') or p['model']['file']}"
-    return send_file(fp, as_attachment=True, download_name=name)
-
-
-@app.get("/api/products/<pid>/model/history")
-def model_history(pid):
-    from core import filemgr
-    return jsonify({"history": filemgr.model_history(pid)})
-
-
-@app.get("/api/products/<pid>/model/history/<name>")
-def model_history_download(pid, name):
-    from core import filemgr
-    fp = filemgr.history_path(pid, name)
-    if not fp:
-        return err("文件不存在", 404)
-    return send_file(fp, as_attachment=True, download_name=f"{pid}_old_{name.partition('__')[2] or name}")
-
-
-@app.post("/api/products/<pid>/model/restore")
-def model_restore(pid):
-    from core import filemgr
-    try:
-        r = filemgr.restore_model(pid, (request.get_json(force=True) or {}).get("name", ""), _uname())
-    except (ValueError, OSError) as e:
-        return err(str(e))
-    return jsonify({"ok": True, "files_reset": r["files_reset"]})
-
-
-@app.delete("/api/products/<pid>/model")
-def model_delete(pid):
-    from core import filemgr
-    filemgr.delete_model(pid)
-    return jsonify({"ok": True})
-
-
-@app.get("/api/products/<pid>/models")
-def models_lib(pid):
-    try:
-        return jsonify(modellib.library(pid))
-    except FileNotFoundError:
-        return err("找不到这个产品", 404)
-
-
-@app.post("/api/products/<pid>/models")
-def models_upload(pid):
-    files = request.files.getlist("files")
-    if not files:
-        return err("请选择模型文件")
-    variant = request.form.get("variant") or ""
-    for_spec = (request.form.get("spec") or "").strip()     # v2.22.1：给某个规格上传 / 更换模型，传完直接指定
-    if for_spec:
-        variant = for_spec
-    # 先把文件存下来（后台线程里读不到上传的文件），读模型 / 分析放后台（v2.20）
-    tmp = os.path.join(DATA_DIR, "tmp")
-    os.makedirs(tmp, exist_ok=True)
-    saved = []
-    for f in files:
-        sp = os.path.join(tmp, "up_" + uuid.uuid4().hex)
-        f.save(sp)
-        saved.append(modellib.SavedFile(sp, f.filename))
-
-    def go():
-        try:
-            added = modellib.upload(pid, saved, _uname(), variant)
-            if for_spec and added:
-                from core import specmodel
-                specmodel.map_spec(pid, for_spec, added[0]["id"], _uname())
-        except (ValueError, OSError) as e:
-            return err(str(e))
-        finally:
-            for x in saved:
-                x.cleanup()
-        return jsonify(modellib.library(pid))
-    return maybe_async(f"上传模型库 {pid}", go, "model_lib", pid)
-
-
-@app.post("/api/products/<pid>/models/reanalyze")
-def models_reanalyze(pid):
-    return maybe_async(f"重新分析模型 {pid}", lambda: jsonify(modellib.library(pid, reanalyze=True)), "model_re", pid)
-
-
-@app.post("/api/products/<pid>/models/current")
-def models_current(pid):
-    b = request.get_json(force=True) or {}
-    return maybe_async(f"设为当前模型 {pid}", lambda: _models_current(pid, b), "model_cur", pid)
-
-
-def _models_current(pid, b):
-    try:
-        r = modellib.make_current(pid, b.get("items") or [], _uname(), b.get("name") or "", b.get("bed_w"))
-    except (ValueError, OSError) as e:
-        return err(str(e))
-    out = modellib.library(pid)
-    out.update(files_reset=r["files_reset"], merged=bool(r["merged"]))
-    return jsonify(out)
-
-
-@app.post("/api/products/<pid>/models/layout-preview")
-def models_layout_preview(pid):
-    """预览摆盘：按勾选的零件、数量、方向排好一盘，返回三角面（Float32，gzip），不保存。"""
-    import gzip as _gz
-    b = request.get_json(force=True) or {}
-    try:
-        tris = modellib.layout_preview(pid, b.get("items") or [], b.get("bed_w"))
-    except FileNotFoundError:
-        return err("找不到这个产品", 404)
-    except (ValueError, OSError) as e:
-        return err(str(e))
-    resp = app.response_class(_gz.compress(tris.astype("<f4").tobytes(), 4), mimetype="application/octet-stream")
-    resp.headers["Content-Encoding"] = "gzip"
-    return resp
-
-
-@app.post("/api/products/<pid>/models/ai-check")
-def models_ai_check(pid):
-    """AI 检查摆盘：按选中的模型和方向，判断空打 / 打飞的机率。"""
-    b = request.get_json(force=True) or {}
-    return maybe_async(f"AI 检查摆盘 {pid}", lambda: _ai_check(pid, b), "ai_check", pid)
-
-
-def _ai_check(pid, b):
-    try:
-        return jsonify(modellib.ai_check(pid, b.get("items") or [], _uname()))
-    except FileNotFoundError:
-        return err("找不到这个产品", 404)
-    except ValueError as e:
-        return err(str(e))
-    except Exception as e:  # noqa: BLE001  AI 没设置 / 网络错误 / 回答不是 JSON
-        return err(f"AI 检查失败：{e}")
-
-
-@app.post("/api/products/<pid>/models/<eid>/spec")
-def models_spec(pid, eid):
-    try:
-        return jsonify(modellib.set_spec(pid, eid, (request.get_json(force=True) or {}).get("spec") or "", _uname()))
-    except ValueError as e:
-        return err(str(e))
-
-
-@app.delete("/api/products/<pid>/models/<eid>")
-def models_delete(pid, eid):
-    try:
-        return jsonify(modellib.remove(pid, eid, _uname()))
-    except ValueError as e:
-        return err(str(e))
-
-
-@app.get("/api/products/<pid>/models/<eid>/<what>")
-def models_file(pid, eid, what):
-    p = store.load(pid)
-    e = next((x for x in p.get("model_lib") or [] if x["id"] == eid), None)
-    if not e:
-        return err("模型库里没有这个文件", 404)
-    if what == "thumb":
-        th = (e.get("info") or {}).get("thumb")
-        fp = os.path.join(store.product_dir(pid), "models", th) if th else None
-        if not fp or not os.path.exists(fp):
-            return err("没有缩略图", 404)
-        return send_file(fp, mimetype="image/png")
-    if what == "preview":
-        fp = modellib.path_of(pid, e)
-        if not fp:
-            return err("文件不见了", 404)
-        try:
-            return _preview_response(fp)
-        except Exception as ex:  # noqa: BLE001
-            return err(f"模型读不了：{ex}")
-    if what == "stl":
-        fp = modellib.path_of(pid, e)
-        if not fp:
-            return err("文件不见了", 404)
-        try:
-            return _stl_response(fp)
-        except Exception as ex:  # noqa: BLE001
-            return err(f"模型读不了：{ex}")
-    if what != "download":
-        return err("不对", 404)
-    fp = modellib.path_of(pid, e)
-    if not fp:
-        return err("文件不见了", 404)
-    return send_file(fp, as_attachment=request.args.get("inline") != "1", download_name=e.get("orig_name") or e["file"])
-
-
-@app.get("/api/products/<pid>/mesh")
-def product_mesh(pid):
-    """按摆放方向转好的模型三角面（Float32，gzip），给打印方案里的实时 3D 预览用。"""
-    import gzip as _gz
-    from core import mesh
-    from core import specmodel
-    try:
-        p = specmodel.view(store.load(pid), request.args.get("spec") or "")      # ?spec=：规格自己的模型（v2.22）
-    except FileNotFoundError:
-        return err("产品不存在", 404)
-    path = specmodel.model_path(p)
-    if not path:
-        return err("没有 3D 模型", 404)
-    orient = request.args.get("orient") or "bottom"
-    if orient not in mesh.ORIENT_ZH:
-        orient = "bottom"
-    try:
-        key = (path, orient, os.path.getmtime(path))
-        blob = _MESH_CACHE.get(key)
-        if blob is None:
-            tris = mesh.rotate(mesh.load(path), orient)
-            blob = _gz.compress(tris.astype("<f4").tobytes(), 4)
-            if len(_MESH_CACHE) > 12:
-                _MESH_CACHE.clear()
-            _MESH_CACHE[key] = blob
-    except (OSError, ValueError) as e:
-        return err(f"模型读取失败：{e}")
-    resp = app.response_class(blob, mimetype="application/octet-stream")
-    resp.headers["Content-Encoding"] = "gzip"
-    return resp
-
-
-@app.get("/api/products/<pid>/filaments")
-def product_filaments(pid):
-    """某台打印机可选的耗材配置（按产品材料筛选）。"""
-    from core import recipes
-    try:
-        p = store.load(pid)
-    except FileNotFoundError:
-        return err("产品不存在", 404)
-    mat = request.args.get("material") or p.get("material") or "PLA"
-    return jsonify(recipes.filament_choices(int(request.args.get("printer") or 0), mat))
-
-
-@app.post("/api/products/<pid>/recipe")
-def recipe_save(pid):
-    from core import recipes, specmodel
-    p = store.load(pid)
-    body = request.get_json(force=True) or {}
-    r = recipes.clean(body)
-    if body.get("material"):
-        mat = recipes.norm_material(body["material"])
-        if (p.get("material") or "PLA").upper() != mat:
-            r["filament"] = {}          # 换了材料：之前指定的耗材配置作废
-            p["material"] = mat
-            store.save(p)
-    r["updated_at"] = time.time()
-    r["updated_by"] = _uname()
-    specmodel.save_recipe(pid, body.get("spec") or "", r)      # 规格有自己的模型时存到规格的方案里（v2.22）
-    return recipe_get(pid)
-
-
-@app.post("/api/products/<pid>/recipe/slice")
-def recipe_slice(pid):
-    """按打印方案切片：选打印机和一盘数量，生成新版本（草稿），带切片报告和自动检查。"""
-    b = request.get_json(force=True) or {}
-    return maybe_async(f"按方案切片 {pid}", lambda: _recipe_slice(pid, b), "slice", pid)
-
-
-def _recipe_slice(pid, b):
-    from core import recipes
-    try:
-        from core import specmodel
-        p = specmodel.view(store.load(pid), b.get("spec") or "")     # 规格有自己的模型时切那个模型（v2.22）
-        sp = p.get("_spec") or ""
-        idx = int(b.get("printer") or 0)
-        names = [x.get("name") for x in load_config().get("printers") or []]
-        r = recipes.get(p)
-        count = int(b.get("count") or r.get("per_plate") or 1)
-        tmp, rep, r = recipes.slice_product(p, idx, count, r)
-        geo = recipes.geometry(p, r, idx)
-        checks = recipes.check(r, geo, rep, p.get("material") or "PLA")
-        f = print_files.add(tmp, f"{pid}{'_' + sp if sp else ''}_{names[idx]}_x{count}.gcode.3mf".replace(" ", "_"), pid, names[idx],
-                            b.get("sku") or "", count, b.get("color") or "", "按打印方案切片" + (f"（规格 {sp}）" if sp else ""), _uname(),
-                            p.get("material") or "PLA", rep.get("grams_per_plate"), rep.get("hours_per_plate"), move=True,
-                            recipe=r, report=rep, checks=checks, source="recipe", spec=sp)
-    except (slicer.SliceError, ValueError, OSError, IndexError) as e:
-        return err(f"切片失败：{e}")
-    production.schedule()
-    return jsonify(f)
-
-
-@app.post("/api/groups")
+@bp.post("/api/groups")
 def groups_post():
     b = request.get_json(force=True) or {}
     try:
@@ -1212,13 +746,13 @@ def groups_post():
     return groups_get()
 
 
-@app.delete("/api/groups/<int:gid>")
+@bp.delete("/api/groups/<int:gid>")
 def groups_delete(gid):
     extras.group_delete(gid)
     return groups_get()
 
 
-@app.post("/api/groups/assign")
+@bp.post("/api/groups/assign")
 def groups_assign():
     b = request.get_json(force=True) or {}
     n = extras.group_assign(b.get("ids") or [], int(b.get("group") or 0), bool(b.get("add", True)))
@@ -1226,7 +760,7 @@ def groups_assign():
 
 
 # ---------------- 规格确认、按耗材算的库存（v2.16） ----------------
-@app.post("/api/products/<pid>/specs/<path:spec_id>/<action>")
+@bp.post("/api/products/<pid>/specs/<path:spec_id>/<action>")
 def spec_confirm(pid, spec_id, action):
     """待确认的规格：ok 确认没问题 / keep 选品工具删了也保留 / delete 删掉这个规格和它的 SKU。"""
     from core import specs
@@ -1250,7 +784,7 @@ def spec_confirm(pid, spec_id, action):
     return jsonify({"ok": True, "product": p})
 
 
-@app.post("/api/products/<pid>/ip-risk")
+@bp.post("/api/products/<pid>/ip-risk")
 def ip_risk_set(pid):
     """侵权待确认（选品工具 listing.ip_risk）：ok = 确认没问题（已改掉品牌 / 角色词，或确认不侵权）；pending = 改回待确认。"""
     act = (request.get_json(force=True, silent=True) or {}).get("action")
@@ -1268,7 +802,7 @@ def ip_risk_set(pid):
     return jsonify({"ok": True, "product": p})
 
 
-@app.get("/api/products/<pid>/stock")
+@bp.get("/api/products/<pid>/stock")
 def product_stock(pid):
     from core import stockcalc
     try:
@@ -1280,7 +814,7 @@ def product_stock(pid):
                     "own": p.get("stock_auto"), "rows": stockcalc.compute(p, cfg), "settings": stockcalc.settings(cfg)})
 
 
-@app.post("/api/products/<pid>/stock-auto")
+@bp.post("/api/products/<pid>/stock-auto")
 def product_stock_auto(pid):
     """这个产品单独开 / 关「按耗材自动算库存」：mode = on / off / default（跟总开关）。"""
     from core import stockcalc
@@ -1295,14 +829,14 @@ def product_stock_auto(pid):
     return jsonify({"ok": True, "product": p, "auto": stockcalc.enabled(p, cfg), "rows": stockcalc.compute(p, cfg)})
 
 
-@app.get("/api/stock/pending")
+@bp.get("/api/stock/pending")
 def stock_pending():
     from core import stockcalc
     plat = request.args.get("platform") or "lazada"
     return jsonify({"ok": True, "items": stockcalc.pending(plat), "settings": stockcalc.settings()})
 
 
-@app.post("/api/stock/mark-synced")
+@bp.post("/api/stock/mark-synced")
 def stock_mark_synced():
     """在平台后台手动改好了（以后接上 Lazada 接口就自动推送）：把这些 SKU 记为已同步。"""
     from core import stockcalc
@@ -1315,109 +849,130 @@ def stock_mark_synced():
     return jsonify({"ok": True, "marked": n})
 
 
-# ---------------- 规格 ↔ 3D 模型（v2.22） ----------------
-@app.get("/api/products/<pid>/spec-models")
-def spec_models_get(pid):
-    from core import specmodel
-    try:
-        return jsonify(specmodel.overview(pid))
-    except FileNotFoundError:
-        return err("产品不存在", 404)
+# ---------------- 类目与属性 ----------------
+@bp.get("/api/categories")
+def category_list():
+    return jsonify(categories.library())
 
 
-@app.post("/api/products/<pid>/spec-models")
-def spec_models_set(pid):
-    """{spec, entry_id}（entry_id 空 = 这个规格用主模型）。"""
-    from core import specmodel
-    b = request.get_json(force=True) or {}
-    no = _need("models.change")
-    if no:
-        return no
+@bp.get("/api/category-fields")
+def category_fields():
+    cat = categories.get(request.args.get("id"))
+    if not cat:
+        return err("找不到类目", 404)
+    fields = lazada_template.attribute_fields(cat)
+    return jsonify({"id": cat["id"], "name": cat["name"], "cat_id": cat["cat_id"],
+                    "fields": [{k: f[k] for k in ("key", "label", "required", "options", "tip", "kind")}
+                               for f in fields]})
+
+
+# ---------------- Shopee ----------------
+@bp.get("/api/shopee/categories")
+def shopee_categories():
+    q = (request.args.get("q") or "").strip()
+    cid = request.args.get("id")
+    if cid:
+        return jsonify([{"id": cid, "path": shopee.path_of(cid), "name": shopee.display_name(cid)}])
+    if not q:
+        return jsonify([])
+    words = re.split(r"[\s>,，、]+", q)
+    if re.search(r"[^\x00-\x7f]", q):
+        # 中文/泰文：先让 AI 翻译成 Shopee 类目树用的英文关键词
+        if q not in _SP_KW_CACHE:
+            try:
+                d = ai_copy.extract_json(ai_copy.call(load_config(), "Translate e-commerce search words. Output only JSON.",
+                    f'Give 3-6 short English keywords (single words or 2-word phrases, as used in Shopee category names, '
+                    f'singular and plural forms) for finding the Shopee category of: "{q}". Return {{"keywords": [...]}}'))
+                _SP_KW_CACHE[q] = [str(x) for x in d.get("keywords") or []]
+            except ai_copy.AIError as e:
+                return err(f"中文/泰文搜索需要 AI（{e}）。也可以用英文关键词，或用下面的逐级选择。")
+        words = _SP_KW_CACHE[q]
+    res = shopee.search(words, limit=30)
+    if q.isdigit() and q in shopee.tree():
+        res = [(q, shopee.path_of(q))] + res
+    return jsonify([{"id": c, "path": p, "name": shopee.display_name(c),
+                     "restricted": shopee.tree()[c][1]} for c, p in res])
+
+
+@bp.get("/api/shopee/attrs")
+def shopee_attrs():
+    """v2.25：Shopee 类目的属性（必填的在前，带可选值）。"""
+    return jsonify({"attrs": shopee.attrs_for(request.args.get("id") or "", 80)})
+
+
+@bp.post("/api/products/<pid>/shopee-attrs")
+def shopee_attrs_fill(pid):
+    """AI 给 Shopee 必填属性挑值。body 可以带编辑页里没保存的产品。返回 {属性ID: {...}}，页面合进 P.shopee_attrs。"""
+    p = request.get_json(silent=True) or store.load(pid)
     try:
-        return jsonify(specmodel.map_spec(pid, b.get("spec") or "", b.get("entry_id") or "", _uname()))
-    except ValueError as e:
+        return jsonify({"values": shopee.fill_attrs(load_config(), p)})
+    except ai_copy.AIError as e:
         return err(str(e))
 
 
-@app.post("/api/products/<pid>/spec-models/parts")
-def spec_models_parts(pid):
-    """v2.23：规格只用模型库文件里的某几个组件。{spec, items: [{id, part, qty}]}。"""
-    from core import specmodel
-    no = _need("models.change")
-    if no:
-        return no
-    b = request.get_json(force=True) or {}
+@bp.get("/api/shopee/tree")
+def shopee_tree():
+    return jsonify([[cid, path, r] for cid, (path, r) in shopee.tree().items()])
+
+
+# ---------------- 模板、导出 ----------------
+@bp.get("/api/templates/sync")
+def templates_sync_status():
+    """v2.25：Lazada 全部类目模板的自动下载进度。"""
+    from core import lazada_sync
+    return jsonify(lazada_sync.status())
+
+
+@bp.post("/api/templates/sync")
+def templates_sync_run():
+    """手动开始 / 重新下载全部 Lazada 类目模板（后台做）。{force: true} 全部重新下载。"""
+    from core import lazada_sync
+    b = request.get_json(silent=True) or {}
 
     def go():
+        from core import bgjobs
         try:
-            return jsonify(specmodel.map_parts(pid, b.get("spec") or "", b.get("items") or [], _uname()))
-        except ValueError as e:
+            r = lazada_sync.download_all(lambda i, n: bgjobs.note(stage=f"{i}/{n}"), force=bool(b.get("force")))
+        except RuntimeError as e:
             return err(str(e))
-    return maybe_async(f"规格选组件 {pid}", go, "model_lib", pid)
+        return jsonify(r)
+    return maybe_async("下载 Lazada 全部类目模板", go, "templates")
 
 
-@app.post("/api/products/<pid>/spec-models/auto-parts")
-def spec_models_auto_parts(pid):
-    """v2.23：按组件名自动对应规格（组件名里有规格名）。"""
-    from core import specmodel
-    no = _need("models.change")
-    if no:
-        return no
-
-    def go():
-        try:
-            done = specmodel.auto_parts(pid, _uname())
-        except ValueError as e:
-            return err(str(e))
-        return jsonify({"ok": True, "done": done, **specmodel.overview(pid)})
-    return maybe_async(f"按组件名对应规格 {pid}", go, "model_lib", pid)
+@bp.get("/api/templates")
+def templates():
+    return jsonify(categories.template_files())
 
 
-@app.post("/api/products/<pid>/spec-models/flatten")
-def spec_models_flatten(pid):
-    """v2.23：分体模型每个组件按推荐方向平放排一盘（spec 空 = 主模型），然后 AI 检查能不能打出来。"""
-    from core import specmodel
-    no = _need("models.change")
-    if no:
-        return no
-    b = request.get_json(force=True) or {}
-    spec = (b.get("spec") or "").strip()
-
-    def go():
-        try:
-            r = specmodel.flatten(pid, spec, _uname())
-        except ValueError as e:
-            return err(str(e))
-        check = None
-        try:
-            check = modellib.ai_check(pid, r["selection"], _uname())
-        except Exception as e:  # noqa: BLE001  没有 AI 也照样摆好
-            check = {"error": str(e)[:200]}
-        return jsonify({"ok": True, **r, "check": check, **specmodel.overview(pid)})
-    return maybe_async(f"分体平放 {pid}", go, "model_lib", pid)
-
-
-@app.post("/api/products/<pid>/spec-models/auto")
-def spec_models_auto(pid):
-    """v2.22.1：模型库里没分配的模型文件，每个自动加成一个规格（按尺寸起名），并指定用这个模型。"""
-    from core import specmodel
-    no = _need("models.change")
-    if no:
-        return no
+@bp.post("/api/templates")
+def template_upload():
+    f = request.files.get("file")
+    if not f or not (f.filename or "").lower().endswith(".xlsx"):
+        return err("请上传从 Lazada 卖家中心下载的 .xlsx 模板")
+    os.makedirs(TEMPLATE_DIR, exist_ok=True)
+    base = re.sub(r"[^\w.-]", "_", os.path.basename(f.filename))
+    path = os.path.join(TEMPLATE_DIR, base)
+    f.save(path)
     try:
-        added = specmodel.auto_specs(pid, _uname())
-    except ValueError as e:
-        return err(str(e))
-    return jsonify({"ok": True, "added": added, "product": store.load(pid), **specmodel.overview(pid)})
+        sheets = lazada_template.parse(path)
+    except Exception as e:
+        os.remove(path)
+        return err(f"无法读取这个模板：{e}")
+    if not sheets:
+        os.remove(path)
+        return err("这个文件里没有找到 Lazada 类目工作表（需要带 _hide 隐藏表的官方模板）")
+    return jsonify({"name": base, "categories": [s["sheet"] for s in sheets]})
 
 
-@app.post("/api/products/<pid>/spec-models/fill")
-def spec_models_fill(pid):
-    """按规格的模型估算填这个规格（所有颜色）的克数和时长。"""
-    from core import specmodel
-    b = request.get_json(force=True) or {}
-    try:
-        n = specmodel.fill_grams(pid, b.get("spec") or "", _uname())
-    except ValueError as e:
-        return err(str(e))
-    return jsonify({"ok": True, "filled": n, "product": store.load(pid), **specmodel.overview(pid)})
+@bp.delete("/api/templates/<name>")
+def template_delete(name):
+    """不直接删除，移到 _deleted 文件夹，误删可以找回。"""
+    name = os.path.basename(name)
+    path = os.path.join(TEMPLATE_DIR, name)
+    if not os.path.exists(path):
+        return err("找不到模板", 404)
+    trash = os.path.join(TEMPLATE_DIR, "_deleted")
+    os.makedirs(trash, exist_ok=True)
+    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.replace(path, os.path.join(trash, f"{stamp}_{name}"))
+    return jsonify({"ok": True})

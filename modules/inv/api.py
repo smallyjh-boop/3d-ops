@@ -1,6 +1,16 @@
-"""库存管理（v2.17）的接口。只调用 core.inventory 的公开函数。"""
+"""库存模块的接口：物品、单据、盘点、流水、库存报表、给财务的事件。v2.31 从 web/inventory.py 搬过来。"""
+from flask import Blueprint
+
 from web.common import *  # noqa: F401,F403
 from core import inventory as inv
+
+bp = Blueprint("m_inv", __name__)
+PREFIXES = ['/api/inv/', '/api/v1/finance/events', '/api/v1/finance/inventory']
+PATTERNS = []
+
+
+from core import inventory as inv
+
 
 DOC_PERM = {"purchase": "inv.in", "return": "inv.in", "issue": "inv.out", "scrap": "inv.out", "adjust": "inv.adjust"}
 
@@ -10,7 +20,7 @@ def _perms():
     return {k: auth.has_perm(u, k) for k in ("inv.in", "inv.out", "inv.adjust", "inv.pay")} if u else {"inv.in": True, "inv.out": True, "inv.adjust": True, "inv.pay": True}
 
 
-@app.get("/api/inv/meta")
+@bp.get("/api/inv/meta")
 def inv_meta():
     return jsonify({"ok": True, "categories": inv.categories(), "units": inv.UNITS,
                     "kinds": {k: v[0] for k, v in inv.KINDS.items()}, "doc_kinds": {k: v[0] for k, v in inv.DOC_KINDS.items()},
@@ -18,13 +28,13 @@ def inv_meta():
                     "printers": [p.get("code") or p.get("name") for p in (load_config().get("printers") or [])]})
 
 
-@app.get("/api/inv/items")
+@bp.get("/api/inv/items")
 def inv_items():
     a = request.args
     return jsonify({"ok": True, "items": inv.items(a.get("category") or "", (a.get("q") or "").strip(), a.get("low") == "1", a.get("all") == "1")})
 
 
-@app.get("/api/inv/items/<iid>")
+@bp.get("/api/inv/items/<iid>")
 def inv_item(iid):
     it = inv.get_item(iid)
     if not it:
@@ -32,7 +42,7 @@ def inv_item(iid):
     return jsonify({"ok": True, "item": it, "moves": inv.moves(item_id=it["id"], limit=100)})
 
 
-@app.post("/api/inv/items")
+@bp.post("/api/inv/items")
 def inv_item_save():
     if _need("inv.in"):
         return _need("inv.in")
@@ -43,7 +53,7 @@ def inv_item_save():
     return jsonify({"ok": True, "item": it})
 
 
-@app.post("/api/inv/presets")
+@bp.post("/api/inv/presets")
 def inv_presets():
     """补全常用物品（耗材常用颜色、备件、工具、包材）：已经有的不重复建。"""
     if _need("inv.in"):
@@ -51,26 +61,26 @@ def inv_presets():
     return jsonify({"ok": True, "added": inv.seed_presets(_uname())})
 
 
-@app.get("/api/inv/moves")
+@bp.get("/api/inv/moves")
 def inv_moves():
     a = request.args
     return jsonify({"ok": True, "moves": inv.moves(a.get("item_id"), a.get("kind") or None, a.get("days") or None,
                                                    min(int(a.get("limit") or 300), 2000), a.get("doc_id"))})
 
 
-@app.get("/api/inv/docs")
+@bp.get("/api/inv/docs")
 def inv_docs():
     a = request.args
     return jsonify({"ok": True, "docs": inv.docs(a.get("kind") or "", a.get("days") or None)})
 
 
-@app.get("/api/inv/docs/<did>")
+@bp.get("/api/inv/docs/<did>")
 def inv_doc(did):
     d = inv.doc(did)
     return jsonify({"ok": True, "doc": d}) if d else err("没有这张单", 404)
 
 
-@app.post("/api/inv/docs")
+@bp.post("/api/inv/docs")
 def inv_doc_create():
     b = request.get_json(force=True) or {}
     key = DOC_PERM.get(b.get("kind"))
@@ -85,7 +95,7 @@ def inv_doc_create():
     return jsonify({"ok": True, "doc": d})
 
 
-@app.post("/api/inv/docs/<did>/void")
+@bp.post("/api/inv/docs/<did>/void")
 def inv_doc_void(did):
     if _need("inv.adjust"):
         return _need("inv.adjust")
@@ -95,7 +105,7 @@ def inv_doc_void(did):
         return err(str(e))
 
 
-@app.post("/api/inv/stocktake")
+@bp.post("/api/inv/stocktake")
 def inv_stocktake_start():
     """开始盘点（有领用权限的员工就能开、能填数；确认要「盘点确认 / 调整」权限）。"""
     if _need("inv.out"):
@@ -107,7 +117,7 @@ def inv_stocktake_start():
         return err(str(e))
 
 
-@app.post("/api/inv/stocktake/<int:did>/<act>")
+@bp.post("/api/inv/stocktake/<int:did>/<act>")
 def inv_stocktake_act(did, act):
     try:
         if act == "save":
@@ -125,19 +135,19 @@ def inv_stocktake_act(did, act):
     return jsonify({"ok": True, "doc": d})
 
 
-@app.get("/api/inv/expense")
+@bp.get("/api/inv/expense")
 def inv_expense():
     a = request.args
     return jsonify({"ok": True, **inv.expense(a.get("start") or None, a.get("end") or None, a.get("group") or "category")})
 
 
 # ---------------- 采购（v2.18） ----------------
-@app.get("/api/inv/suppliers")
+@bp.get("/api/inv/suppliers")
 def inv_suppliers():
     return jsonify({"ok": True, "suppliers": inv.suppliers(request.args.get("all") == "1")})
 
 
-@app.post("/api/inv/suppliers")
+@bp.post("/api/inv/suppliers")
 def inv_supplier_save():
     if _need("inv.in"):
         return _need("inv.in")
@@ -148,14 +158,14 @@ def inv_supplier_save():
 
 
 # ---------------- 财务模块对接（v2.18，对接规范第 11 条） ----------------
-@app.get("/api/v1/finance/events")
+@bp.get("/api/v1/finance/events")
 def v1_finance_events():
     a = request.args
     return jsonify({"ok": True, "events": inv.finance_events(float(a.get("since") or 0), min(int(a.get("limit") or 1000), 5000),
                                                              a.get("kind") or "")})
 
 
-@app.get("/api/v1/finance/inventory")
+@bp.get("/api/v1/finance/inventory")
 def v1_finance_inventory():
     try:
         return jsonify({"ok": True, **inv.finance_month(request.args.get("month") or None)})
@@ -163,7 +173,7 @@ def v1_finance_inventory():
         return err("month 要是 YYYY-MM")
 
 
-@app.get("/api/inv/finance")
+@bp.get("/api/inv/finance")
 def inv_finance_ui():
     """库存页「财务」：最近的财务事件 + 本月汇总（和给财务模块的接口一样的数据）。"""
     if _need("inv.pay"):

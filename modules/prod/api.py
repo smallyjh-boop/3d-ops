@@ -1,7 +1,63 @@
-"""生产排单、打印机、切片文件、打印方案、耗材、库存、质量、维护、打印单据。"""
+"""生产模块的接口：排单、打印机、切片文件、打印方案、耗材料卷、成品备货、质量、保养、打印单据。
+v2.31 从 web/production.py 搬过来。"""
+from flask import Blueprint
+
 from web.common import *  # noqa: F401,F403
 
-@app.post("/api/sliced/parse")
+bp = Blueprint("m_prod", __name__)
+PREFIXES = ['/api/print-files', '/api/slicer', '/api/printers', '/api/printer-models', '/api/jobs', '/api/spools', '/api/materials', '/api/files', '/print/spools', '/print/jobs', '/api/sliced', '/api/runs', '/api/quality', '/api/production', '/api/maintenance', '/api/calib']
+PATTERNS = [r"^/api/stock(/make)?$", '^/api/products/[^/]+/recipe(/slice)?$']
+
+
+@bp.post("/api/products/<pid>/recipe")
+def recipe_save(pid):
+    from core import recipes, specmodel
+    p = store.load(pid)
+    body = request.get_json(force=True) or {}
+    r = recipes.clean(body)
+    if body.get("material"):
+        mat = recipes.norm_material(body["material"])
+        if (p.get("material") or "PLA").upper() != mat:
+            r["filament"] = {}          # 换了材料：之前指定的耗材配置作废
+            p["material"] = mat
+            store.save(p)
+    r["updated_at"] = time.time()
+    r["updated_by"] = _uname()
+    specmodel.save_recipe(pid, body.get("spec") or "", r)      # 规格有自己的模型时存到规格的方案里（v2.22）
+    return recipe_get(pid)
+
+
+@bp.post("/api/products/<pid>/recipe/slice")
+def recipe_slice(pid):
+    """按打印方案切片：选打印机和一盘数量，生成新版本（草稿），带切片报告和自动检查。"""
+    b = request.get_json(force=True) or {}
+    return maybe_async(f"按方案切片 {pid}", lambda: _recipe_slice(pid, b), "slice", pid)
+
+
+def _recipe_slice(pid, b):
+    from core import recipes
+    try:
+        from core import specmodel
+        p = specmodel.view(store.load(pid), b.get("spec") or "")     # 规格有自己的模型时切那个模型（v2.22）
+        sp = p.get("_spec") or ""
+        idx = int(b.get("printer") or 0)
+        names = [x.get("name") for x in load_config().get("printers") or []]
+        r = recipes.get(p)
+        count = int(b.get("count") or r.get("per_plate") or 1)
+        tmp, rep, r = recipes.slice_product(p, idx, count, r)
+        geo = recipes.geometry(p, r, idx)
+        checks = recipes.check(r, geo, rep, p.get("material") or "PLA")
+        f = print_files.add(tmp, f"{pid}{'_' + sp if sp else ''}_{names[idx]}_x{count}.gcode.3mf".replace(" ", "_"), pid, names[idx],
+                            b.get("sku") or "", count, b.get("color") or "", "按打印方案切片" + (f"（规格 {sp}）" if sp else ""), _uname(),
+                            p.get("material") or "PLA", rep.get("grams_per_plate"), rep.get("hours_per_plate"), move=True,
+                            recipe=r, report=rep, checks=checks, source="recipe", spec=sp)
+    except (slicer.SliceError, ValueError, OSError, IndexError) as e:
+        return err(f"切片失败：{e}")
+    production.schedule()
+    return jsonify(f)
+
+
+@bp.post("/api/sliced/parse")
 def sliced_parse():
     f = request.files.get("file")
     if not f:
@@ -30,7 +86,7 @@ def sliced_parse():
     return jsonify(r)
 
 
-@app.get("/api/slicer/info")
+@bp.get("/api/slicer/info")
 def slicer_info():
     cfg = load_config()
     orca, tried = slicer.find_orca(cfg, explain=True)
@@ -45,7 +101,7 @@ def slicer_info():
                     "calibration": cfg.get("est_calibration"), "calibration_n": cfg.get("est_calibration_n")})
 
 
-@app.get("/api/slicer/presets")
+@bp.get("/api/slicer/presets")
 def slicer_presets():
     """下拉选项：全部打印机预设；指定 machine 时给出兼容的工艺和耗材。"""
     from core import orca_profiles as op
@@ -59,7 +115,7 @@ def slicer_presets():
                     "filaments": op.filaments_for(idx, m) if m else []})
 
 
-@app.post("/api/slicer/automatch")
+@bp.post("/api/slicer/automatch")
 def slicer_automatch():
     """按打印机名称自动匹配 OrcaSlicer 打印机/工艺/耗材配置并保存。force=true 时覆盖已填的。"""
     from core import orca_profiles as op
@@ -99,7 +155,7 @@ def slicer_automatch():
     return jsonify({"printers": out, "missing": missing, "orca": exe or "", "presets": op.summary(idx)})
 
 
-@app.post("/api/slicer/pick")
+@bp.post("/api/slicer/pick")
 def slicer_pick():
     """弹出 Windows 选择文件窗口，让用户手动选 OrcaSlicer 程序。"""
     try:
@@ -116,7 +172,7 @@ def slicer_pick():
     return jsonify({"orca": exe})
 
 
-@app.post("/api/slicer/test")
+@bp.post("/api/slicer/test")
 def slicer_test():
     body = request.get_json(force=True) or {}
     try:
@@ -125,89 +181,7 @@ def slicer_test():
         return err(str(e))
 
 
-@app.get("/print/orders")
-def orders_print():
-    """打印：pick 拣货/生产汇总单，pack 装箱单（每单一页）。"""
-    ids = [int(x) for x in (request.args.get("ids") or "").split(",") if x.strip().isdigit()]
-    kind = request.args.get("type") or "pack"
-    orders = [o for o in (orders_mod.get_order(i) for i in ids) if o]
-    from html import escape as h
-    fmt = (lambda t: dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else "")
-    css = ("body{font:13px 'Microsoft YaHei','Leelawadee UI',sans-serif;margin:16px;color:#111}"
-           "table{border-collapse:collapse;width:100%;margin:6px 0}th,td{border:1px solid #999;padding:5px 6px;text-align:left}"
-           "th{background:#eee}.pg{page-break-after:always;margin-bottom:24px}h2{margin:4px 0}.note{border:2px solid #000;"
-           "padding:6px;margin:6px 0;font-weight:bold}.box{display:inline-block;width:14px;height:14px;border:1px solid #000}"
-           "@media print{.noprint{display:none}}")
-    out = [f"<!doctype html><html><head><meta charset='utf-8'><title>{'拣货单' if kind == 'pick' else '装箱单'}</title>"
-           f"<style>{css}</style></head><body><p class='noprint'><button onclick='print()'>打印 / พิมพ์</button></p>"]
-    if kind == "pick":
-        agg = {}
-        for o in orders:
-            for it in o["items"]:
-                k = (it.get("sku") or "", it.get("color") or "")
-                a = agg.setdefault(k, {"name": it.get("name") or "", "qty": 0, "orders": []})
-                a["qty"] += it.get("qty") or 1
-                a["orders"].append(f"{o['order_no']}×{it.get('qty') or 1}")
-        out.append(f"<h2>拣货 / 生产汇总单 ใบรวมสินค้า</h2><p>{len(orders)} 个订单 · 打印时间 {fmt(time.time())}</p>"
-                   "<table><tr><th></th><th>SKU</th><th>商品</th><th>颜色</th><th>数量</th><th>订单</th></tr>")
-        for (sku, color), a in sorted(agg.items()):
-            out.append(f"<tr><td><span class='box'></span></td><td><b>{h(sku)}</b></td><td>{h(a['name'])}</td><td>{h(color)}</td>"
-                       f"<td><b>{a['qty']}</b></td><td style='font-size:11px'>{h(', '.join(a['orders']))}</td></tr>")
-        out.append("</table>")
-        notes = [o for o in orders if o.get("custom_note") or o.get("buyer_note")]
-        if notes:
-            out.append("<h3>有备注的订单</h3><table><tr><th>订单号</th><th>定制要求 / 买家留言</th></tr>")
-            for o in notes:
-                out.append(f"<tr><td>{h(o['order_no'])}</td><td>{h(o.get('custom_note') or '')} {h(o.get('buyer_note') or '')}</td></tr>")
-            out.append("</table>")
-    else:
-        for o in orders:
-            out.append(f"<div class='pg'><h2>装箱单 ใบแพ็คสินค้า · {h(o['order_no'])}</h2>"
-                       f"<p>{h(o.get('platform') or '')} {h(o.get('shop') or '')} · 买家 ผู้ซื้อ：{h(o.get('buyer') or '')} · "
-                       f"下单 {fmt(o.get('order_time'))}{' · 最晚发货 ' + fmt(o.get('ship_by')) if o.get('ship_by') else ''}"
-                       f"{' · 运单 ' + h(o['tracking_no']) if o.get('tracking_no') else ''}</p>")
-            if o.get("custom_note"):
-                out.append(f"<div class='note'>定制要求 ความต้องการพิเศษ：{h(o['custom_note'])}</div>")
-            if o.get("buyer_note"):
-                out.append(f"<div class='note'>买家留言 ข้อความผู้ซื้อ：{h(o['buyer_note'])}</div>")
-            out.append("<table><tr><th>✔</th><th>SKU</th><th>商品</th><th>规格/颜色</th><th>数量</th></tr>")
-            for it in o["items"]:
-                out.append(f"<tr><td><span class='box'></span></td><td><b>{h(it.get('sku') or '')}</b></td><td>{h(it.get('name') or '')}</td>"
-                           f"<td>{h(it.get('variation') or it.get('color') or '')}</td><td><b>{it.get('qty') or 1}</b></td></tr>")
-            out.append("</table><p>检查 ตรวจ：____　打包 แพ็ค：____</p></div>")
-    out.append("</body></html>")
-    for o in orders:
-        orders_mod.log(o["id"], _uname(), "打印拣货单" if kind == "pick" else "打印装箱单")
-    return app.response_class("".join(out), mimetype="text/html")
-
-
-@app.get("/print/handover")
-def handover_print():
-    """交接单打印：给快递员签字。"""
-    from html import escape as h
-    d = orders_mod.handover_get(int(request.args.get("id") or 0))
-    if not d:
-        return err("交接单不存在", 404)
-    fmt = (lambda t: dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else "")
-    cfg = load_config()
-    rows = "".join(f"<tr><td>{i}</td><td><b>{h(o['tracking_no'] or '（无运单号）')}</b></td><td>{h(o['order_no'])}</td>"
-                   f"<td>{h(o['platform'] or '')}</td><td>{o['n_items']}</td><td>{'COD ฿' + format(o['cod'], ',.0f') if o['cod'] else ''}</td></tr>"
-                   for i, o in enumerate(d["orders"], 1))
-    html = (f"<!doctype html><html><head><meta charset='utf-8'><title>交接单 #{d['id']}</title><style>"
-            "body{font:13px 'Microsoft YaHei','Leelawadee UI',sans-serif;margin:16px;color:#111}table{border-collapse:collapse;width:100%}"
-            "th,td{border:1px solid #999;padding:5px 6px;text-align:left}th{background:#eee}.sig{margin-top:28px;display:flex;gap:60px}"
-            "@media print{.noprint{display:none}}</style></head><body><p class='noprint'><button onclick='print()'>打印 / พิมพ์</button></p>"
-            f"<h2>发货交接单 ใบส่งมอบพัสดุ #{d['id']}</h2>"
-            f"<p>物流 ขนส่ง：<b>{h(d['carrier'] or '-')}</b> · {h(d['method_zh'] or '')} · 寄件人 ผู้ส่ง：{h(cfg.get('sender_name') or '')} "
-            f"{h(cfg.get('sender_phone') or '')}<br>共 รวม <b>{d['count']}</b> 件包裹 พัสดุ"
-            f"{' · 货到付款合计 ยอด COD ฿' + format(d['cod_total'], ',.0f') if d['cod_total'] else ''} · 打印时间 {fmt(time.time())}</p>"
-            "<table><tr><th>#</th><th>运单号 เลขพัสดุ</th><th>订单号</th><th>平台</th><th>件数</th><th>COD</th></tr>"
-            f"{rows}</table><div class='sig'><div>交件人 ผู้ส่งมอบ：________________</div><div>快递员 พนักงานขนส่ง：________________</div>"
-            "<div>时间 เวลา：________________</div></div></body></html>")
-    return app.response_class(html, mimetype="text/html")
-
-
-@app.get("/api/production")
+@bp.get("/api/production")
 def production_board():
     production.generate(_uname())
     b = production.board()
@@ -215,12 +189,12 @@ def production_board():
     return jsonify(b)
 
 
-@app.post("/api/production/schedule")
+@bp.post("/api/production/schedule")
 def production_schedule():
     return jsonify({"scheduled": production.schedule()})
 
 
-@app.post("/api/jobs/<int:jid>")
+@bp.post("/api/jobs/<int:jid>")
 def job_update(jid):
     b = request.get_json(force=True) or {}
     try:
@@ -230,12 +204,12 @@ def job_update(jid):
     return jsonify(j)
 
 
-@app.get("/api/materials")
+@bp.get("/api/materials")
 def materials_plan():
     return jsonify(materials.plan())
 
 
-@app.post("/api/materials")
+@bp.post("/api/materials")
 def materials_update():
     b = request.get_json(force=True) or {}
     if b.get("mode") == "set" and _need("materials.adjust"):
@@ -250,7 +224,7 @@ def materials_update():
     return jsonify(materials.plan())
 
 
-@app.get("/api/spools")
+@bp.get("/api/spools")
 def spools_list():
     a = request.args
     return jsonify({"items": materials.spools(a.get("material") or "", a.get("color") or "", a.get("status") or "active",
@@ -258,7 +232,7 @@ def spools_list():
                     "alerts": materials.alerts()})
 
 
-@app.post("/api/spools")
+@bp.post("/api/spools")
 def spools_receive():
     """入库 N 卷（未开封）。"""
     b = request.get_json(force=True) or {}
@@ -270,7 +244,7 @@ def spools_receive():
     return jsonify({"codes": codes_, "plan": materials.plan()})
 
 
-@app.post("/api/spools/<sid>/<act>")
+@bp.post("/api/spools/<sid>/<act>")
 def spool_act(sid, act):
     b = request.get_json(force=True) or {}
     try:
@@ -281,7 +255,7 @@ def spool_act(sid, act):
     return jsonify({"spool": s})
 
 
-@app.get("/print/spools")
+@bp.get("/print/spools")
 def spools_print():
     """料卷标签：贴在料盘上，上机 / 称重时扫码。"""
     from html import escape as h
@@ -303,34 +277,12 @@ def spools_print():
     return app.response_class("".join(out), mimetype="text/html")
 
 
-@app.get("/api/materials/log")
+@bp.get("/api/materials/log")
 def materials_log():
     return jsonify({"items": materials.log()})
 
 
-@app.get("/print/labels")
-def labels_print():
-    ids = [int(x) for x in (request.args.get("ids") or "").split(",") if x.strip().isdigit()]
-    kind = request.args.get("type") or "self"
-    if not ids:
-        return err("请先勾选订单")
-    if kind == "platform":
-        try:
-            data, have, _missing = labels.merged_pdf(ids)
-        except ValueError as e:
-            return err(str(e))
-        if not have:
-            return err("选中的订单都还没有平台面单", 404)
-        labels.mark_printed(have, _uname(), "平台面单")
-        import io as _io
-        return send_file(_io.BytesIO(data), mimetype="application/pdf", as_attachment=False,
-                         download_name=f"labels_{dt.datetime.now().strftime('%m%d_%H%M')}.pdf")
-    orders = [o for o in (orders_mod.get_order(i) for i in ids) if o]
-    labels.mark_printed([o["id"] for o in orders], _uname(), "自制面单")
-    return app.response_class(labels.self_made_html(orders, load_config()), mimetype="text/html")
-
-
-@app.get("/api/printers")
+@bp.get("/api/printers")
 def printers_get():
     runs = {r["printer"]: r for r in production.active_runs()}
     lst = _printer_list()
@@ -342,7 +294,7 @@ def printers_get():
     return jsonify({"printers": lst})
 
 
-@app.post("/api/printers/<int:idx>/conn")
+@bp.post("/api/printers/<int:idx>/conn")
 def printer_conn_save(idx):
     b = request.get_json(force=True) or {}
     cfg = load_config()
@@ -361,7 +313,7 @@ def printer_conn_save(idx):
     return jsonify({"printers": _printer_list()})
 
 
-@app.post("/api/printers/<int:idx>/loaded")
+@bp.post("/api/printers/<int:idx>/loaded")
 def printer_loaded(idx):
     """生产员工填写：这台打印机现在装的是什么颜色（没有料盘读数的打印机用）。"""
     cfg = load_config()
@@ -401,7 +353,7 @@ def _conn_hint(pr, e):
     return head
 
 
-@app.post("/api/printers/<int:idx>/test")
+@bp.post("/api/printers/<int:idx>/test")
 def printer_test(idx):
     cfg = load_config()
     printers = cfg.get("printers") or []
@@ -421,7 +373,7 @@ def printer_test(idx):
     return jsonify({"type": t, "status": st, "status_zh": printers_mod.STATE_ZH.get(st.get("state"), "")})
 
 
-@app.post("/api/printers/<int:idx>/command")
+@bp.post("/api/printers/<int:idx>/command")
 def printer_command(idx):
     cmd = (request.get_json(force=True) or {}).get("cmd")
     if cmd not in ("pause", "resume", "stop"):
@@ -433,13 +385,13 @@ def printer_command(idx):
     return jsonify({"ok": True})
 
 
-@app.get("/api/printer-models")
+@bp.get("/api/printer-models")
 def printer_models():
     from core import fleet
     return jsonify({"models": fleet.MODELS})
 
 
-@app.get("/api/print-files")
+@bp.get("/api/print-files")
 def print_files_list():
     pid = request.args.get("product_id")
     files = print_files.list_files(pid)
@@ -456,7 +408,7 @@ def print_files_list():
                     "printers": _model_names()})
 
 
-@app.get("/api/print-files/<int:fid>")
+@bp.get("/api/print-files/<int:fid>")
 def print_file_get(fid):
     f = print_files.ensure_params(print_files.get(fid))
     if not f:
@@ -475,7 +427,7 @@ def print_file_get(fid):
 
 
 # ---------------- 文件管理（模型 + 切片文件） ----------------
-@app.get("/api/files")
+@bp.get("/api/files")
 def files_overview():
     from core import filemgr
     a = request.args
@@ -485,7 +437,7 @@ def files_overview():
     return jsonify(out)
 
 
-@app.post("/api/files/models")
+@bp.post("/api/files/models")
 def files_models_bulk():
     """批量上传模型：文件名以产品编号开头（3DP0001.stl / 3DP0001_猫.3mf）自动对应。"""
     from core import filemgr
@@ -512,7 +464,7 @@ def files_models_bulk():
     return jsonify({"results": out})
 
 
-@app.post("/api/print-files/<int:fid>/replace")
+@bp.post("/api/print-files/<int:fid>/replace")
 def print_file_replace(fid):
     from core import filemgr
     f = request.files.get("file")
@@ -533,7 +485,7 @@ def print_file_replace(fid):
     return jsonify(r)
 
 
-@app.get("/api/files/zip")
+@bp.get("/api/files/zip")
 def files_zip():
     from core import filemgr
     pids = [x for x in (request.args.get("ids") or "").split(",") if x]
@@ -544,7 +496,7 @@ def files_zip():
     return send_file(buf, as_attachment=True, download_name=name, mimetype="application/zip")
 
 
-@app.get("/api/print-files/<int:fid>/toolpath")
+@bp.get("/api/print-files/<int:fid>/toolpath")
 def print_file_toolpath(fid):
     """切片预览数据（按层、按类型的挤出路径，gzip）。"""
     from core import toolpath
@@ -563,7 +515,7 @@ def print_file_toolpath(fid):
     return resp
 
 
-@app.post("/api/print-files")
+@bp.post("/api/print-files")
 def print_files_upload():
     """上传在电脑上切好的文件（可以一次多个）。打印机 / 一盘几个不填就从文件里自动认。
     表单：files（或 file）、product_id（不填就按文件名开头的产品编号对应）、printer（auto）、per_plate（auto）、sku、color、note"""
@@ -605,7 +557,7 @@ def print_files_upload():
     return jsonify(out)
 
 
-@app.post("/api/print-files/<int:fid>/ai-review")
+@bp.post("/api/print-files/<int:fid>/ai-review")
 def print_file_ai(fid):
     from core import recipes
     f = print_files.get(fid)
@@ -626,7 +578,7 @@ def print_file_ai(fid):
     return jsonify(print_files.set_checks(fid, ai=ai))
 
 
-@app.post("/api/print-files/<int:fid>/review")
+@bp.post("/api/print-files/<int:fid>/review")
 def print_file_review(fid):
     b = request.get_json(force=True) or {}
     try:
@@ -637,7 +589,7 @@ def print_file_review(fid):
     return jsonify(f)
 
 
-@app.post("/api/print-files/<int:fid>/verify")
+@bp.post("/api/print-files/<int:fid>/verify")
 def print_file_verify(fid):
     fm = request.form if request.files else (request.get_json(force=True, silent=True) or {})
     photo = None
@@ -656,26 +608,26 @@ def print_file_verify(fid):
     return jsonify(f)
 
 
-@app.get("/api/print-files/photo/<name>")
+@bp.get("/api/print-files/photo/<name>")
 def print_file_photo(name):
     return send_from_directory(os.path.join(print_files.FILE_DIR, "photos"), os.path.basename(name))
 
 
-@app.post("/api/print-files/<int:fid>")
+@bp.post("/api/print-files/<int:fid>")
 def print_files_update(fid):
     r = print_files.update(fid, **(request.get_json(force=True) or {}))
     production.schedule()
     return jsonify(r)
 
 
-@app.delete("/api/print-files/<int:fid>")
+@bp.delete("/api/print-files/<int:fid>")
 def print_files_delete(fid):
     print_files.delete(fid)
     production.schedule()
     return jsonify({"ok": True})
 
 
-@app.get("/api/print-files/<int:fid>/download")
+@bp.get("/api/print-files/<int:fid>/download")
 def print_files_download(fid):
     f = print_files.get(fid)
     if not f:
@@ -684,7 +636,7 @@ def print_files_download(fid):
 
 
 # ---- 打印批次 ----
-@app.get("/api/jobs/<int:jid>/send-options")
+@bp.get("/api/jobs/<int:jid>/send-options")
 def job_send_options(jid):
     try:
         return jsonify(production.send_options(jid, request.args.get("printer")))
@@ -692,7 +644,7 @@ def job_send_options(jid):
         return err(str(e))
 
 
-@app.post("/api/jobs/<int:jid>/start")
+@bp.post("/api/jobs/<int:jid>/start")
 def job_start(jid):
     b = request.get_json(force=True) or {}
     try:
@@ -707,7 +659,7 @@ def job_start(jid):
     return jsonify(r)
 
 
-@app.post("/api/runs/<int:rid>/<action>")
+@bp.post("/api/runs/<int:rid>/<action>")
 def run_action(rid, action):
     b = request.get_json(force=True, silent=True) or {}
     try:
@@ -724,7 +676,7 @@ def run_action(rid, action):
     return jsonify({"ok": True})
 
 
-@app.post("/api/jobs/<int:jid>/use-stock")
+@bp.post("/api/jobs/<int:jid>/use-stock")
 def job_use_stock(jid):
     try:
         return jsonify(production.use_stock(jid, (request.get_json(force=True) or {}).get("n"), _uname()))
@@ -732,7 +684,7 @@ def job_use_stock(jid):
         return err(str(e))
 
 
-@app.post("/api/stock")
+@bp.post("/api/stock")
 def stock_post():
     b = request.get_json(force=True) or {}
     if not b.get("sku"):
@@ -741,7 +693,7 @@ def stock_post():
     return stock_get()
 
 
-@app.post("/api/stock/make")
+@bp.post("/api/stock/make")
 def stock_make():
     """人工确认后生成备货任务（排在订单任务后面）。"""
     b = request.get_json(force=True) or {}
@@ -756,7 +708,7 @@ def stock_make():
     return jsonify(j)
 
 
-@app.get("/api/quality")
+@bp.get("/api/quality")
 def quality_get():
     from core import extras
     q = production.quality(int(request.args.get("days") or 30))
@@ -764,7 +716,7 @@ def quality_get():
     return jsonify(q)
 
 
-@app.post("/api/maintenance")
+@bp.post("/api/maintenance")
 def maintenance_post():
     b = request.get_json(force=True) or {}
     parts = [p for p in (b.get("parts") or []) if isinstance(p, dict) and p.get("item_id") and p.get("qty")]
@@ -777,14 +729,14 @@ def maintenance_post():
     return maintenance_get()
 
 
-@app.post("/api/materials/flag")
+@bp.post("/api/materials/flag")
 def materials_flag():
     b = request.get_json(force=True) or {}
     materials.flag(b.get("material"), b.get("color"), b.get("action"), _uname())
     return jsonify(materials.plan())
 
 
-@app.get("/print/jobs")
+@bp.get("/print/jobs")
 def jobs_print():
     """生产工单贴纸（60×40mm）：贴在成品袋上，打包时扫码核对。"""
     from html import escape as h
@@ -811,13 +763,13 @@ def jobs_print():
 
 
 # ---- 用真实数据校准（v2.15）：估算克数 / 打印速度 / 空打阈值 ----
-@app.get("/api/calib")
+@bp.get("/api/calib")
 def calib_report():
     from core import calib
     return jsonify(calib.report())
 
 
-@app.post("/api/calib/apply")
+@bp.post("/api/calib/apply")
 def calib_apply():
     from core import calib
     b = request.get_json(force=True) or {}
@@ -825,3 +777,66 @@ def calib_apply():
         return jsonify(calib.apply(b.get("kind"), b.get("data"), _uname()))
     except (ValueError, TypeError) as e:
         return err(str(e))
+
+
+@bp.get("/api/products/<pid>/recipe")
+def recipe_get(pid):
+    """打印方案 + 各方向几何分析 + 每台打印机一盘能放几个 + 这个产品的切片文件。"""
+    from core import mesh, recipes, specmodel
+    try:
+        p0 = store.load(pid)
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    # v2.22：?spec= 看某个规格（规格有自己的模型时，模型、方案、切片文件都是这个规格的）
+    spec = request.args.get("spec") or ""
+    p = specmodel.view(p0, spec)
+    r = recipes.get(p)
+    out = {"recipe": r, "summary_zh": recipes.summary_zh(r), "has_model": bool(p.get("model")),
+           "orient_zh": mesh.ORIENT_ZH, "support_zh": recipes.SUPPORT_ZH, "bed_types": recipes.BED_TYPES,
+           "printers": _model_names(), "printer_idx": _model_first_idx(),
+           "files": print_files.list_files(pid), "status_zh": print_files.STATUS_ZH,
+           "review_items": print_files.REVIEW_ITEMS, "material": recipes.norm_material(p.get("material") or "PLA"),
+           "materials": recipes.MATERIALS, "temp_range": recipes.TEMP_RANGE,
+           "advice": {k: (p.get("print_advice") or {}).get(k) for k in ("risks", "temp_speed", "support_why", "orientation")}
+           if p.get("print_advice") else None}
+    out["files"] = [print_files.ensure_params(f) for f in out["files"]]
+    out["spec"] = p.get("_spec") or ""
+    out["spec_asked"] = spec
+    out["specs"] = [{"spec": s_, "own": specmodel.own(p0, s_)} for s_ in specmodel.specs(p0)]
+    if any(x["own"] for x in out["specs"]):
+        out["files"] = [f for f in out["files"] if (f.get("spec") or "") == out["spec"]]
+    from core import filemgr
+    mp = specmodel.model_path(p) if p.get("_spec") else filemgr.model_path(p)
+    out["model"] = ({k: p["model"].get(k) for k in ("file", "orig_name", "uploaded_at", "uploaded_by", "metrics", "ext", "parts_of")}
+                    | {"size": os.path.getsize(mp), "history": len(filemgr.model_history(pid)), "spec_model": bool(p.get("_spec"))}) if mp else None
+    out["setup"] = []
+    for i in out["printer_idx"]:      # 同机型只算一次
+        st = recipes.setup_info(p, r, i)
+        out["setup"].append(st)
+        if "OrcaSlicer" in str(st.get("error") or ""):      # 没装切片软件：不用每台都找一遍
+            out["setup"] += [st] * (len(out["printers"]) - i - 1)
+            break
+    if p.get("model"):
+        try:
+            tris = mesh.load(specmodel.model_path(p))
+            out["orientations"] = mesh.analyze_all(tris)
+            out["per_printer"] = []
+            for i in out["printer_idx"]:
+                g = recipes.geometry(p, r, i)
+                out["per_printer"].append({"index": i, "capacity": g.get("capacity"), "bed_mm": g.get("bed_mm")})
+            g0 = recipes.geometry(p, r, 0)
+            out["geometry"] = g0
+            out["checks"] = recipes.check(r, g0, None, p.get("material") or "PLA")
+        except Exception as e:  # 模型读不了
+            out["model_error"] = str(e)
+    return jsonify(out)
+
+
+@bp.get("/api/stock")
+def stock_get():
+    return jsonify({"items": production.stock_list(), "suggest": production.stock_suggest()})
+
+
+@bp.get("/api/maintenance")
+def maintenance_get():
+    return jsonify({"printers": production.maintenance_status()})

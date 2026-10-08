@@ -51,7 +51,11 @@
 
   // 内核页面里属于某个模块的按钮 / 区块（data-needmod="seo"）：模块开着才显示
   function markNeeded(root) {
-    (root || document).querySelectorAll("[data-needmod]").forEach((el) => el.classList.toggle("mod-on", !!byId(el.dataset.needmod)));
+    (root || document).querySelectorAll("[data-needmod]").forEach((el) => {
+      const on = !!byId(el.dataset.needmod);
+      if (el.tagName === "OPTION" && !on) { el.remove(); return; }      // 下拉 / 输入提示里的选项：直接去掉（隐藏不一定管用）
+      el.classList.toggle("mod-on", on);
+    });
   }
 
   async function init() {
@@ -74,7 +78,7 @@
       for (const f of m.ui.css || []) {
         const l = document.createElement("link"); l.rel = "stylesheet"; l.href = `/m/${mid}/${f}${ver(m)}`; document.head.appendChild(l);
       }
-      if (m.ui.html) {
+      if (m.ui.html && !m.ui.inline) {          // inline 的模块：页面已经在首页里了
         const r = await fetch(`/m/${mid}/${m.ui.html}${ver(m)}`, { cache: "no-cache" });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const tpl = document.createElement("template");
@@ -133,7 +137,6 @@
     }
   }
 
-  const BUILTIN = ["商品", "上架导出", "3D 模型", "订单", "生产", "库存", "树脂打印"];
   async function manager() {
     let box = $('[data-cfgext="modules"]');
     if (!box) { box = document.createElement("div"); box.className = "cfg-ext"; box.dataset.cfgext = "modules"; $("#tab-settings").appendChild(box); }
@@ -142,7 +145,7 @@
     try { all = (await api("/api/modules?all=1")).modules; } catch (e) { box.innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
     const ids = Object.fromEntries(all.map((m) => [m.id, m]));
     box.innerHTML = `<div class="card"><h3>模块管理</h3>
-      <p class="small muted">每个功能是一个模块（一个文件夹）：关掉以后它的菜单、设置、后台任务都不出现，数据保留，再打开就回来。基础模块不能关；关掉一个模块时，依赖它的模块会一起停用。</p>
+      <p class="small muted">每个功能是一个模块（一个文件夹）：关掉以后它的菜单、设置、后台任务都不出现，数据保留，再打开就回来。基础模块（商品、3D 模型、订单）不能关；关掉一个模块时，依赖它的模块会一起停用。关掉 / 打开以后刷新一下页面。</p>
       <table class="grid"><thead><tr><th>模块名称</th><th>说明</th><th>版本</th><th>依赖</th><th>状态</th></tr></thead><tbody>
       ${all.map((m) => `<tr${m.error ? ' class="st-err"' : ""}><td><b data-notr>${esc(nm(m))}</b></td>
         <td class="small" data-notr>${esc(th() ? m.desc_th || m.desc_zh : m.desc_zh)}${m.error ? `<div class="bad">${esc(m.error)}</div>` : ""}</td>
@@ -151,7 +154,7 @@
         <td class="nowrap">${m.core ? '<span class="pill">基础，不能关</span>' : m.error ? '<span class="bad">出错</span>'
           : `<label class="switch-l" style="white-space:nowrap"><input type="checkbox" data-modsw="${esc(m.id)}" ${m.enabled ? "checked" : ""}> ${m.enabled ? "开着" : "关着"}</label>`}</td></tr>`).join("")
         || '<tr><td colspan="5" class="muted">还没有模块</td></tr>'}</tbody></table>
-      <p class="small muted" style="margin-top:10px">还没拆成模块的内置功能（接下来几个版本陆续变成模块，到时也可以在这里开关）：${BUILTIN.map((x) => `<span>${x}</span>`).join("、")}</p></div>`;
+    </div>`;
     box.querySelectorAll("[data-modsw]").forEach((cb) => cb.addEventListener("change", async () => {
       const id = cb.dataset.modsw, on = cb.checked, m = ids[id];
       if (!on && m.dependents.length && !confirm(`关掉「${nm(m)}」，依赖它的模块也会停用：${m.dependents.map((d) => ids[d] ? nm(ids[d]) : d).join("、")}。继续？`)) { cb.checked = true; return; }

@@ -1,0 +1,543 @@
+"""3D 模型模块（基础模块）的接口：上传 / 预览 / 模型库 / 规格模型 / 几何分析 / 打印建议 / 估算切片。
+v2.31 从 web/products.py 搬过来。"""
+from flask import Blueprint
+
+from web.common import *  # noqa: F401,F403
+
+bp = Blueprint("m_model", __name__)
+PREFIXES = []
+PATTERNS = []
+
+
+@bp.post("/api/products/<pid>/model")
+def model_upload(pid):
+    f = request.files.get("file")
+    ext = os.path.splitext((f.filename if f else "") or "")[1].lower()
+    if not f or ext not in (".stl", ".3mf"):
+        return err("请上传 .stl 或 .3mf 模型文件")
+    from core import filemgr
+    tmp = os.path.join(DATA_DIR, "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    path = os.path.join(tmp, uuid.uuid4().hex + ext)
+    try:
+        has_model = bool((store.load(pid).get("model") or {}).get("file"))
+    except FileNotFoundError:
+        has_model = False
+    if has_model and not auth.has_perm(auth.current_user() or {"role": "owner"}, "models.change"):
+        return err(_no_perm("models.change"), 403)
+    f.save(path)
+    fname = f.filename
+
+    def go():
+        try:
+            r = filemgr.set_model(pid, path, fname, _uname())
+        except (ValueError, OSError) as e:
+            return err(f"模型文件读不了：{e}")
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+        p = r["product"]
+        p["_model_replaced"] = r["replaced"]
+        p["_files_reset"] = r["files_reset"]
+        return jsonify(p)
+    return maybe_async(f"上传模型 {pid}", go, "model", pid)    # v2.20：?async=1 时后台读模型（大文件交给电脑）
+
+
+@bp.post("/api/products/<pid>/model/metrics")
+def model_metrics(pid):
+    m = request.get_json(force=True) or {}
+    cfg = load_config()
+    p = store.load(pid)
+    if not p.get("model"):
+        return err("还没有上传模型")
+    est = slicer.estimate(_advised_cfg(cfg, p), m, p.get("material", "PLA"))
+    p["model"]["metrics"] = {"volume_mm3": m.get("volume_mm3"), "area_mm2": m.get("area_mm2"), "size": m.get("size")}
+    p["model"]["estimate"] = est
+    store.save(p)
+    return jsonify({"estimate": est, "product": p})
+
+
+@bp.post("/api/products/<pid>/print-advice")
+def print_advice_api(pid):
+    """AI 打印建议 + 产品描述。body: analysis（模型几何分析）, prompt, image（渲染图 dataURL，可选）"""
+    from core import print_advice
+    body = request.get_json(force=True) or {}
+    cfg = load_config()
+    p = store.load(pid)
+    img = body.get("image") or ""
+    if "," in img:
+        img = img.split(",", 1)[1]
+    try:
+        adv = print_advice.advise(cfg, p, body.get("analysis") or {}, body.get("prompt") or "", img or None)
+    except ai_copy.AIError as e:
+        return err(str(e))
+    adv["analysis"] = body.get("analysis") or {}
+    adv["prompt"] = body.get("prompt") or ""
+    adv["created_at"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    adv["applied"] = bool((p.get("print_advice") or {}).get("applied"))
+    p["print_advice"] = adv
+    store.save(p)
+    return jsonify({"product": p})
+
+
+@bp.post("/api/products/<pid>/print-advice/apply")
+def print_advice_apply(pid):
+    """applied=true：估算和 OrcaSlicer 自动切片按建议参数来；false：恢复默认参数。"""
+    body = request.get_json(force=True) or {}
+    p = store.load(pid)
+    if not p.get("print_advice"):
+        return err("还没有打印建议")
+    p["print_advice"]["applied"] = bool(body.get("applied", True))
+    cfg = load_config()
+    mt = (p.get("model") or {}).get("metrics")
+    if mt and mt.get("volume_mm3"):
+        p["model"]["estimate"] = slicer.estimate(_advised_cfg(cfg, p), mt, p.get("material", "PLA"))
+    store.save(p)
+    return jsonify({"product": p})
+
+
+@bp.post("/api/products/<pid>/slice")
+def model_slice(pid):
+    body = request.get_json(force=True) or {}
+    return maybe_async(f"切片 {pid}", lambda: _model_slice(pid, body), "slice", pid)
+
+
+def _model_slice(pid, body):
+    cfg = load_config()
+    p = store.load(pid)
+    m = p.get("model")
+    if not m:
+        return err("还没有上传模型")
+    path = os.path.join(store.image_dir(pid, "model"), m["file"])
+    try:
+        from core import print_advice
+        adv = p.get("print_advice") or {}
+        ov = print_advice.slice_overrides(adv) if adv.get("applied") else None
+        r = slicer.orca_slice(cfg, path, int(body.get("printer", 0)), p.get("material", "PLA"), overrides=ov)
+    except slicer.SliceError as e:
+        return err(str(e))
+    _learn(cfg, p, r.get("grams"))
+    return jsonify(r)
+
+
+_STL_CACHE = {}
+
+
+def _stl_response(fp):
+    """把模型（3MF / OBJ 等）转成二进制 STL 给 3D 预览用：拓竹、Orca 的项目 3MF 浏览器读不了时用这个。"""
+    import tempfile as _tf
+    from core import mesh, modellib
+    key = (fp, os.path.getmtime(fp))
+    data = _STL_CACHE.get(key)
+    if data is None:
+        parts = modellib.load_parts(fp)
+        import numpy as _np
+        tris = _np.concatenate([t for _n, t in parts])
+        with _tf.NamedTemporaryFile(suffix=".stl", delete=False) as f:
+            tmp = f.name
+        try:
+            mesh.write_stl(tris, tmp)
+            with open(tmp, "rb") as f:
+                data = f.read()
+        finally:
+            os.remove(tmp)
+        if len(_STL_CACHE) > 8:
+            _STL_CACHE.clear()
+        _STL_CACHE[key] = data
+    return app.response_class(data, mimetype="model/stl")
+
+
+def _preview_response(fp):
+    """?nowait=1（新版页面）：大文件还没算好时不让浏览器干等，回 202 并在后台排队算，浏览器先读完整模型，下次打开就快了。"""
+    from core import filemgr, preview
+    if request.args.get("nowait") and not preview.ready(fp) and os.path.getsize(fp) >= preview.SYNC_BYTES:
+        preview.warm(fp)
+        return jsonify({"ok": False, "pending": True, "msg": "预览模型正在后台生成"}), 202
+    etag = os.path.basename(preview.cache_path(fp))
+    if request.if_none_match and etag in request.if_none_match:      # 浏览器里已经有这份：不用再下载（304）
+        r = app.response_class(status=304)
+    else:
+        r = app.response_class(preview.build(fp, filemgr.metrics), mimetype="application/octet-stream")
+        r.headers["Content-Encoding"] = "gzip"
+    r.set_etag(etag)
+    r.headers["Cache-Control"] = "no-cache"
+    return r
+
+
+@bp.get("/api/products/<pid>/model/preview")
+def model_preview(pid):
+    """3D 预览用的精简模型（大模型先快速显示，放大 / 出图时浏览器再读完整模型）。"""
+    from core import filemgr
+    try:
+        p = store.load(pid)
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    fp = filemgr.model_path(p)
+    if not fp:
+        return err("这个产品没有模型文件", 404)
+    try:
+        return _preview_response(fp)
+    except Exception as e:  # noqa: BLE001
+        return err(f"模型读不了：{e}")
+
+
+@bp.get("/api/products/<pid>/model/stl")
+def model_stl(pid):
+    from core import filemgr
+    try:
+        p = store.load(pid)
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    fp = filemgr.model_path(p)
+    if not fp:
+        return err("这个产品没有模型文件", 404)
+    try:
+        return _stl_response(fp)
+    except Exception as e:  # noqa: BLE001  文件坏了
+        return err(f"模型读不了：{e}")
+
+
+@bp.get("/api/products/<pid>/model/download")
+def model_download(pid):
+    from core import filemgr
+    try:
+        p = store.load(pid)
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    fp = filemgr.model_path(p)
+    if not fp:
+        return err("这个产品没有模型文件", 404)
+    name = f"{p['id']}_{p['model'].get('orig_name') or p['model']['file']}"
+    return send_file(fp, as_attachment=True, download_name=name)
+
+
+@bp.get("/api/products/<pid>/model/history")
+def model_history(pid):
+    from core import filemgr
+    return jsonify({"history": filemgr.model_history(pid)})
+
+
+@bp.get("/api/products/<pid>/model/history/<name>")
+def model_history_download(pid, name):
+    from core import filemgr
+    fp = filemgr.history_path(pid, name)
+    if not fp:
+        return err("文件不存在", 404)
+    return send_file(fp, as_attachment=True, download_name=f"{pid}_old_{name.partition('__')[2] or name}")
+
+
+@bp.post("/api/products/<pid>/model/restore")
+def model_restore(pid):
+    from core import filemgr
+    try:
+        r = filemgr.restore_model(pid, (request.get_json(force=True) or {}).get("name", ""), _uname())
+    except (ValueError, OSError) as e:
+        return err(str(e))
+    return jsonify({"ok": True, "files_reset": r["files_reset"]})
+
+
+@bp.delete("/api/products/<pid>/model")
+def model_delete(pid):
+    from core import filemgr
+    filemgr.delete_model(pid)
+    return jsonify({"ok": True})
+
+
+@bp.get("/api/products/<pid>/models")
+def models_lib(pid):
+    try:
+        return jsonify(modellib.library(pid))
+    except FileNotFoundError:
+        return err("找不到这个产品", 404)
+
+
+@bp.post("/api/products/<pid>/models")
+def models_upload(pid):
+    files = request.files.getlist("files")
+    if not files:
+        return err("请选择模型文件")
+    variant = request.form.get("variant") or ""
+    for_spec = (request.form.get("spec") or "").strip()     # v2.22.1：给某个规格上传 / 更换模型，传完直接指定
+    if for_spec:
+        variant = for_spec
+    # 先把文件存下来（后台线程里读不到上传的文件），读模型 / 分析放后台（v2.20）
+    tmp = os.path.join(DATA_DIR, "tmp")
+    os.makedirs(tmp, exist_ok=True)
+    saved = []
+    for f in files:
+        sp = os.path.join(tmp, "up_" + uuid.uuid4().hex)
+        f.save(sp)
+        saved.append(modellib.SavedFile(sp, f.filename))
+
+    def go():
+        try:
+            added = modellib.upload(pid, saved, _uname(), variant)
+            if for_spec and added:
+                from core import specmodel
+                specmodel.map_spec(pid, for_spec, added[0]["id"], _uname())
+        except (ValueError, OSError) as e:
+            return err(str(e))
+        finally:
+            for x in saved:
+                x.cleanup()
+        return jsonify(modellib.library(pid))
+    return maybe_async(f"上传模型库 {pid}", go, "model_lib", pid)
+
+
+@bp.post("/api/products/<pid>/models/reanalyze")
+def models_reanalyze(pid):
+    return maybe_async(f"重新分析模型 {pid}", lambda: jsonify(modellib.library(pid, reanalyze=True)), "model_re", pid)
+
+
+@bp.post("/api/products/<pid>/models/current")
+def models_current(pid):
+    b = request.get_json(force=True) or {}
+    return maybe_async(f"设为当前模型 {pid}", lambda: _models_current(pid, b), "model_cur", pid)
+
+
+def _models_current(pid, b):
+    try:
+        r = modellib.make_current(pid, b.get("items") or [], _uname(), b.get("name") or "", b.get("bed_w"))
+    except (ValueError, OSError) as e:
+        return err(str(e))
+    out = modellib.library(pid)
+    out.update(files_reset=r["files_reset"], merged=bool(r["merged"]))
+    return jsonify(out)
+
+
+@bp.post("/api/products/<pid>/models/layout-preview")
+def models_layout_preview(pid):
+    """预览摆盘：按勾选的零件、数量、方向排好一盘，返回三角面（Float32，gzip），不保存。"""
+    import gzip as _gz
+    b = request.get_json(force=True) or {}
+    try:
+        tris = modellib.layout_preview(pid, b.get("items") or [], b.get("bed_w"))
+    except FileNotFoundError:
+        return err("找不到这个产品", 404)
+    except (ValueError, OSError) as e:
+        return err(str(e))
+    resp = app.response_class(_gz.compress(tris.astype("<f4").tobytes(), 4), mimetype="application/octet-stream")
+    resp.headers["Content-Encoding"] = "gzip"
+    return resp
+
+
+@bp.post("/api/products/<pid>/models/ai-check")
+def models_ai_check(pid):
+    """AI 检查摆盘：按选中的模型和方向，判断空打 / 打飞的机率。"""
+    b = request.get_json(force=True) or {}
+    return maybe_async(f"AI 检查摆盘 {pid}", lambda: _ai_check(pid, b), "ai_check", pid)
+
+
+def _ai_check(pid, b):
+    try:
+        return jsonify(modellib.ai_check(pid, b.get("items") or [], _uname()))
+    except FileNotFoundError:
+        return err("找不到这个产品", 404)
+    except ValueError as e:
+        return err(str(e))
+    except Exception as e:  # noqa: BLE001  AI 没设置 / 网络错误 / 回答不是 JSON
+        return err(f"AI 检查失败：{e}")
+
+
+@bp.post("/api/products/<pid>/models/<eid>/spec")
+def models_spec(pid, eid):
+    try:
+        return jsonify(modellib.set_spec(pid, eid, (request.get_json(force=True) or {}).get("spec") or "", _uname()))
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.delete("/api/products/<pid>/models/<eid>")
+def models_delete(pid, eid):
+    try:
+        return jsonify(modellib.remove(pid, eid, _uname()))
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.get("/api/products/<pid>/models/<eid>/<what>")
+def models_file(pid, eid, what):
+    p = store.load(pid)
+    e = next((x for x in p.get("model_lib") or [] if x["id"] == eid), None)
+    if not e:
+        return err("模型库里没有这个文件", 404)
+    if what == "thumb":
+        th = (e.get("info") or {}).get("thumb")
+        fp = os.path.join(store.product_dir(pid), "models", th) if th else None
+        if not fp or not os.path.exists(fp):
+            return err("没有缩略图", 404)
+        return send_file(fp, mimetype="image/png")
+    if what == "preview":
+        fp = modellib.path_of(pid, e)
+        if not fp:
+            return err("文件不见了", 404)
+        try:
+            return _preview_response(fp)
+        except Exception as ex:  # noqa: BLE001
+            return err(f"模型读不了：{ex}")
+    if what == "stl":
+        fp = modellib.path_of(pid, e)
+        if not fp:
+            return err("文件不见了", 404)
+        try:
+            return _stl_response(fp)
+        except Exception as ex:  # noqa: BLE001
+            return err(f"模型读不了：{ex}")
+    if what != "download":
+        return err("不对", 404)
+    fp = modellib.path_of(pid, e)
+    if not fp:
+        return err("文件不见了", 404)
+    return send_file(fp, as_attachment=request.args.get("inline") != "1", download_name=e.get("orig_name") or e["file"])
+
+
+@bp.get("/api/products/<pid>/mesh")
+def product_mesh(pid):
+    """按摆放方向转好的模型三角面（Float32，gzip），给打印方案里的实时 3D 预览用。"""
+    import gzip as _gz
+    from core import mesh
+    from core import specmodel
+    try:
+        p = specmodel.view(store.load(pid), request.args.get("spec") or "")      # ?spec=：规格自己的模型（v2.22）
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    path = specmodel.model_path(p)
+    if not path:
+        return err("没有 3D 模型", 404)
+    orient = request.args.get("orient") or "bottom"
+    if orient not in mesh.ORIENT_ZH:
+        orient = "bottom"
+    try:
+        key = (path, orient, os.path.getmtime(path))
+        blob = _MESH_CACHE.get(key)
+        if blob is None:
+            tris = mesh.rotate(mesh.load(path), orient)
+            blob = _gz.compress(tris.astype("<f4").tobytes(), 4)
+            if len(_MESH_CACHE) > 12:
+                _MESH_CACHE.clear()
+            _MESH_CACHE[key] = blob
+    except (OSError, ValueError) as e:
+        return err(f"模型读取失败：{e}")
+    resp = app.response_class(blob, mimetype="application/octet-stream")
+    resp.headers["Content-Encoding"] = "gzip"
+    return resp
+
+
+@bp.get("/api/products/<pid>/filaments")
+def product_filaments(pid):
+    """某台打印机可选的耗材配置（按产品材料筛选）。"""
+    from core import recipes
+    try:
+        p = store.load(pid)
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    mat = request.args.get("material") or p.get("material") or "PLA"
+    return jsonify(recipes.filament_choices(int(request.args.get("printer") or 0), mat))
+
+
+# ---------------- 规格 ↔ 3D 模型（v2.22） ----------------
+@bp.get("/api/products/<pid>/spec-models")
+def spec_models_get(pid):
+    from core import specmodel
+    try:
+        return jsonify(specmodel.overview(pid))
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+
+
+@bp.post("/api/products/<pid>/spec-models")
+def spec_models_set(pid):
+    """{spec, entry_id}（entry_id 空 = 这个规格用主模型）。"""
+    from core import specmodel
+    b = request.get_json(force=True) or {}
+    no = _need("models.change")
+    if no:
+        return no
+    try:
+        return jsonify(specmodel.map_spec(pid, b.get("spec") or "", b.get("entry_id") or "", _uname()))
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/products/<pid>/spec-models/parts")
+def spec_models_parts(pid):
+    """v2.23：规格只用模型库文件里的某几个组件。{spec, items: [{id, part, qty}]}。"""
+    from core import specmodel
+    no = _need("models.change")
+    if no:
+        return no
+    b = request.get_json(force=True) or {}
+
+    def go():
+        try:
+            return jsonify(specmodel.map_parts(pid, b.get("spec") or "", b.get("items") or [], _uname()))
+        except ValueError as e:
+            return err(str(e))
+    return maybe_async(f"规格选组件 {pid}", go, "model_lib", pid)
+
+
+@bp.post("/api/products/<pid>/spec-models/auto-parts")
+def spec_models_auto_parts(pid):
+    """v2.23：按组件名自动对应规格（组件名里有规格名）。"""
+    from core import specmodel
+    no = _need("models.change")
+    if no:
+        return no
+
+    def go():
+        try:
+            done = specmodel.auto_parts(pid, _uname())
+        except ValueError as e:
+            return err(str(e))
+        return jsonify({"ok": True, "done": done, **specmodel.overview(pid)})
+    return maybe_async(f"按组件名对应规格 {pid}", go, "model_lib", pid)
+
+
+@bp.post("/api/products/<pid>/spec-models/flatten")
+def spec_models_flatten(pid):
+    """v2.23：分体模型每个组件按推荐方向平放排一盘（spec 空 = 主模型），然后 AI 检查能不能打出来。"""
+    from core import specmodel
+    no = _need("models.change")
+    if no:
+        return no
+    b = request.get_json(force=True) or {}
+    spec = (b.get("spec") or "").strip()
+
+    def go():
+        try:
+            r = specmodel.flatten(pid, spec, _uname())
+        except ValueError as e:
+            return err(str(e))
+        check = None
+        try:
+            check = modellib.ai_check(pid, r["selection"], _uname())
+        except Exception as e:  # noqa: BLE001  没有 AI 也照样摆好
+            check = {"error": str(e)[:200]}
+        return jsonify({"ok": True, **r, "check": check, **specmodel.overview(pid)})
+    return maybe_async(f"分体平放 {pid}", go, "model_lib", pid)
+
+
+@bp.post("/api/products/<pid>/spec-models/auto")
+def spec_models_auto(pid):
+    """v2.22.1：模型库里没分配的模型文件，每个自动加成一个规格（按尺寸起名），并指定用这个模型。"""
+    from core import specmodel
+    no = _need("models.change")
+    if no:
+        return no
+    try:
+        added = specmodel.auto_specs(pid, _uname())
+    except ValueError as e:
+        return err(str(e))
+    return jsonify({"ok": True, "added": added, "product": store.load(pid), **specmodel.overview(pid)})
+
+
+@bp.post("/api/products/<pid>/spec-models/fill")
+def spec_models_fill(pid):
+    """按规格的模型估算填这个规格（所有颜色）的克数和时长。"""
+    from core import specmodel
+    b = request.get_json(force=True) or {}
+    try:
+        n = specmodel.fill_grams(pid, b.get("spec") or "", _uname())
+    except ValueError as e:
+        return err(str(e))
+    return jsonify({"ok": True, "filled": n, "product": store.load(pid), **specmodel.overview(pid)})

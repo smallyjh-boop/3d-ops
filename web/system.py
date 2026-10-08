@@ -1,5 +1,6 @@
 """首页、登录、账号、设置、备份、系统检查与升级、运行日志。"""
 from web.common import *  # noqa: F401,F403
+from core import chain
 
 @app.get("/")
 def index():
@@ -12,6 +13,11 @@ def index():
     from core import modules
     mi = _json.dumps(modules.i18n_th(), ensure_ascii=False).replace("</", "<\\/")
     html = html.replace("</head>", f'<script>window.CLIENT_VERSION="{VERSION}";window.I18N_MODULES={mi};</script>{i18n_admin.script_tag()}</head>', 1)
+    # v2.31：主链路模块的页面直接放进首页（和以前一样一打开就在），js 按原来的顺序加载
+    panels, js = modules.inline_parts()
+    html = html.replace("<!--MODULE_PANELS-->", panels, 1)
+    html = html.replace("<!--MODULE_SCRIPTS-->", "\n".join(
+        f'<script src="/m/{mid}/{n}?v={VERSION}-{(modules.get(mid)["meta"].get("version") or "")}"></script>' for mid, n in js), 1)
     r = app.response_class(html, mimetype="text/html")
     r.headers["Cache-Control"] = "no-store"
     return r
@@ -127,7 +133,7 @@ def post_config():
         from core import fleet
         fleet.remap(remap_old, cfg["printers"])
         try:
-            production.schedule()     # 打印机增减、停用后重新分配任务
+            chain.reschedule()     # 打印机增减、停用后重新分配任务
         except Exception:  # noqa: BLE001  排单失败不影响保存
             pass
     return jsonify({"config": auth.strip_config(cfg, auth.current_user()), "summary": pricing.cost_summary(cfg)})

@@ -1,7 +1,16 @@
-"""订单、审单、售后、买家、物流交接、打包核对、费用、利润、工作台。"""
-from web.common import *  # noqa: F401,F403
+"""订单模块（基础模块）的接口：订单、审单、售后、买家、物流交接、打包核对、利润、工作台、打印订单 / 面单 / 交接单。
+v2.31 从 web/orders.py 搬过来。"""
+from flask import Blueprint
 
-@app.post("/api/orders/import/preview")
+from web.common import *  # noqa: F401,F403
+from core import chain
+
+bp = Blueprint("m_orders", __name__)
+PREFIXES = []
+PATTERNS = []
+
+
+@bp.post("/api/orders/import/preview")
 def orders_import_preview():
     f = request.files.get("file")
     if not f:
@@ -12,7 +21,7 @@ def orders_import_preview():
         return err(str(e))
 
 
-@app.post("/api/orders/import/commit")
+@bp.post("/api/orders/import/commit")
 def orders_import_commit():
     b = request.get_json(force=True) or {}
     try:
@@ -20,11 +29,11 @@ def orders_import_commit():
                                b.get("profile") or "", _uname())
     except ValueError as e:
         return err(str(e))
-    st["jobs"] = production.generate(_uname())
+    st["jobs"] = chain.order_changed(_uname())
     return jsonify(st)
 
 
-@app.get("/api/orders")
+@bp.get("/api/orders")
 def orders_list():
     f = {k: request.args.get(k) for k in ("tab", "q", "platform", "shop", "kind", "tag", "label", "date_from", "date_to", "sort",
                                           "page", "page_size", "pay", "carrier", "buyer_key")}
@@ -37,7 +46,7 @@ def orders_list():
     return jsonify(r)
 
 
-@app.get("/api/orders/<int:oid>")
+@bp.get("/api/orders/<int:oid>")
 def order_get(oid):
     o = orders_mod.get_order(oid)
     if not o:
@@ -54,7 +63,7 @@ def order_get(oid):
     return jsonify(_strip_order(o))
 
 
-@app.post("/api/orders/<int:oid>/edit")
+@bp.post("/api/orders/<int:oid>/edit")
 def order_edit(oid):
     """修改订单：基本信息 + 商品明细（还没开始打印才能改商品）。"""
     b = request.get_json(force=True) or {}
@@ -67,11 +76,11 @@ def order_edit(oid):
         o = orders_mod.edit_order(oid, b, _uname())
     except ValueError as e:
         return err(str(e))
-    production.schedule()
+    chain.reschedule()
     return jsonify(o)
 
 
-@app.post("/api/orders/<int:oid>")
+@bp.post("/api/orders/<int:oid>")
 def order_update(oid):
     b = request.get_json(force=True) or {}
     keys = ("custom_note", "seller_note", "priority", "status", "kind", "tracking_no", "tags", "ship_by", "buyer",
@@ -86,12 +95,12 @@ def order_update(oid):
         o = orders_mod.update_order(oid, _uname(), **{k: b.get(k) for k in keys if k in b})
     except ValueError as e:
         return err(str(e))
-    production.generate(_uname())
-    production.schedule()
+    chain.order_changed(_uname())
+    chain.reschedule()
     return jsonify(_strip_order(o))
 
 
-@app.post("/api/orders/batch")
+@bp.post("/api/orders/batch")
 def orders_batch():
     b = request.get_json(force=True) or {}
     ids = [int(x) for x in b.get("ids") or []]
@@ -106,12 +115,12 @@ def orders_batch():
         n = orders_mod.batch(ids, act, b.get("value"), _uname())
     except ValueError as e:
         return err(str(e))
-    production.generate(_uname())
-    production.schedule()
+    chain.order_changed(_uname())
+    chain.reschedule()
     return jsonify({"done": n})
 
 
-@app.get("/api/orders/export")
+@bp.get("/api/orders/export")
 def orders_export():
     """导出订单（每个商品一行）。ids=1,2,3 或按当前筛选条件。"""
     import io as _io
@@ -169,23 +178,23 @@ def orders_export():
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
-@app.delete("/api/orders/<int:oid>")
+@bp.delete("/api/orders/<int:oid>")
 def order_delete(oid):
     orders_mod.delete_order(oid)
     return jsonify({"ok": True})
 
 
-@app.post("/api/orders/manual")
+@bp.post("/api/orders/manual")
 def order_manual():
     try:
         o = orders_mod.create_manual(request.get_json(force=True) or {}, _uname())
     except ValueError as e:
         return err(str(e))
-    production.generate(_uname())
+    chain.order_changed(_uname())
     return jsonify(o)
 
 
-@app.post("/api/orders/<int:oid>/review")
+@bp.post("/api/orders/<int:oid>/review")
 def order_review(oid):
     """审单：approve 审核通过（开始排产）/ hold 挂起（不排产，还没开始的任务撤掉）。"""
     b = request.get_json(force=True) or {}
@@ -196,22 +205,22 @@ def order_review(oid):
         orders_mod.set_hold(oid, act == "hold", b.get("reason") or "", _uname())
     except ValueError as e:
         return err(str(e))
-    production.generate(_uname())
-    production.schedule()
+    chain.order_changed(_uname())
+    chain.reschedule()
     return jsonify(_strip_order(orders_mod.get_order(oid)))
 
 
-@app.post("/api/orders/tracking-import")
+@bp.post("/api/orders/tracking-import")
 def orders_tracking_import():
     """批量填运单号：每行 订单号,运单号[,物流公司]。"""
     b = request.get_json(force=True) or {}
     r = orders_mod.import_tracking(b.get("text") or "", bool(b.get("mark_shipped")), _uname())
     if b.get("mark_shipped"):
-        production.generate(_uname())
+        chain.order_changed(_uname())
     return jsonify(r)
 
 
-@app.get("/api/buyers")
+@bp.get("/api/buyers")
 def buyers_get():
     a = request.args
     if a.get("key"):
@@ -228,7 +237,7 @@ def buyers_get():
     return jsonify({"items": items, "levels": orders_mod.LEVEL_ZH})
 
 
-@app.post("/api/buyers")
+@bp.post("/api/buyers")
 def buyers_post():
     b = request.get_json(force=True) or {}
     try:
@@ -239,25 +248,25 @@ def buyers_post():
 
 
 # ---- 发货交接单 ----
-@app.get("/api/handovers")
+@bp.get("/api/handovers")
 def handovers_get():
     return jsonify({"items": orders_mod.handover_list(), "methods": orders_mod.SHIP_METHOD_ZH})
 
 
-@app.post("/api/handovers")
+@bp.post("/api/handovers")
 def handovers_open():
     b = request.get_json(force=True) or {}
     hid = orders_mod.handover_open(str(b.get("carrier") or "").strip()[:60], b.get("method") or "", _uname())
     return jsonify(orders_mod.handover_get(hid))
 
 
-@app.get("/api/handovers/<int:hid>")
+@bp.get("/api/handovers/<int:hid>")
 def handover_get(hid):
     d = orders_mod.handover_get(hid)
     return jsonify(d) if d else err("交接单不存在", 404)
 
 
-@app.post("/api/handovers/<int:hid>/<act>")
+@bp.post("/api/handovers/<int:hid>/<act>")
 def handover_act(hid, act):
     b = request.get_json(force=True) or {}
     try:
@@ -269,7 +278,7 @@ def handover_act(hid, act):
             orders_mod.handover_remove(hid, int(b.get("order_id") or 0), _uname())
         elif act == "close":
             r = orders_mod.handover_close(hid, _uname())
-            production.schedule()
+            chain.reschedule()
             return jsonify({**r, "handover": orders_mod.handover_get(hid)})
         else:
             return err("操作不对", 404)
@@ -278,7 +287,7 @@ def handover_act(hid, act):
     return jsonify(orders_mod.handover_get(hid))
 
 
-@app.delete("/api/handovers/<int:hid>")
+@bp.delete("/api/handovers/<int:hid>")
 def handover_del(hid):
     try:
         orders_mod.handover_delete(hid)
@@ -287,7 +296,7 @@ def handover_del(hid):
     return jsonify({"ok": True})
 
 
-@app.post("/api/orders/rematch")
+@bp.post("/api/orders/rematch")
 def orders_rematch():
     n = orders_mod.rematch()
     # 已有任务也补上克数/时长
@@ -299,17 +308,17 @@ def orders_rematch():
                  material=COALESCE((SELECT material FROM order_items WHERE id=jobs.order_item_id), material)
                  WHERE status='todo' AND order_item_id IS NOT NULL""")
     c.commit()
-    production.generate(_uname())
-    production.schedule()
+    chain.order_changed(_uname())
+    chain.reschedule()
     return jsonify({"matched": n})
 
 
-@app.get("/api/profit")
+@bp.get("/api/profit")
 def profit_report():
     return jsonify(finance.report(int(request.args.get("days") or 30)))
 
 
-@app.post("/api/labels/import")
+@bp.post("/api/labels/import")
 def labels_import():
     f = request.files.get("file")
     if not f:
@@ -320,7 +329,7 @@ def labels_import():
         return err(str(e))
 
 
-@app.post("/api/labels/check")
+@bp.post("/api/labels/check")
 def labels_check():
     ids = [int(x) for x in (request.get_json(force=True) or {}).get("ids") or []]
     c = db.conn()
@@ -332,12 +341,12 @@ def labels_check():
     return jsonify({"have": have, "missing": missing})
 
 
-@app.get("/api/dashboard")
+@bp.get("/api/dashboard")
 def dashboard_get():
     return jsonify(extras.dashboard(auth.is_owner()))
 
 
-@app.get("/api/aftersales")
+@bp.get("/api/aftersales")
 def aftersales_get():
     a = request.args
     st = a.get("status") or None
@@ -354,13 +363,13 @@ def aftersales_get():
                     "loss_total": round(sum(d.get("loss", 0) for d in items), 2) if auth.is_owner() else None})
 
 
-@app.get("/api/aftersales/<int:aid>")
+@bp.get("/api/aftersales/<int:aid>")
 def aftersales_one(aid):
     d = extras.as_get(aid)
     return jsonify(_strip_as(d)) if d else err("售后记录不存在", 404)
 
 
-@app.post("/api/aftersales")
+@bp.post("/api/aftersales")
 def aftersales_post():
     b = request.get_json(force=True) or {}
     try:
@@ -373,11 +382,11 @@ def aftersales_post():
         return err(str(e))
     if b.get("status") and auth.current_user()["role"] != "production":
         orders_mod.update_order(int(b["order_id"]), _uname(), status=b["status"])
-        production.generate(_uname())
+        chain.order_changed(_uname())
     return jsonify({"id": aid})
 
 
-@app.post("/api/aftersales/<int:aid>")
+@bp.post("/api/aftersales/<int:aid>")
 def aftersales_update(aid):
     try:
         d = extras.as_update(aid, request.get_json(force=True) or {}, _uname(), auth.is_owner())
@@ -386,7 +395,7 @@ def aftersales_update(aid):
     return jsonify(_strip_as(d))
 
 
-@app.post("/api/aftersales/<int:aid>/close")
+@bp.post("/api/aftersales/<int:aid>/close")
 def aftersales_close(aid):
     try:
         extras.as_close(aid, _uname())
@@ -395,7 +404,7 @@ def aftersales_close(aid):
     return jsonify({"ok": True})
 
 
-@app.post("/api/aftersales/<int:aid>/inspect")
+@bp.post("/api/aftersales/<int:aid>/inspect")
 def aftersales_inspect(aid):
     b = request.get_json(force=True) or {}
     try:
@@ -405,7 +414,7 @@ def aftersales_inspect(aid):
     return jsonify(_strip_as(d))
 
 
-@app.post("/api/aftersales/<int:aid>/evidence")
+@bp.post("/api/aftersales/<int:aid>/evidence")
 def aftersales_evidence_add(aid):
     files = request.files.getlist("files")
     if not files:
@@ -417,7 +426,7 @@ def aftersales_evidence_add(aid):
     return jsonify({"evidence": ev})
 
 
-@app.get("/api/aftersales/<int:aid>/evidence/<path:name>")
+@bp.get("/api/aftersales/<int:aid>/evidence/<path:name>")
 def aftersales_evidence_get(aid, name):
     path = os.path.join(extras.evidence_dir(aid), os.path.basename(name))
     if not os.path.isfile(path):
@@ -425,7 +434,7 @@ def aftersales_evidence_get(aid, name):
     return send_file(path, conditional=True)
 
 
-@app.delete("/api/aftersales/<int:aid>/evidence/<path:name>")
+@bp.delete("/api/aftersales/<int:aid>/evidence/<path:name>")
 def aftersales_evidence_del(aid, name):
     try:
         ev = extras.as_evidence_del(aid, name, _uname())
@@ -434,7 +443,7 @@ def aftersales_evidence_del(aid, name):
     return jsonify({"evidence": ev})
 
 
-@app.get("/api/pack/lookup")
+@bp.get("/api/pack/lookup")
 def pack_lookup():
     """打包核对：扫订单号 / 运单号，列出这个订单要装的商品。"""
     code = (request.args.get("code") or "").strip()
@@ -452,7 +461,7 @@ def pack_lookup():
     return jsonify(_strip_order(o))
 
 
-@app.post("/api/pack/done")
+@bp.post("/api/pack/done")
 def pack_done():
     """核对完成：这个订单已打印好的任务标记为已打包。"""
     b = request.get_json(force=True) or {}
@@ -464,3 +473,107 @@ def pack_done():
             n += 1
     orders_mod.log(oid, _uname(), "扫码核对打包完成", f"{n} 个任务")
     return jsonify({"packed": n})
+
+
+@bp.get("/print/orders")
+def orders_print():
+    """打印：pick 拣货/生产汇总单，pack 装箱单（每单一页）。"""
+    ids = [int(x) for x in (request.args.get("ids") or "").split(",") if x.strip().isdigit()]
+    kind = request.args.get("type") or "pack"
+    orders = [o for o in (orders_mod.get_order(i) for i in ids) if o]
+    from html import escape as h
+    fmt = (lambda t: dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else "")
+    css = ("body{font:13px 'Microsoft YaHei','Leelawadee UI',sans-serif;margin:16px;color:#111}"
+           "table{border-collapse:collapse;width:100%;margin:6px 0}th,td{border:1px solid #999;padding:5px 6px;text-align:left}"
+           "th{background:#eee}.pg{page-break-after:always;margin-bottom:24px}h2{margin:4px 0}.note{border:2px solid #000;"
+           "padding:6px;margin:6px 0;font-weight:bold}.box{display:inline-block;width:14px;height:14px;border:1px solid #000}"
+           "@media print{.noprint{display:none}}")
+    out = [f"<!doctype html><html><head><meta charset='utf-8'><title>{'拣货单' if kind == 'pick' else '装箱单'}</title>"
+           f"<style>{css}</style></head><body><p class='noprint'><button onclick='print()'>打印 / พิมพ์</button></p>"]
+    if kind == "pick":
+        agg = {}
+        for o in orders:
+            for it in o["items"]:
+                k = (it.get("sku") or "", it.get("color") or "")
+                a = agg.setdefault(k, {"name": it.get("name") or "", "qty": 0, "orders": []})
+                a["qty"] += it.get("qty") or 1
+                a["orders"].append(f"{o['order_no']}×{it.get('qty') or 1}")
+        out.append(f"<h2>拣货 / 生产汇总单 ใบรวมสินค้า</h2><p>{len(orders)} 个订单 · 打印时间 {fmt(time.time())}</p>"
+                   "<table><tr><th></th><th>SKU</th><th>商品</th><th>颜色</th><th>数量</th><th>订单</th></tr>")
+        for (sku, color), a in sorted(agg.items()):
+            out.append(f"<tr><td><span class='box'></span></td><td><b>{h(sku)}</b></td><td>{h(a['name'])}</td><td>{h(color)}</td>"
+                       f"<td><b>{a['qty']}</b></td><td style='font-size:11px'>{h(', '.join(a['orders']))}</td></tr>")
+        out.append("</table>")
+        notes = [o for o in orders if o.get("custom_note") or o.get("buyer_note")]
+        if notes:
+            out.append("<h3>有备注的订单</h3><table><tr><th>订单号</th><th>定制要求 / 买家留言</th></tr>")
+            for o in notes:
+                out.append(f"<tr><td>{h(o['order_no'])}</td><td>{h(o.get('custom_note') or '')} {h(o.get('buyer_note') or '')}</td></tr>")
+            out.append("</table>")
+    else:
+        for o in orders:
+            out.append(f"<div class='pg'><h2>装箱单 ใบแพ็คสินค้า · {h(o['order_no'])}</h2>"
+                       f"<p>{h(o.get('platform') or '')} {h(o.get('shop') or '')} · 买家 ผู้ซื้อ：{h(o.get('buyer') or '')} · "
+                       f"下单 {fmt(o.get('order_time'))}{' · 最晚发货 ' + fmt(o.get('ship_by')) if o.get('ship_by') else ''}"
+                       f"{' · 运单 ' + h(o['tracking_no']) if o.get('tracking_no') else ''}</p>")
+            if o.get("custom_note"):
+                out.append(f"<div class='note'>定制要求 ความต้องการพิเศษ：{h(o['custom_note'])}</div>")
+            if o.get("buyer_note"):
+                out.append(f"<div class='note'>买家留言 ข้อความผู้ซื้อ：{h(o['buyer_note'])}</div>")
+            out.append("<table><tr><th>✔</th><th>SKU</th><th>商品</th><th>规格/颜色</th><th>数量</th></tr>")
+            for it in o["items"]:
+                out.append(f"<tr><td><span class='box'></span></td><td><b>{h(it.get('sku') or '')}</b></td><td>{h(it.get('name') or '')}</td>"
+                           f"<td>{h(it.get('variation') or it.get('color') or '')}</td><td><b>{it.get('qty') or 1}</b></td></tr>")
+            out.append("</table><p>检查 ตรวจ：____　打包 แพ็ค：____</p></div>")
+    out.append("</body></html>")
+    for o in orders:
+        orders_mod.log(o["id"], _uname(), "打印拣货单" if kind == "pick" else "打印装箱单")
+    return app.response_class("".join(out), mimetype="text/html")
+
+
+@bp.get("/print/handover")
+def handover_print():
+    """交接单打印：给快递员签字。"""
+    from html import escape as h
+    d = orders_mod.handover_get(int(request.args.get("id") or 0))
+    if not d:
+        return err("交接单不存在", 404)
+    fmt = (lambda t: dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else "")
+    cfg = load_config()
+    rows = "".join(f"<tr><td>{i}</td><td><b>{h(o['tracking_no'] or '（无运单号）')}</b></td><td>{h(o['order_no'])}</td>"
+                   f"<td>{h(o['platform'] or '')}</td><td>{o['n_items']}</td><td>{'COD ฿' + format(o['cod'], ',.0f') if o['cod'] else ''}</td></tr>"
+                   for i, o in enumerate(d["orders"], 1))
+    html = (f"<!doctype html><html><head><meta charset='utf-8'><title>交接单 #{d['id']}</title><style>"
+            "body{font:13px 'Microsoft YaHei','Leelawadee UI',sans-serif;margin:16px;color:#111}table{border-collapse:collapse;width:100%}"
+            "th,td{border:1px solid #999;padding:5px 6px;text-align:left}th{background:#eee}.sig{margin-top:28px;display:flex;gap:60px}"
+            "@media print{.noprint{display:none}}</style></head><body><p class='noprint'><button onclick='print()'>打印 / พิมพ์</button></p>"
+            f"<h2>发货交接单 ใบส่งมอบพัสดุ #{d['id']}</h2>"
+            f"<p>物流 ขนส่ง：<b>{h(d['carrier'] or '-')}</b> · {h(d['method_zh'] or '')} · 寄件人 ผู้ส่ง：{h(cfg.get('sender_name') or '')} "
+            f"{h(cfg.get('sender_phone') or '')}<br>共 รวม <b>{d['count']}</b> 件包裹 พัสดุ"
+            f"{' · 货到付款合计 ยอด COD ฿' + format(d['cod_total'], ',.0f') if d['cod_total'] else ''} · 打印时间 {fmt(time.time())}</p>"
+            "<table><tr><th>#</th><th>运单号 เลขพัสดุ</th><th>订单号</th><th>平台</th><th>件数</th><th>COD</th></tr>"
+            f"{rows}</table><div class='sig'><div>交件人 ผู้ส่งมอบ：________________</div><div>快递员 พนักงานขนส่ง：________________</div>"
+            "<div>时间 เวลา：________________</div></div></body></html>")
+    return app.response_class(html, mimetype="text/html")
+
+
+@bp.get("/print/labels")
+def labels_print():
+    ids = [int(x) for x in (request.args.get("ids") or "").split(",") if x.strip().isdigit()]
+    kind = request.args.get("type") or "self"
+    if not ids:
+        return err("请先勾选订单")
+    if kind == "platform":
+        try:
+            data, have, _missing = labels.merged_pdf(ids)
+        except ValueError as e:
+            return err(str(e))
+        if not have:
+            return err("选中的订单都还没有平台面单", 404)
+        labels.mark_printed(have, _uname(), "平台面单")
+        import io as _io
+        return send_file(_io.BytesIO(data), mimetype="application/pdf", as_attachment=False,
+                         download_name=f"labels_{dt.datetime.now().strftime('%m%d_%H%M')}.pdf")
+    orders = [o for o in (orders_mod.get_order(i) for i in ids) if o]
+    labels.mark_printed([o["id"] for o in orders], _uname(), "自制面单")
+    return app.response_class(labels.self_made_html(orders, load_config()), mimetype="text/html")

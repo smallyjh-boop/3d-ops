@@ -1,0 +1,298 @@
+<!-- 模块 goods 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上） -->
+<!-- 产品库 -->
+<section id="tab-library" class="panel hidden">
+  <div class="row between wrap gap">
+    <h2>产品库</h2>
+    <div class="row gap">
+      <button id="btn-seo-batch" data-needmod="seo" title="搜索分低于 80 的产品，AI 从买家角度重写标题、关键词、详情、标签，直接更新（可以在编辑页撤销）">🔍 批量搜索优化</button>
+      <button id="btn-fill-copy" title="所有产品里空着的文案字段（英文、Shopee 标签、包装内容、变体名称……）用 AI 补上，后台做">✨ 批量补全文案</button>
+      <a class="btn c-cost" href="/api/catalog" id="btn-catalog">导出全部产品资料（Excel）</a>
+      <button id="btn-new" class="primary">＋ 新建产品</button>
+    </div>
+  </div>
+  <div class="lib-wrap">
+    <aside class="lib-groups card">
+      <div class="row between"><b>分组</b><button class="mini" id="btn-grp-new">＋ 新建</button></div>
+      <div id="grp-list"></div>
+      <p class="muted small">勾选产品后，可以「加入分组」。一个产品可以放进多个分组。</p>
+    </aside>
+    <div class="lib-main">
+      <div class="row gap wrap lib-filter">
+        <input id="lib-q" placeholder="搜索 编号 / SKU / 品名 / 泰文标题 / 关键词 / 颜色" style="width:300px" data-notr>
+        <select id="lib-status"><option value="">全部状态</option><option value="ok">可导出</option><option value="todo">待补资料</option><option value="exported">已上架过</option><option value="new">没上架过</option><option value="seo_low" data-needmod="seo">搜索分低于 80</option></select>
+        <select id="lib-print"><option value="">打印：全部</option><option value="nomodel">没有 3D 模型</option><option value="nofile">没有可用切片文件</option><option value="reviewed">未试打</option><option value="verified">已试打验证</option></select>
+        <select id="lib-sort"><option value="updated">最近修改</option><option value="id">编号</option><option value="sold">近 30 天销量</option><option value="name">品名</option></select>
+        <span id="lib-count" class="muted small"></span>
+      </div>
+      <div id="lib-bulk" class="ord-bulk">
+        <span id="lib-selinfo" class="small muted">勾选产品后批量处理</span>
+        <select id="lib-grp-pick"></select><button id="btn-grp-add">加入分组</button><button id="btn-grp-rm">移出分组</button>
+        <button id="btn-seo-sel" data-needmod="seo">🔍 搜索优化选中</button>
+        <button id="btn-lib-zip">⬇ 下载模型和切片文件</button>
+        <button id="btn-lib-del" class="danger">删除选中</button>
+        <button id="btn-lib-clear" class="mini">取消勾选</button>
+      </div>
+      <table class="grid" id="lib-table">
+        <thead><tr><th><input type="checkbox" id="lib-all"></th><th></th><th>编码</th><th>品名</th><th>分组</th><th>SKU / 颜色</th><th>Lazada 类目</th><th>状态</th><th>打印</th><th>近30天</th><th>更新</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p id="lib-empty" class="muted hidden">还没有产品，点右上角「新建产品」开始。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 编辑产品 -->
+<section id="tab-edit" class="panel hidden">
+  <div class="sticky-bar row between">
+    <div><button id="btn-ed-back" class="mini">← 返回产品库</button> <strong id="ed-title" data-notr>未选择产品</strong> <span id="ed-dirty" class="muted"></span></div>
+    <div class="row gap"><span id="ed-status"></span><button id="btn-ed-edit" class="primary">✏ 修改产品</button>
+      <button id="btn-save" class="primary hidden">💾 保存</button><button id="btn-ed-cancel" class="hidden">取消</button></div>
+  </div>
+  <div id="ed-body" class="hidden">
+  <div id="ed-source"></div>
+
+  <div class="card">
+    <h3>① 基本信息（中文填写即可）</h3>
+    <div class="form2">
+      <label>产品名称<input data-f="name_zh" placeholder="例：猫咪造型手机支架"></label>
+      <label>材料<input data-f="material" list="mat-list" placeholder="PLA / PETG / TPU / RESIN"><datalist id="mat-list"><option>PLA</option><option>PETG</option><option>TPU</option><option>ABS</option><option>ASA</option><option>PLA-CF</option><option>PETG-CF</option><option>PA</option><option>PC</option><option value="RESIN" data-needmod="resin">RESIN（光固化标准树脂）</option><option value="RESIN-ABS" data-needmod="resin">RESIN-ABS（类 ABS 树脂）</option><option value="RESIN-WASH" data-needmod="resin">RESIN-WASH（水洗树脂）</option><option value="RESIN-TOUGH" data-needmod="resin">RESIN-TOUGH（高韧性树脂）</option><option value="RESIN-8K" data-needmod="resin">RESIN-8K（高精度树脂）</option></datalist></label>
+      <label>发货天数（下单后几天内发货，定制商品可以长一点）<input data-f="lead_days" type="number" min="0" placeholder="空 = 用设置里的默认"></label>
+      <label>产品尺寸<input data-f="size_text" placeholder="例：长10 × 宽8 × 高12 cm"></label>
+      <label>关键词（中文或泰文，逗号分隔）<input data-f="keywords" placeholder="手机支架, ที่วางมือถือ"></label>
+      <label class="span2">用途 / 卖点 / 说明<textarea data-f="features_zh" rows="4" placeholder="给谁用、解决什么问题、优点、可定制内容等。写得越具体，AI 文案和类目匹配越准"></textarea></label>
+    </div>
+    <div class="form4" id="pkg-box">
+      <label>包裹长 cm<input data-f="package.length" data-pkg type="number" step="0.1"></label>
+      <label>包裹宽 cm<input data-f="package.width" data-pkg type="number" step="0.1"></label>
+      <label>包裹高 cm<input data-f="package.height" data-pkg type="number" step="0.1"></label>
+      <div class="small"><span id="pkg-note" class="muted">包裹重量 = 变体克数 + 包材重量，自动计算。</span>
+        <button id="btn-pkg-ok" class="hidden">确认尺寸</button></div>
+    </div>
+  </div>
+
+  <div class="card" id="var-card">
+    <div class="row between">
+      <h3>② 变体、SKU 与定价</h3>
+      <button id="btn-regen-sku" title="按当前颜色/规格重新生成 SKU">重新生成 SKU</button>
+    </div>
+    <div class="form4">
+      <label>变体1名称<input data-f="variation1_name_zh" placeholder="颜色"></label>
+      <label>变体2名称（可空）<input data-f="variation2_name_zh" placeholder="尺寸"></label>
+      <label>加价率（空=默认）<input data-f="markup" type="number" step="0.1" placeholder="1 = 100%"></label>
+      <div class="muted small">「手动售价」不填 = 按成本加价；填了 = 用你的价格并显示实际加价率。</div>
+    </div>
+    <div class="color-pick"><span class="small"><b>点选颜色</b>（点一下添加该颜色的变体，再点一次删除）：</span><div id="color-chips" class="chips"></div></div>
+    <p class="muted small">也可以在表格里直接输入颜色，会自动套用颜色代码和统一泰文。颜色表在设置页修改。SKU = 产品编码-颜色代码-规格代码。导出过 Lazada 后 SKU 锁定。</p>
+    <p class="muted small">加颜色时每个规格自动加一个「随机颜色」（客人不挑颜色，接单时系统按耗材选），不要的点一下删掉。</p>
+    <div id="spec-review"></div>
+    <div class="row gap wrap small" style="margin:6px 0"><b>库存</b>
+      <select id="stock-auto-sel"><option value="default">跟随总开关</option><option value="on">按耗材自动算</option><option value="off">手填 / 默认库存</option></select>
+      <span id="stock-auto-note" class="muted"></span></div>
+    <table class="grid" id="var-table">
+      <thead><tr>
+        <th>#</th><th>变体1（颜色）</th><th>变体2</th><th>SKU</th><th>克数 g</th><th>时长 h</th>
+        <th class="c-man">手动售价</th><th>库存</th><th>图片</th>
+        <th class="c-cost">成本</th><th class="c-sug">建议价</th><th class="c-final">最终价</th><th class="c-profit">利润</th><th class="c-mk">加价率</th><th></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="row gap wrap"><button id="btn-add-color" title="颜色表里没有的颜色：给每个规格各加一行">＋ 其它颜色</button>
+      <button id="btn-add-spec" title="加一个规格（尺寸 / 型号 / 套装）：每个颜色各加一行">＋ 加规格</button>
+      <button id="btn-ren-spec" class="mini">规格改名</button>
+      <span id="spec-lock-note" class="muted small"></span></div>
+    <div id="price-note" class="muted small"></div>
+  </div>
+
+  <div class="card" id="model-card">
+    <div class="row between wrap gap">
+      <h3>③ 3D 模型（STL / 3MF）：自动算克数时长、自动出商品图</h3>
+      <div class="row gap"><button class="mini primary-lite" id="btn-model-lib" title="全部模型文件：看尺寸、选哪个当 3D 模型、多个组件合并、每个零件单独选摆放方向、预览摆盘">📚 模型库 / 摆盘</button>
+      <label class="filebtn">上传模型文件<input id="model-input" type="file" accept=".stl,.3mf" hidden></label></div>
+    </div>
+    <div id="model-empty" class="muted small">上传 STL 或 3MF 后，可以 360° 预览、自动估算克数和打印时长、一键生成多颜色多角度商品图和尺寸图。没有模型也可以跳过这一步。</div>
+    <div id="model-body" class="model-grid hidden">
+      <div>
+        <div id="viewer" class="viewer"></div>
+        <div class="muted small">拖动旋转 · 滚轮缩放 · 右键平移</div>
+        <div class="small" style="margin-top:6px">预览颜色：</div><div id="view-chips" class="chips"></div>
+        <div class="row gap wrap small print-look">
+          <label class="row gap"><input type="checkbox" id="pl-on" checked> 真实打印质感（层纹、顶面走线）</label>
+          <span class="muted">放大看细节、生成商品图时才显示，平时用普通显示，更快</span>
+          <label>表面<select id="pl-surface"><option value="auto">按材料自动</option><option value="matte">哑光</option><option value="satin">半哑光</option><option value="glossy">亮面（PETG）</option><option value="silk">丝绸</option><option value="carbon">碳纤维</option><option value="resin">光固化树脂</option></select></label>
+          <label>层高<select id="pl-layer"><option value="auto">按打印方案</option><option value="0.12">0.12 mm</option><option value="0.16">0.16 mm</option><option value="0.2">0.20 mm</option><option value="0.28">0.28 mm</option></select></label>
+          <label class="row gap"><input type="checkbox" id="pl-shadow"> 地面阴影</label>
+        </div>
+        <div class="muted small">层纹方向按「打印方案」里的摆放方向；放大看最清楚。生成商品图时按这里的设置出图。</div>
+        <label class="row gap small"><input type="checkbox" id="viewer-safe"> 兼容显示模式（模型显示全黑、换颜色没反应时勾选）</label>
+      </div>
+      <div>
+        <div id="model-info" class="small"></div>
+        <h4>克数 / 打印时长</h4>
+        <div class="row gap wrap">
+          <select id="printer-select"></select>
+          <button id="btn-est">用估算值填入全部变体</button>
+          <button id="btn-orca">OrcaSlicer 自动切片</button>
+          <label class="filebtn">导入切片文件<input id="sliced-input" type="file" accept=".gcode,.gco,.3mf" hidden></label>
+        </div>
+        <div id="est-box" class="small"></div>
+        <h4>生成商品图</h4>
+        <div class="row gap wrap small">
+          <label class="row gap"><input type="checkbox" id="r-colors" checked> 每个颜色一张主图</label>
+          <label class="row gap"><input type="checkbox" id="r-angles" checked> 多角度（正面/侧面/俯视/背面）</label>
+          <label class="row gap"><input type="checkbox" id="r-dims" checked> 尺寸标注图</label>
+          <label class="row gap"><input type="checkbox" id="r-white" checked> 第一张设为白底图</label>
+        </div>
+        <div class="row gap" style="margin-top:8px">
+          <button id="btn-render" class="primary">一键生成商品图</button>
+          <button id="btn-snap">用当前角度拍一张</button>
+          <select id="snap-color" hidden></select>
+        </div>
+        <div id="render-progress" class="muted small"></div>
+      </div>
+    </div>
+    <div id="spec-model-box" class="card-sub"></div>
+    <div id="advice-box">
+      <h4>AI 打印建议 + 产品描述</h4>
+      <p class="muted small">AI 会分析模型（6 个摆放方向的悬空面积、底面接触、尺寸）和渲染图，结合你的提示词，给出：给客户看的用途/卖点描述、建议材质、摆放方向、层高、壁数、填充率、支撑和注意事项。没有模型时按产品信息和第一张图片分析。</p>
+      <textarea id="advice-prompt" rows="2" placeholder="提示词（可空）：例如 放在车里用、要结实耐用、给小孩玩、要软一点、户外晒太阳、要好看的外观面…"></textarea>
+      <div class="row gap" style="margin-top:6px"><button id="btn-advice" class="primary">AI 分析并生成建议</button><span id="advice-prog" class="muted small"></span></div>
+      <div id="advice-out"></div>
+      <details class="recipe-wrap" id="recipe-wrap" data-needmod="prod"><summary><b>🧩 打印方案与切片文件</b> <span class="muted small">（方向、支撑、参数、一盘几个 → 切片 → 检查 → 复核 → 试打验证）</span></summary>
+        <div id="recipe-box"></div></details>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>④ 图片</h3>
+    <div class="row gap wrap">
+      <label class="filebtn">选择图片上传<input id="img-input" type="file" accept="image/*" multiple hidden></label>
+      <button id="btn-proc">全部转成 1:1 白底方图</button>
+      <button id="btn-proc-bg">全部去背景 + 白底方图</button>
+      <button id="btn-host" class="primary">上传图床，生成网址</button>
+      <button id="btn-adimg">✨ 做卖点图（加广告词）</button>
+    </div>
+    <p class="muted small">第 1 张是主图，最多 8 张。「设为白底图」生成搜索页用的纯白背景图。</p>
+    <div id="img-grid" class="img-grid"></div>
+    <div id="white-box"></div>
+    <details class="scene-box" id="scene-details">
+      <summary><b>场景图（使用场景）</b><span class="muted small">：免费背景合成，或 AI 生成真实场景</span></summary>
+      <div class="scene-grid">
+        <div>
+          <canvas id="scene-canvas" width="1200" height="1200"></canvas>
+          <div class="muted small">拖动产品调整位置 · 滚轮或滑块调大小</div>
+        </div>
+        <div class="scene-ctrl">
+          <label>产品来源<select id="scene-src"></select></label>
+          <div id="scene-color-row" class="small">颜色：<div id="scene-colors" class="chips"></div>
+            <label class="row gap small"><input type="checkbox" id="scene-multi"> 多个颜色并排放</label></div>
+          <div class="row gap wrap small">
+            <label class="row gap">大小 <input type="range" id="scene-scale" min="8" max="95" value="42" style="width:140px"></label>
+            <button class="mini" id="btn-scene-center">放回中间</button>
+          </div>
+          <div class="small"><b>背景</b>（点选）：</div>
+          <div id="scene-bgs" class="scene-bgs"></div>
+          <div class="row gap wrap small">
+            <label class="filebtn mini">＋ 上传自己的背景照片<input id="scene-upload" type="file" accept="image/*" multiple hidden></label>
+            <button class="mini" id="btn-scene-floor" title="把当前产品底部的位置记为这张背景的默认摆放位置">记住这张背景的摆放位置</button>
+          </div>
+          <p class="muted small">背景库是所有产品共用的。两种方式添加：①用手机拍自己的书桌、书架、床头柜、客厅茶几（台面空着、光线柔和、正方形构图）后上传，最真实也免费；②下面让 AI 生成电商常用的空背景，只生成一次，以后所有产品都能用（每张约 0.4-2 铢）。</p>
+          <div class="small"><b>AI 生成背景</b>（不含产品，所以不会画错你的产品）：</div>
+          <div id="bg-presets" class="chips"></div>
+          <div class="row gap"><button id="btn-bg-ai" class="mini">生成选中的背景</button><span id="bg-ai-prog" class="muted small"></span></div>
+          <div class="row gap"><button id="btn-scene-add" class="primary">加入商品图</button></div>
+          <hr>
+          <div class="small"><b>AI 生成场景图</b>（需要在设置页填写「场景图 AI」的密钥，按张收费；会用上面选的产品图和颜色）</div>
+          <div id="ai-scenes" class="chips"></div>
+          <input id="ai-scene-extra" placeholder="补充要求（可空），例：泰式风格、圣诞节氛围、放在白色书桌上">
+          <div class="row gap" style="margin-top:6px"><button id="btn-scene-ai">AI 生成场景图</button><span id="scene-ai-prog" class="muted small"></span></div>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <div class="row between">
+      <h3>⑤ 上架文案（泰文 + 英文，中文回译核对）</h3>
+      <div class="row gap">
+        <button id="btn-seo" data-needmod="seo" class="primary" title="从买家角度找搜索词（原来的「关键词扩展」），按平台搜索规则重写标题（泰文为主 + 几个英文关键词）、简短清楚的详情、标签、变体名，直接更新，可以撤销">🔍 AI 搜索优化（关键词 + 标题 + 详情 + 标签）</button>
+        <button id="btn-kw" class="hidden">AI 关键词扩展</button>
+        <button id="btn-ai" class="hidden">AI 生成文案</button>
+        <button id="btn-back" title="回译成中文核对，同时按泰文更新英文标题和英文详情">泰文改过后重新回译（含英文）</button>
+        <button id="btn-complete" title="英文标题 / 详情、Shopee 标题和标签、包装内容、变体名称、选项泰文……空着的都补上，已经填的不动">✨ 补全空着的文案</button>
+      </div>
+    </div>
+    <div id="seo-panel" class="seo-panel" data-needmod="seo"></div>
+    <div id="kw-panel" class="kw-panel hidden"></div>
+    <div id="curator-copy"></div>
+    <div class="copy-grid">
+      <div>
+        <label><span>泰文标题（Lazada） <span id="cnt-title" class="muted small"></span></span><input data-f="copy.title_th"></label>
+        <label><span>泰文标题（Shopee，最多 120 字符，空=用 Lazada 标题） <span id="cnt-title-sp" class="muted small"></span></span><input data-f="copy.title_shopee_th"></label>
+        <label>英文标题<input data-f="copy.title_en"></label>
+        <label>泰文详情（HTML）<textarea data-f="copy.description_th" rows="9"></textarea></label>
+        <label>英文详情（HTML）<textarea data-f="copy.description_en" rows="4"></textarea></label>
+        <label>Shopee 标签（加在 Shopee 详情最后，会被搜索，最多 18 个）<textarea data-f="copy.hashtags_shopee" rows="2"></textarea></label>
+        <label>包装内容（What's in the box）<input data-f="copy.package_content_th"></label>
+        <div class="form2">
+          <label>变体1名称（泰文）<input data-f="copy.variation1_name_th"></label>
+          <label>变体2名称（泰文）<input data-f="copy.variation2_name_th"></label>
+        </div>
+        <label>非颜色选项的泰文（每行：中文=泰文；颜色自动用颜色表）<textarea id="opt-map" rows="3"></textarea></label>
+      </div>
+      <div>
+        <label>标题中文回译<textarea data-f="copy.title_zh" rows="2" readonly></textarea></label>
+        <label>详情中文回译<textarea data-f="copy.description_zh" rows="9" readonly></textarea></label>
+        <label>泰文搜索关键词参考<textarea id="kw-th" rows="2" readonly></textarea></label>
+        <div class="muted small">详情预览</div>
+        <div id="desc-preview" class="preview"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row between wrap gap">
+      <h3>⑥ Lazada 类目与属性</h3>
+      <div class="row gap wrap">
+        <button id="btn-ai-cat" class="primary">AI 匹配类目并填写属性</button>
+        <button id="btn-fill-attrs">按当前类目重新填写属性</button>
+        <button id="btn-confirm-all">✓ 全部确认</button>
+      </div>
+    </div>
+    <div class="form2">
+      <label>类目<input id="cat-filter" placeholder="🔍 搜索类目（中文 / 泰文 / 类目ID），类目多时用" autocomplete="off"><select id="cat-select"></select></label>
+      <div id="cat-info" class="small"></div>
+    </div>
+    <div class="legend small">
+      <span class="st st-auto">规则/记住的值</span><span class="st st-ai">AI 确定</span>
+      <span class="st st-check">AI 不确定·请确认</span><span class="st st-missing">必填·缺少</span>
+      <span class="st st-manual">手动（会记住）</span><span class="st st-empty">选填·留空</span>
+    </div>
+    <div id="attr-form" class="form3"></div>
+    <div class="shopee-box">
+      <div class="row between wrap gap">
+        <h3>Shopee 类目</h3>
+        <button id="btn-ai-sp">AI 匹配 Shopee 类目</button>
+      </div>
+      <div class="form2">
+        <div>
+          <label>搜索 Shopee 类目（中文、泰文、英文或类目ID都可以，回车搜索，点结果选择）
+            <input id="sp-search" autocomplete="off" placeholder="例如 排水管 / ท่อ / figurine / 101188"></label>
+          <div id="sp-results" class="sp-results"></div>
+          <div class="small" style="margin-top:6px">或者逐级选择：</div>
+          <div id="sp-cascade" class="row gap wrap"></div>
+        </div>
+        <div id="sp-info" class="small"></div>
+        <div id="sp-attrs" class="small"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="check-card">
+    <div class="row between"><h3>⑦ 上架检查</h3><button id="btn-check">重新检查</button></div>
+    <div class="form2">
+      <div><b>Lazada</b><div id="check-box"></div></div>
+      <div><b>Shopee</b><div id="check-box-sp"></div></div>
+    </div>
+  </div>
+  </div>
+</section>

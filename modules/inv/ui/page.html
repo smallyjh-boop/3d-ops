@@ -1,0 +1,21 @@
+<!-- 模块 inv 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上） -->
+<!-- 耗材 -->
+<section id="tab-inventory" class="panel hidden">
+  <div class="row between wrap gap"><h2>库存管理</h2>
+    <div class="row gap wrap" id="inv-actions">
+      <button class="primary" data-newdoc="purchase" data-perm="inv.in">＋ 采购入库</button>
+      <button data-newdoc="issue" data-perm="inv.out">领用出库</button>
+      <button data-newdoc="return" data-perm="inv.in">退回入库</button>
+      <button data-newdoc="scrap" data-perm="inv.out">报废</button>
+      <button data-newdoc="adjust" data-perm="inv.adjust">调整</button>
+      <button id="inv-new-item" data-perm="inv.in">＋ 新物品</button>
+      <button id="inv-presets" data-perm="inv.in" title="耗材常用颜色、备件、工具、包材，已经有的不重复建">补全常用物品</button>
+      <button id="inv-reload">刷新</button></div></div>
+  <p class="muted small">耗材、备件、包材、成品……都在这里，按分类管理；数量只能通过单据改变，每一笔都有流水。打印完成自动扣耗材（产品克数 + 损耗率），打印失败整盘记损耗；
+    备货打印的成品自动入库、出货自动出库；开了「发货自动扣包材」的话，订单发货时自动扣包材。买东西走「采购」（下单 → 在途 → 到货入库）。</p>
+  <div id="inv-alerts"></div>
+  <div class="chips" id="inv-views" style="margin:8px 0">
+    <span class="chip on" data-iv="items">库存总览</span><span class="chip" data-iv="docs">单据</span><span class="chip" data-iv="moves">流水</span>
+    <span class="chip" data-iv="stocktake">盘点</span><span class="chip" data-iv="expense">支出统计</span></div>
+  <div id="inv-body"></div>
+</section>

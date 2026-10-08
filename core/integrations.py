@@ -215,7 +215,8 @@ def ingest(orders, source, default_platform="", user="", shop_id=None):
     """所有自动导入的入口：写订单 → 生成生产任务 → 记日志。"""
     from . import orders as orders_mod, production
     stats = orders_mod.upsert(orders, source=source, default_platform=default_platform, user=user)
-    stats["jobs"] = production.generate(user or source)
+    from . import chain
+    stats["jobs"] = chain.order_changed(user or source)
     msg = "；".join(stats.get("errors") or [])
     if stats["unmatched"]:
         msg = (msg + "；" if msg else "") + "没对上的 SKU：" + ", ".join(u["sku"] for u in stats["unmatched"][:20])

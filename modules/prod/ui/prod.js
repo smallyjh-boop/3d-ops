@@ -15,22 +15,13 @@
     if (name === "quality") { loadQuality(); loadCalib().catch(() => {}); }
   }
 
-  // ---------------- 弹窗 ----------------
-  function modal(html) {
-    $("#modal-in").innerHTML = html;
-    $("#modal").classList.remove("hidden");
-    return $("#modal-in");
-  }
-  function closeModal() {
-    const wasRecipe = !!$("#rc-modal-box");
-    $("#modal-in").onchange = null; $("#modal-in").onclick = null;
-    $("#modal").classList.add("hidden"); $("#modal-in").innerHTML = ""; $("#modal-in").classList.remove("wide");
-    if (wasRecipe && !$("#tab-recipes").classList.contains("hidden")) loadRecipes();
-    if (wasRecipe && $("#tab-files") && !$("#tab-files").classList.contains("hidden") && window.FILES) window.FILES.load();
-  }
-  $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal" || e.target.closest("[data-mclose]")) closeModal(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#modal").classList.contains("hidden")) closeModal(); });
-  window.MODAL = { open: modal, close: closeModal };
+  // ---------------- 弹窗（v2.31：通用弹窗搬到 static/modal.js，这里只接「关掉打印方案弹窗后刷新列表」） ----------------
+  const modal = (html) => MODAL.open(html);
+  const closeModal = () => MODAL.close();
+  MODAL.onClose((ctx) => {
+    if (ctx.wasRecipe && $("#tab-recipes") && !$("#tab-recipes").classList.contains("hidden")) loadRecipes();
+    if (ctx.wasRecipe && $("#tab-files") && !$("#tab-files").classList.contains("hidden") && window.FILES) window.FILES.load();
+  });
 
   // ---------------- 生产看板 ----------------
   function prodHead(j) {

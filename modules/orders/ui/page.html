@@ -1,0 +1,191 @@
+<!-- 模块 orders 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上） -->
+<!-- 订单 -->
+<section id="tab-orders" class="panel hidden">
+  <div class="row between wrap gap">
+    <h2>订单</h2>
+    <div class="row gap wrap">
+      <label class="filebtn primary-file">导入订单表格<input type="file" id="ord-file" accept=".xlsx,.xlsm,.csv" hidden></label>
+      <button id="btn-ord-manual">＋ 手工订单（批发/定制/报价）</button>
+      <button id="btn-ord-rematch" title="新建产品或改了 SKU 以后点这里">重新匹配 SKU</button>
+      <button id="btn-ord-track" title="从平台 / BigSeller 复制 订单号,运单号 粘贴进来">批量填运单号</button>
+    </div>
+  </div>
+  <p class="muted small">从 BigSeller / Lazada / Shopee / TikTok 后台导出订单表格，直接导入。第一次导入时确认每一列是什么，以后同样格式的表格自动识别。
+    重复导入同一批订单不会重复，只会更新状态。待发货订单会自动生成生产任务。</p>
+
+  <div id="ord-import" class="card hidden">
+    <div class="row between"><h3>导入：<span id="imp-file" data-notr></span></h3><button class="mini" id="btn-imp-cancel">取消</button></div>
+    <p class="small"><span id="imp-info"></span></p>
+    <div class="row gap wrap">
+      <label>平台（表格里没有平台列时用）<select id="imp-platform"><option value="">自动/表格里有</option><option value="lazada">Lazada</option><option value="shopee">Shopee</option><option value="tiktok">TikTok</option><option value="other">其他</option></select></label>
+      <label>记住这个格式，名称<input id="imp-profile" placeholder="例：BigSeller 订单" style="width:200px"></label>
+    </div>
+    <div style="overflow:auto"><table class="grid small" id="imp-map"><thead><tr><th>表格里的列</th><th>前几行内容</th><th>对应</th></tr></thead><tbody></tbody></table></div>
+    <button id="btn-imp-commit" class="primary">确认导入</button>
+  </div>
+  <div id="ord-result" class="card hidden"></div>
+
+  <div id="ord-manual" class="card hidden">
+    <div class="row between"><h3>手工订单</h3><button class="mini" id="btn-man-cancel">取消</button></div>
+    <div class="form4">
+      <label>类型<select id="man-kind"><option value="wholesale">批发/大单</option><option value="custom">定制单</option><option value="manual">私下成交</option><option value="quote">报价/预订单（先排产估算，不算收入）</option></select></label>
+      <label>客户<input id="man-buyer" data-notr></label>
+      <label>来源<select id="man-platform"><option value="manual">私下/LINE</option><option value="lazada">Lazada</option><option value="shopee">Shopee</option><option value="tiktok">TikTok</option></select></label>
+      <label>订单号（可不填）<input id="man-no" data-notr></label>
+      <label>最晚发货日期<input id="man-shipby" type="date"></label>
+      <label>订单总额 ฿（不填=按商品合计）<input id="man-total" type="number" min="0"></label>
+      <label class="row" style="align-self:center"><input type="checkbox" id="man-priority"> 加急</label>
+    </div>
+    <details class="man-ship"><summary class="small">收件信息（自己发货、要打自制面单时填）</summary>
+      <div class="form3">
+        <label>收件人<input id="man-receiver" data-notr></label>
+        <label>电话<input id="man-phone" data-notr></label>
+        <label>邮编<input id="man-postcode" data-notr></label>
+        <label class="span2">地址<input id="man-address" data-notr></label>
+        <label>物流公司<input id="man-carrier" list="carrier-list" data-notr></label>
+        <label>运单号<input id="man-track" data-notr></label>
+        <label>货到付款金额 ฿<input id="man-cod" type="number" min="0"></label>
+      </div>
+    </details>
+    <datalist id="carrier-list"><option>Lazada Express (LEX)</option><option>Flash Express</option><option>Kerry Express</option><option>J&amp;T Express</option><option>Thailand Post</option><option>SPX Express</option><option>Lazada Express</option><option>Ninja Van</option><option>Best Express</option></datalist>
+    <label>定制要求（刻字、颜色、尺寸、包装等，会显示在生产任务上）<textarea id="man-note" rows="2" data-notr></textarea></label>
+    <table class="grid" id="man-items"><thead><tr><th>SKU</th><th>商品</th><th>数量</th><th class="c-final">单价 ฿</th><th></th></tr></thead><tbody></tbody></table>
+    <datalist id="sku-list"></datalist>
+    <div class="row gap"><button id="btn-man-add">＋ 加一行</button><button id="btn-man-save" class="primary">保存订单</button></div>
+  </div>
+
+  <div id="ord-tabs" class="ord-tabs"></div>
+  <div class="row gap wrap ord-filter">
+    <input id="ord-q" placeholder="搜索 订单号 / 买家 / SKU / 运单号 / 备注" style="width:260px">
+    <select id="ord-platform"><option value="">全部平台</option><option value="lazada">Lazada</option><option value="shopee">Shopee</option><option value="tiktok">TikTok</option><option value="manual">手工</option><option value="other">其他</option></select>
+    <select id="ord-shop"><option value="">全部店铺</option></select>
+    <select id="ord-kind"><option value="">全部类型</option><option value="normal">平台订单</option><option value="wholesale">批发/大单</option><option value="custom">定制单</option><option value="manual">私下成交</option><option value="quote">报价</option></select>
+    <select id="ord-tag"><option value="">全部标签</option></select>
+    <select id="ord-label"><option value="">面单：全部</option><option value="none">未打面单</option><option value="printed">已打面单</option></select>
+    <select id="ord-pay"><option value="">付款：全部</option><option value="cod">货到付款 COD</option><option value="prepaid">在线已付</option></select>
+    <select id="ord-carrier"><option value="">全部物流</option></select>
+    <label class="row small">下单<input id="ord-from" type="date" style="width:140px"></label>
+    <label class="row small">～<input id="ord-to" type="date" style="width:140px"></label>
+    <select id="ord-sort"><option value="time_desc">最新下单在前</option><option value="time_asc">最早下单在前</option><option value="ship_by">最晚发货时间</option><option value="amount" class="c-cost">金额从高到低</option></select>
+    <button id="btn-ord-reset" class="mini">清空筛选</button>
+  </div>
+  <div id="ord-bulk" class="ord-bulk">
+    <span id="ord-selinfo" class="small muted">勾选订单后批量处理</span>
+    <button data-bulk="approve" class="primary-lite">✔ 审核通过</button>
+    <button data-bulk="hold">⏸ 挂起</button>
+    <button data-bulk="label" class="primary-lite">🏷 打印面单</button>
+    <label class="filebtn mini-file" title="Lazada / Shopee / TikTok / BigSeller 批量下载的面单 PDF">⬆ 上传平台面单 PDF<input type="file" id="label-file" accept=".pdf" hidden></label>
+    <button data-bulk="pick">打印拣货单</button>
+    <button data-bulk="pack">打印装箱单</button>
+    <button data-bulk="status:shipped">标记已发货</button>
+    <button data-bulk="status:completed">标记已完成</button>
+    <button data-bulk="ship_method:pickup">上门揽收</button>
+    <button data-bulk="ship_method:dropoff">送到网点</button>
+    <button data-bulk="status:delivery_failed">标记拒收/派送失败</button>
+    <button data-bulk="priority:1">加急</button>
+    <button data-bulk="priority:0">取消加急</button>
+    <button data-bulk="tag_add">加标签</button>
+    <button data-bulk="tag_remove">去标签</button>
+    <button data-bulk="status:cancelled" class="danger">取消订单</button>
+    <button data-bulk="export">导出 Excel</button>
+    <button data-bulk="delete" class="danger">删除</button>
+  </div>
+  <table class="grid" id="ord-table"><thead><tr><th><input type="checkbox" id="ord-all"></th><th>订单</th><th>时间</th><th>买家</th><th>商品</th><th class="c-cost">金额</th><th>状态 / 生产</th><th>异常 / 标签</th><th></th></tr></thead><tbody></tbody></table>
+  <div id="ord-pager" class="row gap pager"></div>
+
+  <div id="ord-detail" class="drawer hidden"></div>
+</section>
+
+<!-- 打包核对 -->
+<section id="tab-pack" class="panel hidden">
+  <h2>打包核对</h2>
+  <p class="muted small">先扫订单号或运单号（面单上的条码），再逐个扫商品工单贴纸上的 SKU 条码。全部对上了才能点「打包完成」，防止错发漏发。
+    扫码枪直接扫；手机可以点「📷 摄像头扫码」。</p>
+  <div class="card pack-card">
+    <div class="row gap wrap"><input id="pk-code" placeholder="扫描 / 输入 订单号 或 SKU" style="width:320px;font-size:18px" autocomplete="off" data-notr>
+      <button id="btn-pk-cam">📷 摄像头扫码</button><button id="btn-pk-reset">重新开始</button></div>
+    <video id="pk-video" class="hidden" playsinline muted></video>
+    <div id="pk-out"></div>
+  </div>
+</section>
+
+<!-- 发货交接 -->
+<section id="tab-handover" class="panel hidden">
+  <h2>发货交接</h2>
+  <p class="muted small">快递员上门揽收或送到网点时用：选物流，逐个扫包裹面单上的运单号（或订单号），扫完核对件数，点「交接完成」——单里的订单全部标记「已发货」。 取消了 / 拒收的 / 还在待审核的订单扫进来会报警，防止发错。可以打印交接单让快递员签字。</p>
+  <div class="card">
+    <div class="row gap wrap">
+      <label>物流<input id="ho-carrier" list="carrier-list" placeholder="例：Lazada Express (LEX)" style="width:220px" data-notr></label>
+      <label>方式<select id="ho-method"><option value="pickup">上门揽收</option><option value="dropoff">送到网点</option><option value="self">自己送 / 其他</option></select></label>
+      <button id="ho-open" class="primary">开始 / 继续这张交接单</button>
+    </div>
+    <div id="ho-cur" class="hidden">
+      <div class="row gap wrap" style="margin-top:10px"><input id="ho-code" placeholder="扫描运单号 / 订单号" style="width:320px;font-size:18px" autocomplete="off" data-notr>
+        <span id="ho-msg"></span></div>
+      <div id="ho-info" class="small" style="margin:8px 0"></div>
+      <table class="grid small" id="ho-table"><thead><tr><th>#</th><th>运单号</th><th>订单号</th><th>平台</th><th>件数</th><th>COD</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
+      <div class="row gap"><button id="ho-close" class="big primary">✅ 交接完成（标记已发货）</button><a id="ho-print" class="btn" target="_blank">🖨 打印交接单</a>
+        <button id="ho-del" class="danger mini">删除这张单</button></div>
+    </div>
+  </div>
+  <div class="card"><h3>交接记录</h3>
+    <table class="grid small" id="ho-list"><thead><tr><th>#</th><th>物流</th><th>方式</th><th>包裹数</th><th>开单</th><th>交接完成</th><th></th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<!-- 售后 -->
+<section id="tab-aftersales" class="panel hidden">
+  <div class="row between wrap gap"><h2>售后</h2><button id="as-reload" class="mini">刷新</button></div>
+  <p class="muted small">在订单详情里点「登记售后」。每条售后按流程走：待处理 → 等买家寄回 / 等平台判定 → 已收到待验货 → 已退款 / 已补发 / 已拒绝 / 已关闭。 有处理期限（平台一般 48 小时要回应），快到期和超期的标红。退回来的货要验货：能卖的放回成品库存，坏的报废记损失。拒收 / 派送失败的订单会自动登记一条，等包裹退回。 责任方和打印机会统计到「质量统计」，损失会从「利润」里扣掉。</p>
+  <div id="as-sum" class="as-sum"></div>
+  <div class="row gap wrap ord-filter">
+    <select id="as-status"><option value="open">处理中（全部没处理完的）</option><option value="">全部</option><option value="closed">已处理完</option></select>
+    <select id="as-stage"><option value="">全部阶段</option></select>
+    <select id="as-kind"><option value="">全部类型</option></select>
+    <select id="as-resp"><option value="">全部责任</option></select>
+    <select id="as-due"><option value="">期限：全部</option><option value="soon">快到期 + 已超期</option><option value="overdue">已超期</option></select>
+    <input id="as-q" placeholder="搜索 订单号 / 买家 / 运单号 / 说明" style="width:240px">
+  </div>
+  <table class="grid" id="as-table"><thead><tr><th>登记时间</th><th>订单</th><th>类型 / 原因</th><th>阶段</th><th>处理期限</th><th>责任</th><th class="c-cost">损失</th><th>说明</th><th></th></tr></thead><tbody></tbody></table>
+</section>
+
+<!-- 买家档案 -->
+<section id="tab-buyers" class="panel hidden">
+  <h2>买家档案</h2>
+  <p class="muted small">同一个买家（同电话，或同平台同账号）的历史订单自动归在一起：下过几单、拒收几次、退货几次。可以标记 VIP、批发客户、需留意、黑名单。 黑名单和拒收过的买家再下货到付款单时，会自动挂起到「待审核」。这里只列出有分类、拒收过、或下过 2 单以上的买家。</p>
+  <div class="row gap wrap ord-filter">
+    <select id="by-level"><option value="">有标记 / 拒收 / 回头客</option><option value="__risky">只看有风险的（拒收 / 黑名单 / 需留意）</option></select>
+    <input id="by-q" placeholder="搜索 买家名" style="width:220px" data-notr>
+  </div>
+  <table class="grid" id="by-table"><thead><tr><th>买家</th><th>分类</th><th>订单</th><th>拒收</th><th>退货</th><th class="c-cost">消费</th><th>最近下单</th><th>备注</th><th></th></tr></thead><tbody></tbody></table>
+</section>
+
+<!-- 利润 -->
+<section id="tab-profit" class="panel hidden">
+  <div class="row between"><h2>利润</h2>
+    <select id="pf-days" style="min-width:140px"><option value="7">最近 7 天</option><option value="30" selected>最近 30 天</option><option value="90">最近 90 天</option><option value="365">最近一年</option></select>
+  </div>
+  <div id="pf-summary" class="card summary"></div>
+  <div id="pf-warn"></div>
+  <div class="card"><h3>每日利润</h3>
+    <table class="grid" id="pf-days-t"><thead><tr><th>日期</th><th>订单</th><th>收入</th><th>平台费</th><th>材料</th><th>机时</th><th>包材</th><th>损耗</th><th>其他支出</th><th>售后损失</th><th>利润</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="lanes two">
+    <div class="card"><h3>按平台</h3><table class="grid" id="pf-plat"><thead><tr><th>平台</th><th>订单</th><th>收入</th><th>利润</th><th>利润率</th></tr></thead><tbody></tbody></table></div>
+    <div class="card" data-needmod="fin"><h3>其他支出（广告费等）</h3>
+      <p class="muted small">完整的收支（带票据、收入、房租工资）在「财务 → 收支记账」。</p>
+      <div class="row gap wrap">
+        <input id="ex-day" type="date" style="width:150px">
+        <select id="ex-kind" style="min-width:110px"><option>广告费</option><option>快递运费</option><option>包材（不入库的）</option><option>办公杂费</option><option>其他支出</option></select>
+        <input id="ex-amount" type="number" placeholder="金额 ฿" style="width:110px">
+        <input id="ex-note" placeholder="备注" style="width:140px" data-notr>
+        <button id="btn-ex-add" class="primary">记一笔</button>
+      </div>
+      <table class="grid small" id="ex-table"><thead><tr><th>日期</th><th>类型</th><th>金额</th><th>备注</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+  <div class="card"><h3>按商品（SKU）</h3>
+    <table class="grid" id="pf-sku"><thead><tr><th>SKU</th><th>商品</th><th>件数</th><th>收入</th><th>利润</th><th>利润率</th></tr></thead><tbody></tbody></table>
+  </div>
+  <p class="muted small">计算方法：收入 − 平台费用（表格里有佣金就用实际数，没有按设置里的扣点估算）− 材料 − 机时（电费+房租人工折旧分摊）− 包材 − 失败损耗，再减去当天手动记的其他支出。
+    已取消、退款、未付款和报价单不算。商品没对上 SKU 或缺少克数的订单成本会偏低。</p>
+</section>

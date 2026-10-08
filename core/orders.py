@@ -1036,8 +1036,8 @@ def edit_order(oid, data, user=""):
                                 "platform_fee": "平台费", "shop": "店铺"}[k], str(sets[k]), commit=False)
     c.commit()
     if items is not None:
-        from . import production
-        production.generate(user)
+        from . import chain
+        chain.order_changed(user)          # v2.31：生产模块开着才生成生产任务
     return get_order(oid)
 
 
@@ -1181,9 +1181,8 @@ SHIP_FROM = ("to_ship", "quote", "unpaid")
 def on_status_change(oid, new, user="", old=None):
     """状态变化的联动：拒收 / 派送失败 → 自动登记售后（等包裹退回验货），买家档案里记一次拒收；
     待发货 → 已发货：按设置自动扣包材（v2.18）。"""
-    if new in ("shipped", "completed") and old in SHIP_FROM:
-        from .inventory import packing
-        packing.pack_order(oid, user)
+    from . import chain
+    chain.order_status(oid, new, old, user)      # v2.31：库存模块开着时「已发货」自动扣包材（库存模块自己判断）
     if new == "delivery_failed":
         from . import extras
         try:
