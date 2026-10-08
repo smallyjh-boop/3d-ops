@@ -26,7 +26,8 @@ ok(not bad, f"quantities match {bad}")
 ok(all(m["kind"]=="opening" for m in inv.moves(kind="opening")) and inv.moves(kind="opening"), "opening moves")
 
 # ---- 2. 物品档案
-r=c.post("/api/inv/items",json={"name_zh":"0.4 喷嘴 硬化钢","name_th":"หัวฉีด 0.4","category":"part","unit":"个","brand":"Bambu","reorder_point":2,"location":"A架2层"}).get_json()
+ok(c.post("/api/inv/items",json={"name_zh":"x","category":"part","location":"A架2层"}).status_code==400, "v2.35: free-text location rejected")
+r=c.post("/api/inv/items",json={"name_zh":"0.4 喷嘴 硬化钢","name_th":"หัวฉีด 0.4","category":"part","unit":"个","brand":"Bambu","reorder_point":2,"location":""}).get_json()
 noz=r["item"]; ok(noz["code"]=="BJ0001" and noz["qty"]==0, f"new part {noz['code']}")
 box=c.post("/api/inv/items",json={"name_zh":"纸箱 15×15×15","category":"pack","unit":"个","reorder_point":20}).get_json()["item"]
 ok(box["code"]=="BC0001", "pack item")

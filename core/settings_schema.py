@@ -79,7 +79,6 @@ MODULES = [
         ("耗材补货", [
             ("filament_lead_days", "耗材到货天数（从下单到收货）"), ("filament_safety_days", "安全库存天数"),
             ("filament_cover_days", "每次补货够用天数"), ("filament_spool_kg", "每卷公斤数")], "prod"),
-        ("发货自动扣包材", [("inv_pack_auto", "订单变成「已发货」时自动扣包材", "bool")], "inv"),
     ]},
     {"id": "finance", "zh": "财务", "th": "การเงิน", "module": "fin", "groups": [
         ("税（VAT）", [

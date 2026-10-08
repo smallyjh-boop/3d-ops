@@ -117,4 +117,21 @@ except connectors.NotReady:
 db.create_user("staff", "pass123", "listing", "Staff", "zh")
 C2 = A.app.test_client(); ok(C2.post("/api/auth/login", json={"username": "staff", "password": "pass123"}).status_code == 200, "staff login")
 ok(C2.post("/api/waybill/template", json={"enabled": False}).status_code == 403, "staff can't change template")
+# v2.35：浏览器扩展转交面单（/api/v1/labels/import，员工的扩展密钥）
+key = integrations.create_key("Nok")
+C3 = A.app.test_client()
+H = {"Authorization": "Bearer " + key, "X-Ext-Version": "2.9.0"}
+pdf3 = mk_pdf([(283, 425, label_ops(0, 0, 283, 425, "WB-1003", "TH000333")), (283, 425, label_ops(0, 0, 283, 425, "NOPE-1", "X"))])
+r = C3.post("/api/v1/labels/import", headers=H, data={"file": (io.BytesIO(pdf3), "awb.pdf"), "site": "Shopee"}, content_type="multipart/form-data")
+j = r.get_json()
+ok(r.status_code == 200 and j["ok"] and j["matched"] == 1 and j["order_nos"] == ["WB-1003"] and j["unmatched_pages"] == [2], f"ext label import {j}")
+ok(orders_mod.get_order(o3["id"])["label_file"] == f"{o3['id']}.pdf", "label stored for order")
+lg = [x for x in orders_mod.get_log(o3["id"]) if x["action"] == "上传平台面单"]
+ok(lg and "插件 · Shopee" in lg[0]["detail"] and lg[0]["username"] == "api:Nok", f"log says plugin {lg[:1]}")
+ok(integrations.EXT_SEEN.get("Nok") == "2.9.0", "ext version noted")
+ok(C3.post("/api/v1/labels/import", headers=H, data={"file": (io.BytesIO(b"hello"), "x.pdf")}, content_type="multipart/form-data").status_code == 400, "not a pdf rejected")
+ok(C3.post("/api/v1/labels/import", data={"file": (io.BytesIO(pdf3), "awb.pdf")}, content_type="multipart/form-data").status_code == 401, "no key -> 401")
+rk = integrations.create_key("RO", "read")
+ok(C3.post("/api/v1/labels/import", headers={"Authorization": "Bearer " + rk}, data={"file": (io.BytesIO(pdf3), "awb.pdf")},
+           content_type="multipart/form-data").status_code == 403, "read-only key can't upload")
 print("ERRORS", E_); sys.exit(1 if E_ else 0)

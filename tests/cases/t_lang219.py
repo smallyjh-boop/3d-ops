@@ -35,6 +35,6 @@ n=inv.seed_presets(); ok(n>=35, f"presets added {n}")
 ok(inv.seed_presets()==0, "presets idempotent")
 fil={(i["material"],i["color"]) for i in inv.items("filament")}
 ok(("PLA","白色") in fil and ("PLA","橙色") in fil and len([x for x in fil if x[0]=="PLA"])>=12, "12 PLA colors")
-ok(len(inv.items("pack"))>=10 and len(inv.items("part"))>=8, "pack + part items")
+ok(len(inv.items("pack"))>=8 and len(inv.items("part"))>=8, "pack + part items")   # v2.35：纸箱改用邮政标准规格，不再预设 S/M/L
 ok(all(i["name_th"] for i in inv.items()), "all items have thai names")
 print("ERRORS", E)

@@ -38,7 +38,7 @@ th{background:#f9fafb}
 <h2><span class="m get">GET</span>/api/v1/ping</h2>
 <p>测试密钥和网络是否正常。</p>
 <pre><code>curl -H "Authorization: Bearer lh_xxxx" {{BASE}}/api/v1/ping
-→ {"ok": true, "version": "2.34.0", "time": 1791200000}</code></pre>
+→ {"ok": true, "version": "2.35.0", "time": 1791200000}</code></pre>
 
 <h2><span class="m post">POST</span>/api/v1/orders　推送订单（新增或更新）</h2>
 <p>平台 + 订单号相同视为同一个订单：再次推送只更新状态等信息，不会重复，也不会覆盖你在系统里写的定制备注和加急。
@@ -105,6 +105,12 @@ th{background:#f9fafb}
 <code>status</code> 多了一个值 <code>delivery_failed</code>。
 <code>cost</code> 里多了 <code>fee_source</code>（平台费怎么来的：<code>settlement</code> = 订单金额 − 结算到账；<code>detail</code> = 佣金 + 服务费 + 支付手续费 + 卖家优惠；<code>import</code> = 导入的平台费；<code>estimate</code> = 按扣点估算）和 <code>fee_detail</code>。</p>
 <pre><code>GET /api/v1/orders?since=1791200000&amp;status=to_ship</code></pre>
+
+<h2><span class="m post">POST</span>/api/v1/labels/import　上传平台面单 PDF（v2.35）</h2>
+<p>浏览器扩展用（员工在卖家中心 / BigSeller 下载面单 PDF 时，点「发送」才传上来），自动化工具也可以用。表单上传（multipart）：
+<code>file</code> = 面单 PDF，<code>site</code> = 从哪个网站下载的（可不填，只记日志）。系统按每页上的订单号 / 运单号拆开、对应到订单（最近 90 天、没取消的）。</p>
+<pre><code>curl -H "Authorization: Bearer lh_xxxx" -F file=@labels.pdf -F site=Shopee {{BASE}}/api/v1/labels/import
+→ {"ok": true, "pages": 12, "matched": 11, "unmatched_pages": [7], "order_nos": ["2410090001", "…"], "hint": "…"}</code></pre>
 
 <h2><span class="m get">GET</span>/api/v1/skus　产品 SKU 列表</h2>
 <p>所有产品变体的 SKU、颜色、克数、打印时长。v2.9.1 起还返回：材质、售价（最终价 / 建议价 / 最低价）、单件成本拆分 <code>unit_cost</code>、

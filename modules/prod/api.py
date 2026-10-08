@@ -863,7 +863,10 @@ def recipe_get(pid):
 
 @bp.get("/api/stock")
 def stock_get():
-    return jsonify({"items": production.stock_list(), "suggest": production.stock_suggest()})
+    items = production.stock_list()
+    for it in items:                       # v2.35：订单「用库存发」占住的（发货出库时才扣）
+        it["reserved"] = production.reserved(it["sku"])
+    return jsonify({"items": items, "suggest": production.stock_suggest()})
 
 
 @bp.get("/api/maintenance")

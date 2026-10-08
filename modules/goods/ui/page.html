@@ -63,6 +63,8 @@
       <label class="span2">用途 / 卖点 / 说明<textarea data-f="features_zh" rows="4" placeholder="给谁用、解决什么问题、优点、可定制内容等。写得越具体，AI 文案和类目匹配越准"></textarea></label>
     </div>
     <div class="form4" id="pkg-box">
+      <label>包装纸箱（邮政标准，发货时扣这个）<select data-f="pack_box" id="pkg-boxsel" data-notr><option value="">没设</option></select>
+        <span id="pkg-boxhint" class="small"></span></label>
       <label>包裹长 cm<input data-f="package.length" data-pkg type="number" step="0.1"></label>
       <label>包裹宽 cm<input data-f="package.width" data-pkg type="number" step="0.1"></label>
       <label>包裹高 cm<input data-f="package.height" data-pkg type="number" step="0.1"></label>

@@ -36,6 +36,7 @@
         return `<tr class="${got >= need ? "pk-ok" : ""}"><td>${i.img ? `<img class="pk-img" src="${esc(i.img)}" alt="" loading="lazy">` : ""}</td>
         <td class="mono" data-notr><b>${esc(i.sku)}</b></td><td data-notr>${esc(i.name || "")}</td><td>${h.colorTxt(i.color)}</td>
         <td><b>${i.qty}</b></td><td><b>${Math.min(got, need)}</b></td><td class="nowrap">${act}</td></tr>`; }).join("")}</tbody></table>
+      <div class="pk-box">${window.PACKBOX ? PACKBOX.html(o, "pk-box-sel") : ""}</div>
       ${notReady.length ? `<p class="warn small">注意：这个订单还有 ${notReady.length} 个生产任务没打完（${notReady.map((j) => esc(j.sku) + " " + esc(j.status_zh)).join("、")}）</p>` : ""}
       ${scanLeft ? '<p class="small muted">还有要扫码的商品：扫 SKU 条码，或者后处理时贴的内部商品标签。</p>' : ""}
       <div class="row gap wrap"><button class="big primary" id="pk-done" ${all ? "" : "disabled"}>✅ 打包完成</button>
@@ -54,6 +55,7 @@
     }
     try {
       const o = await api(`/api/pack/lookup?code=${encodeURIComponent(code)}`);
+      if (window.PACKBOX) await PACKBOX.load();
       PK = { order: o, need: {}, got: {}, mode: {} };
       o.items.forEach((i) => {
         const k = (i.sku || "").toUpperCase();

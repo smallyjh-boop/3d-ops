@@ -5,6 +5,10 @@ body{font:14px/1.5 system-ui,-apple-system,"Segoe UI","Noto Sans Thai","Microsof
 h3{margin:0 0 10px}label{display:block;margin:8px 0}input,select{width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #cfd5dd;border-radius:6px;font:inherit}
 button{padding:7px 14px;border-radius:6px;border:1px solid #0f6fde;background:#0f6fde;color:#fff;font:inherit;cursor:pointer;margin-right:6px}
 button.sec{background:#fff;color:#0f6fde}.muted{color:#6b7280;font-size:12px}#st{margin-top:10px;font-size:13px}.ok{color:#1b7f3b}.bad{color:#c62828}
+hr{border:0;border-top:1px solid #e5e7eb;margin:14px 0 10px}h4{margin:0 0 6px}
+label.chk{display:flex;gap:6px;align-items:flex-start}label.chk input{width:auto;margin-top:3px}
+.lbl{border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;margin:6px 0;font-size:13px}.lbl b{word-break:break-all}
+.lbl button{padding:3px 10px;font-size:12px;margin:4px 6px 0 0}.last{font-size:12px;margin:3px 0;white-space:pre-line}
 </style></head><body>
 <h3>3D 运营管理系统 · AI 客服</h3>
 <label><span data-t="server">局域网地址（NAS 或电脑）</span><input id="server" placeholder="http://192.168.1.20:8790"></label>
@@ -15,5 +19,12 @@ button.sec{background:#fff;color:#0f6fde}.muted{color:#6b7280;font-size:12px}#st
 <label><span data-t="lang">面板语言</span><select id="lang"><option value="zh">中文</option><option value="th">ภาษาไทย</option></select></label>
 <button id="save" data-t="save">保存并测试</button>
 <div id="st"></div>
+<hr>
+<h4 data-t="lbltitle">面单 PDF 转交</h4>
+<label class="chk"><input type="checkbox" id="label_forward"><span data-t="lblon">在卖家中心 / BigSeller 下载面单 PDF 时，提示发到系统（点「发送到系统」才发）</span></label>
+<div id="lbl-list"></div>
+<button class="sec" id="lbl-tab" data-t="lbltab">把当前标签页的 PDF 发到系统</button>
+<p class="muted" data-t="lblhelp">有的平台点「打印面单」是在新标签页打开 PDF，不是下载：在那个标签页点这个按钮。系统按每页上的订单号 / 运单号自动对应订单。</p>
+<div id="lbl-st"></div>
 <script src="options.js"></script>
 </body></html>

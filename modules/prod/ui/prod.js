@@ -2,6 +2,7 @@
 // 生产模块：生产看板（打印批次 / 开始打印对话框）、打印机、打印方案列表、成品库存 / 备货、质量统计
 (function () {
   const H = () => window.OPSH;
+  const Z = (zh, th) => (window.I18N && I18N.lang === "th" ? th : zh);
   const CONN_ZH = { auto: "自动识别", bambu: "拓竹局域网", moonraker: "Klipper / Moonraker（root 过的 K1）", creality: "Creality 原厂固件", none: "不连接" };
   const FST = { draft: "草稿（未复核）", reviewed: "已复核（未试打）", verified: "已试打验证" };
   let BOARD = null, PR_TIMER = null, BOARD_TIMER = null;
@@ -36,10 +37,11 @@
     const late = j.ship_by && j.planned_end && j.planned_end > j.ship_by;
     const pl = j.plan || {};
     const kind = (j.kind && j.kind !== "order" ? `<span class="pill kind-${j.kind}">${esc(j.kind_zh)}</span>` : "") +
-      (j.tech === "resin" ? `<span class="pill resin-pill" title="光固化：打完先用酒精清洗，晾干后二次固化，再去支撑">🧪 树脂${j.status === "post" ? " · 清洗→固化→去支撑" : ""}</span>` : "");
+      (j.tech === "resin" ? `<span class="pill resin-pill" title="光固化：打完先用酒精清洗，晾干后二次固化，再去支撑">🧪 树脂${j.status === "post" ? " · 清洗→固化→去支撑" : ""}</span>` : "") +
+      (j.stock_n ? `<span class="pill tag-pill" title="先占住，发货出库时扣库存">📦 ${Z("用库存", "ใช้สต็อก")} ×${j.stock_n}</span>` : "");
     const btns = {
       todo: `<button class="big primary" data-start="${j.id}">▶ 开始打印…</button>` +
-        (j.stock > 0 && j.kind !== "stock" ? `<button class="big" data-usestock="${j.id}">📦 用库存（有 ${j.stock} 个）</button>` : ""),
+        (j.stock > 0 && j.kind !== "stock" ? `<button class="big" data-usestock="${j.id}" title="先占住，发货出库时才扣库存">📦 ${Z(`用库存（可用 ${j.stock} 个）`, `ใช้สต็อก (มี ${j.stock} ชิ้น)`)}</button>` : ""),
       post: `<button class="big primary" data-js="packed">📦 已打包</button><button class="mini" data-js="todo">退回重打</button>`,
       packed: `<button class="big primary" data-js="done">🚚 已发货</button><button class="mini" data-js="post">退回</button>`,
     }[j.status] || "";
@@ -235,7 +237,7 @@
       }
       if (d.usestock) {
         const n = prompt("用成品库存出几个？", "1"); if (!n) return;
-        await api(`/api/jobs/${d.usestock}/use-stock`, { json: { n: +n } }); toast("已用库存"); return loadBoard();
+        await api(`/api/jobs/${d.usestock}/use-stock`, { json: { n: +n } }); toast("已用库存（先占住，发货出库时扣库存）"); return loadBoard();
       }
       if (d.js) {
         const jid = t.closest("[data-jid]").dataset.jid;
@@ -391,13 +393,13 @@
     const r = await api("/api/stock");
     const h = H();
     $("#sg-table tbody").innerHTML = r.suggest.map((s) => `<tr><td class="mono" data-notr>${esc(s.sku)}</td><td data-notr>${esc(s.name || "")} ${h.colorTxt(s.color)}</td>
-      <td>${s.sold30}</td><td>${s.daily}</td><td>${s.target}${s.auto_target ? ' <span class="muted small">(自动)</span>' : ""}</td><td>${s.stock}</td><td>${s.order_need}</td><td>${s.making}</td>
+      <td>${s.sold30}</td><td>${s.daily}</td><td>${s.target}${s.auto_target ? ' <span class="muted small">(自动)</span>' : ""}</td><td>${s.stock}${s.reserved ? ` <span class="small muted">${Z(`（订单占 ${s.reserved}）`, `(จองให้ออเดอร์ ${s.reserved})`)}</span>` : ""}</td><td>${s.order_need}</td><td>${s.making}</td>
       <td>${s.suggest ? `<b>${s.suggest}</b>` : '<span class="muted">够了</span>'}</td>
       <td class="small">${s.suggest ? (s.suggest_after - Date.now() / 1000 < 3600 ? "现在（打印机有空）" : h.short(s.suggest_after) + " 以后（订单排完）") : ""}</td>
       <td>${s.suggest ? `<input type="number" min="1" value="${s.suggest}" style="width:64px" data-mkq="${esc(s.sku)}"> <button class="mini" data-mk="${esc(s.sku)}">生成备货任务</button>` : ""}</td></tr>`).join("")
       || '<tr><td colspan="11" class="muted">暂时没有建议（近 30 天销量不够多，或者库存已经够）</td></tr>';
     $("#st-table tbody").innerHTML = r.items.map((s) => `<tr><td class="mono" data-notr>${esc(s.sku)}</td><td data-notr>${esc(s.name || "")}</td><td>${h.colorTxt(s.color)}</td>
-      <td><b>${s.qty}</b></td><td>${s.target ?? '<span class="muted">自动</span>'}</td><td class="small">${fmtTime(s.updated_at)}</td></tr>`).join("")
+      <td><b>${s.qty}</b>${s.reserved ? ` <span class="small muted">${Z(`（订单占 ${s.reserved}，发货时扣）`, `(จองให้ออเดอร์ ${s.reserved} ตัดตอนส่ง)`)}</span>` : ""}</td><td>${s.target ?? '<span class="muted">自动</span>'}</td><td class="small">${fmtTime(s.updated_at)}</td></tr>`).join("")
       || '<tr><td colspan="6" class="muted">还没有成品库存</td></tr>';
     if (window.OPS && OPS.loadSkus) OPS.loadSkus();
   }

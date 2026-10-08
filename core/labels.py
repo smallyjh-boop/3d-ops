@@ -29,8 +29,9 @@ def _norm(s):
     return re.sub(r"[\s\-]", "", str(s or "")).upper()
 
 
-def import_pdf(fileobj, user=""):
-    """拆分平台面单 PDF，按页面文字里的订单号/运单号对应订单。返回 {matched, unmatched_pages, pages}"""
+def import_pdf(fileobj, user="", via=""):
+    """拆分平台面单 PDF，按页面文字里的订单号/运单号对应订单。返回 {matched, unmatched_pages, pages, order_nos}
+    via：从哪来的（例如「插件 · Shopee」，v2.35 浏览器扩展转交），写进订单日志。"""
     pypdf = _pypdf()
     data = fileobj.read()
     try:
@@ -40,8 +41,9 @@ def import_pdf(fileobj, user=""):
     c = db.conn()
     rows = c.execute("SELECT id, order_no, tracking_no FROM orders WHERE status NOT IN ('cancelled') "
                      "AND order_time>=?", (time.time() - 90 * 86400,)).fetchall()
-    keys = []
+    keys, nos = [], {}
     for r in rows:
+        nos[r["id"]] = r["order_no"]
         for k in (r["order_no"], r["tracking_no"]):
             k = _norm(k)
             if len(k) >= 6:
@@ -68,10 +70,11 @@ def import_pdf(fileobj, user=""):
             w.write(f)
         c.execute("UPDATE orders SET label_file=? WHERE id=?", (name, oid))
         from . import orders
-        orders.log(oid, user, "上传平台面单", f"{len(idxs)} 页", commit=False)
+        orders.log(oid, user, "上传平台面单", f"{len(idxs)} 页" + (f" · {via}" if via else ""), commit=False)
         matched.append(oid)
     c.commit()
     return {"pages": len(reader.pages), "matched": len(matched), "unmatched_pages": unmatched,
+            "order_nos": [nos.get(o, "") for o in matched],
             "hint": "" if not unmatched else "有的页面没找到订单号/运单号：可能是图片型 PDF，或这些订单还没导入系统"}
 
 

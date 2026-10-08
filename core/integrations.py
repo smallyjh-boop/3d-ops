@@ -81,7 +81,7 @@ def check_key(raw):
     return dict(r) if r else None
 
 
-EXT_LATEST = "2.8.0"     # 当前随系统发的浏览器扩展版本（extension/manifest.json）
+EXT_LATEST = "2.9.0"     # 当前随系统发的浏览器扩展版本（extension/manifest.json）
 EXT_SEEN = {}            # 密钥名 → 最近一次用扩展时的扩展版本（旧扩展不带版本号，记 "旧版"）
 
 

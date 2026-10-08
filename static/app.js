@@ -1,5 +1,5 @@
 "use strict";
-const APP_JS_VERSION = "2.34.0";   // 必须和 app.py 的 VERSION 一致
+const APP_JS_VERSION = "2.35.0";   // 必须和 app.py 的 VERSION 一致
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -319,8 +319,8 @@ function cfgSpecial(name) {
   if (name === "accel") return window.ACCEL ? ACCEL.card() : "";
   if (name === "remote") return `<div class="card cfg-group" id="sys-remote"><div class="row between"><h3>外网访问（Tailscale）</h3><div class="lockbar" id="sys-remote-bar"></div></div><div id="sys-remote-body" class="small">…</div></div>`;
   if (name === "components") return `<div class="card cfg-group" id="cfg-comps" data-lock-skip><div class="row between"><h3>组件安装情况</h3><button class="mini" id="cfg-comps-reload">重新检查</button></div><div id="cfg-comps-body" class="small">…</div></div>`;
-  if (name === "pack_rules") return `<div class="card cfg-group"><h3>发货自动扣包材：扣哪些</h3>
-      <p class="muted small">打开上面的开关后，订单从「待发货」变成「已发货」时，按这里的规则从库存领用包材（库存管理里记「发货包材」）。物品要先在「库存 → 库存管理」建好（分类：包材）。</p>
+  if (name === "pack_rules") return `<div class="card cfg-group"><h3>发货出库：另外每单 / 每件要扣的包材</h3>
+      <p class="muted small">纸箱按产品设（编辑产品 → 包装纸箱，用邮政标准规格），这里只填纸箱以外的：胶带、气泡袋、快递袋、感谢卡、面单纸……订单变成「已发货」时，和成品、纸箱一起记在这单的出库单里。物品要先在「库存 → 库存管理」建好（分类：包材）。</p>
       <table class="grid small" id="pack-rules"><thead><tr><th>包材</th><th>数量</th><th>按</th><th></th></tr></thead><tbody>${(CFG.inv_pack_rules || []).map(packRuleRow).join("")}</tbody></table>
       <button class="mini" id="pack-add">＋ 加一行</button></div>`;
   return "";
@@ -771,10 +771,11 @@ function L(x) {   // 双语字段按界面语言显示
   const colorTxt = (c) => (c ? `${swatch(c, "var-sw")}<span data-notr>${esc(colorLabel(c))}</span>` : "");
   const today = () => { const d = new Date(), z = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`; };
 
-  function printerName(i) {
-    if (i === null || i === undefined) return "未分配";
+  function printerName(i) {          // 结果常放在 data-notr 里，所以这里直接按界面语言给
+    const th = window.I18N && I18N.lang === "th";
+    if (i === null || i === undefined) return th ? "ยังไม่ได้กำหนด" : "未分配";
     const p = (CFG && CFG.printers && CFG.printers[i]);
-    return p ? `${p.code || "#" + (i + 1)} · ${p.name || ""}` : (i == null ? "" : `打印机${i + 1}`);
+    return p ? `${p.code || "#" + (i + 1)} · ${p.name || ""}` : (i == null ? "" : `${th ? "เครื่องพิมพ์" : "打印机"}${i + 1}`);
   }
   function stChip(st, zh) {
     if (!st || !st.state || st.state === "none") return '<span class="pill pst-none">未连接</span>';

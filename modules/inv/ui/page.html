@@ -12,10 +12,10 @@
       <button id="inv-presets" data-perm="inv.in" title="耗材常用颜色、备件、工具、包材，已经有的不重复建">补全常用物品</button>
       <button id="inv-reload">刷新</button></div></div>
   <p class="muted small">耗材、备件、包材、成品……都在这里，按分类管理；数量只能通过单据改变，每一笔都有流水。打印完成自动扣耗材（产品克数 + 损耗率），打印失败整盘记损耗；
-    备货打印的成品自动入库、出货自动出库；开了「发货自动扣包材」的话，订单发货时自动扣包材。买东西走「采购」（下单 → 在途 → 到货入库）。</p>
+    备货打印的成品自动入库；订单发货时自动出库（用库存发的成品、纸箱、包材，每单一张出库单）。买东西走「采购」（下单 → 在途 → 到货入库）。</p>
   <div id="inv-alerts"></div>
   <div class="chips" id="inv-views" style="margin:8px 0">
-    <span class="chip on" data-iv="items">库存</span><span class="chip" data-iv="catalog">物品资料</span><span class="chip" data-iv="locations">货位</span><span class="chip" data-iv="docs">单据</span><span class="chip" data-iv="moves">流水</span>
+    <span class="chip on" data-iv="items">库存</span><span class="chip" data-iv="catalog">物品资料</span><span class="chip" data-iv="locations">货位</span><span class="chip" data-iv="boxes">纸箱</span><span class="chip" data-iv="docs">单据</span><span class="chip" data-iv="moves">流水</span>
     <span class="chip" data-iv="stocktake">盘点</span><span class="chip" data-iv="expense">支出统计</span></div>
   <div id="inv-body"></div>
 </section>

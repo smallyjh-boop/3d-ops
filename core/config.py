@@ -52,7 +52,6 @@ DEFAULT_CONFIG = {
     # ---------- 库存管理（v2.17） ----------
     "inv_loss_rate": 0.05,               # 打印扣料时多扣的损耗（0.05 = 产品克数的 5%），每个耗材物品可以单独设
     "inv_categories": [],                # 自己加的物品分类（中文名），内置：耗材 / 备件 / 包材 / 成品 / 工具 / 其他
-    "inv_pack_auto": False,              # 订单发货时自动扣包材（v2.18）
     "inv_pack_rules": [],
     "fin_vat_on": False,                 # 财务（v2.21）：VAT 开关（还没注册 VAT 就关着；Lazada 等已经代扣的不用管）
     "fin_vat_rate": 0.07,

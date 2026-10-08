@@ -30,10 +30,12 @@ def reschedule():
 
 
 def order_status(oid, new, old=None, user=""):
-    if not modules.is_loaded():
-        from .inventory import packing
-        if new in ("shipped", "completed") and old in ("to_ship", "quote", "unpaid"):
-            packing.pack_order(oid, user)
+    if not modules.is_loaded():             # 没装载模块（单独的脚本）：按「全开」，直接交给库存模块的发货出库（v2.35）
+        try:
+            from modules.inv import events as _inv_events
+            _inv_events.on_order_status(oid, new, old, user)
+        except Exception:  # noqa: BLE001  出库失败不能影响发货
+            pass
         return {}
     return modules.emit("order.status", oid=oid, new=new, old=old, user=user)
 

@@ -64,7 +64,8 @@ def init():
     for col, typ in (("pin", "INTEGER DEFAULT 0"), ("plates_done", "INTEGER DEFAULT 0"), ("consumed_g", "REAL DEFAULT 0"),
                      ("file_id", "INTEGER"), ("remote_file", "TEXT"), ("sent_at", "REAL"), ("alert", "TEXT"),
                      ("qty_done", "INTEGER DEFAULT 0"), ("kind", "TEXT DEFAULT 'order'"), ("run_id", "INTEGER"),
-                     ("priority_job", "INTEGER DEFAULT 0")):
+                     ("priority_job", "INTEGER DEFAULT 0"),
+                     ("stock_n", "INTEGER DEFAULT 0")):     # v2.35：订单任务里「用库存发」的个数（先占住，发货出库时才扣）
         if col not in cols:
             c.execute(f"ALTER TABLE jobs ADD COLUMN {col} {typ}")
             if col == "qty_done":     # 老数据：已经打完的任务
@@ -113,14 +114,24 @@ def generate(user=""):
                 prod = None
             color, note = stockcalc.pick_random_color(r["material"] or "PLA", (r["grams"] or 0) * (r["qty"] or 1), prod, cfg)
             _olog(r["oid"], user or "系统", "随机颜色", f"{r['sku']}：{note}")
-        c.execute("""INSERT INTO jobs(order_id, order_item_id, product_id, sku, name, color, material, qty, grams_each,
+        jid = c.execute("""INSERT INTO jobs(order_id, order_item_id, product_id, sku, name, color, material, qty, grams_each,
                      hours_each, status, kind, created_at, updated_at, updated_by, note) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (r["oid"], r["id"], r["product_id"], r["sku"], r["name"], color, r["material"] or "PLA",
-                   r["qty"] or 1, r["grams"], r["hours"], "todo", "order", now, now, user, note))
+                        (r["oid"], r["id"], r["product_id"], r["sku"], r["name"], color, r["material"] or "PLA",
+                         r["qty"] or 1, r["grams"], r["hours"], "todo", "order", now, now, user, note)).lastrowid
         n += 1
+        # v2.35：有成品库存就先用库存发（占住数量，发货出库时才扣；不够的部分才排打印）
+        if cfg.get("stock_auto_use", True) and not note and r["sku"]:
+            use = min(free_stock(r["sku"], c), int(r["qty"] or 1))
+            if use > 0:
+                _reserve(c, jid, use, int(r["qty"] or 1), 0, now, user or "系统")
+                _olog(r["oid"], user or "系统", "用库存发", f"{r['sku']} ×{use}（发货出库时扣库存）")
     cancelled = c.execute("""DELETE FROM jobs WHERE status='todo' AND COALESCE(qty_done,0)=0 AND run_id IS NULL
         AND kind='order' AND order_id IN (SELECT id FROM orders WHERE status IN ('cancelled','returned','delivery_failed')
         OR COALESCE(hold,0)=1)""").rowcount
+    # v2.35：还没发货就取消的订单，「用库存发」占住的数量放回去（只用库存、没打印过的任务直接删）
+    cancelled += c.execute("""DELETE FROM jobs WHERE kind='order' AND run_id IS NULL AND COALESCE(stock_n,0)>0
+        AND COALESCE(qty_done,0)<=COALESCE(stock_n,0) AND status IN ('todo','post')
+        AND order_id IN (SELECT id FROM orders WHERE status='cancelled')""").rowcount
     c.commit()
     if n or cancelled:
         schedule()
@@ -319,24 +330,57 @@ def stock_qty(sku):
     return max(0, r["qty"]) if r else 0
 
 
+def reserved(sku, c=None):
+    """v2.35：还没发货的订单「用库存发」占住的成品个数（发货出库时才真正扣库存）。"""
+    c = c or db.conn()
+    r = c.execute("""SELECT COALESCE(SUM(j.stock_n),0) FROM jobs j JOIN orders o ON o.id=j.order_id
+                     WHERE UPPER(j.sku)=? AND j.kind='order' AND COALESCE(j.stock_n,0)>0 AND o.status IN ('to_ship','quote','unpaid')""",
+                  ((sku or "").upper(),)).fetchone()
+    return int(r[0] or 0)
+
+
+def free_stock(sku, c=None):
+    """可以用的成品 = 库存 − 订单占住的。"""
+    c = c or db.conn()
+    r = c.execute("SELECT qty FROM stock WHERE sku=?", ((sku or "").upper(),)).fetchone()
+    return max(0, (r["qty"] if r else 0) - reserved(sku, c))
+
+
+def _reserve(c, job_id, n, qty, done0, now, user):
+    done = done0 + n
+    if done >= qty:
+        c.execute("UPDATE jobs SET stock_n=COALESCE(stock_n,0)+?, qty_done=?, status='post', printed_at=?, updated_at=?, updated_by=? WHERE id=?",
+                  (n, done, now, now, user, job_id))
+    else:
+        c.execute("UPDATE jobs SET stock_n=COALESCE(stock_n,0)+?, qty_done=?, updated_at=?, updated_by=? WHERE id=?",
+                  (n, done, now, user, job_id))
+
+
 def use_stock(job_id, n, user=""):
+    """生产页点「用库存」。订单任务（v2.35）：先占住，发货出库时才扣库存；补发等其他任务：马上扣。"""
     c = db.conn()
     j = _job(c, job_id)
     if j["status"] != "todo" or j["run_id"]:
         raise ValueError("只有还没开始打印的任务可以用库存")
-    have = stock_qty(j["sku"])
+    order_job = (j["kind"] or "order") == "order" and j["order_id"]
+    have = free_stock(j["sku"], c) if order_job else stock_qty(j["sku"])
     n = min(int(n or 0), have, max(0, j["qty"] - (j["qty_done"] or 0)))
     if n <= 0:
         raise ValueError("成品库存不够")
-    stock_add(j["sku"], -n, f"订单出货 任务#{job_id}", user)
-    done = (j["qty_done"] or 0) + n
-    if done >= j["qty"]:
-        c.execute("UPDATE jobs SET qty_done=?, status='post', printed_at=?, updated_at=?, updated_by=? WHERE id=?",
-                  (done, _now(), _now(), user, job_id))
+    if order_job:
+        _reserve(c, job_id, n, j["qty"], j["qty_done"] or 0, _now(), user)
+        c.commit()
+        _olog(j["order_id"], user, f"任务 #{job_id} 用库存发 {n} 个（发货出库时扣库存）", j["sku"] or "")
     else:
-        c.execute("UPDATE jobs SET qty_done=?, updated_at=?, updated_by=? WHERE id=?", (done, _now(), user, job_id))
-    c.commit()
-    _olog(j["order_id"], user, f"任务 #{job_id} 用成品库存 {n} 个", j["sku"] or "")
+        stock_add(j["sku"], -n, f"订单出货 任务#{job_id}", user)
+        done = (j["qty_done"] or 0) + n
+        if done >= j["qty"]:
+            c.execute("UPDATE jobs SET qty_done=?, status='post', printed_at=?, updated_at=?, updated_by=? WHERE id=?",
+                      (done, _now(), _now(), user, job_id))
+        else:
+            c.execute("UPDATE jobs SET qty_done=?, updated_at=?, updated_by=? WHERE id=?", (done, _now(), user, job_id))
+        c.commit()
+        _olog(j["order_id"], user, f"任务 #{job_id} 用成品库存 {n} 个", j["sku"] or "")
     schedule()
     return dict(_job(c, job_id))
 
@@ -395,10 +439,12 @@ def stock_suggest():
             if q30 < min_sold:
                 continue
             target = math.ceil(daily * cover)
-        have = st.get("qty") or 0
+        rsv = reserved(sku, c)
+        have = max(0, (st.get("qty") or 0) - rsv)          # v2.35：订单占住的不算
         gap = target + need.get(sku, 0) - have - making.get(sku, 0)
         out.append({"sku": sku, "product_id": s.get("product_id") or st.get("product_id"), "name": s.get("name") or st.get("name"),
-                    "color": s.get("color") or st.get("color"), "sold30": q30, "daily": round(daily, 2), "stock": have,
+                    "color": s.get("color") or st.get("color"), "sold30": q30, "daily": round(daily, 2), "stock": st.get("qty") or 0,
+                    "reserved": rsv,
                     "target": target, "auto_target": auto, "making": making.get(sku, 0), "order_need": need.get(sku, 0),
                     "suggest": max(0, int(gap)), "suggest_after": max(now, queue_end)})
     out.sort(key=lambda x: (-x["suggest"], -x["sold30"]))
@@ -468,7 +514,7 @@ def send_options(job_id, printer_idx=None):
             "job": j, "printer": idx, "printer_name": pname, "remaining": remaining, "merge": merge, "capacity": capacity,
             "files": files, "usable_files": [f["id"] for f in usable], "has_model": bool(p and p.get("model")),
             "recipe": recipe, "recipe_zh": recipes.summary_zh(recipe) if recipe else "",
-            "suggestion": suggestion, "stock": stock_qty(j["sku"]),
+            "suggestion": suggestion, "stock": free_stock(j["sku"]),
             "fail_reasons": FAIL_REASONS, "review_items": print_files.REVIEW_ITEMS}
 
 
@@ -898,7 +944,7 @@ def board():
         return pinfo[pid]
     for j in jobs:
         j["product"] = prod(j["product_id"]) if j["product_id"] else {}
-        j["stock"] = stock_qty(j["sku"]) if j["status"] == "todo" else 0
+        j["stock"] = free_stock(j["sku"]) if j["status"] == "todo" else 0
         if j["status"] == "todo" and j["printer"] is not None:
             pl = plan_for(j, j["printer"], names)
             f = pl["file"] or {}

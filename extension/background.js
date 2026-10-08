@@ -1,5 +1,7 @@
 // 后台：替页面里的面板访问3D 运营管理系统（NAS / 本机），以及截取当前标签页画面。
 // v2.8：两个地址——局域网地址 + 外网地址（Tailscale）。哪个通用哪个，记住上次能用的那个。
+// v2.9：面单 PDF 转交在 labels.js（下载面单时问一下，点「发送」才发到系统）。
+importScripts("labels.js");
 async function cfg() {
   const d = await chrome.storage.sync.get({ server: "", server2: "", key: "", lang: "zh" });
   const norm = (x) => (x || "").trim().replace(/\/+$/, "");
@@ -67,6 +69,7 @@ chrome.notifications.onClicked.addListener((nid) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (msg && typeof msg.type === "string" && msg.type.startsWith("label-")) return false;   // 面单转交：labels.js 处理
   const tabId = sender.tab && sender.tab.id;
   if (msg.type === "whoami") { reply({ ok: true, data: { tab: tabId } }); return false; }
   if (msg.type === "focus-tab") {

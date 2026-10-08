@@ -10,7 +10,7 @@
   }
   function close() {
     const ctx = { wasRecipe: !!$("#rc-modal-box") };
-    $("#modal-in").onchange = null; $("#modal-in").onclick = null;
+    $("#modal-in").onchange = null; $("#modal-in").onclick = null; $("#modal-in").oninput = null;
     $("#modal").classList.add("hidden"); $("#modal-in").innerHTML = ""; $("#modal-in").classList.remove("wide");
     hooks.forEach((f) => { try { f(ctx); } catch (e) { console.error(e); } });
   }

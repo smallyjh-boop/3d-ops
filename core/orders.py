@@ -159,6 +159,7 @@ def init():
                      # v2.11：审单挂起、买家、付款方式、发货方式、交接单、金额拆分
                      ("hold", "INTEGER DEFAULT 0"), ("hold_reason", "TEXT"), ("reviewed_at", "REAL"), ("reviewed_by", "TEXT"),
                      ("buyer_key", "TEXT"), ("payment", "TEXT"), ("ship_method", "TEXT"), ("handover_id", "INTEGER"),
+                     ("pack_box", "TEXT"),          # v2.35：打包用的纸箱（空 = 按产品自动选；none = 不用纸箱）
                      *((k, "REAL") for k in MONEY_FIELDS)):
         if col not in cols:
             c.execute(f"ALTER TABLE orders ADD COLUMN {col} {typ}")

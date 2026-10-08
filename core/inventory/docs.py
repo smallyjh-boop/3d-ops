@@ -7,7 +7,8 @@ from .. import db
 from . import ledger
 
 DOC_KINDS = {"purchase": ("采购入库", "RK", 1), "return": ("退回入库", "TH", 1), "issue": ("领用出库", "LY", -1),
-             "scrap": ("报废", "BF", -1), "adjust": ("调整", "TZ", 0), "stocktake": ("盘点", "PD", 0)}
+             "scrap": ("报废", "BF", -1), "adjust": ("调整", "TZ", 0), "stocktake": ("盘点", "PD", 0),
+             "ship": ("订单出库", "CK", -1)}          # v2.35：订单发货时自动开（成品 + 纸箱 + 包材），见 modules/inv/shipout.py
 
 
 def _no(c, kind):
@@ -51,8 +52,9 @@ def _apply(c, it, kind, qty, unit_cost, doc_id, user, reason, printer="", extra=
 
 
 def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, allow_negative=False):
-    """开单并生效。lines：[{item_id, qty（正数；调整单可正可负）, unit_cost, note, rolls, net_g, brand}]。返回单据。
-    move_kind：流水类型（默认和单据类型一样；发货自动扣包材用 pack）。allow_negative：自动扣料不够时也扣（库存变负数，会提醒）。"""
+    """开单并生效。lines：[{item_id, qty（正数；调整单可正可负）, unit_cost, note, rolls, net_g, brand, move_kind}]。返回单据。
+    move_kind：流水类型（默认和单据类型一样；发货自动扣包材用 pack；每一行也可以单独写，订单出库：成品 ship、纸箱包材 pack）。
+    allow_negative：自动扣料不够时也扣（库存变负数，会提醒）。"""
     if kind not in DOC_KINDS or kind == "stocktake":
         raise ValueError("单据类型不对")
     sign = DOC_KINDS[kind][2]
@@ -96,7 +98,7 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
     c.commit()
     label = DOC_KINDS[kind][0]
     for it, qty, uc, lnote, ln in clean:
-        _apply(c, it, move_kind or kind, qty, uc, doc_id, user, f"{label} {no}" + (f"：{lnote or note}" if (lnote or note) else ""), printer,
+        _apply(c, it, ln.get("move_kind") or move_kind or kind, qty, uc, doc_id, user, f"{label} {no}" + (f"：{lnote or note}" if (lnote or note) else ""), printer,
                {k: ln.get(k) for k in ("rolls", "net_g", "brand")})
     _set_amount(c, doc_id)
     c.commit()
@@ -134,24 +136,31 @@ def void(doc_id, user=""):
 
 
 # ---------------- 盘点 ----------------
-def stocktake_start(category="", user="", note=""):
-    """开一张盘点单（草稿）：列出这个分类（空 = 全部）所有启用的物品和账面数。"""
+def stocktake_start(category="", user="", note="", area="", codes=None):
+    """开一张盘点单（草稿）：列出这个分类（空 = 全部）所有启用的物品和账面数。
+    v2.35：按货架盘点——area 是区 / 货架 / 货位（例如 A1），codes 是里面的货位编号，只列放在这些格子里的物品。"""
     c = db.conn()
     sql, args = "SELECT * FROM inv_items WHERE active=1", []
     if category:
         sql += " AND category=?"
         args.append(category)
-    items = c.execute(sql + " ORDER BY category, code", args).fetchall()
+    if codes is not None:
+        codes = list(codes)
+        if not codes:
+            raise ValueError("这里没有货位")
+        sql += f" AND location IN ({','.join('?' * len(codes))})"
+        args += codes
+    items = c.execute(sql + (" ORDER BY location, code" if codes is not None else " ORDER BY category, code"), args).fetchall()
     if not items:
-        raise ValueError("这个分类下没有物品")
+        raise ValueError("这里没有放东西" if codes is not None else "这个分类下没有物品")
     no = _no(c, "stocktake")
     now = ledger._now()
-    doc_id = c.execute("INSERT INTO inv_docs(no, kind, status, category, note, created_by, created_at) VALUES(?,?,?,?,?,?,?)",
-                       (no, "stocktake", "draft", category or "", str(note or "")[:500], user, now)).lastrowid
+    doc_id = c.execute("INSERT INTO inv_docs(no, kind, status, category, note, ref, created_by, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                       (no, "stocktake", "draft", category or "", str(note or "")[:500], f"area:{area}" if area else "", user, now)).lastrowid
     for it in items:
         c.execute("INSERT INTO inv_doc_lines(doc_id, item_id, expected) VALUES(?,?,?)", (doc_id, it["id"], it["qty"] or 0))
     c.commit()
-    db.audit(user, "库存·开始盘点", no, category or "全部")
+    db.audit(user, "库存·开始盘点", no, area or category or "全部")
     return get(doc_id)
 
 
@@ -215,7 +224,7 @@ def get(doc_id):
     out = dict(d)
     out["kind_zh"] = DOC_KINDS.get(d["kind"], (d["kind"],))[0]
     out["lines"] = []
-    for ln in c.execute("SELECT l.*, i.code, i.name_zh, i.name_th, i.unit, i.category, i.qty AS now_qty FROM inv_doc_lines l "
+    for ln in c.execute("SELECT l.*, i.code, i.name_zh, i.name_th, i.unit, i.category, i.qty AS now_qty, i.location FROM inv_doc_lines l "
                         "JOIN inv_items i ON i.id=l.item_id WHERE l.doc_id=? ORDER BY l.id", (d["id"],)):
         x = dict(ln)
         if d["kind"] == "stocktake" and x["counted"] is not None and d["status"] == "draft":

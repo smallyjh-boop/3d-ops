@@ -446,9 +446,30 @@
       estimate: "平台费按设置里的扣点估算（导入时带上佣金 / 结算金额会更准）" }[pr.fee_source] || "";
     return `<p class="small muted">${src}${Object.keys(d).length ? "：" + Object.entries(d).map(([k, v]) => `${FEE_ZH[k] || k} ${money(v)}`).join(" · ") : ""}</p>`;
   }
+  // v2.35：发货出库——这单用哪个纸箱、发货时扣了什么（一张出库单）
+  const U_TH = { "个": "ชิ้น", "卷": "ม้วน", "张": "แผ่น", "件": "ชิ้น", "米": "เมตร", "瓶": "ขวด", "盒": "กล่อง", "套": "ชุด", "g": "g" };
+  function outBox(o) {
+    const TH = window.I18N && I18N.lang === "th";
+    const box = window.PACKBOX ? PACKBOX.html(o, "od-box") : "";
+    const out = o.out;
+    return `<h4>发货出库</h4><div class="row gap wrap small">${box}</div>
+      ${out ? `<p class="small">出库单 <a href="#" class="mono" data-invdoc="${out.doc_id}" data-notr>${esc(out.no)}</a> · ${fmtTime(out.ts)}${out.status === "void" ? ' <span class="muted">（已作废）</span>' : ""}</p>
+        <table class="grid small"><thead><tr><th>编码</th><th>名称</th><th>扣了</th><th>货位</th></tr></thead><tbody>
+        ${out.lines.map((l) => `<tr><td class="mono" data-notr>${esc(l.code)}</td><td data-notr>${esc(TH && l.name_th ? l.name_th : l.name_zh)}</td>
+          <td>${num(l.qty, 2)} <span data-notr>${esc((TH && U_TH[l.unit]) || l.unit || "")}</span></td><td class="mono" data-notr>${esc(l.location || "")}</td></tr>`).join("")}</tbody></table>`
+        : `<p class="small muted">${["shipped", "completed"].includes(o.status) ? "这单没有出库记录（库存模块没开、发货出库关着，或者是导入时就已经发货的旧订单）。" : "发货时自动扣：用库存发的成品、上面这个纸箱、设置里每单 / 每件的包材，记成一张出库单。"}</p>`}`;
+  }
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest && e.target.closest("[data-invdoc]");
+    if (!a) return;
+    e.preventDefault();
+    if (window.INV && INV.docView) INV.docView(+a.dataset.invdoc).catch((er) => toast(er.message, true));
+  });
+
   async function openOrder(oid) {
     let o;
     try { o = await api(`/api/orders/${oid}`); } catch (err) { toast(err.message, true); return; }
+    if (window.PACKBOX) await PACKBOX.load();
     const d = $("#ord-detail");
     const pr = o.profit;
     const canEdit = role() !== "production";
@@ -506,9 +527,10 @@
       <h4>生产任务</h4>
       ${o.jobs.length ? `<table class="grid small"><thead><tr><th>#</th><th>SKU</th><th>颜色</th><th>数量</th><th>已打盘数</th><th>打印机</th><th>状态</th><th>预计完成</th></tr></thead><tbody>
         ${o.jobs.map((j) => `<tr><td>${j.id}</td><td class="mono" data-notr>${esc(j.sku)}</td><td>${colorTxt(j.color)}</td><td>${j.qty}</td><td>${j.plates_done || 0}</td>
-          <td data-notr>${esc(printerName(j.printer))}</td><td><span class="jst jst-${j.status}">${esc(JOB_ZH[j.status] || j.status)}</span>${j.fails ? ` <span class="bad small">失败 ${j.fails} 次</span>` : ""}</td>
+          <td data-notr>${esc(printerName(j.printer))}</td><td><span class="jst jst-${j.status}">${esc(JOB_ZH[j.status] || j.status)}</span>${j.fails ? ` <span class="bad small">失败 ${j.fails} 次</span>` : ""}${j.stock_n ? ` <span class="pill tag-pill">📦 ${(window.I18N && I18N.lang === "th") ? "ใช้สต็อก" : "用库存"} ×${j.stock_n}</span>` : ""}</td>
           <td class="small">${j.status === "todo" || j.status === "printing" ? short(j.planned_end) : ""}</td></tr>`).join("")}</tbody></table>`
         : '<p class="muted small">没有生产任务（订单不是待发货状态，或商品没对上产品）。</p>'}
+      ${outBox(o)}
       ${pr ? `<h4>利润</h4><div class="summary small">
         <div>收入<b>${money(pr.revenue)}</b></div><div>平台费${pr.fee_estimated ? "（估）" : ""}<b>${money(pr.fee)}</b></div>
         <div>材料<b>${money(pr.material)}</b></div><div>机时<b>${money(pr.machine)}</b></div><div>包材+损耗<b>${money(pr.packaging + pr.failure)}</b></div>
@@ -525,7 +547,7 @@
     d.classList.remove("hidden");
     d.querySelector("[data-x]").onclick = () => d.classList.add("hidden");
     if (canEdit) lockBox(d.querySelector(".drawer-in"), { id: "order-detail", bar: d.querySelector("#od-lockbar"), label: "✏ 修改",
-      keep: "[data-x], #od-as, #od-edit, #od-del, .log-box, details > summary, #od-approve, #od-hold, .buyer-box, [data-asopen]",
+      keep: "[data-x], #od-as, #od-edit, #od-del, .log-box, details > summary, #od-approve, #od-hold, .buyer-box, [data-asopen], .pb-wrap, .pb-sel, [data-invdoc]",
       onCancel: () => openOrder(oid),
       onSave: async () => {
         const nst = $("#od-status").value;

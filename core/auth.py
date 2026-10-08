@@ -301,7 +301,7 @@ def _api_guard(path):
     scope = k.get("scope") or "full"
     g.user = {"id": -1, "username": f"api:{k['name']}", "display_name": k["name"], "role": "api", "lang": "zh",
               "scope": scope}
-    if path.startswith("/api/v1/cs/"):
+    if path.startswith(("/api/v1/cs/", "/api/v1/labels/")):
         integrations.note_ext(k["name"], request.headers.get("X-Ext-Version", "").strip()[:12])
     if path.startswith("/api/v1/accel/") and scope not in ("worker", "full"):
         return jsonify({"ok": False, "error": "电脑加速要用「电脑加速」权限的密钥（scope = worker）"}), 403

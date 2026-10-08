@@ -43,6 +43,16 @@ def ensure_item(c, sku, product_id=None, name="", color=""):
     if r:
         return r["id"]
     now = ledger._now()
+    if not name:                       # v2.35：手工改成品数量时没带名字 → 按 SKU 找产品名和颜色（找不到才用 SKU）
+        try:
+            from .. import orders
+            hit = orders.match_sku(sku, orders.sku_index())
+            if hit:
+                vi = orders._variant_info(hit[0], hit[1]) or {}
+                name, color = vi.get("name") or "", color or vi.get("color") or ""
+                product_id = product_id or hit[0]
+        except Exception:  # noqa: BLE001
+            pass
     nm = " ".join(x for x in (name, color) if x).strip() or sku
     uc = _unit_cost(sku, product_id) or 0
     return c.execute("INSERT INTO inv_items(code, name_zh, name_th, category, unit, spec, qty, avg_cost, active, created_at, updated_at) "

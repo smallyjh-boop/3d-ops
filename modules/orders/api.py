@@ -60,7 +60,17 @@ def order_get(oid):
     o["review_flags"] = orders_mod.review_flags(o) if o["status"] == "to_ship" else []
     if auth.is_owner():
         o["profit"] = finance.order_profit(load_config(), o, [dict(i) for i in o["items"]])
+    _add_pack_info(o)
     return jsonify(_strip_order(o))
+
+
+def _add_pack_info(o):
+    """v2.35：用哪个纸箱（自动 / 改过）、发货出库单（库存模块开着才有）。"""
+    from modules.orders import packbox
+    o["box"] = packbox.box_for(o)
+    from core import modules as _mods
+    _inv = _mods.public("inv")
+    o["out"] = _inv.order_out(o["id"]) if _inv is not None and hasattr(_inv, "order_out") else None
 
 
 @bp.post("/api/orders/<int:oid>/edit")
@@ -329,6 +339,25 @@ def labels_import():
         return err(str(e))
 
 
+@bp.post("/api/v1/labels/import")
+def v1_labels_import():
+    """浏览器扩展转交平台面单 PDF（v2.35）：员工在卖家中心 / BigSeller 下载面单 PDF 时，扩展弹提示，点「发送」才传上来。
+    用员工的扩展密钥（Authorization: Bearer）。表单字段 file（PDF）、site（从哪个网站下载的，只记日志）。"""
+    f = request.files.get("file")
+    if not f:
+        return err("没有收到面单 PDF")
+    head = f.stream.read(1024)
+    f.stream.seek(0)
+    if b"%PDF-" not in head:
+        return err("这个文件不是 PDF")
+    site = re.sub(r"[^A-Za-z ]", "", request.form.get("site") or "")[:20]
+    try:
+        r = labels.import_pdf(f.stream, _uname(), via="插件" + (f" · {site}" if site else ""))
+    except ValueError as e:
+        return err(str(e))
+    return jsonify({"ok": True, **r})
+
+
 @bp.post("/api/labels/check")
 def labels_check():
     """勾选的订单哪些有平台面单。v2.34：没有的、平台接口接通了的，顺便去平台取（waybill/sources.ensure）。"""
@@ -460,7 +489,25 @@ def pack_lookup():
     for it, m in zip(o.get("items") or [], scanning.modes_for_items(o.get("items") or [], cfg)):
         it.update(m)                          # v2.32：这一行怎么核对：scan 扫商品码 / tap 点一下 / none 不用核对；img 产品图
     o["scan_key"] = scanning.key_setting(cfg)
+    _add_pack_info(o)
     return jsonify(_strip_order(o))
+
+
+@bp.get("/api/pack-boxes")
+def pack_boxes():
+    """泰国邮政标准纸箱（v2.35）：产品编辑页、打包页选纸箱用。"""
+    from core.inventory import boxes
+    return jsonify({"ok": True, "boxes": boxes.catalog(), "none": boxes.NONE})
+
+
+@bp.post("/api/orders/<int:oid>/pack-box")
+def order_pack_box(oid):
+    """打包时改纸箱：{box: 规格 / "none" / ""（按产品自动）}。"""
+    from modules.orders import packbox
+    try:
+        return jsonify({"ok": True, "box": packbox.set_box(oid, (request.get_json(force=True) or {}).get("box") or "", _uname())})
+    except ValueError as e:
+        return err(str(e))
 
 
 @bp.post("/api/pack/done")

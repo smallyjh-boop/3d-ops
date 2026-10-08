@@ -49,16 +49,30 @@ def inv_item(iid):
     if not it:
         return err("没有这个物品", 404)
     from modules.inv import locations
+    loc = locations.get_loc(it["location"]) if it.get("location") else None
     return jsonify({"ok": True, "item": it, "moves": inv.moves(item_id=it["id"], limit=100),
-                    "loc": {**locations.item_locations(it["id"]), "suggest": locations.suggest(it)}})   # v2.33 货位
+                    "loc": {"code": loc["code"] if loc else "", "id": loc["id"] if loc else None,          # v2.35：一物一位
+                            "human_zh": locations.human(loc["code"]) if loc else "", "human_th": locations.human(loc["code"], "th") if loc else "",
+                            "missing": bool(it.get("location") and not loc),
+                            "suggest": None if loc else locations.suggest(it["category"])}})
 
 
 @bp.post("/api/inv/items")
 def inv_item_save():
     if _need("inv.in"):
         return _need("inv.in")
+    b = request.get_json(force=True) or {}
     try:
-        it = inv.save_item(request.get_json(force=True) or {}, _uname())
+        if "location" in b:                      # v2.35：货位要是建好的格子（a1-2-3 也认），空 = 没货位
+            from modules.inv import locations
+            raw = str(b.get("location") or "").strip()
+            old = inv.get_item(int(b["id"])) if b.get("id") else None
+            if not (old and raw == (old.get("location") or "")):     # 没改就不检查
+                loc = locations.get_loc(raw) if raw else None
+                if raw and not loc:
+                    raise ValueError(f"没有货位 {raw}（先在「货位」里建好货架，或者留空）")
+                b["location"] = loc["code"] if loc else ""
+        it = inv.save_item(b, _uname())
     except (TypeError, ValueError) as e:
         return err(str(e))
     return jsonify({"ok": True, "item": it})
@@ -123,6 +137,11 @@ def inv_stocktake_start():
         return _need("inv.out")
     b = request.get_json(force=True) or {}
     try:
+        area = str(b.get("area") or "").strip().upper()
+        if area:                                 # v2.35：按货架 / 区 / 货位盘点
+            from modules.inv import locations
+            codes = locations.area_codes(area)
+            return jsonify({"ok": True, "doc": inv.stocktake_start(b.get("category") or "", _uname(), b.get("note") or "", area, codes)})
         return jsonify({"ok": True, "doc": inv.stocktake_start(b.get("category") or "", _uname(), b.get("note") or "")})
     except ValueError as e:
         return err(str(e))
@@ -192,9 +211,29 @@ def inv_finance_ui():
     return jsonify({"ok": True, "events": list(reversed(inv.finance_events(0, 5000)))[:200], "month": inv.finance_month(request.args.get("month") or None)})
 
 
-# ---------------- 货位（v2.33 建，v2.34 改成「区+货架号-层-位」）----------------
+# ---------------- 纸箱（v2.35：泰国邮政标准纸箱的库存和用量）----------------
+@bp.get("/api/inv/boxes")
+def inv_boxes():
+    return jsonify({"ok": True, "boxes": _views().box_stats()})
+
+
+@bp.post("/api/inv/boxes/<code>/item")
+def inv_box_item(code):
+    """给这个规格的纸箱建档（库存里的包材物品 BOX-规格）。"""
+    if _need("inv.in"):
+        return _need("inv.in")
+    from core.inventory import boxes
+    iid = boxes.ensure_item(code, _uname())
+    if not iid:
+        return err("不是邮政标准纸箱规格")
+    return jsonify({"ok": True, "item": inv.get_item(iid)})
+
+
+# ---------------- 货位（v2.33 建；v2.35：一个物品一个货位，数量只记在物品上）----------------
 from modules.inv import locations as _loc  # noqa: E402
+from modules.inv import shipout as _shipout  # noqa: E402
 _loc.init()
+_shipout.init()
 
 
 def _ok(fn):
@@ -207,9 +246,8 @@ def _ok(fn):
 @bp.get("/api/inv/locations")
 def inv_locations():
     a = request.args
-    return jsonify({"ok": True, "locations": _loc.locations(a.get("all") != "1"), "unplaced": len(_loc.unplaced()),
-                    "groups": _loc.groups(), "layer_bottom": _loc.layer_bottom(),
-                    "categories": inv.categories()})
+    return jsonify({"ok": True, "locations": _loc.locations(a.get("all") != "1"), "unassigned": len(_loc.unassigned()),
+                    "groups": _loc.groups(), "layer_bottom": _loc.layer_bottom(), "categories": inv.categories()})
 
 
 @bp.post("/api/inv/locations")
@@ -221,12 +259,12 @@ def inv_location_save():
 
 @bp.post("/api/inv/locations/bulk")
 def inv_location_bulk():
-    """建货架：{zone, shelf(空=接着排), layers, positions, name, categories}"""
+    """建货架：{zone, shelf(起始号，空=接着排), count(建几个), layers, positions, name, categories}"""
     if _need("inv.in"):
         return _need("inv.in")
     b = request.get_json(force=True) or {}
     return _ok(lambda: _loc.bulk_create(b.get("zone"), b.get("shelf"), b.get("layers"), b.get("positions"),
-                                        b.get("name") or "", b.get("categories"), _uname()))
+                                        b.get("name") or "", b.get("categories"), _uname(), b.get("count") or 1))
 
 
 @bp.post("/api/inv/locations/add")
@@ -267,43 +305,38 @@ def inv_location_delete(lid):
 
 @bp.get("/api/inv/locations/find")
 def inv_location_find():
-    """扫码 / 输入：货位 → 货位详情；货架 → 货架；物品编码 / SKU → 放在哪。"""
+    """扫码 / 输入：货位 → 货位详情；货架 → 货架；物品编码 / SKU → 它放在哪。"""
     try:
         return jsonify({"ok": True, **_loc.find(request.args.get("code"))})
     except ValueError as e:
         return err(str(e), 404)
 
 
-@bp.get("/api/inv/locations/unplaced")
-def inv_unplaced():
-    return jsonify({"ok": True, "items": _loc.unplaced()})
+@bp.get("/api/inv/locations/unassigned")
+def inv_unassigned():
+    """有库存、还没货位的物品 + 推荐的空格。"""
+    return jsonify({"ok": True, "items": _loc.unassigned()})
 
 
-@bp.post("/api/inv/locations/putaway")
-def inv_putaway():
-    if _need("inv.in"):
-        return _need("inv.in")
-    return _ok(lambda: {"done": _loc.putaway_all(_uname())})
-
-
-@bp.post("/api/inv/locations/move")
-def inv_loc_move():
+@bp.post("/api/inv/locations/assign")
+def inv_loc_assign():
+    """放物品：{item_id, code}（code 空 = 拿下来）。"""
     if _need("inv.in"):
         return _need("inv.in")
     b = request.get_json(force=True) or {}
-    return _ok(lambda: _loc.move(b.get("item_id"), b.get("from_loc"), b.get("to_loc"), b.get("qty"), _uname()))
+    return _ok(lambda: {"item": _loc.assign(b.get("item_id"), b.get("code") or "", _uname())})
+
+
+@bp.post("/api/inv/locations/assign-all")
+def inv_loc_assign_all():
+    if _need("inv.in"):
+        return _need("inv.in")
+    return _ok(lambda: {"done": _loc.assign_all(_uname())})
 
 
 @bp.get("/api/inv/locations/<int:lid>")
 def inv_location_detail(lid):
     return _ok(lambda: _loc.loc_detail(lid))
-
-
-@bp.post("/api/inv/locations/<int:lid>/check")
-def inv_location_check(lid):
-    if _need("inv.in"):
-        return _need("inv.in")
-    return _ok(lambda: _loc.check(lid, (request.get_json(force=True) or {}).get("counts") or {}, _uname()))
 
 
 @bp.get("/print/inv-locations")

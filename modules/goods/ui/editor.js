@@ -101,7 +101,39 @@ $("#opt-map").addEventListener("input", () => {
   markDirty();
 });
 
+// v2.35：包装纸箱（泰国邮政标准纸箱，core/inventory/boxes.py）。选了纸箱 → 包裹尺寸按纸箱填；没选时按包裹尺寸推荐一个
+let PBOXES = [];
+const pbTH = () => window.I18N && I18N.lang === "th";
+(async () => {
+  try { PBOXES = (await api("/api/pack-boxes")).boxes; } catch { PBOXES = []; }
+  const sel = $("#pkg-boxsel"); if (!sel) return;
+  sel.innerHTML = `<option value="">${pbTH() ? "ยังไม่ได้ตั้ง" : "没设"}</option>${PBOXES.map((b) => `<option value="${esc(b.code)}">${esc(pbTH() ? b.th : b.zh)}</option>`).join("")}` +
+    `<option value="none">${pbTH() ? "ไม่ใช้กล่อง (ถุงไปรษณีย์ ฯลฯ)" : "不用纸箱（快递袋等）"}</option>`;
+  if (P) renderPackage();
+})();
+function boxFit(pkg) {
+  const need = [pkg && pkg.length, pkg && pkg.width, pkg && pkg.height].map(Number).sort((a, b) => a - b);
+  if (need.some((x) => !(x > 0))) return "";
+  const b = PBOXES.slice().sort((x, y) => x.vol - y.vol).find((x) => [x.w, x.l, x.h].sort((p, q) => p - q).every((v, i) => v >= need[i]));
+  return b ? b.code : "";
+}
+function useBox(code) {
+  const b = PBOXES.find((x) => x.code === code);
+  P.pack_box = code;
+  if (b) {
+    P.package = { ...(P.package || {}), length: b.l, width: b.w, height: b.h };
+    P.package_status = "manual";
+    $$('#pkg-box [data-pkg]').forEach((el) => { const v = getPath(P, el.dataset.f); el.value = v == null ? "" : v; });
+  }
+  markDirty(); renderPackage();
+}
+$("#pkg-boxsel").addEventListener("input", (e) => { if (P && e.target.value && e.target.value !== "none") useBox(e.target.value); });
+$("#pkg-box").addEventListener("click", (e) => { if (e.target.id === "pkg-boxuse" && P) { e.preventDefault(); useBox(e.target.dataset.code); } });
 function renderPackage() {
+  const sel = $("#pkg-boxsel");
+  if (sel && PBOXES.length && sel.value !== (P.pack_box || "")) sel.value = P.pack_box || "";
+  const fit = PBOXES.length && !P.pack_box ? boxFit(P.package) : "";
+  if ($("#pkg-boxhint")) $("#pkg-boxhint").innerHTML = fit ? `${pbTH() ? "ตามขนาดพัสดุแนะนำ" : "按包裹尺寸推荐"} <b data-notr>${esc(fit)}</b> <button class="mini" id="pkg-boxuse" data-code="${esc(fit)}">${pbTH() ? "ใช้อันนี้" : "用这个"}</button>` : "";
   const st = P.package_status;
   $("#pkg-box").classList.toggle("is-check", st === "check" || st === "default");
   $("#btn-pkg-ok").classList.toggle("hidden", !(st === "check" || st === "ai" || st === "default"));

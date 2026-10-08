@@ -57,3 +57,29 @@ def counts():
 def alerts():
     stocked = _stocked_ids()
     return [a for a in inv.alerts() if a["item_id"] in stocked]
+
+
+def box_stats():
+    """纸箱页（v2.35）：每种邮政标准纸箱——有没有建档、库存、最近 30 天 / 本月用了多少、平均每天、还够几天、补货线。"""
+    import datetime as dt
+    import time
+    from core.inventory import boxes
+    c = db.conn()
+    now = time.time()
+    month0 = dt.datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp()
+    out = []
+    for b in boxes.catalog():
+        it = c.execute("SELECT * FROM inv_items WHERE code=?", (b["item_code"],)).fetchone()
+        row = {**b, "item": None, "used30": 0, "used_month": 0, "daily": 0, "days_left": None}
+        if it:
+            used30 = -(c.execute("SELECT COALESCE(SUM(qty),0) FROM inv_moves WHERE item_id=? AND qty<0 AND kind IN ('pack','issue') AND ts>=?",
+                                 (it["id"], now - 30 * 86400)).fetchone()[0] or 0)
+            used_m = -(c.execute("SELECT COALESCE(SUM(qty),0) FROM inv_moves WHERE item_id=? AND qty<0 AND kind IN ('pack','issue') AND ts>=?",
+                                 (it["id"], month0)).fetchone()[0] or 0)
+            daily = used30 / 30.0
+            row.update(item={"id": it["id"], "qty": it["qty"] or 0, "reorder_point": it["reorder_point"], "location": it["location"] or "",
+                             "active": it["active"]},
+                       used30=used30, used_month=used_m, daily=round(daily, 2),
+                       days_left=(max(0, round((it["qty"] or 0) / daily)) if daily > 0 else None))
+        out.append(row)
+    return out

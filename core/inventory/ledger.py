@@ -186,14 +186,14 @@ def post(c, item_id, kind, qty, unit_cost=None, reason="", user="", doc_id=None,
               "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
               (_now(), item_id, kind, q, uc, round(q * uc, 4), bal, doc_id, reason or KINDS.get(kind, (kind,))[0], user or "", ref or "",
                printer or ""))
-    try:                       # v2.33：货位管理（库存模块）跟着调整每个货位上的数量；出错不影响记账
+    try:                       # v2.35：货位（库存模块）——新物品第一次入库还没货位时自动放一个空格；出错不影响记账
         from .. import modules
         m = modules.public("inv")
         if m is not None:
             m.on_post(c, item_id, q, kind, user)
     except Exception as e:  # noqa: BLE001
         import logging
-        logging.getLogger("3dops").warning("货位数量没调整（物品 %s %+g）：%s", item_id, q, e)
+        logging.getLogger("3dops").warning("货位没自动放（物品 %s %+g）：%s", item_id, q, e)
     return bal
 
 

@@ -1,11 +1,12 @@
 """订单（基础模块）：订单列表 / 导入 / 手工单 / 审单、打包核对、发货交接、售后、买家档案、每单利润、工作台数据、
-打印订单 / 面单 / 交接单。订单变化通过 core/chain.py 发事件：生产模块生成生产任务、库存模块发货扣包材。"""
+打印订单 / 面单 / 交接单。订单变化通过 core/chain.py 发事件：生产模块生成生产任务、库存模块发货出库（成品、纸箱、包材）。"""
+from . import packbox
 
 MODULE = {
     "id": "orders",
     "name_zh": "订单",
     "name_th": "ออเดอร์",
-    "version": "1.3",
+    "version": "1.4",
     "desc_zh": "订单、审单、打包核对、发货交接、售后、买家档案、每单利润。",
     "desc_th": "ออเดอร์ ตรวจออเดอร์ ตรวจแพ็ก ส่งมอบพัสดุ หลังการขาย ข้อมูลผู้ซื้อ กำไรต่อคำสั่งซื้อ",
     "core": True,
@@ -19,7 +20,9 @@ MODULE = {
         {"tab": "buyers", "mod": "orders", "zh": "买家档案", "th": "ข้อมูลผู้ซื้อ", "roles": "owner,listing", "after": "aftersales"},
         {"tab": "profit", "mod": "biz", "zh": "每单利润", "th": "กำไรต่อคำสั่งซื้อ", "roles": "owner"},
     ],
-    "production_allow": [("GET", r"^/print/(item-labels|waybill|waybill-preview)$"), ("GET", r"^/api/waybill/(status|awb/\d+/\d+\.png)$")],
+    "public": packbox,            # 别的模块用：box_for(订单) 这个订单用哪个纸箱（库存模块发货出库扣纸箱）
+    "production_allow": [("GET", r"^/print/(item-labels|waybill|waybill-preview)$"), ("GET", r"^/api/(waybill/(status|awb/\d+/\d+\.png)|pack-boxes)$"),
+                         ("POST", r"^/api/orders/\d+/pack-box$")],
     "owner_only": [("POST", r"^/api/waybill/template$")],
     "settings_module": "orders",
     "settings": [("打包核对与发货交接（扫什么码）", [
@@ -31,5 +34,5 @@ MODULE = {
             ("label_size", "面单尺寸：100x150 热敏 4×6 寸 / 100x100 小标签 / a6 普通打印机 A6 纸", ["100x150", "100x100", "a6"])])],
     "settings_cards": ["orders"],
     "config_defaults": {"scan_order_key": "both", "pack_item_mode": "tap", "item_label_size": "50x30", "label_carrier": "auto", "label_size": "100x150"},
-    "ui": {"inline": True, "html": "page.html", "eager_js": ["orders.js", "aftersales.js", "shipping.js", "pack.js", "labels.js"], "css": ["page.css"], "page_js": [], "boot_js": []},
+    "ui": {"inline": True, "html": "page.html", "eager_js": ["packbox.js", "orders.js", "aftersales.js", "shipping.js", "pack.js", "labels.js"], "css": ["page.css"], "page_js": [], "boot_js": []},
 }

@@ -43,3 +43,13 @@ modules/<id>/
   首页打开时所有模块的 th.json 都会合进来（模块关着也合，不影响）。
 - 3D 预览（`static/model3d.js`）、G-code 预览（`static/gview.js`）是几个模块共用的查看器（ES 模块），还在内核。
 
+## 模块之间、弹窗、浏览器插件（v2.35）
+
+- 给别的模块用的函数放在模块自己的一个文件里（例如 `inv/public.py`、`orders/packbox.py`），在说明书里写 `"public": 这个文件`；
+  别的模块用 `modules.public("<id>")` 拿（对方关着返回 None，要判断）。现在有：`inv`（on_post / where_is / sort_key / human / order_out）、
+  `orders`（box_for / set_box）。
+- 共用弹窗 `MODAL.open()` 返回的是同一个框 `#modal-in`：事件用 `m.onclick / m.oninput / m.onchange = …`（关掉时清空），
+  不要用 `addEventListener`（会一直留着，下一个弹窗里也会触发）。
+- 浏览器插件在根目录 `extension/`（打包下载在客服模块 /api/cs/extension.zip，只打包这一层的文件）：一个功能一个文件，
+  `background.js` 是公用的（cfg / callApi），面单转交在 `labels.js` + `pdfgrab.js`（后台消息都用 `label-` 开头），客服面板在 `content.js`。
+  改了插件要改 manifest.json 的版本号和 `core/integrations.py` 的 `EXT_LATEST`。插件不读、不存平台的账号密码。
