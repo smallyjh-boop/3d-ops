@@ -91,7 +91,7 @@ ok(inv.moves(item_id=noz["id"],limit=1)[0]["printer"]==code, "part expense on pr
 
 # ---- 设置按模块
 sc=c.get("/api/settings/schema").get_json()["modules"]
-ids=[m["id"] for m in sc]; ok(ids[:4]==["general","accounts","cost","goods"] and "inventory" in ids and ids[-1]=="addons" and "accel" not in ids, f"settings modules {ids}")
+ids=[m["id"] for m in sc]; ok(ids[:5]==["general","modules","accounts","cost","goods"] and "inventory" in ids and ids[-1]=="addons" and "accel" not in ids, f"settings modules {ids}")
 allkeys=[f["key"] for m in sc for g in m["groups"] for f in g["fields"]]
 ok(len(allkeys)==len(set(allkeys)) and all(k in config.load_config() for k in allkeys), "settings keys unique & exist")
 r=c.post("/api/config",json={"inv_categories":"模具, 胶水","inv_pack_rules":[{"item_id":box["id"],"qty":"2","per":"item"}]}).get_json()

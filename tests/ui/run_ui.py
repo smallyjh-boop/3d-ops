@@ -20,12 +20,13 @@ run_all.prepare(T)
 for f in ("prod.jpg", "prod2.jpg"):
     shutil.copy(os.path.join(run_all.FIX, f), os.path.join(T, f))
 run_all.copy_base(T, "v20", no_users=True)
-env = dict(os.environ, T3D_TMP=T, T3D_APP=run_all.APP, PYTHONPATH=run_all.APP, PYTHONIOENCODING="utf-8", LH_NO_PRESETS="1", LH_NO_TPL_SYNC="1", LH_NO_UPDATE_CHECK="1")
+env = dict(os.environ, T3D_TMP=T, T3D_APP=run_all.APP, PYTHONPATH=run_all.APP, PYTHONIOENCODING="utf-8", LH_NO_PRESETS="1", LH_NO_TPL_SYNC="1", LH_NO_UPDATE_CHECK="1",
+           LH_EXTRA_MODULES=os.path.join(run_all.APP, "tests", "fixtures", "demomods"))
 subprocess.run([sys.executable, os.path.join(HERE, "seed2131.py")], cwd=T, env=env, check=True)
 srv = subprocess.Popen([sys.executable, os.path.join(HERE, "run_cs_server.py")], cwd=T, env=env,
                        stdout=open(os.path.join(T, "server.log"), "w"), stderr=subprocess.STDOUT)
 bad = 0
-SCRIPTS = [a for a in sys.argv[1:] if a.startswith("ui")] or ["ui214", "ui228"]
+SCRIPTS = [a for a in sys.argv[1:] if a.startswith("ui")] or ["ui214", "ui228", "ui229"]
 try:
     time.sleep(6)
     for lang in ("zh", "th"):

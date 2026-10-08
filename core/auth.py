@@ -36,6 +36,8 @@ OWNER_ONLY = [
     ("*", r"^/api/backups"),
     ("*", r"^/api/system/"),
     ("*", r"^/api/desktop/devices"),
+    ("POST", r"^/api/modules/"),                 # v2.29 模块开关
+    ("GET", r"^/api/modules/events"),
     ("POST", r"^/api/ops/changes/"),
     ("POST", r"^/api/calib/"),
     ("POST", r"^/api/cs/settings$"),
@@ -45,6 +47,8 @@ OWNER_ONLY = [
 # 生产角色能用的（其他全部拒绝）
 PRODUCTION_ALLOW = [
     ("GET", r"^/$"),
+    ("GET", r"^/api/modules$"),                          # v2.29 模块菜单
+    ("GET", r"^/m/[a-z0-9_]+/page\.(html|js|css)$"),
     ("POST", r"^/api/desktop/(pair|dltoken)$"),           # v2.28 桌面客户端
     ("GET", r"^/api/desktop/package$"),
     ("GET", r"^/api/accel/(package|status)$"),

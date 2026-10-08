@@ -6,10 +6,12 @@
   web/*.py      各模块的接口（产品、上架、订单、生产、对接、系统）；接口路径和以前完全一样
   core/*.py     业务逻辑
 """
-VERSION = "2.28.1"   # 改版本号时同时改 static/app.js 的 APP_JS_VERSION、static/api-docs.html 里的示例
+VERSION = "2.29.0"   # 改版本号时同时改 static/app.js 的 APP_JS_VERSION、static/api-docs.html 里的示例
 
 from web.common import *  # noqa: F401,F403,E402
-import web.products, web.listing, web.orders, web.production, web.integrations, web.system, web.inventory, web.accel, web.fin, web.desktop  # noqa: F401,E402  注册路由（不要用 from web import …，会把 core 的同名模块盖掉）
+import web.products, web.listing, web.orders, web.production, web.integrations, web.system, web.inventory, web.accel, web.fin, web.desktop, web.modules  # noqa: F401,E402  注册路由（不要用 from web import …，会把 core 的同名模块盖掉）
+from core import modules as _modules  # noqa: E402
+_modules.load_all(app)   # v2.29：modules/ 文件夹里的功能模块（接口、权限、设置、事件）
 
 def main():
     port = int(os.environ.get("PORT", "8765"))

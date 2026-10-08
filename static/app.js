@@ -1,5 +1,5 @@
 "use strict";
-const APP_JS_VERSION = "2.28.1";   // 必须和 app.py 的 VERSION 一致
+const APP_JS_VERSION = "2.29.0";   // 必须和 app.py 的 VERSION 一致
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -228,6 +228,7 @@ function showTab(name) {
   if (window.PURCHASE) window.PURCHASE.show(name);
   if (window.FIN) window.FIN.show(name);
   if (window.CSREC) window.CSREC.show(name);
+  if (window.MODKIT) window.MODKIT.show(name);       // v2.29：模块的页面（第一次打开时才加载）
   try { history.replaceState(null, "", "#" + name); } catch { /* 忽略 */ }
 }
 async function goTab(name) {
@@ -2099,6 +2100,7 @@ function cfgShowMod(id) {
 }
 function cfgLoadExt(id) {
   const err = (e) => toast(e.message || String(e), true);
+  if (window.MODKIT) MODKIT.settings(id).catch(err);   // v2.29：模块管理 + 模块自己的设置卡片
   if (id === "accounts") { loadUsers(); if (window.CS) CS.show("csext"); if (window.CSREC) CSREC.show("csext"); }
   if (id === "goods") renderTplLib().catch(err);
   if (id === "cs" && window.CS) CS.show("cskb");
@@ -2440,6 +2442,7 @@ $("#btn-nu").addEventListener("click", async (e) => {
 // ---------------- 启动 ----------------
 (async () => {
   try { await loadMe(); } catch (e) { toast(e.message, true); return; }
+  if (window.MODKIT) await MODKIT.init();             // v2.29：模块的菜单
   try { await loadConfig(); } catch (e) { toast(e.message, true); }
   await renderEditor();
   const want = (location.hash || "").slice(1);

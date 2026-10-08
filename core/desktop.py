@@ -82,6 +82,14 @@ def user_of_key(name):
     return ""
 
 
+def describe_key(name):
+    """电脑加速密钥名 → 给人看的名字（「Nok@NOK-PC」）；不是配对的密钥原样返回。"""
+    for v in _load().values():
+        if v.get("key_name") == name:
+            return worker_name(v.get("display") or v.get("user") or "", v.get("pc") or "")
+    return name
+
+
 def touch(name, version=""):
     with _lock:
         d = _load()

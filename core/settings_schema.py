@@ -15,6 +15,7 @@ MODULES = [
             ("update_check", "每天自动检查新版本（只提醒，升级要你点）", "bool")]),
         ("备份", [("backup_copy_dir", "备份另存一份到（文件夹路径，例如 U 盘 E:\\备份 或 网盘同步文件夹；NAS 版用 HBS 3）")]),
     ]},
+    {"id": "modules", "zh": "模块管理", "th": "จัดการโมดูล", "ext": True, "groups": []},
     {"id": "accounts", "zh": "账号与权限", "th": "บัญชีและสิทธิ์", "ext": True, "groups": []},
     {"id": "cost", "zh": "成本与定价", "th": "ต้นทุนและราคา", "summary": True, "groups": [
         ("成本", [
@@ -105,20 +106,25 @@ MODULES = [
 ]
 
 
-def register(module_id, group_title, fields, module_zh=None, module_th=None):
-    """别的模块加自己的设置：register("finance", "财务", [("fin_xxx", "说明")], "财务", "การเงิน")。"""
+def register(module_id, group_title, fields, module_zh=None, module_th=None, module_of=None):
+    """别的模块加自己的设置：register("finance", "财务", [("fin_xxx", "说明")], "财务", "การเงิน")。
+    module_of：这组设置属于哪个功能模块（v2.29 模块框架）——模块关掉时这组设置不显示。"""
     mod = next((m for m in MODULES if m["id"] == module_id), None)
     if not mod:
         mod = {"id": module_id, "zh": module_zh or module_id, "th": module_th or module_zh or module_id, "groups": []}
         MODULES.append(mod)
-    mod["groups"].append((group_title, list(fields)))
+    if any(g[0] == group_title for g in mod["groups"]):
+        return
+    mod["groups"].append((group_title, list(fields), module_of) if module_of else (group_title, list(fields)))
 
 
 def schema():
+    from . import modules
     out = []
     for m in MODULES:
+        groups = [g for g in m["groups"] if len(g) < 3 or modules.enabled(g[2])]
         out.append({"id": m["id"], "zh": m["zh"], "th": m["th"], "special": m.get("special", []), "summary": bool(m.get("summary")),
                     "ext": bool(m.get("ext")),
-                    "groups": [{"title": g, "fields": [{"key": f[0], "label": f[1], "type": (f[2] if len(f) > 2 else "")} for f in fs]}
-                               for g, fs in m["groups"]]})
+                    "groups": [{"title": g[0], "fields": [{"key": f[0], "label": f[1], "type": (f[2] if len(f) > 2 else "")} for f in g[1]]}
+                               for g in groups]})
     return out

@@ -660,3 +660,5 @@ td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .desk-chip{margin-left:6px;cursor:pointer;border:1px solid rgba(255,255,255,.25);background:transparent;color:inherit}
 .desk-opts label{display:flex;gap:8px;align-items:center;margin:6px 0;text-align:left}
 .desk-opts input[type=checkbox]{width:auto;margin:0}
+.switch-l{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.switch-l input{width:auto;margin:0}

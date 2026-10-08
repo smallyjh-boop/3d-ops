@@ -228,6 +228,9 @@ def tray(c):
         except Exception:  # noqa: BLE001
             pass
 
+    def ts(icon, item):
+        threading.Thread(target=ts_join, args=(c,), daemon=True).start()
+
     def change(icon, item):
         n = setup_dialog(dict(c))
         if n:
@@ -257,6 +260,7 @@ def tray(c):
         items.append(pystray.MenuItem("也帮别人加速（同事的活）", opt("share"), checked=lambda it: bool(c.get("share"))))
     items += [pystray.MenuItem("开机自动启动", lambda i, it: autostart_set(not autostart_get()), checked=lambda it: autostart_get()),
               pystray.MenuItem("运行记录", open_log),
+              pystray.MenuItem("连接外网（Tailscale）", ts),
               pystray.MenuItem("修改 NAS 地址和密钥…", change),
               pystray.Menu.SEPARATOR,
               pystray.MenuItem("退出加速器", quit_all)]
@@ -291,6 +295,36 @@ def tray(c):
     return icon
 
 
+def ts_join(c, require_auto=False):
+    """外网自动加入（Tailscale）：用这台电脑的加速密钥问 NAS 要预授权密钥，装好并加入。"""
+    import platform
+    import tsjoin
+    import worker as W
+    note = (lambda m: S["icon"].notify(m, "连接外网（Tailscale）")) if S["icon"] else (lambda m: None)
+    r = tsjoin.join(c["server"], c["key"], f"3dops-{platform.node()}-accel", log=note, require_auto=require_auto)
+    if not r.get("skip"):
+        c["ts_tried"] = 1
+        W.save_conf(c)
+        note(("已连上，在店外也能用了" + (f"（{r['ips'][0]}）" if r.get("ips") else "")) if r.get("ok") else r.get("error") or "没有连上")
+    return r
+
+
+def ts_auto(c):
+    for _ in range(120):
+        if S["w"] and S["w"].server_version:
+            break
+        time.sleep(1)
+    if c.get("ts_tried") or os.name != "nt":
+        return
+    try:
+        import tsjoin
+        if tsjoin.status().get("running"):
+            return
+        ts_join(c, require_auto=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def lock_listener(sock):
     while True:
         try:
@@ -323,6 +357,7 @@ def main():
         c["autostart_done"] = 1
         W.save_conf(c)
     start_worker(c)
+    threading.Thread(target=ts_auto, args=(c,), daemon=True).start()
     tray(c).run()
 
 

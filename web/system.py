@@ -8,7 +8,10 @@ def index():
         html = f.read()
     html = re.sub(r'(/static/(?!vendor)[\w./-]+\.(?:js|css))"', rf'\1?v={VERSION}"', html)
     from core import i18n_admin
-    html = html.replace("</head>", f'<script>window.CLIENT_VERSION="{VERSION}";</script>{i18n_admin.script_tag()}</head>', 1)
+    import json as _json
+    from core import modules
+    mi = _json.dumps(modules.i18n_th(), ensure_ascii=False).replace("</", "<\\/")
+    html = html.replace("</head>", f'<script>window.CLIENT_VERSION="{VERSION}";window.I18N_MODULES={mi};</script>{i18n_admin.script_tag()}</head>', 1)
     r = app.response_class(html, mimetype="text/html")
     r.headers["Cache-Control"] = "no-store"
     return r

@@ -178,13 +178,26 @@
         <label class="row gap"><input type="checkbox" data-dopt="share" ${a.share ? "checked" : ""}> 也帮别人加速（同事的活也可以在这台电脑做）</label>
         <label class="row gap"><input type="checkbox" data-dopt="autostart" ${INFO.autostart ? "checked" : ""}> 开机自动启动（只在右下角托盘，不弹窗口）</label>
       </div>
+      <p class="small" id="dk-ts">外网（Tailscale）：…</p>
       <details class="small"><summary>运行记录</summary><pre class="sys-pre" data-notr>${esc((a.log || []).join("\n") || "（还没有）")}</pre></details>
-      <div class="row gap" style="margin-top:8px"><button data-dfolder>打开「在本机打开」的文件夹</button><button data-dswitch>重新连接 NAS</button><button data-mclose>关闭</button></div>`);
+      <div class="row gap" style="margin-top:8px"><button data-dfolder>打开「在本机打开」的文件夹</button><button data-dswitch>重新连接 NAS</button><button data-dts>连接外网（Tailscale）</button><button data-mclose>关闭</button></div>`);
     m.onchange = async (e) => {
       const k = e.target.dataset && e.target.dataset.dopt; if (!k) return;
       INFO = await DESK.set_option(k, e.target.checked); renderChip();
     };
+    const tsBox = m.querySelector("#dk-ts");
+    const tsShow = async () => {
+      let t = {};
+      try { t = await DESK.ts_status(); } catch { t = {}; }
+      if (!tsBox || !tsBox.isConnected) return;
+      tsBox.innerHTML = "外网（Tailscale）：" + (t.busy ? "正在连接…（弹出的窗口点「是」）" : t.running ? `<span class="ok">已连上</span> <span data-notr>${esc((t.ips || []).join(", "))}</span>`
+        : t.installed ? '<span class="warn">已安装，没连上</span>' : '<span class="muted">还没安装</span>') +
+        (t.last && !t.last.ok && t.last.error ? ` <span class="bad small" data-notr>${esc(t.last.error)}</span>` : "");
+      if (t.busy) setTimeout(tsShow, 3000);
+    };
+    tsShow();
     m.onclick = (e) => {
+      if (e.target.dataset.dts !== undefined) { DESK.ts_join(); setTimeout(tsShow, 800); }
       if (e.target.dataset.dfolder !== undefined) DESK.show_folder();
       if (e.target.dataset.dswitch !== undefined) { DESK.switch_server(); toast("正在重新找 NAS…"); }
     };

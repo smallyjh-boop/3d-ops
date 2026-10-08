@@ -165,6 +165,7 @@ class Accel:
         self.w.no_install = bool(C.get("no_install"))
         self.w.auto_update = True
         self.state = "连接中"
+        threading.Thread(target=ts_auto, daemon=True).start()
         try:
             self.w.loop()
         except Exception as e:  # noqa: BLE001
@@ -193,6 +194,48 @@ class Accel:
 
 
 ACCEL = Accel()
+
+
+# ---------------- 外网自动加入（Tailscale，v2.29 模块） ----------------
+TS = {"busy": False, "last": None}
+
+
+def ts_join(require_auto=False):
+    if os.name != "nt" or TS["busy"] or not C.get("key") or not STATE.get("server"):
+        return {"ok": False, "error": "现在不能连接（没配对 / 没连上 NAS）"}
+    import tsjoin
+    TS["busy"] = True
+    try:
+        r = tsjoin.join(STATE["server"], C["key"], f"3dops-{_pc_name()}-{C.get('user') or ''}",
+                        log=lambda m: API.notify("连接外网（Tailscale）", m), require_auto=require_auto)
+    finally:
+        TS["busy"] = False
+    TS["last"] = r
+    if not r.get("skip"):
+        C["ts_tried"] = 1
+        save_conf(C)
+        API.notify("连接外网（Tailscale）", ("已连上，在店外也能用了" + (f"（{r['ips'][0]}）" if r.get("ips") else "")) if r.get("ok")
+                   else r.get("error") or "没有连上")
+    return r
+
+
+def ts_auto():
+    """配对好、第一次连上 NAS 以后：NAS 上开了「自动加入」就自动连一次（只试一次，以后从菜单点）。"""
+    for _ in range(120):
+        if ACCEL.w and ACCEL.w.server_version:
+            break
+        time.sleep(1)
+    if C.get("ts_tried") or os.name != "nt":
+        return
+    try:
+        import tsjoin
+        if tsjoin.status().get("running"):
+            C["ts_tried"] = 1
+            save_conf(C)
+            return
+        ts_join(require_auto=True)
+    except Exception:  # noqa: BLE001
+        pass
 STATE = {"server": None, "window": None, "tray": None, "quitting": False}
 
 
@@ -289,6 +332,18 @@ class Api:
         except Exception:  # noqa: BLE001
             pass
         return True
+
+    def ts_join(self):
+        threading.Thread(target=ts_join, daemon=True).start()
+        return True
+
+    def ts_status(self):
+        try:
+            import tsjoin
+            st = tsjoin.status() if os.name == "nt" else {"installed": False, "running": False, "ips": []}
+        except Exception as e:  # noqa: BLE001
+            st = {"error": str(e)}
+        return {**st, "busy": TS["busy"], "last": TS["last"]}
 
     def switch_server(self):
         threading.Thread(target=watch_once, args=(True,), daemon=True).start()
@@ -442,6 +497,7 @@ def tray():
         pystray.MenuItem("也帮别人加速（同事的活）", toggle_share, checked=lambda it: bool(C.get("share"))),
         pystray.MenuItem("开机自动启动", toggle_auto, checked=lambda it: autostart_get()),
         pystray.MenuItem("打开文件夹（在本机打开的文件）", lambda i, it: API.show_folder()),
+        pystray.MenuItem("连接外网（Tailscale）", lambda i, it: API.ts_join()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("退出（加速也停止）", quit_all))
     icon = pystray.Icon("3d-ops", img, "3D 运营管理系统", menu)
