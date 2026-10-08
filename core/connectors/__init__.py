@@ -19,6 +19,10 @@ class Connector:
     NOTE = ""              # 界面上的说明
     # 需要填写的授权信息：(键, 显示名, 是否保密)
     FIELDS = []
+    # v2.34 取平台面单（modules/orders/waybill）：接通后改 True，实现 fetch_label()
+    LABEL_READY = False
+    LABEL_NOTE = ""
+    LABEL_NOTE_TH = ""
 
     def __init__(self, creds):
         self.creds = dict(creds or {})
@@ -38,6 +42,11 @@ class Connector:
     def handle_webhook(self, headers, body, url=""):
         """平台主动推送（webhook）。返回标准订单列表；不支持就返回 None（只记录日志）。"""
         return None
+
+    def fetch_label(self, order):
+        """取这个订单的平台面单。返回 {"kind": "pdf" | "png", "data": 文件内容, "tracking_no": "运单号（有就给）"}。
+        order 是系统里的订单（order_no、tracking_no、raw 里有平台自己的编号）。"""
+        raise NotReady(f"{self.LABEL} 取面单还没接通")
 
 
 from .lazada import LazadaConnector      # noqa: E402

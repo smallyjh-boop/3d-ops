@@ -105,7 +105,7 @@
         ${f("brand", "品牌")}${f("spec", "规格")}${f("reorder_point", "补货线（低于就提醒）", 'type="number" step="any"')}
         ${f("reorder_qty", "每次补多少（空 = 自动）", 'type="number" step="any"')}
         <label>默认供应商<select data-k="supplier_id" data-notr ${edit ? "" : "disabled"}><option value="">—</option>${(SUPS || []).map((x) => `<option value="${x.id}" ${x.id === it.supplier_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
-        ${f("location", "默认货位（入库自动放这里）", 'list="loc-dl"')}<datalist id="loc-dl">${((window.INVLOC && INVLOC.list()) || []).map((l) => `<option value="${esc(l.code)}">`).join("")}</datalist>${f("link", "购买链接")}${f("note", "备注")}
+        ${f("location", "默认货位（可填货架 A1 或货位 A1-02-03）", 'list="loc-dl"')}<datalist id="loc-dl">${((window.INVLOC && INVLOC.shelves && INVLOC.shelves()) || []).concat(((window.INVLOC && INVLOC.list()) || []).map((l) => l.code)).map((c) => `<option value="${esc(c)}">`).join("")}</datalist>${f("link", "购买链接")}${f("note", "备注")}
       </div>
       ${id && r.loc && (r.loc.locations.length || r.loc.unplaced) ? `<p class="small">📍 货位：${r.loc.locations.map((x) => `<a href="#" data-locgo="${x.loc_id}" class="mono" data-notr>${esc(x.code)}</a> ×${num(x.qty, 2)}`).join("、") || "—"}
         ${r.loc.unplaced > 1e-9 ? ` · <span class="warn">未上架 ${num(r.loc.unplaced, 2)}</span>${r.loc.suggest ? `（推荐放 <b class="mono" data-notr>${esc(r.loc.suggest.code)}</b>）` : ""}` : ""}</p>` : ""}

@@ -35,6 +35,11 @@ class ShopeeConnector(Connector):
            "按官方文档编写，拿到正式 Partner ID 后需要联调确认。"
     FIELDS = [("partner_id", "Partner ID", False), ("partner_key", "Partner Key", True), ("shop_id", "Shop ID", False),
               ("access_token", "Access Token", True), ("refresh_token", "Refresh Token", True)]
+    # v2.34 面单：等联调。流程（Shopee Open Platform v2 物流接口）：订单先「安排发货」→ 取运单号 get_tracking_number →
+    # 生成面单 create_shipping_document（热敏 THERMAL_AIR_WAYBILL）→ 查结果 get_shipping_document_result →
+    # 下载 download_shipping_document（PDF）→ 交给 fetch_label 返回
+    LABEL_NOTE = "未接入：接通后打印时自动从 Shopee 取面单（订单要先在平台安排发货）"
+    LABEL_NOTE_TH = "ยังไม่เชื่อมต่อ: เชื่อมแล้วจะดึงใบปะหน้าจาก Shopee อัตโนมัติ (ต้องจัดส่งในแพลตฟอร์มก่อน)"
 
     # ---------- 授权 ----------
     def authorize_url(self, redirect_uri):

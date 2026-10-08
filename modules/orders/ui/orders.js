@@ -1,33 +1,15 @@
 "use strict";
-// 订单 / 生产 / 耗材 / 利润（店铺日常运营）
+// 订单模块：订单列表（ERP 式）、修改订单、批量填运单号、导入、手工单、订单详情、每单利润。
+// v2.34 从 static/ops.js 搬进模块；公用的小工具（PLAT、money、colorTxt、打印机名……）在内核 app.js 的 window.OPSH，
+// API 密钥在内核（window.INTG_UI），「打开了哪个页面」由内核 showTab 通知各页面脚本。
 (function () {
-  const PLAT = { lazada: "Lazada", shopee: "Shopee", tiktok: "TikTok", manual: "手工", other: "其他" };
-  const KIND_ZH = { normal: "", manual: "私下成交", wholesale: "批发/大单", custom: "定制单", quote: "报价" };
-  const JOB_ZH = { todo: "待打印", printing: "打印中", post: "后处理", packed: "已打包", done: "已发货", failed: "打印失败" };
+  const { PLAT, KIND_ZH, JOB_ZH, role, isOwner, money, num, day, short, colorTxt, today, printerName } = window.OPSH;
   let ORD_STATUS = {};
   let IMP = null;          // 当前导入预览
-  let PRINTERS = [];
-  const role = () => (typeof ME !== "undefined" && ME ? ME.role : "owner");
-  const isOwner = () => role() === "owner";
-  const money = (v) => (v === null || v === undefined || v === "") ? "" : "฿" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 });
-  const num = (v, d = 2) => (v === null || v === undefined || v === "") ? "" : String(Number(Number(v).toFixed(d)));
-  const day = (ts) => (ts ? fmtTime(ts).slice(0, 10) : "");
-  const short = (ts) => (ts ? fmtTime(ts).slice(5) : "");
-  const colorTxt = (c) => (c ? `${swatch(c, "var-sw")}<span data-notr>${esc(colorLabel(c))}</span>` : "");
-  const today = () => { const d = new Date(), z = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`; };
 
   function show(name) {
     if (name === "orders") loadOrders();
-    if (window.PROD) window.PROD.show(name);
-    if (window.HOME) window.HOME.show(name);
-    if (window.FILES) window.FILES.show(name);
-    if (window.SYS) window.SYS.show(name);
-    if (window.AS) window.AS.show(name);
-    if (window.SHIP) window.SHIP.show(name);
-    if (window.PACK) window.PACK.show(name);
-    if (name === "materials" && window.MATERIALS) MATERIALS.load();   // v2.31：耗材料卷在生产模块
     if (name === "profit") loadProfit();
-    if (name === "users") loadIntegrations().catch((e) => toast(e.message, true));
   }
 
   // ================= 订单（ERP 式）=================
@@ -505,7 +487,7 @@
           ${o.handover_id ? `<label>交接单<input value="#${o.handover_id}" readonly></label>` : ""}
         </div>
         <div class="row gap"><a class="btn" target="_blank" href="/print/labels?type=${o.label_file ? "platform" : "self"}&ids=${o.id}">🏷 打印面单</a>
-          ${o.label_file ? `<a class="btn" target="_blank" href="/print/labels?type=self&ids=${o.id}">打印自制面单</a>` : ""}</div>
+          ${o.label_file ? `<a class="btn" target="_blank" href="/print/labels?type=platform&raw=1&ids=${o.id}" title="不加信息，原样打印平台给的 PDF">原样平台面单</a><a class="btn" target="_blank" href="/print/labels?type=self&ids=${o.id}">打印自制面单</a>` : ""}</div>
       </details>
       <div class="form3">
         <label>运单号<input id="od-track" value="${esc(o.tracking_no || "")}" data-notr ${canEdit ? "" : "readonly"}></label>
@@ -589,25 +571,6 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#ord-detail").classList.add("hidden"); });
   $("#ord-detail").addEventListener("click", (e) => { if (e.target.id === "ord-detail") e.target.classList.add("hidden"); });
 
-  // ================= 公用（生产页 prod.js 也用）=================
-  function printerName(i) {
-    if (i === null || i === undefined) return "未分配";
-    const p = (CFG && CFG.printers && CFG.printers[i]);
-    return p ? `${p.code || "#" + (i + 1)} · ${p.name || ""}` : (i == null ? "" : `打印机${i + 1}`);
-  }
-  function stChip(st, zh) {
-    if (!st || !st.state || st.state === "none") return '<span class="pill pst-none">未连接</span>';
-    const pr = st.state === "printing" && st.progress != null ? ` ${st.progress}%` : "";
-    const rm = st.state === "printing" && st.remaining_min ? ` · 剩 ${Math.floor(st.remaining_min / 60)}h${st.remaining_min % 60}m` : "";
-    return `<span class="pill pst-${st.state}">${esc(zh)}${pr}${rm}</span>`;
-  }
-  function trayHtml(st) {
-    const t = (st && st.trays) || [];
-    if (!t.length) return "";
-    return `<div class="trays">${t.map((x) => `<span class="tray ${String(st.tray_now) === String(x.slot) ? "on" : ""}" title="${esc(x.type || "")}">
-      <span class="sw" style="background:${esc(x.hex || "#ccc")}"></span>${esc(x.label)} <span class="muted">${esc(x.type || "")}${x.remain != null && x.remain >= 0 ? " " + x.remain + "%" : ""}</span></span>`).join("")}</div>`;
-  }
-
   // ================= 利润 =================
   async function loadProfit() {
     const r = await api(`/api/profit?days=${$("#pf-days").value}`);
@@ -650,40 +613,8 @@
   });
   $("#ex-day").value = today();
 
-  // ================= API 密钥（老板）=================
-  // v2.30：店铺对接、3D选品工具对接搬到了「对接」模块（modules/link/ui/settings.js）
-  let INTG = null;
-  async function loadIntegrations() {
-    if (!isOwner()) return;
-    INTG = await api("/api/integrations");
-    $("#intg-keys tbody").innerHTML = INTG.keys.map((k) => `<tr><td data-notr>${esc(k.name)}</td><td class="mono" data-notr>${esc(k.prefix)}…</td>
-      <td>${k.scope === "read" ? '<span class="pill ok-pill">只读</span>' : k.scope === "ops" ? '<span class="pill warn-pill">运营写回</span>' : k.scope === "catalog" ? '<span class="pill tag-pill">建产品</span>' : "完整"}</td>
-      <td class="nowrap">${day(k.created_at)}</td><td class="nowrap">${k.last_used ? fmtTime(k.last_used) : "-"}</td><td>${k.uses || 0}</td>
-      <td><input type="checkbox" data-keyact="${k.id}" ${k.active ? "checked" : ""}></td>
-      <td><button class="danger mini-x" data-keydel="${k.id}">删除</button></td></tr>`).join("") || '<tr><td colspan="8" class="muted">还没有密钥</td></tr>';
-    document.dispatchEvent(new CustomEvent("intg-loaded", { detail: INTG }));   // 对接模块用（店铺列表、选品工具密钥）
-  }
-  $("#intg").addEventListener("click", async (e) => {
-    const t = e.target, d = t.dataset;
-    try {
-      if (t.id === "btn-key-new") {
-        const r = await api("/api/apikeys", { json: { name: $("#key-name").value || "API", scope: $("#key-scope") ? $("#key-scope").value : ($("#key-readonly").checked ? "read" : "full") } });
-        $("#key-name").value = "";
-        if ($("#key-readonly")) $("#key-readonly").checked = false;
-        $("#key-new-out").innerHTML = `<p class="note-flag">新密钥（只显示这一次，请复制保存）：<b class="mono" data-notr>${esc(r.key)}</b></p>`;
-        return loadIntegrations();
-      }
-      if (d.keydel) { if (!confirm("删除这个密钥？用它的程序会马上不能用。")) return; await api(`/api/apikeys/${d.keydel}`, { method: "DELETE" }); return loadIntegrations(); }
-    } catch (err) { toast(err.message, true); }
-  });
-  $("#intg").addEventListener("change", async (e) => {
-    const id = e.target.dataset.keyact;
-    if (!id) return;
-    try { await api(`/api/apikeys/${id}`, { json: { active: e.target.checked } }); toast(e.target.checked ? "已启用" : "已停用"); }
-    catch (err) { toast(err.message, true); }
-  });
 
   const filterBuyer = (key) => { OF.buyer_key = key; OF.tab = "all"; OF.page = 1; showTab("orders"); };
-  window.OPS = { show, loadOrders, loadMaterials: () => window.MATERIALS && MATERIALS.load(), loadProfit, openOrder, loadSkus, filterBuyer, loadIntegrations };
-  window.OPSH = { PLAT, KIND_ZH, JOB_ZH, money, num, day, short, colorTxt, stChip, trayHtml, printerName, today, isOwner, role };
+  window.OPS = { show, loadOrders, loadMaterials: () => window.MATERIALS && MATERIALS.load(), loadProfit, openOrder, loadSkus, filterBuyer,
+    loadIntegrations: () => window.INTG_UI && INTG_UI.load() };
 })();

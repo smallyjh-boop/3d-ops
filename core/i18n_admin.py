@@ -52,26 +52,48 @@ def key_entries():
     return json.loads(body)
 
 
+def _js_pairs(body):
+    """JS 对象字面量里的「"中文": "泰文"」（一行几条、一条两行、注释都认）。"""
+    def dec(raw, q):
+        if q == "'":
+            raw = raw.replace("\\'", "'").replace('"', '\\"')
+        return json.loads(f'"{raw}"')
+    toks, i, n = [], 0, len(body)
+    while i < n:
+        ch = body[i]
+        if body.startswith("//", i):
+            j = body.find("\n", i)
+            i = n if j < 0 else j
+        elif ch in "\"'":
+            j = i + 1
+            while j < n and body[j] != ch:
+                j += 2 if body[j] == "\\" else 1
+            toks.append(("s", dec(body[i + 1:j], ch)))
+            i = j + 1
+        elif ch == ":":
+            toks.append((":", None))
+            i += 1
+        else:
+            i += 1
+    out = {}
+    for k in range(len(toks) - 2):
+        if toks[k][0] == "s" and toks[k + 1][0] == ":" and toks[k + 2][0] == "s":
+            out[toks[k][1]] = toks[k + 2][1]
+    return out
+
+
 def sub_entries():
-    """i18n.js 里 TH 表的「中文: 泰文」（只认一行一条的写法）。"""
+    """片段翻译：i18n.js 里 TH 表的「中文: 泰文」+ 各模块自己的 modules/<id>/i18n/th.json（v2.34 起模块的翻译放在模块里）。"""
     with open(SUBS_JS, encoding="utf-8") as f:
         txt = f.read()
-    start = txt.index("const TH = {")
+    start = txt.index("const TH = {") + len("const TH = {")
     end = txt.index("\n  };", start)
-    out = {}
-    pend = None
-    for line in txt[start:end].splitlines()[1:]:
-        m = _PAIR.match(line)
-        if m:
-            out[json.loads(f'"{m.group(1)}"')] = json.loads(f'"{m.group(2)}"')
-            pend = None
-            continue
-        mk, mv = _KEY.match(line), _VAL.match(line)
-        if mk:
-            pend = json.loads(f'"{mk.group(1)}"')       # 一条写成两行：先是中文……
-        elif mv and pend is not None:
-            out[pend] = json.loads(f'"{mv.group(1)}"')   # ……下一行是泰文
-            pend = None
+    out = _js_pairs(txt[start:end])
+    try:
+        from . import modules
+        out.update(modules.i18n_th())
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 

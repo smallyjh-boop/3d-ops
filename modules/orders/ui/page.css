@@ -6,3 +6,15 @@
 .lt-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background: #fafafa }
 .lt-fr { height: 330px; overflow: hidden; margin-top: 6px; background: #ddd; border-radius: 4px }
 .lt-fr iframe { width: 420px; height: 600px; border: 0; transform: scale(.55); transform-origin: 0 0 }
+/* v2.34 平台面单：自定义加信息 */
+.wb-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; margin-top: 10px }
+.wb-form { flex: 1 1 420px; min-width: 300px }
+.wb-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0 }
+.wb-k { flex: 0 0 84px; font-size: 13px; color: #475569 }
+.wb-opt { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 4px; margin: 2px 10px 2px 0; font-size: 13px; width: auto }
+.wb-opt input { width: auto; margin: 0 }
+.wb-fields { display: flex; flex-wrap: wrap; flex: 1 }
+.wb-prev { flex: 0 0 auto }
+.wb-fr { width: 300px; height: 525px; overflow: hidden; background: #ddd; border-radius: 6px }
+.wb-fr iframe { width: 400px; height: 700px; border: 0; transform: scale(.75); transform-origin: 0 0 }
+.wb-src td, .wb-src th { padding: 3px 6px }

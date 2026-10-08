@@ -19,7 +19,7 @@ ok(all(x in ms and ms[x]["enabled"] and not ms[x]["error"] for x in CHAIN), f"ch
 ok(ms["goods"]["core"] and ms["orders"]["core"] and ms["model"]["core"] and not ms["prod"]["core"], "core flags")
 html = C.get("/").get_data(as_text=True)
 ok(all(f'id="tab-{t}" class="panel hidden" data-module=' in html for t in ("library", "edit", "export", "orders", "production", "inventory")), "inline panels in index")
-ok('/m/prod/prod.js' in html and '/m/goods/scene.js' in html and html.index('/static/ops.js') < html.index('/m/goods/scene.js') < html.index('/static/home.js'), "module scripts in order")
+ok('/m/prod/prod.js' in html and '/m/goods/scene.js' in html and html.index('/static/app.js') < html.index('/m/goods/library.js') < html.index('/m/goods/scene.js') < html.index('/m/model/model.js') < html.index('/m/orders/orders.js') < html.index('/static/home.js'), "module scripts in order")
 for mid, f in (("goods", "scene.js"), ("listing", "export.js"), ("prod", "materials.js"), ("inv", "inventory.js"), ("orders", "shipping.js")):
     ok(C.get(f"/m/{mid}/{f}").status_code == 200, f"serve {mid}/{f}")
 

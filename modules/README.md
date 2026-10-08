@@ -30,3 +30,16 @@ modules/<id>/
 7. 删掉 / 搬走的文件写进根目录的 `removed_files.txt`，在线升级时会清掉旧文件。
 
 主链路的数据层（产品、订单、生产、库存、耗材）还在 `core/`，几个模块共用；新的逻辑仍然写在模块里。
+
+## 界面代码和翻译放哪（v2.34）
+
+- 模块的页面脚本都放在模块的 `ui/` 里（`eager_js` 跟首页按顺序加载；`page_js` 打开页面才加载；`boot_js` 一打开就加载）。
+  内核 `static/app.js` 只放大家都用的：`api` / `toast` / `busy`、权限 `CAN`、菜单和 `showTab`、设置页框架、账号、启动，
+  公用小工具 `window.OPSH`（平台名、金额、日期、颜色、打印机名……）、API 密钥 `window.INTG_UI`。
+- 页面打开时内核 `showTab` 会通知各页面对象：`window.OPS / PROD / HOME / FILES / SYS / AS / SHIP / PACK / INV` 的 `show(名字)`；
+  新模块的页面用 MODKIT（`page_js`）或在模块脚本里自己挂一个对象。
+- 模块脚本在内核脚本后面加载，模块之间按 `order`；加载时就要执行的代码只能用内核和排在前面的模块的东西，其余的放在函数里（点了 / 打开页面时才用）。
+- 翻译：只在这个模块里用到的文字写在模块的 `i18n/th.json`；`static/i18n.js` 只留内核页面、几个模块共用的、后台程序（core/、web/）发出来的文字。
+  首页打开时所有模块的 th.json 都会合进来（模块关着也合，不影响）。
+- 3D 预览（`static/model3d.js`）、G-code 预览（`static/gview.js`）是几个模块共用的查看器（ES 模块），还在内核。
+

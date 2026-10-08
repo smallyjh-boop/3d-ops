@@ -31,3 +31,4 @@ web/listing.py
 web/orders.py
 web/production.py
 web/inventory.py
+static/ops.js

@@ -1,6 +1,24 @@
-/* 库存模块样式（v2.33 货位） */
-.loc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px }
-.loc-cell { display: flex; flex-direction: column; align-items: center; padding: 8px 4px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #fff; cursor: pointer }
+/* 库存模块样式（v2.33 货位；v2.34 区 → 货架 → 层 × 位） */
+.loc-shelves { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start }
+.loc-shelf { border: 1px solid #cbd5e1; border-radius: 10px; padding: 8px 10px; background: #f8fafc; max-width: 100%; overflow-x: auto }
+.loc-sh-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px }
+.loc-sh-head b { font-size: 16px }
+.loc-sh-tools { margin-left: auto; display: inline-flex; gap: 4px; flex-wrap: wrap }
+.loc-cats { font-size: 12px; background: #e0f2fe; color: #075985; border-radius: 10px; padding: 1px 8px }
+.loc-rack { border-collapse: collapse }
+.loc-rack th { font-weight: normal; font-size: 12px; color: #475569; padding: 4px 6px 4px 0; text-align: left; vertical-align: middle }
+.loc-rack td { padding: 3px 0; vertical-align: middle }
+.loc-rack tr + tr > * { border-top: 2px solid #94a3b8 }
+.loc-row { display: grid; gap: 4px }
+.loc-cell { display: flex; flex-direction: column; align-items: center; min-width: 70px; padding: 5px 3px; border: 1px dashed #cbd5e1; border-radius: 6px; background: #fff; cursor: pointer; line-height: 1.25 }
 .loc-cell.on { border: 1px solid #16a34a; background: #f0fdf4 }
-.loc-cell b { font-family: monospace; font-size: 13px }
+.loc-cell .pn { font-family: monospace; font-size: 12px; color: #64748b }
+.loc-cell .it { font-family: monospace; font-size: 11px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.loc-cell.on .it { color: #166534; font-weight: 600 }
+.loc-cell.loc-hl, .loc-shelf.loc-hl, .loc-zone.loc-hl { outline: 3px solid #f59e0b; outline-offset: 2px }
+.loc-floor { border-top: 4px solid #64748b; margin-top: 4px; padding-top: 2px; text-align: center; font-size: 11px }
+.loc-catbox { margin: 4px 0 8px }
+.loc-catbox label { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; font-size: 13px; margin: 0 }
+.loc-catbox input { width: auto; margin: 0 }
+.loc-to { max-width: 200px }
 .warn-btn { border-color: #f59e0b; color: #b45309 }

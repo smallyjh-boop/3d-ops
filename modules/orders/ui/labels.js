@@ -1,8 +1,12 @@
 "use strict";
-// 订单模块：设置 → 订单与售后 里的「面单模板」卡片（v2.33）：各家快递的版式预览、测试打印。
+// 订单模块：设置 → 订单与售后 里的两张卡片
+//   ① 自制面单模板预览（v2.33）：各家快递的版式预览、测试打印
+//   ② 平台面单：自定义加信息（v2.34，modules/orders/waybill）：面单来源、模板（信息区放什么）、实时预览
 (function () {
-  async function settings(box, cat) {
-    if (cat !== "orders") return;
+  const TH = () => window.I18N && I18N.lang === "th";
+  const Z = (zh, th) => (TH() ? th : zh);
+
+  async function selfCard(box) {
     let r;
     try { r = await api("/api/label-templates"); } catch (e) { box.innerHTML = `<p class="bad small">${esc(e.message)}</p>`; return; }
     const size = (window.CFG && CFG.label_size) || "100x150";
@@ -18,6 +22,59 @@
     };
     $("#lt-size").onchange = draw;
     draw();
+  }
+
+  async function waybillCard(box) {
+    let r;
+    try { r = await api("/api/waybill/status"); } catch (e) { box.innerHTML = `<p class="bad small">${esc(e.message)}</p>`; return; }
+    const t = r.template;
+    const owner = typeof ME !== "undefined" && ME && ME.role === "owner";
+    const L = (x) => esc(TH() ? x.th || x.zh : x.zh);
+    box.innerHTML = `<div class="card" id="wb-card"><div class="row between wrap"><h3>平台面单：自定义加信息</h3>
+        <label class="wb-opt"><input type="checkbox" id="wb-on" ${t.enabled ? "checked" : ""}> <b>打印平台面单时按这个模板排</b></label></div>
+      <p class="small muted">平台面单上的条码、运单号、分拣码、收寄件人是平台和快递定的，不能改；能改的是面单放多大、裁不裁白边，以及在旁边加一块自己的信息（拣货、打包核对、防止重复贴）。关掉 = 原样打印平台的 PDF。开之前先点「测试打印」，用快递的扫码枪扫一下面单条码，确认能扫出来。</p>
+      ${r.renderer ? "" : '<p class="bad small">缺少 PDF 转图片组件（pypdfium2）：NAS 重启一次容器会自动安装；Windows 重新双击 1_setup.bat。装好之前平台面单照常原样打印。</p>'}
+      <table class="grid small wb-src"><thead><tr><th>面单来源</th><th>状态</th><th>说明</th></tr></thead><tbody>
+        ${r.sources.map((s) => `<tr><td data-notr>${L(s)}</td><td>${s.ready ? `<span class="ok">${esc(Z("✓ 可以用", "✓ ใช้ได้"))}</span>` : `<span class="muted">${esc(Z("未接入", "ยังไม่เชื่อมต่อ"))}</span>`}</td>
+          <td class="small" data-notr>${esc(TH() ? s.note_th || s.note_zh : s.note_zh)}</td></tr>`).join("")}</tbody></table>
+      <div class="wb-grid"><div class="wb-form">
+        <div class="wb-row"><span class="wb-k">版式</span><div>${r.layouts.map((x) => `<label class="wb-opt"><input type="radio" name="wb-layout" value="${x.id}" ${t.layout === x.id ? "checked" : ""}> <span data-notr>${L(x)}</span></label>`).join("")}</div></div>
+        <div class="wb-row"><span class="wb-k">纸张</span><select id="wb-paper" data-notr>${r.papers.map((x) => `<option value="${x.id}" ${t.paper === x.id ? "selected" : ""}>${L(x)}</option>`).join("")}</select></div>
+        <div class="wb-row"><span class="wb-k">信息区高度</span><input id="wb-info" type="number" min="16" max="70" value="${t.info_mm}" style="width:70px"> <span class="small">毫米（「面单下面加信息」用；越高面单缩得越小）</span></div>
+        <div class="wb-row"><span class="wb-k">字号</span><input id="wb-font" type="number" min="7" max="14" value="${t.font}" style="width:70px"> <span>pt</span></div>
+        <div class="wb-row"><span class="wb-k">显示</span><div class="wb-fields">${r.fields.map((x) => `<label class="wb-opt"><input type="checkbox" value="${x.id}" ${t.fields.includes(x.id) ? "checked" : ""}> <span data-notr>${L(x)}</span></label>`).join("")}</div></div>
+        <div class="wb-row"><span class="wb-k">商品排序</span><select id="wb-sort"><option value="loc" ${t.sort === "loc" ? "selected" : ""}>按货位（拣货走一趟）</option><option value="sku" ${t.sort === "sku" ? "selected" : ""}>按 SKU</option></select></div>
+        <div class="wb-row"><span class="wb-k">自定义文字</span><input id="wb-text" maxlength="80" value="${esc(t.text)}" placeholder="例如：易碎品 轻拿轻放 / ของเปราะบาง" style="flex:1" data-notr></div>
+        <div class="wb-row"><label class="wb-opt"><input type="checkbox" id="wb-crop" ${t.crop ? "checked" : ""}> 自动裁掉面单的白边（A4 纸上的小面单也能放大）</label></div>
+        <div class="wb-row"><label class="wb-opt"><input type="checkbox" id="wb-rot" ${t.rotate ? "checked" : ""}> 面单是横的就转成竖的</label></div>
+        <div class="row gap wrap" style="margin-top:8px">${owner ? '<button class="primary" id="wb-save">保存</button>' : '<span class="small muted">只有老板能改模板</span>'}
+          <a class="btn" id="wb-test" target="_blank" href="/print/waybill-preview">打开预览 / 测试打印</a></div>
+      </div><div class="wb-prev"><div class="wb-fr"><iframe id="wb-fr" title="preview"></iframe></div></div></div></div>`;
+    const card = $("#wb-card");
+    const cur = () => ({
+      enabled: $("#wb-on").checked, layout: (card.querySelector("[name=wb-layout]:checked") || {}).value, paper: $("#wb-paper").value,
+      info_mm: +$("#wb-info").value, font: +$("#wb-font").value, sort: $("#wb-sort").value, text: $("#wb-text").value,
+      fields: [...card.querySelectorAll(".wb-fields input:checked")].map((x) => x.value), crop: $("#wb-crop").checked, rotate: $("#wb-rot").checked,
+    });
+    let timer = 0;
+    const draw = () => {
+      const url = `/print/waybill-preview?tpl=${encodeURIComponent(JSON.stringify(cur()))}`;
+      $("#wb-fr").src = url; $("#wb-test").href = url;
+    };
+    card.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(draw, 350); });
+    card.addEventListener("change", () => { clearTimeout(timer); timer = setTimeout(draw, 150); });
+    const sv = $("#wb-save");
+    if (sv) sv.onclick = () => busy(sv, async () => {
+      const x = await api("/api/waybill/template", { json: cur() });
+      toast(x.template.enabled ? Z("已保存：打印平台面单会按这个模板排", "บันทึกแล้ว: พิมพ์ใบปะหน้าแพลตฟอร์มตามแบบนี้") : Z("已保存（没开：平台面单原样打印）", "บันทึกแล้ว (ปิดอยู่: พิมพ์ใบปะหน้าตามต้นฉบับ)"));
+    });
+    draw();
+  }
+
+  async function settings(box, cat) {
+    if (cat !== "orders") return;
+    box.innerHTML = '<div id="lt-self"></div><div id="lt-wb"></div>';
+    await Promise.all([selfCard($("#lt-self")), waybillCard($("#lt-wb"))]);
   }
   window.MODS = window.MODS || {};
   window.MODS.orders = Object.assign(window.MODS.orders || {}, { settings });

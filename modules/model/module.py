@@ -5,11 +5,11 @@ MODULE = {
     "id": "model",
     "name_zh": "3D 模型",
     "name_th": "โมเดล 3D",
-    "version": "1.0",
+    "version": "1.1",
     "desc_zh": "产品 3D 模型、模型库、规格模型、几何分析、AI 打印建议、估算克数和时长。",
     "desc_th": "โมเดล 3D ของสินค้า คลังโมเดล โมเดลตามตัวเลือก วิเคราะห์รูปทรง คำแนะนำการพิมพ์จาก AI และประมาณกรัม/เวลา",
     "core": True,
     "depends": ["goods"],
     "order": 3,
-    "ui": {"page_js": [], "boot_js": []},
+    "ui": {"eager_js": ["model.js"], "page_js": [], "boot_js": []},
 }

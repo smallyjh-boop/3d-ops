@@ -1,4 +1,4 @@
-# v2.33 界面：库存 → 货位（批量建、点开货位、未上架一键上架）；设置 → 订单与售后 → 面单模板预览
+# v2.33 界面：库存 → 货位（v2.34 起按货架建：区+货架号-层-位；点开货位、未上架一键上架、扫码打开）；设置 → 订单与售后 → 面单模板预览
 import os as _os
 T = _os.environ["T3D_TMP"]; APP = _os.environ["T3D_APP"]
 import asyncio, json, sys
@@ -18,7 +18,7 @@ async def main():
         await pg.click("#inv-views [data-iv=locations]"); await pg.wait_for_timeout(1200)
         if not await pg.evaluate("!!document.querySelector('.loc-cell')"):
             await pg.click("#loc-bulk"); await pg.wait_for_timeout(500)
-            await pg.fill("#lb-zone", "Z"); await pg.fill("#lb-sh", "2"); await pg.fill("#lb-c", "3")
+            await pg.fill("#lb-zone", "Z"); await pg.fill("#lb-shelf", "1"); await pg.fill("#lb-layers", "2"); await pg.fill("#lb-pos", "3")
             await pg.click("#lb-ok"); await pg.wait_for_timeout(1500)
         n = await pg.evaluate("document.querySelectorAll('.loc-cell').length")
         print(" v233 cells:", n)
@@ -35,7 +35,7 @@ async def main():
         if "货位" not in md and "ตำแหน่ง" not in md and "ช่องเก็บ" not in md: ERR.append("v233 detail")
         if LANG=="th": miss|=set(await pg.evaluate(JS,"#modal-in"))
         await pg.evaluate("MODAL.close()")
-        await pg.fill("#loc-scan", "Z-01-01"); await pg.press("#loc-scan", "Enter"); await pg.wait_for_timeout(1000)
+        await pg.fill("#loc-scan", "z1-1-1"); await pg.press("#loc-scan", "Enter"); await pg.wait_for_timeout(1000)
         if not await pg.evaluate("!document.querySelector('#modal').classList.contains('hidden')"): ERR.append("v233 scan")
         await pg.evaluate("MODAL.close()")
         # 面单模板预览

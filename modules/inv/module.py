@@ -7,7 +7,7 @@ MODULE = {
     "id": "inv",
     "name_zh": "库存",
     "name_th": "สต็อก",
-    "version": "1.2",
+    "version": "1.3",
     "desc_zh": "库存管理（物品、单据、盘点、流水）、发货自动扣包材、打印扣耗材和成品同步记流水。",
     "desc_th": "จัดการสต็อก (สิ่งของ เอกสาร ตรวจนับ ความเคลื่อนไหว) ตัดวัสดุแพ็กอัตโนมัติเมื่อส่งของ บันทึกการใช้ฟิลาเมนต์และสินค้าสำเร็จรูป",
     "depends": [],
@@ -17,11 +17,11 @@ MODULE = {
     ],
     "events": {"order.status": events.on_order_status},
     "public": locations,          # ledger.post → locations.on_post（货位跟着调整）
-    "production_allow": [("POST", r"^/api/inv/locations(/(move|putaway|bulk|\d+/check))?$"), ("GET", r"^/print/inv-locations$")],
+    "production_allow": [("POST", r"^/api/inv/locations(/(move|putaway|bulk|add|group|\d+/check))?$"), ("GET", r"^/print/inv-locations$")],
     "settings_module": "inventory",
     "settings": [("货位", [
         ("inv_loc_auto", "入库时自动放进推荐货位（关掉 = 先记「未上架」，人工上架）", "bool"),
-        ("inv_loc_zones", "每个分类默认放哪个区（写法：分类名=区字母，用逗号隔开）")])],
-    "config_defaults": {"inv_loc_auto": True, "inv_loc_zones": ""},
+        ("inv_loc_layer_bottom", "最下面一层是第 1 层（关掉 = 最上面一层是第 1 层）", "bool")])],
+    "config_defaults": {"inv_loc_auto": True, "inv_loc_layer_bottom": True},
     "ui": {"inline": True, "html": "page.html", "eager_js": ["inventory.js", "locations.js"], "css": ["page.css"], "page_js": [], "boot_js": []},
 }

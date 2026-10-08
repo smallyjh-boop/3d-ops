@@ -331,12 +331,13 @@ def labels_import():
 
 @bp.post("/api/labels/check")
 def labels_check():
+    """勾选的订单哪些有平台面单。v2.34：没有的、平台接口接通了的，顺便去平台取（waybill/sources.ensure）。"""
+    from modules.orders.waybill import sources as _wbs
     ids = [int(x) for x in (request.get_json(force=True) or {}).get("ids") or []]
-    c = db.conn()
     have, missing = [], []
     for oid in ids:
-        r = c.execute("SELECT label_file FROM orders WHERE id=?", (oid,)).fetchone()
-        ok = bool(r and r["label_file"] and os.path.exists(os.path.join(labels.LABEL_DIR, r["label_file"])))
+        o = orders_mod.get_order(oid)
+        ok = bool(o and _wbs.ensure(o)[0])
         (have if ok else missing).append(oid)
     return jsonify({"have": have, "missing": missing})
 
@@ -504,7 +505,9 @@ def orders_print():
         where = {sku: (_inv.where_is(sku) if _inv else []) for (sku, _c) in agg}
         out.append(f"<h2>拣货 / 生产汇总单 ใบรวมสินค้า</h2><p>{len(orders)} 个订单 · 打印时间 {fmt(time.time())}</p>"
                    "<table><tr><th></th><th>货位</th><th>SKU</th><th>商品</th><th>颜色</th><th>数量</th><th>订单</th></tr>")
-        for (sku, color), a in sorted(agg.items(), key=lambda kv: ((where.get(kv[0][0]) or [("~", 0)])[0][0], kv[0])):
+        _key = getattr(_inv, "sort_key", None) or (lambda c_: (0, c_))
+        _none = (2,)                           # 没有货位的排最后
+        for (sku, color), a in sorted(agg.items(), key=lambda kv: (_key(where[kv[0][0]][0][0]) if where.get(kv[0][0]) else _none, kv[0])):
             w = "、".join(f"{c_} ×{q_:g}" for c_, q_ in where.get(sku) or []) or "—"
             out.append(f"<tr><td><span class='box'></span></td><td><b>{h(w)}</b></td><td><b>{h(sku)}</b></td><td>{h(a['name'])}</td><td>{h(color)}</td>"
                        f"<td><b>{a['qty']}</b></td><td style='font-size:11px'>{h(', '.join(a['orders']))}</td></tr>")
@@ -580,6 +583,11 @@ def labels_print():
     if not ids:
         return err("请先勾选订单")
     if kind == "platform":
+        if waybill.enabled() and request.args.get("raw") != "1":     # v2.34：按自定义模板排（加信息区）
+            html, have, _miss = waybill.print_html(ids, _uname())
+            if not have:
+                return err("选中的订单都还没有平台面单", 404)
+            return app.response_class(html, mimetype="text/html")
         try:
             data, have, _missing = labels.merged_pdf(ids)
         except ValueError as e:
@@ -587,13 +595,69 @@ def labels_print():
         if not have:
             return err("选中的订单都还没有平台面单", 404)
         labels.mark_printed(have, _uname(), "平台面单")
+        waybill.record(have, _uname(), "平台面单")
         import io as _io
         return send_file(_io.BytesIO(data), mimetype="application/pdf", as_attachment=False,
                          download_name=f"labels_{dt.datetime.now().strftime('%m%d_%H%M')}.pdf")
     orders = [o for o in (orders_mod.get_order(i) for i in ids) if o]
     labels.mark_printed([o["id"] for o in orders], _uname(), "自制面单")
+    waybill.record([o["id"] for o in orders], _uname(), "自制面单")
     from modules.orders import carriers          # v2.33：按快递公司的版式（?tpl=flash&size=100x150 可以指定）
     return app.response_class(carriers.html(orders, load_config(), request.args.get("tpl"), request.args.get("size")), mimetype="text/html")
+
+
+# ---------------- 平台面单框架（v2.34，modules/orders/waybill）----------------
+from modules.orders import waybill  # noqa: E402
+waybill.init()
+
+
+@bp.get("/api/waybill/status")
+def waybill_status():
+    """面单来源（上传 / 各平台接口）、自定义模板、可选的信息项。"""
+    return jsonify({"ok": True, **waybill.status()})
+
+
+@bp.post("/api/waybill/template")
+def waybill_template_save():
+    return jsonify({"ok": True, "template": waybill.save_template(request.get_json(force=True) or {})})
+
+
+@bp.get("/print/waybill")
+def waybill_print():
+    """按模板打印平台面单（不管模板开没开都按模板排；订单页「打印面单」在模板开着时也走这里）。"""
+    ids = [int(x) for x in (request.args.get("ids") or "").split(",") if x.strip().isdigit()]
+    if not ids:
+        return err("请先勾选订单")
+    if not waybill.render.available():
+        return err("缺少 PDF 转图片组件（pypdfium2）。NAS 重启容器会自动安装；Windows 重新双击 1_setup.bat", 500)
+    html, have, _miss = waybill.print_html(ids, _uname())
+    if not have:
+        return err("选中的订单都还没有平台面单", 404)
+    return app.response_class(html, mimetype="text/html")
+
+
+@bp.get("/print/waybill-preview")
+def waybill_preview():
+    """设置页预览：?tpl=模板 JSON（不传 = 已保存的模板）。示例订单 + 示例面单。"""
+    import json as _json
+    try:
+        tpl = _json.loads(request.args.get("tpl") or "{}")
+    except ValueError:
+        tpl = {}
+    return app.response_class(waybill.preview_html(tpl if isinstance(tpl, dict) else {}), mimetype="text/html")
+
+
+@bp.get("/api/waybill/awb/<int:oid>/<int:page>.png")
+def waybill_awb(oid, page):
+    try:
+        data = waybill.awb_image(oid, page)
+    except ValueError as e:
+        return err(str(e), 404)
+    except ImportError:
+        return err("缺少 PDF 转图片组件（pypdfium2）", 500)
+    resp = app.response_class(data, mimetype="image/png")
+    resp.headers["Cache-Control"] = "private, max-age=86400"
+    return resp
 
 
 @bp.get("/print/label-preview")

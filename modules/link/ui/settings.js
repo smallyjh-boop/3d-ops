@@ -1,6 +1,6 @@
 "use strict";
 // 对接模块：设置 → AI 与对接 里的「店铺对接」和「3D选品工具对接」（v2.30 从 ops.js 搬过来）。
-// API 密钥在内核（ops.js），密钥列表加载好后发 intg-loaded 事件，这里接着画店铺和选品工具。
+// API 密钥在内核（app.js 的 INTG_UI），密钥列表加载好后发 intg-loaded 事件，这里接着画店铺和选品工具。
 (function () {
   const isOwner = () => window.OPSH && OPSH.isOwner();
   let INTG = null;

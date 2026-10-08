@@ -25,6 +25,11 @@ try:
 except Exception:
     print("  [--] rembg 去背景组件未安装（可选，运行 3_install_bg_removal.bat）")
 try:
+    importlib.import_module("pypdfium2")
+    print("  [OK] pypdfium2 平台面单排版组件")
+except Exception:
+    print("  [--] pypdfium2 平台面单排版组件未安装（重新运行 1_setup.bat；不装也能原样打印平台面单）")
+try:
     import requests
     for url in ("https://api.anthropic.com", "https://api.imgbb.com"):
         try:

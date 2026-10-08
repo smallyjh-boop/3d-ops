@@ -11,6 +11,9 @@ class TikTokConnector(Connector):
     FIELDS = [("app_key", "App Key", False), ("app_secret", "App Secret", True),
               ("access_token", "Access Token", True), ("refresh_token", "Refresh Token", True),
               ("shop_cipher", "Shop Cipher", False)]
+    # v2.34 面单：等联调。按包裹取面单（shipping label：PDF，也可以要图片）→ fetch_label 返回
+    LABEL_NOTE = "未接入：TikTok Shop 店铺对接接通后，打印时自动取面单"
+    LABEL_NOTE_TH = "ยังไม่เชื่อมต่อ: เมื่อเชื่อม TikTok Shop แล้วจะดึงใบปะหน้าอัตโนมัติ"
 
 
 class BigSellerConnector(Connector):

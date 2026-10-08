@@ -192,7 +192,7 @@ def inv_finance_ui():
     return jsonify({"ok": True, "events": list(reversed(inv.finance_events(0, 5000)))[:200], "month": inv.finance_month(request.args.get("month") or None)})
 
 
-# ---------------- 货位（v2.33）----------------
+# ---------------- 货位（v2.33 建，v2.34 改成「区+货架号-层-位」）----------------
 from modules.inv import locations as _loc  # noqa: E402
 _loc.init()
 
@@ -208,7 +208,8 @@ def _ok(fn):
 def inv_locations():
     a = request.args
     return jsonify({"ok": True, "locations": _loc.locations(a.get("all") != "1"), "unplaced": len(_loc.unplaced()),
-                    "zones": _loc.zones_setting()})
+                    "groups": _loc.groups(), "layer_bottom": _loc.layer_bottom(),
+                    "categories": inv.categories()})
 
 
 @bp.post("/api/inv/locations")
@@ -220,10 +221,41 @@ def inv_location_save():
 
 @bp.post("/api/inv/locations/bulk")
 def inv_location_bulk():
+    """建货架：{zone, shelf(空=接着排), layers, positions, name, categories}"""
     if _need("inv.in"):
         return _need("inv.in")
     b = request.get_json(force=True) or {}
-    return _ok(lambda: {"made": _loc.bulk_create(b.get("zone"), b.get("shelves"), b.get("cells"), _uname())})
+    return _ok(lambda: _loc.bulk_create(b.get("zone"), b.get("shelf"), b.get("layers"), b.get("positions"),
+                                        b.get("name") or "", b.get("categories"), _uname()))
+
+
+@bp.post("/api/inv/locations/add")
+def inv_location_add():
+    """货架加一层（不带 layer）/ 某一层加一位（带 layer）。"""
+    if _need("inv.in"):
+        return _need("inv.in")
+    b = request.get_json(force=True) or {}
+    if b.get("layer") in (None, ""):
+        return _ok(lambda: {"made": _loc.add_layer(b.get("shelf"), _uname())})
+    return _ok(lambda: {"made": [_loc.add_pos(b.get("shelf"), b.get("layer"), _uname())]})
+
+
+@bp.post("/api/inv/locations/remove")
+def inv_location_remove():
+    """删空的货架（不带 layer）/ 货架的某一层（带 layer）。"""
+    if _need("inv.adjust"):
+        return _need("inv.adjust")
+    b = request.get_json(force=True) or {}
+    return _ok(lambda: {"removed": _loc.remove(b.get("shelf"), b.get("layer"), _uname())})
+
+
+@bp.post("/api/inv/locations/group")
+def inv_location_group():
+    """区 / 货架的名字、放哪些分类。"""
+    if _need("inv.in"):
+        return _need("inv.in")
+    b = request.get_json(force=True) or {}
+    return _ok(lambda: {"group": _loc.save_group(b.get("code"), b.get("name") or "", b.get("categories") or [], _uname())})
 
 
 @bp.delete("/api/inv/locations/<int:lid>")
@@ -235,11 +267,11 @@ def inv_location_delete(lid):
 
 @bp.get("/api/inv/locations/find")
 def inv_location_find():
-    """扫货位条码 / 输入编号打开货位。"""
-    loc = _loc.get_loc((request.args.get("code") or "").strip())
-    if not loc:
-        return err("没有这个货位", 404)
-    return jsonify({"ok": True, **_loc.loc_detail(loc["id"])})
+    """扫码 / 输入：货位 → 货位详情；货架 → 货架；物品编码 / SKU → 放在哪。"""
+    try:
+        return jsonify({"ok": True, **_loc.find(request.args.get("code"))})
+    except ValueError as e:
+        return err(str(e), 404)
 
 
 @bp.get("/api/inv/locations/unplaced")
@@ -276,7 +308,19 @@ def inv_location_check(lid):
 
 @bp.get("/print/inv-locations")
 def inv_location_labels():
-    ids = [x for x in (request.args.get("ids") or "").split(",") if x.strip()]
-    locs = [l for l in (_loc.get_loc(i) for i in ids) if l] if ids else _loc.locations()
-    return app.response_class(_loc.labels_html(locs), mimetype="text/html")
-
+    """货位标签：?ids=1,2 / ?shelf=A1 / ?zone=A / 不带 = 全部；?kind=shelf 打货架牌；?lang=th 泰文说明。"""
+    a = request.args
+    lang = "th" if a.get("lang") == "th" else "zh"
+    locs = _loc.locations()
+    if a.get("shelf"):
+        sc = a["shelf"].strip().upper()
+        locs = [l for l in locs if l.get("shelf") is not None and _loc.shelf_code(l["zone"], l["shelf"]) == sc]
+    elif a.get("zone"):
+        locs = [l for l in locs if l["zone"] == a["zone"].strip().upper()]
+    ids = [x for x in (a.get("ids") or "").split(",") if x.strip()]
+    if ids:
+        locs = [l for l in (_loc.get_loc(i) for i in ids) if l]
+    if a.get("kind") == "shelf":
+        codes = list(dict.fromkeys(_loc.shelf_code(l["zone"], l["shelf"]) for l in locs if l.get("shelf") is not None))
+        return app.response_class(_loc.shelf_labels_html(codes, lang), mimetype="text/html")
+    return app.response_class(_loc.labels_html(locs, lang), mimetype="text/html")

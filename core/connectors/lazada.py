@@ -61,6 +61,9 @@ class LazadaConnector(Connector):
            "按官方文档编写，拿到正式 App Key 后需要联调确认。"
     FIELDS = [("app_key", "App Key", False), ("app_secret", "App Secret", True),
               ("access_token", "Access Token", True), ("refresh_token", "Refresh Token", True)]
+    # v2.34 面单：等联调。订单先「打包 / 准备发货」拿到包裹号和运单号 → 用取面单（document）接口按包裹取 PDF → fetch_label 返回
+    LABEL_NOTE = "未接入：接通后打印时自动从 Lazada 取面单（订单要先打包 / 准备发货）"
+    LABEL_NOTE_TH = "ยังไม่เชื่อมต่อ: เชื่อมแล้วจะดึงใบปะหน้าจาก Lazada อัตโนมัติ (ต้องแพ็ก / พร้อมส่งก่อน)"
 
     # ---------- 授权 ----------
     def authorize_url(self, redirect_uri):
