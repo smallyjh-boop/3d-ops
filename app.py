@@ -7,7 +7,7 @@
   modules/*/    功能模块（v2.29 起）：每个模块自己的页面、接口、权限、设置、事件、测试；接口路径和以前完全一样
   core/*.py     业务逻辑和数据（主链路的数据层：产品、订单、生产、库存都在这里，模块之间通过 core/chain.py 的事件联动）
 """
-VERSION = "2.31.0"   # 改版本号时同时改 static/app.js 的 APP_JS_VERSION、static/api-docs.html 里的示例
+VERSION = "2.31.1"   # 改版本号时同时改 static/app.js 的 APP_JS_VERSION、static/api-docs.html 里的示例
 
 from web.common import *  # noqa: F401,F403,E402
 import web.integrations, web.system, web.accel, web.modules  # noqa: F401,E402  注册路由（不要用 from web import …，会把 core 的同名模块盖掉）

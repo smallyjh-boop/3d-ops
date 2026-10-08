@@ -222,7 +222,7 @@ def _save_from_client(pid, p):
         p["white_bg"] = old.get("white_bg")
         p["exported_at"] = old.get("exported_at")
         p["shopee_exported_at"] = old.get("shopee_exported_at")
-        p["listing"] = old.get("listing")            # 上架进度由导出 / 标记接口维护
+        p["listing"] = old.get("listing") or {}      # 上架进度由导出 / 标记接口维护（没导出过的是 {}，不能存成 null）
         if "specs" in old:
             p["specs"] = old.get("specs")              # 规格由选品工具同步 / 「确认规格」接口维护（v2.16）
         for k in ("seo_review", "seo_undo", "seo_log", "title_changed_at", "copy_dirty_after_export"):   # v2.24：搜索优化由后台维护

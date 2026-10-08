@@ -1,5 +1,6 @@
 """产品库：每个产品一个 JSON 文件，图片放在同名文件夹里。"""
 import json
+import threading
 import os
 import re
 import shutil
@@ -95,6 +96,8 @@ def load(pid):
     for k, v in (("category", {}), ("attributes", {}), ("copy", {}), ("images", []), ("exported_at", None),
                  ("shopee_category", {})):
         p.setdefault(k, v)
+    if p.get("listing") is None:
+        p["listing"] = {}
     return p
 
 
@@ -103,7 +106,8 @@ def save(product):
     safe_id(product["id"])
     product["updated_at"] = int(time.time())
     path = os.path.join(PRODUCTS_DIR, product["id"] + ".json")
-    tmp = path + ".tmp"
+    # v2.31.1：同一个产品同时保存两次（例如白底图和编辑页一起存）时，临时文件名不能一样，不然一个会把另一个的临时文件搬走
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(product, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)

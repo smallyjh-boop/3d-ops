@@ -45,7 +45,9 @@ def status_of(p, platform):
 
 
 def _set(p, platform, status, batch=None, note=None, user=""):
-    lst = p.setdefault("listing", {})
+    if not isinstance(p.get("listing"), dict):      # v2.31.1：编辑页保存过、从没导出过的产品这里是 null（导出时报错）
+        p["listing"] = {}
+    lst = p["listing"]
     cur = dict(lst.get(platform) or {})
     now = time.time()
     old = cur.get("status")

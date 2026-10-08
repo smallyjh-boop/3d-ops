@@ -180,7 +180,9 @@ def _restore(p, v, before):
 
 def _mark_unsynced(p, fields):
     """已经上传到平台的产品：标成「有修改待同步」，导出页能筛出来。"""
-    lst = p.setdefault("listing", {})
+    if not isinstance(p.get("listing"), dict):
+        p["listing"] = {}
+    lst = p["listing"]
     for plat in ("lazada", "shopee"):
         st = lst.get(plat) or {}
         if st.get("status") in ("uploaded", "live", "rejected", "inactive", "update"):
