@@ -110,6 +110,8 @@ def v1_skus():
     bnames = _lst.batch_names()
     from core import codes, stockcalc
     av = stockcalc.available(cfg)
+    from core import modules as _mods
+    _gimg = _mods.public("goods")          # 商品模块的 openapi（图片）
     out = []
     for item in store.list_products():
         if since and (item.get("updated_at") or 0) < since:
@@ -148,6 +150,8 @@ def v1_skus():
                 "random_color": codes.is_random(cfg, v.get("opt1_zh")),
                 "stock": sk["stock"], "stock_sync": auto,
                 "spec_status": (spec_by.get(v.get("spec_id")) or {}).get("status") or "ok",
+                # v2.32.1（接口需求单：商品主图）：{id, url, updated_at, for: sku / product}，没图为 null
+                "image": _gimg.sku_image(p, v) if _gimg else None,
             })
     return jsonify({"ok": True, "skus": out, "count": len(out)})
 

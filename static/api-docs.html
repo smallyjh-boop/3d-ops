@@ -38,7 +38,7 @@ th{background:#f9fafb}
 <h2><span class="m get">GET</span>/api/v1/ping</h2>
 <p>测试密钥和网络是否正常。</p>
 <pre><code>curl -H "Authorization: Bearer lh_xxxx" {{BASE}}/api/v1/ping
-→ {"ok": true, "version": "2.32.0", "time": 1791200000}</code></pre>
+→ {"ok": true, "version": "2.32.1", "time": 1791200000}</code></pre>
 
 <h2><span class="m post">POST</span>/api/v1/orders　推送订单（新增或更新）</h2>
 <p>平台 + 订单号相同视为同一个订单：再次推送只更新状态等信息，不会重复，也不会覆盖你在系统里写的定制备注和加急。
@@ -140,6 +140,14 @@ v2.12.1 起多 <code>variant</code>（规格中文名，和 <code>spec</code> �
 <p>状态是人在 ERP 里按平台后台标记的（导出页 / 上架批次），时间是标记的时间。上架状态变化会更新产品的 <code>updated_at</code>，用 <code>since</code> 增量能拉到。
 2.11.1 以前标成「已上传」的，<code>first_uploaded_at</code> 用当时标记的时间，<code>first_listed_at</code> 为 null（不知道哪天过审）。</p>
 
+<p><b>v2.32.1 <code>GET /api/v1/skus</code> 新字段 <code>image</code></b>（商品主图，没有图为 <code>null</code>）：
+<code>{"id": "3DP0012-a1b2c3d4e5", "url": "/api/v1/images/3DP0012-a1b2c3d4e5", "updated_at": 1791300000, "for": "sku"}</code>。
+<code>for</code> = <code>sku</code>：这个 SKU（颜色 / 规格）自己选的图；<code>product</code>：产品封面（图片顺序第 1 张）。
+图片编号稳定不变，换图、重新处理图片编号就变；改图会更新产品 <code>updated_at</code>，按 <code>since</code> 增量能拉到。</p>
+<h2><span class="m get">GET</span>/api/v1/images/&lt;图片编号&gt;[?size=thumb]　商品图片（v2.32.1，只读密钥）</h2>
+<p>返回图片文件（<code>image/jpeg</code> 或 <code>image/png</code>）。<code>size=thumb</code>：长边 ≤ 400px 的小图；不带返回原图。
+带 <code>ETag</code> 和 <code>Last-Modified</code>，重复拉时带 <code>If-None-Match</code> / <code>If-Modified-Since</code> 返回 304。
+编号不存在或不合法（例如 <code>../</code>）：404 <code>{"ok": false, "code": "not_found"}</code>。只能取产品资料里登记的图片，不能读其他文件。</p>
 <h2><span class="m get">GET</span>/api/v1/cost-params　成本参数（v2.9.1）</h2>
 <p>设置页里的成本、扣点、加价率、包材、打印机列表（编码、机型、是否启用）、每天可用打印小时、颜色代码表。不含任何密钥。
 外部系统算成本和利润时用这一套数，保证两边口径一致。</p>

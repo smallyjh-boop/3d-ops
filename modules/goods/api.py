@@ -976,3 +976,24 @@ def template_delete(name):
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     os.replace(path, os.path.join(trash, f"{stamp}_{name}"))
     return jsonify({"ok": True})
+
+
+# ---------------- 给运营分析系统的商品图片（v2.32.1，只读密钥）----------------
+@bp.get("/api/v1/images/<path:image_id>")
+def v1_image(image_id):
+    """GET /api/v1/images/<图片编号>[?size=thumb]：只读下载商品图片。编号不对 / 拼路径一律 404。"""
+    from modules.goods import openapi
+    path = openapi.resolve(image_id)
+    if not path:
+        return jsonify({"ok": False, "code": "not_found", "error": "图片不存在"}), 404
+    mt = "image/png" if path.lower().endswith(".png") else "image/jpeg"
+    etag = image_id
+    if request.args.get("size") == "thumb":
+        try:
+            path, mt = openapi.thumb(path, image_id)
+            etag += "-t"
+        except Exception:  # noqa: BLE001  小图做不出来就给原图
+            pass
+    resp = send_file(path, mimetype=mt, conditional=True, etag=etag, max_age=86400)
+    return resp
+
