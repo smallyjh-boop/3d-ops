@@ -1376,13 +1376,10 @@ def handover_scan(hid, code, user=""):
     code = str(code or "").strip()
     if not code:
         raise ValueError("请扫描运单号或订单号")
-    r = c.execute("SELECT * FROM orders WHERE tracking_no=? OR order_no=? ORDER BY id DESC LIMIT 1", (code, code)).fetchone()
+    from modules.orders import scanning          # v2.32：扫什么码按设置（订单号 / 快递单号）
+    r = scanning.find_order(code)
     if not r:
-        k = code.replace("-", "")
-        r = c.execute("SELECT * FROM orders WHERE REPLACE(tracking_no,'-','')=? OR REPLACE(order_no,'-','')=? ORDER BY id DESC LIMIT 1",
-                      (k, k)).fetchone()
-    if not r:
-        raise ValueError(f"找不到「{code}」对应的订单")
+        raise ValueError(scanning.not_found_msg(code))
     if r["status"] in ("cancelled", "returned", "delivery_failed"):
         raise ValueError(f"订单 {r['order_no']} 是「{STATUS_ZH.get(r['status'])}」状态，不能发货！")
     if r["hold"]:

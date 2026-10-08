@@ -57,6 +57,7 @@
       <label>产品名称<input data-f="name_zh" placeholder="例：猫咪造型手机支架"></label>
       <label>材料<input data-f="material" list="mat-list" placeholder="PLA / PETG / TPU / RESIN"><datalist id="mat-list"><option>PLA</option><option>PETG</option><option>TPU</option><option>ABS</option><option>ASA</option><option>PLA-CF</option><option>PETG-CF</option><option>PA</option><option>PC</option><option value="RESIN" data-needmod="resin">RESIN（光固化标准树脂）</option><option value="RESIN-ABS" data-needmod="resin">RESIN-ABS（类 ABS 树脂）</option><option value="RESIN-WASH" data-needmod="resin">RESIN-WASH（水洗树脂）</option><option value="RESIN-TOUGH" data-needmod="resin">RESIN-TOUGH（高韧性树脂）</option><option value="RESIN-8K" data-needmod="resin">RESIN-8K（高精度树脂）</option></datalist></label>
       <label>发货天数（下单后几天内发货，定制商品可以长一点）<input data-f="lead_days" type="number" min="0" placeholder="空 = 用设置里的默认"></label>
+      <label>打包时怎么核对这个产品<select data-f="pack_check"><option value="">跟设置里的默认</option><option value="tap">点一下确认（看图和数量）</option><option value="scan">扫商品码 / 内部标签</option><option value="none">不用核对（扫到订单就行）</option></select></label>
       <label>产品尺寸<input data-f="size_text" placeholder="例：长10 × 宽8 × 高12 cm"></label>
       <label>关键词（中文或泰文，逗号分隔）<input data-f="keywords" placeholder="手机支架, ที่วางมือถือ"></label>
       <label class="span2">用途 / 卖点 / 说明<textarea data-f="features_zh" rows="4" placeholder="给谁用、解决什么问题、优点、可定制内容等。写得越具体，AI 文案和类目匹配越准"></textarea></label>

@@ -337,8 +337,8 @@ def _ui_files(rec):
 
 
 def inline_parts():
-    """首页要直接放进去的模块页面和 js（开着的、inline 的模块，按 order 排）。返回 (html, [(模块, js 文件)])。"""
-    html, js = [], []
+    """首页要直接放进去的模块页面和 js（开着的、inline 的模块，按 order 排）。返回 (html, [(模块, js 文件)], [(模块, css 文件)])。"""
+    html, js, css = [], [], []
     cfg = load_config()
     for mid, rec in sorted(_mods.items(), key=lambda kv: (kv[1]["meta"].get("order", 50), kv[0])):
         if rec["error"] or not enabled(mid, cfg):
@@ -353,7 +353,9 @@ def inline_parts():
             except OSError as e:
                 _log("ui", mid, str(e), "")
         js += [(mid, n) for n in ui["eager_js"]]
-    return "\n".join(html), js
+        if ui["inline"]:
+            css += [(mid, n) for n in ui["css"]]
+    return "\n".join(html), js, css
 
 
 def listing(user=None, all_=False):

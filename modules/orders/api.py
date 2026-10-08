@@ -446,18 +446,19 @@ def aftersales_evidence_del(aid, name):
 @bp.get("/api/pack/lookup")
 def pack_lookup():
     """打包核对：扫订单号 / 运单号，列出这个订单要装的商品。"""
+    from modules.orders import scanning
     code = (request.args.get("code") or "").strip()
     if not code:
         return err("请扫描或输入订单号 / 运单号")
-    c = db.conn()
-    r = c.execute("SELECT id FROM orders WHERE order_no=? OR tracking_no=? ORDER BY id DESC LIMIT 1", (code, code)).fetchone()
+    r = scanning.find_order(code)
     if not r:
-        r = c.execute("SELECT id FROM orders WHERE REPLACE(order_no,'-','')=? OR REPLACE(tracking_no,'-','')=? ORDER BY id DESC LIMIT 1",
-                      (code.replace("-", ""), code.replace("-", ""))).fetchone()
-    if not r:
-        return err(f"找不到订单「{code}」", 404)
+        return err(scanning.not_found_msg(code), 404)
     o = orders_mod.get_order(r["id"])
     o["jobs"] = production.list_jobs(order_id=r["id"])
+    cfg = load_config()
+    for it, m in zip(o.get("items") or [], scanning.modes_for_items(o.get("items") or [], cfg)):
+        it.update(m)                          # v2.32：这一行怎么核对：scan 扫商品码 / tap 点一下 / none 不用核对；img 产品图
+    o["scan_key"] = scanning.key_setting(cfg)
     return jsonify(_strip_order(o))
 
 
@@ -555,6 +556,17 @@ def handover_print():
             f"{rows}</table><div class='sig'><div>交件人 ผู้ส่งมอบ：________________</div><div>快递员 พนักงานขนส่ง：________________</div>"
             "<div>时间 เวลา：________________</div></div></body></html>")
     return app.response_class(html, mimetype="text/html")
+
+
+@bp.get("/print/item-labels")
+def item_labels_print():
+    """v2.32：内部商品标签（自产件后处理时贴在袋子上，打包时扫）。?ids=订单id,..."""
+    from modules.orders import scanning
+    ids = [int(x) for x in (request.args.get("ids") or "").split(",") if x.strip().isdigit()]
+    if not ids:
+        return err("请先选订单")
+    orders = [o for o in (orders_mod.get_order(i) for i in ids) if o]
+    return app.response_class(scanning.labels_html(orders), mimetype="text/html")
 
 
 @bp.get("/print/labels")

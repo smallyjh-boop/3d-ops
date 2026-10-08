@@ -210,6 +210,18 @@
       <button class="mini" data-rc="rz-save">保存</button>
       <div class="small muted">光固化一盘的时间主要看高度，放满和放一个差不多：尽量一盘放满。打完要清洗 + 二次固化。</div></div>`;
   }
+  // v2.32：切片文件是哪个机型的（发到打印机前一定核对机型、喷嘴、热床板，对不上不能发）
+  function machineLine(f) {
+    const m = f.machine;
+    if (!m) return "";
+    if (m.need_confirm) {
+      return `<div class="chk chk-error">⚠ 认不出这个文件是哪台机型切的${m.profile ? `（文件里写的是「<span data-notr>${esc(m.profile)}</span>」）` : "（文件里没有打印机信息）"}，确认之前不能用来打印。
+        ${H().isOwner() ? '<button class="mini" data-rc="confirm-printer">确认机型</button>' : '<span class="small">请老板确认机型</span>'}</div>`;
+    }
+    return `<div class="small ${m.ok_for.length ? "ok" : "bad"}">🛡 机型：<b data-notr>${esc(m.model)}</b>（${esc(m.source)}）
+      ${m.nozzle ? ` · 喷嘴 ${esc(m.nozzle)} mm` : ""}${m.plate ? ` · ${esc(m.plate)}` : ""}
+      · ${m.ok_for.length ? `能发到：<span data-notr>${m.ok_for.map(esc).join("、")}</span>` : "设置里没有能用这个文件的打印机（机型 / 喷嘴 / 热床板对不上）"}</div>`;
+  }
   function fileCard(f) {
     const rp = f.report || {};
     const p = rp.params || {};
@@ -225,6 +237,7 @@
           ${p.nozzle_temp != null ? `· 🔥${p.nozzle_temp}° ▭${p.bed_temp ?? "-"}°` : ""}</span>
         ${f.active ? "" : '<span class="pill bad-pill">已停用</span>'}</summary>
       <div class="fbody">
+        ${machineLine(f)}
         ${mm === "diff" ? `<div class="chk chk-error">❌ 材料不对：这个文件是 ${esc(p.material)}，产品材料是 ${esc(R.material)}</div>` : ""}
         <div class="fgrid">
           ${f.kind === "resin" ? resinBox(f) : `<div class="fprev">
@@ -395,6 +408,19 @@
         if (nf && nf.id) gv((G) => G.openFile(nf.id, { material: R.material }));
       }
       if (act === "gv") gv((G) => G.openFile(+fid, { material: R.material }));
+      if (act === "confirm-printer") {
+        const names = [...new Set(((CFG && CFG.printers) || []).map((p) => p.name).filter(Boolean))];
+        const m = MODAL.open(`<h3>这个切片文件是给哪台机型的？</h3>
+          <p class="small">文件里读不出打印机信息。请打开切片软件确认这个文件是用哪台打印机的配置切的，<b>选错会损坏机器</b>。确认后只能发到这个机型。</p>
+          <select id="cp-model" data-notr>${names.map((n) => `<option>${esc(n)}</option>`).join("")}</select>
+          <div class="row gap" style="margin-top:10px"><button class="primary" id="cp-ok">确认</button><button data-mclose>取消</button></div>`);
+        m.querySelector("#cp-ok").onclick = async () => {
+          try {
+            await api(`/api/print-files/${fid}/confirm-printer`, { json: { printer: m.querySelector("#cp-model").value } });
+            MODAL.close(); toast("已确认机型"); await mount(BOX, PID, SPEC);
+          } catch (err) { toast(err.message, true); }
+        };
+      }
       if (act === "rz-save") {
         const body = {};
         card.querySelectorAll("[data-rz]").forEach((x) => { if (x.value !== "") body[x.dataset.rz] = +x.value; });

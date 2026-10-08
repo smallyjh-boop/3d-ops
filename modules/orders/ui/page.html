@@ -99,8 +99,7 @@
 <!-- 打包核对 -->
 <section id="tab-pack" class="panel hidden">
   <h2>打包核对</h2>
-  <p class="muted small">先扫订单号或运单号（面单上的条码），再逐个扫商品工单贴纸上的 SKU 条码。全部对上了才能点「打包完成」，防止错发漏发。
-    扫码枪直接扫；手机可以点「📷 摄像头扫码」。</p>
+  <p class="muted small">先扫面单上的条码（订单号或快递单号，在 设置 → 订单与售后 里规定扫哪个），再核对商品：有条码的扫商品码；自产件可以在后处理时打印「内部商品标签」贴在袋子上再扫，或者对着图片点「✓ 装好了」（每个产品可以单独设置）。全部对上了才能点「打包完成」，防止错发漏发。扫码枪直接扫；手机可以点「📷 摄像头扫码」。</p>
   <div class="card pack-card">
     <div class="row gap wrap"><input id="pk-code" placeholder="扫描 / 输入 订单号 或 SKU" style="width:320px;font-size:18px" autocomplete="off" data-notr>
       <button id="btn-pk-cam">📷 摄像头扫码</button><button id="btn-pk-reset">重新开始</button></div>

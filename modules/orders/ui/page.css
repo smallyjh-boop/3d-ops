@@ -1,0 +1,3 @@
+/* 订单模块的样式（v2.32 起模块自己的样式放这里） */
+.pk-img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #f3f4f6 }
+.pk-table td { vertical-align: middle }

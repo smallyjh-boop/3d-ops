@@ -594,6 +594,11 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
                 raise ValueError("这个文件还没试打验证，请先确认：" + "、".join(missing))
         count = int(f["per_plate"])
     f = print_files.ensure_params(f) if f else f
+    if f:                                   # v2.32：切片文件必须是这台机型、喷嘴、热床板的，对不上一律不能发（会损坏机器）
+        from modules.prod import slicecheck
+        sc = slicecheck.check(f, idx)
+        if not sc["ok"]:
+            raise ValueError("不能用这个切片文件：" + "；".join(sc["errors"]))
     mc = material_check(j, f, idx)
     if mc["error"]:
         raise ValueError(mc["error"])

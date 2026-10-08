@@ -32,38 +32,58 @@
     const al = META.alerts || [];
     $("#inv-alerts").innerHTML = al.length ? `<div class="warnbox small"><b>低于补货线</b>：` +
       al.map((a) => `<span class="chip" data-notr>${esc(TH() && a.name_th ? a.name_th : a.name_zh)} ${num(a.qty, 1)}/${num(a.reorder_point, 1)} ${esc(uLab(a.unit))}</span>`).join(" ") + "</div>" : "";
-    if (VIEW === "items") return renderItems();
+    if (VIEW === "items" || VIEW === "catalog") return renderItems();
     if (VIEW === "docs") return renderDocs();
     if (VIEW === "moves") return renderMoves();
     if (VIEW === "expense") return renderExpense();
     if (VIEW === "stocktake") return renderStocktakes();
   }
 
-  // ---------------- 库存总览 ----------------
+  // ---------------- 库存 / 物品资料（v2.32：按同行的做法分开，没入过库的不堆在库存里） ----------------
+  let SUB = "all";      // 物品资料里：all 全部 / zero 没库存 / inactive 已停用
+  const CAT_COLS = {    // 每个分类显示自己需要的列
+    filament: ["brand", "qty", "transit", "reorder", "cost", "value", "loc"],
+    goods: ["qty", "cost", "value", "loc"],
+    "": ["brand", "qty", "transit", "reorder", "cost", "value", "loc"],
+  };
   async function renderItems() {
-    const ov = META.overview || {};
-    const chips = [`<span class="chip ${CAT ? "" : "on"}" data-cat="">全部</span>`].concat(
-      (META.categories || []).map((c) => `<span class="chip ${CAT === c.id ? "on" : ""}" data-cat="${esc(c.id)}">${esc(TH() ? c.th : c.zh)}
-        <span class="muted small">${(ov[c.id] || {}).items || 0}</span></span>`)).join("");
+    const catalog = VIEW === "catalog";
+    const view = catalog ? SUB : "stock";
     const q = ($("#inv-q") || {}).value || "";
-    const r = await api(`/api/inv/items?category=${encodeURIComponent(CAT)}&q=${encodeURIComponent(q)}`);
+    const r = await api(`/api/inv/items?view=${view}&category=${encodeURIComponent(CAT)}&q=${encodeURIComponent(q)}`);
+    const cnt = r.counts || {};
+    const key = catalog ? "all" : "stock";
+    const sum = (k) => Object.values(cnt).reduce((s, x) => s + (x[k] || 0), 0);
+    const chips = [`<span class="chip ${CAT ? "" : "on"}" data-cat="">全部 <span class="muted small">${sum(key)}</span></span>`].concat(
+      (META.categories || []).filter((c) => catalog || (cnt[c.id] || {}).stock).map((c) => `<span class="chip ${CAT === c.id ? "on" : ""}" data-cat="${esc(c.id)}">${esc(TH() ? c.th : c.zh)}
+        <span class="muted small">${(cnt[c.id] || {})[key] || 0}</span>${!catalog && (cnt[c.id] || {}).low ? ` <span class="bad small">⚠${cnt[c.id].low}</span>` : ""}</span>`)).join("");
     const total = r.items.reduce((s, x) => s + (x.value || 0), 0);
+    const cols = CAT_COLS[CAT] || CAT_COLS[""];
+    const has = (k) => cols.includes(k) && (k !== "transit" || r.items.some((x) => x.transit));
+    const zeroN = CAT ? ((cnt[CAT] || {}).zero || 0) : sum("zero");
+    const head = `<tr><th>编码</th><th>名称</th>${CAT ? "" : "<th>分类</th>"}${has("brand") ? "<th>品牌 / 规格</th>" : ""}<th>库存</th>
+      ${has("transit") ? "<th>在途</th>" : ""}${has("reorder") ? "<th>补货线</th>" : ""}${has("cost") ? "<th>平均单价</th>" : ""}${has("value") ? "<th>金额</th>" : ""}
+      ${has("loc") ? "<th>位置</th>" : ""}${catalog ? "<th>状态</th>" : ""}<th></th></tr>`;
+    const row = (it) => `<tr class="${it.low ? "inv-low" : ""} ${it.active ? "" : "muted"}"><td class="mono" data-notr>${esc(it.code)}</td>
+        <td data-notr>${it.category === "filament" ? `<span class="sw" style="background:${esc(colorHex(it.color))}"></span>` : ""}${esc(itName(it))}</td>
+        ${CAT ? "" : `<td>${esc(catName(it.category))}</td>`}${has("brand") ? `<td class="muted" data-notr>${esc([it.brand, it.spec].filter(Boolean).join(" · "))}</td>` : ""}
+        <td class="nowrap">${qtyText(it)}${it.low ? ' <span class="bad">⚠</span>' : ""}</td>
+        ${has("transit") ? `<td>${it.transit ? num(it.transit, 1) : ""}</td>` : ""}
+        ${has("reorder") ? `<td>${it.reorder_point == null ? "" : num(it.reorder_point, 1)}</td>` : ""}
+        ${has("cost") ? `<td>${it.avg_cost ? "฿" + num(it.avg_cost, it.unit === "g" ? 3 : 2) : ""}</td>` : ""}${has("value") ? `<td>${it.value ? "฿" + num(it.value, 0) : ""}</td>` : ""}
+        ${has("loc") ? `<td class="muted" data-notr>${esc(it.location || "")}</td>` : ""}
+        ${catalog ? `<td class="small">${!it.active ? "已停用" : it.stocked ? (Math.abs(it.qty) > 1e-9 ? "有库存" : '<span class="muted">用完了</span>') : '<span class="muted">还没入过库</span>'}</td>` : ""}
+        <td class="nowrap"><button class="mini" data-item="${it.id}">查看</button></td></tr>`;
     $("#inv-body").innerHTML = `<div class="row gap wrap" style="margin-bottom:8px"><div class="chips" id="inv-cats">${chips}</div>
         <input id="inv-q" placeholder="搜索编码 / 名称 / 品牌" value="${esc(q)}" style="width:200px">
-        <span class="muted small">库存金额 <b>฿${num(total, 0)}</b></span></div>
-      <table class="grid small"><thead><tr><th>编码</th><th>名称</th><th>分类</th><th>品牌 / 规格</th><th>库存</th><th>在途</th><th>补货线</th><th>平均单价</th><th>金额</th><th>位置</th><th></th></tr></thead><tbody>` +
-      (r.items.map((it) => `<tr class="${it.low ? "inv-low" : ""}"><td class="mono" data-notr>${esc(it.code)}</td>
-        <td data-notr>${it.category === "filament" ? `<span class="sw" style="background:${esc(colorHex(it.color))}"></span>` : ""}${esc(itName(it))}</td>
-        <td>${esc(catName(it.category))}</td><td class="muted" data-notr>${esc([it.brand, it.spec].filter(Boolean).join(" · "))}</td>
-        <td class="nowrap">${qtyText(it)}${it.low ? ' <span class="bad">⚠</span>' : ""}</td>
-        <td>${it.transit ? num(it.transit, 1) : ""}</td>
-        <td>${it.reorder_point == null ? "" : num(it.reorder_point, 1)}</td>
-        <td>${it.avg_cost ? "฿" + num(it.avg_cost, it.unit === "g" ? 3 : 2) : ""}</td><td>${it.value ? "฿" + num(it.value, 0) : ""}</td>
-        <td class="muted" data-notr>${esc(it.location || "")}</td>
-        <td class="nowrap"><button class="mini" data-item="${it.id}">查看</button></td></tr>`).join("") ||
-        '<tr><td colspan="11" class="muted">还没有物品（点「新物品」添加；耗材会从耗材页自动带过来）</td></tr>') + "</tbody></table>";
+        ${catalog ? `<select id="inv-sub"><option value="all" ${SUB === "all" ? "selected" : ""}>全部物品</option><option value="zero" ${SUB === "zero" ? "selected" : ""}>没有库存的</option>
+          <option value="inactive" ${SUB === "inactive" ? "selected" : ""}>已停用的</option></select>` : `<span class="muted small">库存金额 <b>฿${num(total, 0)}</b></span>`}</div>
+      <table class="grid small"><thead>${head}</thead><tbody>` +
+      (r.items.map(row).join("") || `<tr><td colspan="12" class="muted">${catalog ? "没有物品（点「＋ 新物品」建档）" : "现在没有库存。买了东西用「＋ 采购入库」，物品资料在「物品资料」里"}</td></tr>`) + "</tbody></table>" +
+      (!catalog && zeroN ? `<p class="small muted"><span>没有库存的物品（从没入过库或已经用完）不显示在这里，请看</span> <a href="#" data-goiv="catalog">物品资料</a>（<b data-notr>${zeroN}</b>）</p>` : "");
     const qi = $("#inv-q"); let t = null;
     qi.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => renderItems().then(() => { const n = $("#inv-q"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }), 300); });
+    const sb = $("#inv-sub"); if (sb) sb.onchange = () => { SUB = sb.value; renderItems(); };
   }
   function colorHex(zh) { try { return (typeof COLORS !== "undefined" && COLORS[zh] && COLORS[zh].hex) || "#ccc"; } catch { return "#ccc"; } }
 
@@ -99,7 +119,8 @@
       if (id) delete d.category;
       if (d.category !== "filament") { delete d.material; delete d.color; delete d.loss_rate; }
       await api("/api/inv/items", { json: d });
-      toast("已保存"); MODAL.close(); load();
+      if (!id) { VIEW = "catalog"; SUB = "all"; }      // 新建的物品还没入库：在「物品资料」里
+      toast(id ? "已保存" : "已建档（入库后会出现在「库存」里）"); MODAL.close(); load();
     });
   }
 
@@ -240,6 +261,7 @@
   // ---------------- 事件 ----------------
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#tab-inventory")) return;
+    const gv = e.target.closest("[data-goiv]"); if (gv) { e.preventDefault(); VIEW = gv.dataset.goiv; SUB = "zero"; return render(); }
     const v = e.target.closest("[data-iv]"); if (v) { VIEW = v.dataset.iv; if (VIEW !== "stocktake") ST_DOC = null; return render(); }
     const c = e.target.closest("[data-cat]"); if (c && c.closest("#inv-cats")) { CAT = c.dataset.cat; return renderItems(); }
     const it = e.target.closest("[data-item]"); if (it) return itemModal(Number(it.dataset.item)).catch((er) => toast(er.message, true));

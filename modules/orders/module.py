@@ -5,7 +5,7 @@ MODULE = {
     "id": "orders",
     "name_zh": "订单",
     "name_th": "ออเดอร์",
-    "version": "1.0",
+    "version": "1.1",
     "desc_zh": "订单、审单、打包核对、发货交接、售后、买家档案、每单利润。",
     "desc_th": "ออเดอร์ ตรวจออเดอร์ ตรวจแพ็ก ส่งมอบพัสดุ หลังการขาย ข้อมูลผู้ซื้อ กำไรต่อคำสั่งซื้อ",
     "core": True,
@@ -19,5 +19,11 @@ MODULE = {
         {"tab": "buyers", "mod": "orders", "zh": "买家档案", "th": "ข้อมูลผู้ซื้อ", "roles": "owner,listing", "after": "aftersales"},
         {"tab": "profit", "mod": "biz", "zh": "每单利润", "th": "กำไรต่อคำสั่งซื้อ", "roles": "owner"},
     ],
-    "ui": {"inline": True, "html": "page.html", "eager_js": ["aftersales.js", "shipping.js"], "page_js": [], "boot_js": []},
+    "settings_module": "orders",
+    "settings": [("打包核对与发货交接（扫什么码）", [
+        ("scan_order_key", "打开订单 / 发货交接时扫：both = 订单号或快递单号；tracking = 只认快递单号；order = 只认订单号", ["both", "tracking", "order"]),
+        ("pack_item_mode", "打包时怎么核对商品（产品里可以单独设）：tap = 点一下确认；scan = 扫商品码 / 内部标签；none = 只核对订单", ["tap", "scan", "none"]),
+        ("item_label_size", "内部商品标签尺寸（毫米，热敏标签纸）", ["50x30", "40x30", "60x40"])])],
+    "config_defaults": {"scan_order_key": "both", "pack_item_mode": "tap", "item_label_size": "50x30"},
+    "ui": {"inline": True, "html": "page.html", "eager_js": ["aftersales.js", "shipping.js", "pack.js"], "css": ["page.css"], "page_js": [], "boot_js": []},
 }

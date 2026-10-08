@@ -1,5 +1,5 @@
 "use strict";
-const APP_JS_VERSION = "2.31.1";   // 必须和 app.py 的 VERSION 一致
+const APP_JS_VERSION = "2.32.0";   // 必须和 app.py 的 VERSION 一致
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1849,7 +1849,7 @@ const PRINTERS_CARD = () => `<div class="card cfg-group"><h3>打印机与 OrcaSl
         <label class="small">台数<input id="pr-add-n" type="number" min="1" max="50" value="1" style="width:60px"></label>
         <button id="pr-add" class="mini">＋ 添加</button>
         <span class="small muted">共 ${(CFG.printers || []).length} 台：${prCountByModel()}</span></div>
-      <table class="grid" id="printer-table"><thead><tr><th>机器编码</th><th>机型</th><th>备注（位置等）</th><th>类型</th><th>启用</th><th>每小时克数</th><th>打印机配置 (machine)</th><th>工艺配置 (process)</th><th>耗材配置 (filament)</th><th></th></tr></thead><tbody>
+      <table class="grid" id="printer-table"><thead><tr><th>机器编码</th><th>机型</th><th>备注（位置等）</th><th>类型</th><th>启用</th><th>每小时克数</th><th title="发送切片文件前核对：文件的喷嘴直径要和这里一样">喷嘴 mm</th><th title="填了就核对切片文件用的热床板；不填不核对">现在装的热床板</th><th>打印机配置 (machine)</th><th>工艺配置 (process)</th><th>耗材配置 (filament)</th><th></th></tr></thead><tbody>
       ${(CFG.printers || []).map((p, i) => printerRow(p, i)).join("")}
       </tbody></table>
       <datalist id="dl-machine"></datalist>
@@ -1994,6 +1994,8 @@ function renderSummary(s) {
     <div>每月总机时<b>${s.monthly_machine_hours} 小时</b></div>
     <div class="muted small" style="max-width:360px">机时成本 = 电费 + 固定成本 ÷ 每月总机时。开机率越高，每小时分摊越低。</div>`;
 }
+const PLATES = [["", "不核对"], ["Textured PEI Plate", "纹理 PEI 板"], ["Smooth PEI Plate", "光面 PEI 板"], ["Cool Plate", "低温板"],
+  ["Engineering Plate", "工程板"], ["High Temp Plate", "高温板"], ["SuperTack Plate", "超粘板"]];
 function printerRow(p, i) {
   return `<tr data-i="${i}">
         <td><input data-p="code" value="${esc(p.code || "")}" placeholder="自动编号" style="width:84px" class="mono" data-notr></td>
@@ -2002,6 +2004,8 @@ function printerRow(p, i) {
         <td><select data-p="tech" style="width:90px"><option value="fdm" ${p.tech !== "resin" ? "selected" : ""}>FDM</option>${p.tech === "resin" || !window.MODKIT || MODKIT.enabled("resin") ? `<option value="resin" ${p.tech === "resin" ? "selected" : ""}>光固化</option>` : ""}</select></td>
         <td><input type="checkbox" data-p="enabled" ${p.enabled === false ? "" : "checked"}></td>
         <td><input data-p="g_per_h" value="${esc(p.g_per_h)}" style="width:60px"></td>
+        <td>${p.tech === "resin" ? '<input type="hidden" data-p="nozzle" value="0.4"><span class="muted small">—</span>' : `<input data-p="nozzle" value="${esc(p.nozzle ?? 0.4)}" style="width:52px">`}</td>
+        <td>${p.tech === "resin" ? '<input type="hidden" data-p="plate" value="">' : `<select data-p="plate">${PLATES.map(([v, l]) => `<option value="${v}" ${(p.plate || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`}</td>
         <td><input data-p="orca_machine" list="dl-machine" value="${esc(p.orca_machine || "")}" placeholder="自动" style="min-width:180px"></td>
         <td><input data-p="orca_process" list="dl-process-${i}" value="${esc(p.orca_process || "")}" placeholder="自动" style="min-width:180px"><datalist id="dl-process-${i}"></datalist></td>
         <td><input data-p="orca_filament" list="dl-filament-${i}" value="${esc(p.orca_filament || "")}" placeholder="自动" style="min-width:160px"><datalist id="dl-filament-${i}"></datalist></td>

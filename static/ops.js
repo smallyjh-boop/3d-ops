@@ -24,6 +24,7 @@
     if (window.SYS) window.SYS.show(name);
     if (window.AS) window.AS.show(name);
     if (window.SHIP) window.SHIP.show(name);
+    if (window.PACK) window.PACK.show(name);
     if (name === "materials" && window.MATERIALS) MATERIALS.load();   // v2.31：耗材料卷在生产模块
     if (name === "profit") loadProfit();
     if (name === "users") loadIntegrations().catch((e) => toast(e.message, true));

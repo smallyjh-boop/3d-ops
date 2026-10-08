@@ -10,7 +10,7 @@ MODULE = {
     "id": "fin",
     "name_zh": "财务",
     "name_th": "การเงิน",
-    "version": "1.0",
+    "version": "1.1",
     "desc_zh": "总览与损益、利润分析、平台对账、收支记账、现金流、税务；给会计软件的只读接口。",
     "desc_th": "ภาพรวมกำไรขาดทุน วิเคราะห์กำไร กระทบยอดแพลตฟอร์ม บันทึกรายรับรายจ่าย กระแสเงินสด ภาษี และ API อ่านอย่างเดียวสำหรับโปรแกรมบัญชี",
     "depends": [],
@@ -18,11 +18,12 @@ MODULE = {
     "public": logic,
     "menus": [
         {"tab": "fin_overview", "mod": "biz", "zh": "总览与损益", "th": "ภาพรวมและกำไรขาดทุน", "roles": "owner", "before": "profit"},
-        {"tab": "fin_profit", "mod": "biz", "zh": "利润分析", "th": "วิเคราะห์กำไร", "roles": "owner", "after": "fin_overview"},
+        {"tab": "fin_orders", "mod": "biz", "zh": "订单明细", "th": "รายละเอียดคำสั่งซื้อ", "roles": "owner", "after": "fin_overview"},
+        {"tab": "fin_profit", "mod": "biz", "zh": "利润分析", "th": "วิเคราะห์กำไร", "roles": "owner", "after": "fin_orders"},
         {"tab": "fin_settle", "mod": "biz", "zh": "平台对账", "th": "กระทบยอดแพลตฟอร์ม", "roles": "owner", "after": "fin_profit"},
         {"tab": "fin_book", "mod": "biz", "zh": "收支记账", "th": "บันทึกรายรับรายจ่าย", "roles": "owner", "after": "fin_settle"},
         {"tab": "fin_cash", "mod": "biz", "zh": "现金流", "th": "กระแสเงินสด", "roles": "owner", "after": "fin_book"},
         {"tab": "fin_tax", "mod": "biz", "zh": "税务", "th": "ภาษี", "roles": "owner", "after": "fin_cash"},
     ],
-    "ui": {"html": "page.html", "page_js": ["finance.js", "page.js"], "boot_js": []},
+    "ui": {"html": "page.html", "page_js": ["finance.js", "orders.js", "page.js"], "boot_js": []},
 }

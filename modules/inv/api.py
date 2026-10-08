@@ -5,6 +5,11 @@ from web.common import *  # noqa: F401,F403
 from core import inventory as inv
 
 bp = Blueprint("m_inv", __name__)
+
+
+def _views():
+    from modules.inv import views
+    return views
 PREFIXES = ['/api/inv/', '/api/v1/finance/events', '/api/v1/finance/inventory']
 PATTERNS = []
 
@@ -24,13 +29,17 @@ def _perms():
 def inv_meta():
     return jsonify({"ok": True, "categories": inv.categories(), "units": inv.UNITS,
                     "kinds": {k: v[0] for k, v in inv.KINDS.items()}, "doc_kinds": {k: v[0] for k, v in inv.DOC_KINDS.items()},
-                    "overview": inv.overview(), "alerts": inv.alerts(), "perms": _perms(),
+                    "overview": inv.overview(), "alerts": _views().alerts(), "perms": _perms(),
                     "printers": [p.get("code") or p.get("name") for p in (load_config().get("printers") or [])]})
 
 
 @bp.get("/api/inv/items")
 def inv_items():
     a = request.args
+    if a.get("view"):            # v2.32：库存 / 物品资料 / 没库存 / 已停用
+        from modules.inv import views
+        return jsonify({"ok": True, "items": views.listing(a.get("view"), a.get("category") or "", (a.get("q") or "").strip()),
+                        "counts": views.counts()})
     return jsonify({"ok": True, "items": inv.items(a.get("category") or "", (a.get("q") or "").strip(), a.get("low") == "1", a.get("all") == "1")})
 
 

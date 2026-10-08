@@ -19,7 +19,7 @@
   try { const s = JSON.parse(localStorage.getItem("fin_per") || "null"); if (s && s.mode) PER = s; } catch { /* 忽略 */ }
 
   const q = () => (PER.mode === "range" && PER.start ? `start=${PER.start}&end=${PER.end || today()}` : `month=${PER.month || thisMonth()}`);
-  const TABS = { fin_overview: "fin-ov", fin_profit: "fin-pa", fin_settle: "fin-st", fin_book: "fin-bk", fin_cash: "fin-cf", fin_tax: "fin-tx" };
+  const TABS = { fin_orders: "fin-od", fin_overview: "fin-ov", fin_profit: "fin-pa", fin_settle: "fin-st", fin_book: "fin-bk", fin_cash: "fin-cf", fin_tax: "fin-tx" };
 
   function bar(id) {
     const mo = [];
@@ -42,6 +42,7 @@
     if (!box) return;
     try {
       if (!META) META = await api("/api/fin/meta");
+      if (name === "fin_orders") return window.FIN_ORDERS && await FIN_ORDERS.render(box, bar("fin-od"), q(), META);   // v2.32 订单明细（orders.js）
       if (name === "fin_overview") return await overview(box);
       if (name === "fin_profit") return await analysis(box);
       if (name === "fin_settle") return await settle(box);
@@ -340,5 +341,5 @@
     }
   });
 
-  window.FIN = { show, reload };
+  window.FIN = { show, reload, PLAT, m, n0, pct };
 })();

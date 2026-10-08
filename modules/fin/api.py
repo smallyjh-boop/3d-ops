@@ -37,6 +37,39 @@ def fin_meta():
     return jsonify({"ok": True, "categories": fin.expense_categories(), "settings": settings(), "shops": shops})
 
 
+def _od_args():
+    """订单明细的筛选：期间（month 或 start/end）+ 平台 / 店铺 / 回款状态 / 搜索。"""
+    a = request.args
+    kw = {"platform": a.get("platform") or "", "shop": a.get("shop") or "", "settle": a.get("settle") or "", "q": (a.get("q") or "").strip()}
+    if a.get("start"):
+        s, e, _ = fin.period(start=a.get("start"), end=a.get("end"))
+        kw.update(start=s, end=e)
+    else:
+        kw["month"] = a.get("month") or None
+    return kw
+
+
+@bp.get("/api/fin/orders")
+def fin_orders():
+    """v2.32：订单明细（每单一行：收入、平台费用拆分、到账、成本、利润、回款状态）。"""
+    from modules.fin.logic import order_detail
+    try:
+        return jsonify(order_detail.rows(**_od_args()))
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.get("/api/fin/orders/export")
+def fin_orders_export():
+    from modules.fin.logic import order_detail
+    try:
+        buf, label = order_detail.export_xlsx(**_od_args())
+    except ValueError as e:
+        return err(str(e))
+    return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True,
+                     download_name=f"订单明细_{label.replace(' ~ ', '_')}.xlsx")
+
+
 @bp.get("/api/fin/overview")
 def fin_overview():
     return _wrap(lambda: fin.overview(request.args.get("month") or None))

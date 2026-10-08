@@ -408,6 +408,31 @@ def print_files_list():
                     "printers": _model_names()})
 
 
+@bp.post("/api/print-files/<int:fid>/confirm-printer")
+def print_file_confirm_printer(fid):
+    """v2.32：文件里读不出机型时，老板确认这个文件是给哪台机型的（只能确认一次，文件里有机型的不能改）。"""
+    from modules.prod import slicecheck
+    try:
+        f = slicecheck.confirm(fid, (request.get_json(force=True) or {}).get("printer") or "", _uname())
+    except ValueError as e:
+        return err(str(e))
+    return jsonify({"ok": True, "file": f, "machine": slicecheck.describe(f)})
+
+
+@bp.get("/api/print-files/<int:fid>/check")
+def print_file_check(fid):
+    """v2.32：这个切片文件能不能发到某台打印机（?printer=序号）。"""
+    from modules.prod import slicecheck
+    f = print_files.get(fid)
+    if not f:
+        return err("文件不存在", 404)
+    try:
+        idx = int(request.args.get("printer"))
+    except (TypeError, ValueError):
+        idx = None
+    return jsonify(slicecheck.check(print_files.ensure_params(f), idx))
+
+
 @bp.get("/api/print-files/<int:fid>")
 def print_file_get(fid):
     f = print_files.ensure_params(print_files.get(fid))
@@ -800,6 +825,10 @@ def recipe_get(pid):
            "advice": {k: (p.get("print_advice") or {}).get(k) for k in ("risks", "temp_speed", "support_why", "orientation")}
            if p.get("print_advice") else None}
     out["files"] = [print_files.ensure_params(f) for f in out["files"]]
+    from modules.prod import slicecheck
+    _cfg = load_config()
+    for f in out["files"]:
+        f["machine"] = slicecheck.describe(f, _cfg)        # v2.32：这个文件是哪个机型的、能发到哪几台
     out["spec"] = p.get("_spec") or ""
     out["spec_asked"] = spec
     out["specs"] = [{"spec": s_, "own": specmodel.own(p0, s_)} for s_ in specmodel.specs(p0)]

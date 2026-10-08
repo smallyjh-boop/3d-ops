@@ -7,7 +7,7 @@ MODULE = {
     "id": "prod",
     "name_zh": "生产",
     "name_th": "การผลิต",
-    "version": "1.0",
+    "version": "1.1",
     "desc_zh": "生产看板、打印机、文件管理、打印方案和切片文件、质量统计、耗材料卷、成品备货。",
     "desc_th": "บอร์ดผลิต เครื่องพิมพ์ จัดการไฟล์ แผนการพิมพ์และไฟล์สไลซ์ สถิติคุณภาพ ม้วนฟิลาเมนต์ เตรียมสต็อกสินค้า",
     "depends": ["orders", "model"],
@@ -21,6 +21,7 @@ MODULE = {
         {"tab": "materials", "mod": "inv", "zh": "耗材料卷", "th": "ม้วนฟิลาเมนต์", "roles": "owner,production"},
         {"tab": "stock", "mod": "inv", "zh": "成品备货", "th": "เตรียมสต็อกสินค้า", "roles": "owner,production", "after": "materials"},
     ],
+    "owner_only": [("POST", r"^/api/print-files/\d+/confirm-printer$")],
     "events": {"order.changed": events.on_order_changed, "chain.reschedule": events.on_reschedule},
     "ui": {"inline": True, "html": "page.html", "eager_js": ["recipe.js", "prod.js", "files.js", "spools.js", "materials.js"], "page_js": [], "boot_js": []},
 }

@@ -364,6 +364,11 @@ def upload_slice(src_path, filename, product_id, user="", printer="auto", per_pl
         return _upload_resin(src_path, filename, p, user, printer, per_plate, sku, color, note, hours, ml, spec)
     params = recipes.params_from(src_path, kind)
     detected = {}
+    if printer and printer not in ("auto", "*"):     # v2.32：手动选的机型和文件里写的机型不一样 → 不让上传
+        from modules.prod import slicecheck
+        fm = slicecheck.model_of_profile(params.get("printer_profile"))
+        if fm and _norm(fm) != _norm(printer):
+            raise ValueError(f"这是「{fm}」的切片文件，不能登记成「{printer}」用的。请用「{printer}」重新切片，或者选「自动识别」")
     if not printer or printer == "auto":
         printer = detect_printer(params) or "*"
         detected["printer"] = printer

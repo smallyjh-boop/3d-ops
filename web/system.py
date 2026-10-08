@@ -14,13 +14,22 @@ def index():
     mi = _json.dumps(modules.i18n_th(), ensure_ascii=False).replace("</", "<\\/")
     html = html.replace("</head>", f'<script>window.CLIENT_VERSION="{VERSION}";window.I18N_MODULES={mi};</script>{i18n_admin.script_tag()}</head>', 1)
     # v2.31：主链路模块的页面直接放进首页（和以前一样一打开就在），js 按原来的顺序加载
-    panels, js = modules.inline_parts()
+    panels, js, css = modules.inline_parts()
+    html = html.replace("</head>", "".join(f'<link rel="stylesheet" href="/m/{m}/{n}?v={VERSION}">' for m, n in css) + "</head>", 1)
     html = html.replace("<!--MODULE_PANELS-->", panels, 1)
     html = html.replace("<!--MODULE_SCRIPTS-->", "\n".join(
         f'<script src="/m/{mid}/{n}?v={VERSION}-{(modules.get(mid)["meta"].get("version") or "")}"></script>' for mid, n in js), 1)
     r = app.response_class(html, mimetype="text/html")
     r.headers["Cache-Control"] = "no-store"
     return r
+
+
+def _nozzle(v):
+    try:
+        x = float(v)
+        return x if 0.1 <= x <= 2 else 0.4
+    except (TypeError, ValueError):
+        return 0.4
 
 
 # ---------------- 设置 ----------------
@@ -67,7 +76,10 @@ def post_config():
                               "note": str(pr.get("note") or "")[:40],
                               "orca_machine": str(pr.get("orca_machine") or "").strip().strip('"'),
                               "orca_process": str(pr.get("orca_process") or "").strip().strip('"'),
-                              "orca_filament": str(pr.get("orca_filament") or "").strip().strip('"')})
+                              "orca_filament": str(pr.get("orca_filament") or "").strip().strip('"'),
+                              # v2.32：发送切片文件前核对喷嘴直径、热床板
+                              "nozzle": _nozzle(pr.get("nozzle")),
+                              "plate": str(pr.get("plate") or "").strip()[:40]})
                 # 连接设置（IP/访问码）在打印机页单独保存：按机器编码保留原来的
                 prev = by_code.get(code) if code else (old_pr[i] if i < len(old_pr) and not old_pr[i].get("code") else None)
                 if prev and prev.get("conn"):

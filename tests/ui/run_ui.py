@@ -26,7 +26,7 @@ subprocess.run([sys.executable, os.path.join(HERE, "seed2131.py")], cwd=T, env=e
 srv = subprocess.Popen([sys.executable, os.path.join(HERE, "run_cs_server.py")], cwd=T, env=env,
                        stdout=open(os.path.join(T, "server.log"), "w"), stderr=subprocess.STDOUT)
 bad = 0
-SCRIPTS = [a for a in sys.argv[1:] if a.startswith("ui")] or ["ui214", "ui228", "ui229", "ui230", "ui231"]
+SCRIPTS = [a for a in sys.argv[1:] if a.startswith("ui")] or ["ui214", "ui228", "ui229", "ui230", "ui231", "ui232"]
 try:
     time.sleep(6)
     for lang in ("zh", "th"):
