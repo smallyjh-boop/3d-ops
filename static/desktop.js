@@ -79,7 +79,7 @@
         解压后双击 <b>Install.bat</b>，装好用自己的账号登录就行。</p></div>
       <div class="card"><div class="row between wrap gap"><b>偶尔用的电脑：浏览器 + 只装加速器</b><a class="btn" href="/api/accel/package?personal=1">⬇ 下载我的加速器</a></div>
         <p class="small">系统照常用浏览器打开；加速器在后台帮你做切片、读大模型、抠图（只做你自己的活）。<br>
-        解压后双击 <b>4_start_worker.bat</b>（里面已经带好 NAS 地址和你的密钥，不用填）。</p></div>
+        解压后双击 <b>Install.bat</b>（里面已经带好 NAS 地址和你的密钥，不用填）。装好后在右下角托盘后台运行、开机自动启动，右键图标可以暂停 / 退出。</p></div>
       <div class="row gap"><button data-mclose>关闭</button></div>`);
   });
 

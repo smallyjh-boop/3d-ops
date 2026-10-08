@@ -16,11 +16,13 @@ def shortcut(path, target, args, icon, workdir):
 
 
 def main():
+    accel = "--accel" in sys.argv
     exe = sys.executable
     if exe.lower().endswith("python.exe"):
         exe = exe[:-10] + "pythonw.exe"
-    app = os.path.join(HERE, "desktop_app.py")
-    icon = os.path.join(HERE, "icon.ico")
+    app = os.path.join(HERE, "accel_tray.py" if accel else "desktop_app.py")
+    icon = os.path.join(HERE, "accel.ico" if accel else "icon.ico")
+    lnk = "3D Ops 加速器.lnk" if accel else "3D Ops.lnk"
     home = os.path.expanduser("~")
     desk = os.path.join(home, "Desktop")
     try:
@@ -35,9 +37,13 @@ def main():
     menu = os.path.join(os.environ.get("APPDATA", home), "Microsoft", "Windows", "Start Menu", "Programs")
     for d in (desk, menu):
         if os.path.isdir(d):
-            shortcut(os.path.join(d, "3D Ops.lnk"), exe, f'"{app}"', icon, HERE)
-    import desktop_app
-    desktop_app.autostart_set(True)
+            shortcut(os.path.join(d, lnk), exe, f'"{app}"', icon, HERE)
+    if accel:
+        import accel_tray
+        accel_tray.autostart_set(True)
+    else:
+        import desktop_app
+        desktop_app.autostart_set(True)
     print("   Shortcuts created; auto start ON.")
 
 

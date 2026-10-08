@@ -119,7 +119,7 @@ ok(all(n in names for n in need), f"package files {[n for n in need if n not in 
 sj = json.loads(zf.read("3D-Ops-Desktop/server.json"))
 ok(sj["servers"][0] == "http://localhost" and sj["version"] == A.VERSION, f"server.json {sj}")
 bat = zf.read("3D-Ops-Desktop/Install.bat").decode()
-ok("\r\n" in bat and "pythonw.exe" in bat and "setup_shortcuts.py" in bat, "install bat")
+ok("\r\n" in bat and "pythonw.exe" in bat and "desktop_app.py\" --installed" in bat and "{" not in bat, "install bat")
 ok(C.get("/api/desktop/package").status_code in (401, 302), "package needs login")
 upd = zipfile.ZipFile(io.BytesIO(C.get("/api/v1/accel/package", headers={"Authorization": "Bearer " + rb2["key"]}).data)).namelist()
 ok("desktop/desktop_app.py" in upd, "auto-update package includes desktop")
@@ -127,12 +127,17 @@ ok("desktop/desktop_app.py" in upd, "auto-update package includes desktop")
 # 「我的加速器」（偶尔用的电脑：浏览器 + 加速器）：包里带好地址和只属于这个账号的密钥
 zp = cn.get("/api/accel/package?personal=1")
 ok(zp.status_code == 200, "staff can download personal accelerator")
-wj = json.loads(zipfile.ZipFile(io.BytesIO(zp.data)).read("data/worker.json"))
+zpn = zipfile.ZipFile(io.BytesIO(zp.data)).namelist()
+ok(all(n in zpn for n in ("3D-Ops-Accelerator/Install.bat", "3D-Ops-Accelerator/app/desktop/accel_tray.py", "3D-Ops-Accelerator/app/desktop/accel.ico",
+                          "3D-Ops-Accelerator/app/worker.py", "3D-Ops-Accelerator/app/desktop/requirements-accel.txt")), "accelerator package layout")
+abat = zipfile.ZipFile(io.BytesIO(zp.data)).read("3D-Ops-Accelerator/Install.bat").decode()
+ok("accel_tray.py" in abat and "3D-Ops-Accelerator" in abat and "--accel" in abat and "{" not in abat, "accelerator install bat")
+wj = json.loads(zipfile.ZipFile(io.BytesIO(zp.data)).read("3D-Ops-Accelerator/app/data/worker.json"))
 ok(wj["server"] == "http://localhost" and wj["key"].startswith("lh_") and wj["name_prefix"] == "Nok", f"worker.json {wj}")
 C.post("/api/v1/accel/hello", json={"name": "Nok@OLD-PC", "caps": caps, "proto": accel.PROTO}, headers={"Authorization": "Bearer " + wj["key"]})
 ok({w["name"]: w for w in accel.workers()}["Nok@OLD-PC"]["user"] == "nok", "personal accelerator belongs to nok")
 zo = cb.get("/api/accel/package")
-ok("data/worker.json" not in zipfile.ZipFile(io.BytesIO(zo.data)).namelist(), "owner shared package has no key")
+ok(not any(n.endswith("data/worker.json") for n in zipfile.ZipFile(io.BytesIO(zo.data)).namelist()), "owner shared package has no key")
 
 # 客户端模块（不开窗口）：找 NAS、设置
 os.environ["HOME"] = D; os.environ["LH_DESKTOP_ROOT"] = D
@@ -160,6 +165,7 @@ ws_ = make_server("127.0.0.1", 0, A.app, threaded=True); threading.Thread(target
 nas = f"http://127.0.0.1:{ws_.server_port}"
 rp = cn.post("/api/desktop/pair", json={"device_id": dk.C["device_id"], "device_name": "NOK-LAPTOP"}).get_json()
 dk.STATE["server"] = nas
+dk.C["no_install"] = True
 dk.API.paired(nas, rp["key"], rp["worker_name"], "nok")
 w = None
 for _ in range(100):
@@ -180,5 +186,45 @@ for _ in range(200):
 ok(isinstance(res.get("r"), dict) and dk.ACCEL.w.done == 1, f"real task done on desktop accel {str(res.get('r'))[:120]} done={dk.ACCEL.w.done}")
 dk.API.set_option("paused", True)
 ok(dk.ACCEL.w.paused and dk.C["paused"], "pause option")
+# 托盘版加速器（替身托盘，不开窗口）：读带好的 worker.json，连上 NAS，图标带状态
+sys.path.insert(0, "/tmp/claude-0/stub") if os.path.exists("/tmp/claude-0/stub/pystray.py") else None
+stubd = os.path.join(D, "stub"); os.makedirs(stubd, exist_ok=True)
+open(os.path.join(stubd, "pystray.py"), "w").write('''
+class MenuItem:
+    def __init__(self, text, action, checked=None, default=False, enabled=True): self.text = text; self.action = action; self.checked = checked
+class Menu:
+    SEPARATOR = None
+    def __init__(self, *items): self.items = items
+class Icon:
+    def __init__(self, name, img, title, menu): self.icon = img; self.title = title; self.menu = menu; self.notes = []
+    def notify(self, msg, title=""): self.notes.append((title, msg))
+    def update_menu(self): pass
+    def run(self): pass
+    def stop(self): pass
+''')
+sys.path.insert(0, stubd)
+import worker as Wm
+rp2 = cn.post("/api/desktop/pair", json={"device_id": "t" * 32, "device_name": "TRAY"}).get_json()
+Wm.CONF = os.path.join(D, "worker_tray.json")
+json.dump({"server": nas, "key": rp2["key"], "name_prefix": "Nok", "autostart_done": 1, "no_install": 1}, open(Wm.CONF, "w"))
+at = importlib.import_module("accel_tray")
+at.LOGF = os.path.join(D, "worker_tray.log")
+c = Wm.load_conf()
+at.start_worker(c)
+icon = at.tray(c)
+for _ in range(100):
+    if at.state() == "在线": break
+    time.sleep(0.2)
+time.sleep(1.5)
+names = [it.text if isinstance(it.text, str) else it.text(it) for it in icon.menu.items if it]
+ok(at.state() == "在线" and any("在线" in n for n in names) and "也帮别人加速（同事的活）" in names and "退出加速器" in names, f"tray accel online {at.state()} {names}")
+ok(icon.notes and "后台运行" in icon.notes[0][1] and os.path.exists(at.LOGF), f"first-run tip & log file {icon.notes}")
+wn = [w for w in accel.workers() if w["name"].startswith("Nok@")]
+ok(any(w["user"] == "nok" and w["online"] for w in wn), "tray accel registered as nok")
+pause = [it for it in icon.menu.items if it and it.text == "暂停加速"][0]
+pause.action(icon, pause)
+ok(at.S["w"].paused and Wm.load_conf()["paused"], "pause from tray")
+import trayicon
+ok(trayicon.image("accel.png", "在线").size == (64, 64) and trayicon.image("accel.png", "暂停") is not trayicon.image("accel.png", "在线"), "status icons")
 ws_.shutdown()
 print("ERRORS", E)

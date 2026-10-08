@@ -68,17 +68,17 @@ def desktop_dl(tok):
     return app.view_functions[endpoint](**args)
 
 
-INSTALL_BAT = r'''@echo off
+INSTALL_BAT_T = r'''@echo off
 chcp 65001 >nul
-title 3D Ops Desktop - Install
+title {TITLE} - Install
 cd /d "%~dp0"
-set "DEST=%LOCALAPPDATA%\3D-Ops-Desktop"
+set "DEST=%LOCALAPPDATA%\{DIR}"
 echo.
-echo   Installing 3D Ops Desktop to %DEST% ...
+echo   Installing {TITLE} to %DEST% ...
 echo.
 if not exist "%DEST%" mkdir "%DEST%"
 xcopy /e /i /y /q "%~dp0app" "%DEST%\app" >nul
-copy /y "%~dp0server.json" "%DEST%\server.json" >nul
+if exist "%~dp0server.json" copy /y "%~dp0server.json" "%DEST%\server.json" >nul
 set "PYCMD="
 if exist "%DEST%\.venv\Scripts\pythonw.exe" goto deps
 py -3.12 --version >nul 2>nul && set "PYCMD=py -3.12"
@@ -99,12 +99,12 @@ if not exist "%DEST%\.venv\Scripts\pythonw.exe" goto pyfail
 :deps
 echo   Installing components (first time 3-10 minutes, needs internet) ...
 "%DEST%\.venv\Scripts\python.exe" -m pip install -q --upgrade pip
-"%DEST%\.venv\Scripts\python.exe" -m pip install -q -r "%DEST%\app\desktop\requirements-desktop.txt"
+"%DEST%\.venv\Scripts\python.exe" -m pip install -q -r "%DEST%\app\desktop\{REQ}"
 if errorlevel 1 goto pipfail
-"%DEST%\.venv\Scripts\python.exe" "%DEST%\app\desktop\setup_shortcuts.py"
+"%DEST%\.venv\Scripts\python.exe" "%DEST%\app\desktop\setup_shortcuts.py" {SC_ARGS}
 echo.
-echo   DONE. Starting 3D Ops Desktop ...
-start "" "%DEST%\.venv\Scripts\pythonw.exe" "%DEST%\app\desktop\desktop_app.py"
+echo   DONE. Starting {TITLE} ...
+start "" "%DEST%\.venv\Scripts\pythonw.exe" "%DEST%\app\desktop\{ENTRY}" --installed
 timeout /t 3 /nobreak >nul
 exit /b 0
 :pyfail
@@ -121,17 +121,20 @@ exit /b 1
 '''
 
 
-@app.get("/api/desktop/package")
-def desktop_package():
-    """桌面客户端安装包：解压后双击「安装.bat」。里面带好 NAS 地址（局域网 + 外网），装好登录就能用。"""
-    u = auth.current_user()
-    if not u or u.get("id", -1) == -1:
-        return err("请先登录", 401)
-    import json
+
+def install_bat(accel=False):
+    t = INSTALL_BAT_T
+    for k, v in ({"TITLE": "3D Ops Accelerator", "DIR": "3D-Ops-Accelerator", "REQ": "requirements-accel.txt", "SC_ARGS": "--accel",
+                  "ENTRY": "accel_tray.py"} if accel else
+                 {"TITLE": "3D Ops Desktop", "DIR": "3D-Ops-Desktop", "REQ": "requirements-desktop.txt", "SC_ARGS": "",
+                  "ENTRY": "desktop_app.py"}).items():
+        t = t.replace("{" + k + "}", v)
+    return t.replace("\n", "\r\n")
+
+
+def app_zip(top, extra):
+    """安装包：<top>/app/（程序：core、web、desktop、worker.py…）+ <top>/ 下的 extra 文件（{相对路径: 内容}）。"""
     from web.accel import PKG_DIRS, PKG_FILES
-    cfg = load_config()
-    here = request.host_url.rstrip("/")
-    servers = [here] + [x for x in [str(cfg.get("remote_url") or "").rstrip("/")] if x and x != here]
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for d in PKG_DIRS:
@@ -141,13 +144,29 @@ def desktop_package():
                     if f.endswith((".pyc", ".pyo")):
                         continue
                     fp = os.path.join(root, f)
-                    z.write(fp, "3D-Ops-Desktop/app/" + os.path.relpath(fp, BASE_DIR).replace(os.sep, "/"))
+                    z.write(fp, top + "/app/" + os.path.relpath(fp, BASE_DIR).replace(os.sep, "/"))
         for f in PKG_FILES:
             fp = os.path.join(BASE_DIR, f)
             if os.path.exists(fp):
-                z.write(fp, "3D-Ops-Desktop/app/" + f)
-        z.writestr("3D-Ops-Desktop/server.json", json.dumps({"servers": servers, "version": VERSION}, ensure_ascii=False))
-        z.writestr("3D-Ops-Desktop/Install.bat", INSTALL_BAT.replace("\n", "\r\n"))
+                z.write(fp, top + "/app/" + f)
+        for k, v in extra.items():
+            z.writestr(top + "/" + k, v)
+    buf.seek(0)
+    return buf
+
+
+@app.get("/api/desktop/package")
+def desktop_package():
+    """桌面客户端安装包：解压后双击「安装.bat」。里面带好 NAS 地址（局域网 + 外网），装好登录就能用。"""
+    u = auth.current_user()
+    if not u or u.get("id", -1) == -1:
+        return err("请先登录", 401)
+    import json
+    cfg = load_config()
+    here = request.host_url.rstrip("/")
+    servers = [here] + [x for x in [str(cfg.get("remote_url") or "").rstrip("/")] if x and x != here]
+    buf = app_zip("3D-Ops-Desktop", {"server.json": json.dumps({"servers": servers, "version": VERSION}, ensure_ascii=False),
+                                     "Install.bat": install_bat()})
     buf.seek(0)
     db.audit(u.get("username", ""), "下载桌面客户端", VERSION)
     return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=f"3D-Ops-Desktop-{VERSION}.zip")

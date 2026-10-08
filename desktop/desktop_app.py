@@ -22,6 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.dirname(HERE)                    # 程序目录（core、web、worker.py 在这里）
 ROOT = os.environ.get("LH_DESKTOP_ROOT") or os.path.dirname(APP)   # 安装目录（%LOCALAPPDATA%\\3D-Ops-Desktop）
 sys.path.insert(0, APP)
+sys.path.insert(0, HERE)
 CONF = os.path.join(ROOT, "desktop.json")
 SERVERS = os.path.join(ROOT, "server.json")
 LOCK_PORT = 38791
@@ -85,7 +86,7 @@ def single_instance(wait=0):
                 continue
             try:
                 with socket.create_connection(("127.0.0.1", LOCK_PORT), timeout=2) as c:
-                    c.sendall(b"show")
+                    c.sendall(b"restart" if "--installed" in sys.argv else b"show")   # 重新安装后：让旧的重启成新版本
             except OSError:
                 pass
             return None
@@ -161,6 +162,7 @@ class Accel:
         self.w.desktop = True
         self.w.paused = bool(C.get("paused"))
         self.w.share = bool(C.get("share"))
+        self.w.no_install = bool(C.get("no_install"))
         self.w.auto_update = True
         self.state = "连接中"
         try:
@@ -406,10 +408,10 @@ def on_started():
 def tray():
     try:
         import pystray
-        from PIL import Image
     except Exception:  # noqa: BLE001
         return
-    img = Image.open(os.path.join(HERE, "icon.png"))
+    import trayicon
+    img = trayicon.image("icon.png", ACCEL.info()["state"])
 
     def title():
         a = ACCEL.info()
@@ -446,8 +448,13 @@ def tray():
     STATE["tray"] = icon
 
     def refresh():
+        last = None
         while not STATE["quitting"]:
             try:
+                st = ACCEL.info()["state"]
+                if st != last:
+                    icon.icon = trayicon.image("icon.png", st)
+                    last = st
                 icon.title = title()
             except Exception:  # noqa: BLE001
                 pass
@@ -461,8 +468,11 @@ def lock_listener(sock):
         try:
             c, _ = sock.accept()
             with c:
-                if c.recv(16) == b"show":
+                m = c.recv(16)
+                if m == b"show":
                     show_window()
+                elif m == b"restart":
+                    restart()
         except Exception:  # noqa: BLE001
             time.sleep(1)
 

@@ -42,15 +42,7 @@ z = zipfile.ZipFile(io.BytesIO(C.get("/api/v1/accel/package", headers=H).data));
 ok("worker.py" in names and "core/accel.py" in names and "core/kernels.py" in names and not any(n.endswith(".bat") for n in names)
    and not any("__pycache__" in n for n in names), "auto-update package (no .bat)")
 z2 = zipfile.ZipFile(io.BytesIO(C.get("/api/accel/package").data))
-ok("4_start_worker.bat" in z2.namelist() and "5_worker_autostart.bat" in z2.namelist(), "full package has start scripts")
-# NAS 上没有 .bat（旧的在线升级跳过了）：下载包里也要有
-import web.accel as WA
-_orig = WA.BASE_DIR
-_tmpd = D + "/fakeapp"; shutil.copytree(APP, _tmpd, ignore=shutil.ignore_patterns("*.bat", "tests", "data", "__pycache__"))
-WA.BASE_DIR = _tmpd
-z3 = zipfile.ZipFile(io.BytesIO(C.get("/api/accel/package").data)); WA.BASE_DIR = _orig
-bt = z3.read("4_start_worker.bat")
-ok("4_start_worker.bat" in z3.namelist() and "1_setup.bat" in z3.namelist() and b"worker.py" in bt and b"\r\n" in bt, "start scripts filled in when NAS lacks .bat")
+ok("3D-Ops-Accelerator/Install.bat" in z2.namelist() and "3D-Ops-Accelerator/app/desktop/accel_tray.py" in z2.namelist(), "full package: tray installer (v2.28.1)")
 
 # ---- 电脑在线但不接活：等 2 秒后 NAS 自己做 ----
 r = C.post("/api/v1/accel/hello", headers=H, json={"name": "ghost", "caps": ["mesh"], "proto": accel.PROTO, "cpu": 8, "version": A.VERSION})

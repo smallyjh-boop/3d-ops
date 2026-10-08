@@ -123,21 +123,18 @@ def accel_package_full():
     if not u or u.get("id", -1) == -1:
         return err("请先登录", 401)
     personal = request.args.get("personal") == "1" or not auth.is_owner()
-    buf = _package(True)
-    if not personal:
-        return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=f"3d-ops-worker-{VERSION}.zip")
-    import secrets
-    from core import desktop
-    r = desktop.pair(u, secrets.token_hex(16), "浏览器+加速器")
-    out = io.BytesIO()
-    with zipfile.ZipFile(buf) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for it in zin.infolist():
-            z.writestr(it, zin.read(it.filename))
-        z.writestr("data/worker.json", _json.dumps({"server": request.host_url.rstrip("/"), "key": r["key"],
-                                                     "name_prefix": (u.get("display_name") or u.get("username") or "")[:14]}, ensure_ascii=False))
-    out.seek(0)
-    db.audit(_uname(), "下载我的加速器", VERSION)
-    return send_file(out, mimetype="application/zip", as_attachment=True, download_name=f"3d-ops-accelerator-{VERSION}.zip")
+    from web.desktop import app_zip, install_bat
+    extra = {"Install.bat": install_bat(accel=True)}
+    if personal:
+        import secrets
+        from core import desktop
+        r = desktop.pair(u, secrets.token_hex(16), "浏览器+加速器")
+        extra["app/data/worker.json"] = _json.dumps({"server": request.host_url.rstrip("/"), "key": r["key"],
+                                                     "name_prefix": (u.get("display_name") or u.get("username") or "")[:14]}, ensure_ascii=False)
+        db.audit(_uname(), "下载我的加速器", VERSION)
+    buf = app_zip("3D-Ops-Accelerator", extra)
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=f"3D-Ops-Accelerator-{VERSION}{'' if personal else '-shared'}.zip")
 
 
 @app.get("/api/accel/status")
