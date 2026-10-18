@@ -228,7 +228,7 @@ v2.12 起每行多 <code>spools</code>：<code>{"sealed": 未开封卷数, "open
 <tr><td><code>image_download_failed</code></td><td>502</td><td>从选品工具下载图片失败（密钥不对、地址不通、不是 JPG / PNG、太大）</td></tr>
 </table>
 <h2>批发站密钥（scope = wholesale，v2.36）</h2>
-<p>给批发网站用。只能调：<code>GET /api/v1/ping</code>、<code>GET /api/v1/skus</code>、<code>GET /api/v1/orders</code>、<code>POST /api/v1/orders</code>、<code>POST /api/v1/orders/status</code>。
+<p>给批发网站用。只能调：<code>GET /api/v1/ping</code>、<code>GET /api/v1/skus</code>、<code>GET /api/v1/images/…</code>（商品图片）、<code>GET /api/v1/orders</code>、<code>POST /api/v1/orders</code>、<code>POST /api/v1/orders/status</code>。
 推送和改状态时平台一律当作 <code>wholesale</code>（传别的平台也会被改掉），所以碰不到 Lazada / Shopee 的订单；查询只返回批发订单。
 SKU 不返回成本、底价、建议价、手填价、机时；订单不返回成本利润和平台费。批发订单和其他订单一样生成生产任务、占用耗材库存。其他接口一律 403。</p>
 <h2><span class="m get">GET</span>/api/v1/finance/events　财务事件（v2.18）</h2>

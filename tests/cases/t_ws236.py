@@ -21,6 +21,9 @@ for k in ("unit_cost", "floor_price", "suggested_price", "manual_price", "hours"
 for k in ("sku", "price", "stock", "name", "title_th"):
     assert k in s0, k
 print("skus", len(skus), sorted(s0)[:6])
+img = next((s["image"] for s in skus if s.get("image")), None)
+if img:   # 批发站要能下载商品图片
+    r = x.get(img["url"], headers=H(wk)); assert r.status_code == 200 and r.mimetype.startswith("image/"), r.status_code
 
 # 2. 推单：平台强制为 wholesale，不能借批发密钥改 Lazada 订单
 lz = x.post("/api/v1/orders", json={"orders": [{"platform": "lazada", "order_no": "LZ-WS-1", "status": "to_ship",
