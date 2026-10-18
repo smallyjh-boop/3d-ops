@@ -8,9 +8,13 @@ function fillCatSelect(cur, known) {
   const words = q.split(/\s+/).filter(Boolean);
   let list = CATS;
   if (words.length) list = CATS.filter((c) => { const t = `${catName(c)} ${c.path || ""} ${c.cat_id}`.toLowerCase(); return words.every((w) => t.includes(w)); });
-  if (cur && !list.some((c) => c.id === cur)) list = CATS.filter((c) => c.id === cur).concat(list);
-  $("#cat-select").innerHTML = `<option value="">${words.length ? `— 找到 ${list.length} 个 —` : "— 未选择 —"}</option>` +
-    list.slice(0, 600).map((c) => `<option value="${esc(c.id)}" ${c.id === cur ? "selected" : ""} title="${esc(c.path || "")}">${esc(catName(c))}（${esc(c.cat_id)}）${c.needs_license ? " ⚠需TISI许可证" : ""}</option>`).join("") +
+  const found = list.length;
+  // v2.36.1：只放前 600 个选项；当前类目排在 600 名之后（全部模板下载完约 2900 个）会被截掉，下拉框显示「未选择」→ 当前类目总是放进去
+  list = list.slice(0, 600);
+  const curCat = cur ? CATS.find((c) => c.id === cur) : null;
+  if (curCat && !list.includes(curCat)) list = [curCat].concat(list);
+  $("#cat-select").innerHTML = `<option value="">${words.length ? `— 找到 ${found} 个 —` : "— 未选择 —"}</option>` +
+    list.map((c) => `<option value="${esc(c.id)}" ${c.id === cur ? "selected" : ""} title="${esc(c.path || "")}">${esc(catName(c))}（${esc(c.cat_id)}）${c.needs_license ? " ⚠需TISI许可证" : ""}</option>`).join("") +
     (cur && !known ? `<option value="${esc(cur)}" selected>（模板已删除）${esc(cur)}</option>` : "");
 }
 document.addEventListener("input", (e) => {

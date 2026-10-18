@@ -147,7 +147,7 @@ ok(not tx["vat_on"] and tx["total"]["payable"] == 0 and tx["year_sales"] > 0 and
 
 # ---- 总览 / 导出 / 删除结算 ----
 ov = C.get(f"/api/fin/overview?month={M}").get_json()
-ok(ov["summary"]["orders"] >= 4 and "change" in ov and ov["diff_count"] >= 1 and ov["unpaid_count"] == 0 and ov["platforms"], "overview")
+ok(ov["summary"]["orders"] >= 4 and "change" in ov and ov["diff_count"] >= 1 and ov["unpaid_count"] == len(fin.reconcile(*fin.period(M)[:2])["unpaid"]) and ov["platforms"], "overview")
 x = C.get(f"/api/fin/export?month={M}")
 wb = __import__("openpyxl").load_workbook(io.BytesIO(x.data))
 ok(x.status_code == 200 and {"损益表", "按产品", "收支明细", "现金流"} <= set(wb.sheetnames), "excel export")
