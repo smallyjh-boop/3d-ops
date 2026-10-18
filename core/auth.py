@@ -325,6 +325,12 @@ def _api_guard(path):
               or (request.method in ("GET", "HEAD") and path in ("/api/v1/categories", "/api/v1/ping")))
         if not ok:
             return jsonify({"ok": False, "error": "这个密钥只能新建产品（POST /api/v1/catalog/products）和查类目"}), 403
+    elif scope == "wholesale":
+        # 批发站密钥（v2.36）：只能读 SKU、推送 / 查询 / 改状态批发站自己的订单（platform 强制为 wholesale）
+        ok = ((request.method in ("GET", "HEAD") and path in ("/api/v1/ping", "/api/v1/skus", "/api/v1/orders"))
+              or (request.method == "POST" and path in ("/api/v1/orders", "/api/v1/orders/status")))
+        if not ok:
+            return jsonify({"ok": False, "error": "这个密钥只能给批发站用（读 SKU、推送和查询批发订单）"}), 403
     elif scope == "finance":
         # 财务密钥（规范第 11 条）：只能读 /api/v1/finance/…（和 ping）
         if not (request.method in ("GET", "HEAD") and (path.startswith("/api/v1/finance/") or path == "/api/v1/ping")):

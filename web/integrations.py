@@ -34,8 +34,14 @@ def v1_orders_push():
     if len(orders) > 1000:
         return _v1_err("一次最多 1000 个订单")
     src = (b.get("source") if isinstance(b, dict) else None) or auth.current_user()["username"]
+    plat = (b.get("platform") if isinstance(b, dict) else "") or ""
+    if _v1_wholesale():       # v2.36：批发站只能建 / 改自己平台的订单
+        if not all(isinstance(o, dict) for o in orders):
+            return _v1_err("订单格式不对")
+        orders = [{**o, "platform": WHOLESALE_PLATFORM} for o in orders]
+        src, plat = "wholesale", WHOLESALE_PLATFORM
     try:
-        st = integrations.ingest(orders, str(src)[:60], (b.get("platform") if isinstance(b, dict) else "") or "")
+        st = integrations.ingest(orders, str(src)[:60], plat)
     except ValueError as e:
         return _v1_err(str(e))
     return jsonify({"ok": not st["errors"], **st})
@@ -51,6 +57,8 @@ def v1_orders_status():
         if not isinstance(r, dict):
             continue
         r = {k: v for k, v in r.items() if k != "items"}   # 不带 items = 不改商品明细
+        if _v1_wholesale():
+            r["platform"] = WHOLESALE_PLATFORM
         clean.append(r)
     if not clean:
         return _v1_err("没有要更新的订单")
@@ -77,7 +85,9 @@ def v1_orders_list():
     conds, args = ["updated_at>=?"], [float(a.get("since") or 0)]
     if a.get("status"):
         conds.append("status=?"); args.append(a["status"])
-    if a.get("platform"):
+    if _v1_wholesale():
+        conds.append("platform=?"); args.append(WHOLESALE_PLATFORM)
+    elif a.get("platform"):
         conds.append("platform=?"); args.append(a["platform"])
     rows = c.execute(f"SELECT id FROM orders WHERE {' AND '.join(conds)} ORDER BY updated_at LIMIT ?",
                      (*args, min(1000, int(a.get("limit") or 200)))).fetchall()
@@ -94,6 +104,9 @@ def v1_orders_list():
         o["cost"] = finance.order_profit(cfg, orow, irows)
         if read_only:
             for k in V1_PII_FIELDS:
+                o.pop(k, None)
+        if _v1_wholesale():
+            for k in WHOLESALE_ORDER_HIDE:
                 o.pop(k, None)
         out.append(o)
     return jsonify({"ok": True, "orders": out, "count": len(out)})
@@ -153,6 +166,8 @@ def v1_skus():
                 # v2.32.1（接口需求单：商品主图）：{id, url, updated_at, for: sku / product}，没图为 null
                 "image": _gimg.sku_image(p, v) if _gimg else None,
             })
+    if _v1_wholesale():
+        out = [{k: v for k, v in s_.items() if k not in WHOLESALE_SKU_HIDE} for s_ in out]
     return jsonify({"ok": True, "skus": out, "count": len(out)})
 
 

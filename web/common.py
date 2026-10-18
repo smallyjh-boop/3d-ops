@@ -586,6 +586,18 @@ def _v1_err(msg, code=400):
 V1_PII_FIELDS = ("buyer", "receiver", "phone", "address", "postcode", "buyer_note", "label_file", "buyer_key")
 
 
+WHOLESALE_PLATFORM = "wholesale"
+# 批发站密钥看不到的 SKU 字段（成本、底价、建议价、手填价、机时）和订单字段（成本利润）
+WHOLESALE_SKU_HIDE = ("unit_cost", "suggested_price", "floor_price", "manual_price", "hours", "source", "listing",
+                      "lazada_category_id", "shopee_category_id", "exported_at")
+WHOLESALE_ORDER_HIDE = ("cost", "platform_fee", "raw")
+
+
+def _v1_wholesale():
+    from flask import g
+    return (getattr(g, "user", None) or {}).get("scope") == "wholesale"
+
+
 def _v1_read_only():
     from flask import g
     return (getattr(g, "user", None) or {}).get("scope") == "read"

@@ -154,7 +154,7 @@
     <summary class="row between"><h3>API 密钥（外部程序调用本系统）</h3><a class="btn" href="/api-docs" target="_blank">接口说明</a></summary>
     <p class="muted small">外部程序（运营分析系统、3D选品工具、自己写的程序）用「API 密钥」调用本系统接口。每个程序一把，名字写清楚，方便停用。</p>
     <table class="grid small" id="intg-keys"><thead><tr><th>名称</th><th>密钥开头</th><th>权限</th><th>创建</th><th>最后使用</th><th>次数</th><th>启用</th><th></th></tr></thead><tbody></tbody></table>
-    <div class="row gap"><input id="key-name" placeholder="名称，例如 Lazada 同步" style="width:220px" data-notr><label class="small">权限<select id="key-scope"><option value="full">完整（可推送订单）</option><option value="read">只读（运营分析系统查询用）</option><option value="ops">运营写回（只能改标题、属性、售价、上下架）</option><option value="catalog">建产品（3D选品工具用）</option></select></label><button id="btn-key-new">创建密钥</button></div>
+    <div class="row gap"><input id="key-name" placeholder="名称，例如 Lazada 同步" style="width:220px" data-notr><label class="small">权限<select id="key-scope"><option value="full">完整（可推送订单）</option><option value="read">只读（运营分析系统查询用）</option><option value="ops">运营写回（只能改标题、属性、售价、上下架）</option><option value="catalog">建产品（3D选品工具用）</option><option value="wholesale">批发站（看不到成本）</option></select></label><button id="btn-key-new">创建密钥</button></div>
     <div id="key-new-out"></div>
   </details>
   </div>
