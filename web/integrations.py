@@ -47,6 +47,20 @@ def v1_orders_push():
     return jsonify({"ok": not st["errors"], **st})
 
 
+@app.post("/api/v1/wholesale/hook")
+def v1_wholesale_hook():
+    """v2.37：批发网站登记回调地址 {"url": "https://…/erp/hook/", "secret": "…"}（只限批发站密钥）。"""
+    if not _v1_wholesale():
+        return _v1_err("只有批发站密钥能登记回调", 403)
+    b = request.get_json(force=True, silent=True) or {}
+    from core import wholesale_hook
+    try:
+        wholesale_hook.register(b.get("url"), b.get("secret"))
+    except ValueError as e:
+        return _v1_err(str(e))
+    return jsonify({"ok": True})
+
+
 @app.post("/api/v1/orders/status")
 def v1_orders_status():
     """只更新状态/运单号：{"platform":"shopee","order_no":"...","status":"shipped","tracking_no":"..."} 或 {"orders":[...]}"""

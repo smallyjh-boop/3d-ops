@@ -68,4 +68,27 @@ for m, p in (("get", "/api/v1/cost-params"), ("get", "/api/v1/profit"), ("get", 
     assert code == 403, (p, code)
 assert x.get("/api/v1/ping", headers=H(wk)).status_code == 200
 print("keys", [(k["name"], k["scope"]) for k in c.get("/api/integrations").get_json().get("keys", [])][-2:])
+
+# 4. v2.37 回调：只有批发站密钥能登记；批发订单状态变化时回调（带签名）
+import hashlib, hmac, json as _json
+from core import wholesale_hook
+r = x.post("/api/v1/wholesale/hook", json={"url": "https://shop.test/erp/hook/", "secret": "s" * 20}, headers=H(fk))
+assert r.status_code == 403, r.status_code
+r = x.post("/api/v1/wholesale/hook", json={"url": "ftp://x", "secret": "s" * 20}, headers=H(wk))
+assert r.status_code == 400, r.status_code
+r = x.post("/api/v1/wholesale/hook", json={"url": "https://shop.test/erp/hook/", "secret": "s" * 20}, headers=H(wk))
+assert r.get_json()["ok"], r.get_json()
+sent = []
+wholesale_hook._post = lambda url, secret, body: sent.append((url, secret, body))
+import threading as _th
+_orig = _th.Thread
+class _Now:
+    def __init__(self, target, args, daemon=True): self.t, self.a = target, args
+    def start(self): self.t(*self.a)
+wholesale_hook.threading.Thread = _Now
+x.post("/api/v1/orders/status", json={"order_no": "WS-0001", "status": "completed"}, headers=H(wk))
+wholesale_hook.threading.Thread = _orig
+assert sent and sent[-1][0] == "https://shop.test/erp/hook/", sent
+body = _json.loads(sent[-1][2]); assert body["order_no"] == "WS-0001" and body["status"] == "completed", body
+print("hook ok", body["status"])
 print("ALL OK")

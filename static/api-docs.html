@@ -38,7 +38,7 @@ th{background:#f9fafb}
 <h2><span class="m get">GET</span>/api/v1/ping</h2>
 <p>测试密钥和网络是否正常。</p>
 <pre><code>curl -H "Authorization: Bearer lh_xxxx" {{BASE}}/api/v1/ping
-→ {"ok": true, "version": "2.36.1", "time": 1791200000}</code></pre>
+→ {"ok": true, "version": "2.37.0", "time": 1791200000}</code></pre>
 
 <h2><span class="m post">POST</span>/api/v1/orders　推送订单（新增或更新）</h2>
 <p>平台 + 订单号相同视为同一个订单：再次推送只更新状态等信息，不会重复，也不会覆盖你在系统里写的定制备注和加急。
@@ -231,6 +231,11 @@ v2.12 起每行多 <code>spools</code>：<code>{"sealed": 未开封卷数, "open
 <p>给批发网站用。只能调：<code>GET /api/v1/ping</code>、<code>GET /api/v1/skus</code>、<code>GET /api/v1/images/…</code>（商品图片）、<code>GET /api/v1/orders</code>、<code>POST /api/v1/orders</code>、<code>POST /api/v1/orders/status</code>。
 推送和改状态时平台一律当作 <code>wholesale</code>（传别的平台也会被改掉），所以碰不到 Lazada / Shopee 的订单；查询只返回批发订单。
 SKU 不返回成本、底价、建议价、手填价、机时；订单不返回成本利润和平台费。批发订单和其他订单一样生成生产任务、占用耗材库存。其他接口一律 403。</p>
+<h2><span class="m post">POST</span>/api/v1/wholesale/hook　登记回调地址（v2.37）</h2>
+<pre><code>POST /api/v1/wholesale/hook
+{"url": "https://shop.example.com/erp/hook/", "secret": "至少 16 位的随机字符串"}</code></pre>
+<p>只限批发站密钥。登记后批发订单状态一变，ERP 就 POST 到这个地址：内容 <code>{"event": "order.status", "order_no": "…", "status": "shipped", "time": …}</code>，
+请求头 <code>X-Timestamp</code>（Unix 秒）和 <code>X-Signature</code> = HMAC-SHA256(secret, 时间戳 + "." + 请求内容) 的十六进制。网站验签后自己调 <code>GET /api/v1/orders</code> 取最新状态。</p>
 <h2><span class="m get">GET</span>/api/v1/finance/events　财务事件（v2.18）</h2>
 <p>「财务」密钥（scope = finance）。库存 / 采购里跟钱有关的事：<code>purchase_payment</code> 采购付款、<code>purchase_received</code> 采购到货入库。参数 <code>since</code>（Unix 秒）、<code>kind</code>、<code>limit</code>（最多 5000）。
 字段：<code>id, ts, day, source, kind, amount, currency, category, ref_type, ref_no, method, note, username</code>。</p>

@@ -1184,6 +1184,13 @@ def on_status_change(oid, new, user="", old=None):
     待发货 → 已发货：按设置自动扣包材（v2.18）。"""
     from . import chain
     chain.order_status(oid, new, old, user)      # v2.31：库存模块开着时「已发货」自动扣包材（库存模块自己判断）
+    try:                                          # v2.37：批发站的订单状态变了，马上通知批发网站
+        r = db.conn().execute("SELECT platform, order_no FROM orders WHERE id=?", (oid,)).fetchone()
+        if r and r["platform"] == "wholesale":
+            from . import wholesale_hook
+            wholesale_hook.notify(r["order_no"], new)
+    except Exception as e:   # 不影响订单处理
+        print("批发站回调出错：", e)
     if new == "delivery_failed":
         from . import extras
         try:
