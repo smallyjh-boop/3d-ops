@@ -126,7 +126,7 @@
         if (!d || !d.messages.length) return;
         const last = d.messages[d.messages.length - 1];
         const sig = last.from + ":" + last.text;
-        if (sig !== lastSig) { lastSig = sig; chrome.runtime.sendMessage({ type: "chat-changed", last }); }
+        if (sig !== lastSig) { lastSig = sig; try { chrome.runtime.sendMessage({ type: "chat-changed", last }, () => void chrome.runtime.lastError); } catch { /* 插件重新加载过，旧页面 */ } }
       }, 1200);
     });
     obs.observe(watchEl, { childList: true, subtree: true, characterData: true });
@@ -233,8 +233,8 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-    if (msg.type === "unread-q") { let d = { n: 0, buyers: [], chat: false }; try { d = countUnread(); } catch { /* 忽略 */ } chrome.runtime.sendMessage({ type: "unread-ans", req: msg.req, data: d }); return; }
-    if (msg.type === "collect") { let d = null; try { d = readChat(); } catch { d = null; } chrome.runtime.sendMessage({ type: "collected", req: msg.req, data: d }); return; }
+    if (msg.type === "unread-q") { let d = { n: 0, buyers: [], chat: false }; try { d = countUnread(); } catch { /* 忽略 */ } chrome.runtime.sendMessage({ type: "unread-ans", req: msg.req, data: d }, () => void chrome.runtime.lastError); return; }
+    if (msg.type === "collect") { let d = null; try { d = readChat(); } catch { d = null; } chrome.runtime.sendMessage({ type: "collected", req: msg.req, data: d }, () => void chrome.runtime.lastError); return; }
     if (msg.type === "insert") { reply({ ok: insertReply(msg.text) }); return; }
     if (msg.type === "sendmsg") { sendNow(msg.text).then(reply); return true; }
     if (msg.type === "patrol") {

@@ -85,7 +85,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === "unread-all") {
     const req = "u" + Date.now() + "_" + Math.random();
     PEND[req] = [];
-    chrome.tabs.sendMessage(tabId, { type: "unread-q", req });
+    chrome.tabs.sendMessage(tabId, { type: "unread-q", req }, () => void chrome.runtime.lastError);   // v2.9.1：标签里没有插件脚本（刚刷新等）时不报错
     setTimeout(() => {
       const arr = (PEND[req] || []).filter((x) => x.data);
       delete PEND[req];
@@ -98,11 +98,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     return true;
   }
   if (msg.type === "collected") { if (PEND[msg.req]) PEND[msg.req].push({ frameId: sender.frameId, data: msg.data }); return false; }
-  if (msg.type === "chat-changed") { chrome.tabs.sendMessage(tabId, { type: "chat-changed-top", last: msg.last }, { frameId: 0 }); return false; }
+  if (msg.type === "chat-changed") { chrome.tabs.sendMessage(tabId, { type: "chat-changed-top", last: msg.last }, { frameId: 0 }, () => void chrome.runtime.lastError); return false; }
   if (msg.type === "collect-all") {
     const req = Date.now() + "_" + Math.random();
     PEND[req] = [];
-    chrome.tabs.sendMessage(tabId, { type: "collect", req });
+    chrome.tabs.sendMessage(tabId, { type: "collect", req }, () => void chrome.runtime.lastError);
     setTimeout(() => {
       const arr = (PEND[req] || []).filter((x) => x.data && x.data.messages && x.data.messages.length);
       delete PEND[req];

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "3D 运营管理系统 · AI 客服",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "description": "在 Lazada / Shopee / TikTok 卖家中心的聊天页面读取买家消息，用3D 运营管理系统的 AI 生成泰语回复并填入回复框；下载平台面单 PDF 时，点一下就发到系统。",
   "icons": {
     "16": "icon16.png",

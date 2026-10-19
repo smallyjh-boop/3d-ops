@@ -33,3 +33,4 @@ AI 客服——v2.30 从内核搬出来的模块（原来的 core/cs/ 现在是 
 
 - 1.0（系统 v2.30.0）：从内核搬成模块。
 - 1.1（系统 v2.34.0）：泰文翻译从内核 static/i18n.js 搬到模块自己的 i18n/th.json（只在这个模块里用到的那些），界面不变。
+- 1.2（系统 v2.37.1）：浏览器插件 2.9.1：后台给没有插件脚本的标签 / 框架发消息时（网页刚刷新、插件刚重新加载）不再在 chrome://extensions 里报「Could not establish connection. Receiving end does not exist.」。功能本身没变。测试 tests/ui/ui2371ext.py。
