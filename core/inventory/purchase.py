@@ -199,6 +199,12 @@ def receive(pid, qtys=None, user="", note=""):
             q = float(v) * (ln["net_g"] or 1000) if ln["rolls"] else float(v)
         if q <= 0:
             continue
+        if qtys is not None and q > left + 1e-6:      # v2.38：不能比还没到的多（以前能收成 14/10）
+            it = ledger.get_item(ln["item_id"]) or {}
+            unit = "卷" if ln["rolls"] else (it.get("unit") or "")
+            left_show = left / (ln["net_g"] or 1000) if ln["rolls"] else left
+            raise ValueError(f"{it.get('name_zh') or ''}：这次到货比还没到的多（还差 {left_show:g} {unit}）。"
+                             f"供应商多发了的话，多出来的另开一张采购入库单")
         q = min(q, left) if qtys is None else q
         uc = (ln["unit_cost"] or 0) * (1 + fee_rate)
         dl = {"item_id": ln["item_id"], "qty": q, "unit_cost": round(uc, 6), "note": ln["note"] or ""}
@@ -219,6 +225,31 @@ def receive(pid, qtys=None, user="", note=""):
     finance.event("purchase_received", round(abs(d.get("amount") or 0), 2), ref_type="po", ref_no=po["no"],
                   note=f"采购到货入库 {d['no']}", user=user, category=_po_category(c, po["id"]))
     return get_po(po["id"])
+
+
+def on_receipt_void(d, amount, user=""):
+    """v2.38：采购到货入库单被作废：已到数量减回去、状态退回「已下单 / 部分到货」、财务记一笔负的到货。"""
+    c = db.conn()
+    po = c.execute("SELECT * FROM inv_po WHERE no=?", (d["ref"][3:],)).fetchone()
+    if not po:
+        return
+    for dl in c.execute("SELECT item_id, qty FROM inv_doc_lines WHERE doc_id=?", (d["id"],)).fetchall():
+        left = abs(dl["qty"] or 0)
+        for ln in c.execute("SELECT id, COALESCE(received,0) r FROM inv_po_lines WHERE po_id=? AND item_id=? ORDER BY id DESC",
+                            (po["id"], dl["item_id"])).fetchall():
+            take = min(left, ln["r"])
+            if take > 0:
+                c.execute("UPDATE inv_po_lines SET received=? WHERE id=?", (max(0, ln["r"] - take), ln["id"]))
+                left -= take
+            if left <= 1e-9:
+                break
+    if po["status"] in ("partial", "received", "closed"):
+        got = c.execute("SELECT SUM(COALESCE(received,0)) FROM inv_po_lines WHERE po_id=?", (po["id"],)).fetchone()[0] or 0
+        c.execute("UPDATE inv_po SET status=?, received_at=NULL WHERE id=?", ("partial" if got > 1e-9 else "ordered", po["id"]))
+    c.commit()
+    if amount:
+        finance.event("purchase_received", -round(amount, 2), ref_type="po", ref_no=po["no"],
+                      note=f"作废到货入库单 {d['no']}", user=user, category=_po_category(c, po["id"]))
 
 
 def _po_category(c, pid):

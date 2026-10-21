@@ -283,8 +283,12 @@ def reconcile(start, end):
     settled, diff, unpaid = [], [], []
     now = time.time()
     tot = {"orders": len(orders), "settled": 0, "revenue": 0.0, "net": 0.0, "fees": 0.0, "unpaid_amount": 0.0, "diff_amount": 0.0}
+    item_sum = {r[0]: r[1] for r in c.execute(
+        "SELECT order_id, SUM(COALESCE(item_total,0)) FROM order_items WHERE order_id IN "
+        "(SELECT id FROM orders WHERE order_time>=? AND order_time<?) GROUP BY order_id", (s_ts, e_ts))}
     for o in orders:
-        rev = float(o["order_total"] or 0)
+        # v2.38：没有订单金额（Shopee 导出常见）→ 按商品合计，和损益表、订单明细一样（以前当成 0，扣费算成负数）
+        rev = float(o["order_total"] if o["order_total"] is not None else (item_sum.get(o["id"]) or 0))
         rate = cfg.get("shopee_fee_rate") if o["platform"] == "shopee" and cfg.get("shopee_fee_rate") else cfg.get("platform_fee_rate", 0)
         expect = rev * (1 - float(rate or 0))
         row = {"id": o["id"], "platform": o["platform"], "shop": o["shop"], "order_no": o["order_no"], "status": o["status"],

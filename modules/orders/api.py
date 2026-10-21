@@ -52,7 +52,7 @@ def order_get(oid):
     if not o:
         return err("订单不存在", 404)
     o["jobs"] = production.list_jobs(order_id=oid)
-    o["log"] = orders_mod.get_log(oid)
+    o["log"] = orders_mod.get_log(oid, hide_money=not auth.is_owner())
     from core import extras as _ex
     o["aftersales"] = _ex.as_list(oid, days=3650)
     o["buyer_profile"] = orders_mod.buyer_profile(o.get("buyer_key"), exclude_id=None) if o.get("buyer_key") else None
@@ -190,7 +190,10 @@ def orders_export():
 
 @bp.delete("/api/orders/<int:oid>")
 def order_delete(oid):
-    orders_mod.delete_order(oid)
+    try:
+        orders_mod.delete_order(oid)
+    except ValueError as e:      # v2.38：正在打印的订单不能删
+        return err(str(e))
     return jsonify({"ok": True})
 
 
@@ -402,6 +405,10 @@ def aftersales_one(aid):
 @bp.post("/api/aftersales")
 def aftersales_post():
     b = request.get_json(force=True) or {}
+    if b.get("status") and b.get("order_id"):      # v2.38：借售后把订单改成取消 / 拒收，一样要 orders.cancel 权限
+        denied = _cancel_denied(int(b["order_id"]), b)
+        if denied:
+            return denied
     try:
         aid = extras.as_add(int(b.get("order_id") or 0), b.get("kind") or "other", b.get("reason") or "其他",
                             b.get("amount") if auth.is_owner() or b.get("amount") not in (None, "") else None,
