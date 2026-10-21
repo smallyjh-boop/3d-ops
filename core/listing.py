@@ -134,10 +134,13 @@ def _batch_row(r):
         except FileNotFoundError:
             continue
         st = status_of(p, d["platform"])
-        # 后来又被别的批次重新导出了：这个批次里显示那次的状态
+        other = st.get("batch") not in (None, d["id"])
         items.append({"id": pid, "name": p.get("name_zh", ""), "status": st.get("status"), "note": st.get("note", ""),
-                      "other_batch": st.get("batch") not in (None, d["id"])})
-        counts[st.get("status") or "none"] += 1
+                      "other_batch": other})
+        if other:      # v2.41：后来在别的批次重新导出了 → 状态算在那个批次，这里不再按现在的状态计数
+            counts["moved"] = counts.get("moved", 0) + 1
+        else:
+            counts[st.get("status") or "none"] += 1
     d["items"] = items
     d["counts"] = counts
     return d

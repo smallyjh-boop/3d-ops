@@ -4,6 +4,7 @@ from flask import Blueprint
 
 from web.common import *  # noqa: F401,F403
 from core import chain
+from core.labels import cod_txt
 
 bp = Blueprint("m_orders", __name__)
 PREFIXES = []
@@ -113,21 +114,27 @@ def order_update(oid):
 @bp.post("/api/orders/batch")
 def orders_batch():
     b = request.get_json(force=True) or {}
-    ids = [int(x) for x in b.get("ids") or []]
+    try:
+        ids = [int(x) for x in b.get("ids") or []]
+    except (TypeError, ValueError):      # v2.41
+        return err("订单编号不对")
     act = b.get("action")
     if not ids:
         return err("请先勾选订单")
     if act == "delete" and not auth.has_perm(auth.current_user(), "orders.delete"):
         return err(_no_perm("orders.delete"), 403)
-    if act == "status" and b.get("value") in ("cancelled", "delivery_failed") and _need("orders.cancel"):
+    if act == "status" and b.get("value") in ("cancelled", "delivery_failed", "returned") and _need("orders.cancel"):
         return _need("orders.cancel")
+    errors = []
     try:
-        n = orders_mod.batch(ids, act, b.get("value"), _uname())
+        n = orders_mod.batch(ids, act, b.get("value"), _uname(), errors)
     except ValueError as e:
         return err(str(e))
     chain.order_changed(_uname())
     chain.reschedule()
-    return jsonify({"done": n})
+    if not n and errors:
+        return err(errors[0])
+    return jsonify({"done": n, "errors": errors[:20]})
 
 
 @bp.get("/api/orders/export")
@@ -609,7 +616,7 @@ def handover_print():
     fmt = (lambda t: dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else "")
     cfg = load_config()
     rows = "".join(f"<tr><td>{i}</td><td><b>{h(o['tracking_no'] or '（无运单号）')}</b></td><td>{h(o['order_no'])}</td>"
-                   f"<td>{h(o['platform'] or '')}</td><td>{o['n_items']}</td><td>{'COD ฿' + format(o['cod'], ',.0f') if o['cod'] else ''}</td></tr>"
+                   f"<td>{h(o['platform'] or '')}</td><td>{o['n_items']}</td><td>{'COD ฿' + cod_txt(o['cod']) if o['cod'] else ''}</td></tr>"
                    for i, o in enumerate(d["orders"], 1))
     html = (f"<!doctype html><html><head><meta charset='utf-8'><title>交接单 #{d['id']}</title><style>"
             "body{font:13px 'Microsoft YaHei','Leelawadee UI',sans-serif;margin:16px;color:#111}table{border-collapse:collapse;width:100%}"
@@ -618,7 +625,7 @@ def handover_print():
             f"<h2>发货交接单 ใบส่งมอบพัสดุ #{d['id']}</h2>"
             f"<p>物流 ขนส่ง：<b>{h(d['carrier'] or '-')}</b> · {h(d['method_zh'] or '')} · 寄件人 ผู้ส่ง：{h(cfg.get('sender_name') or '')} "
             f"{h(cfg.get('sender_phone') or '')}<br>共 รวม <b>{d['count']}</b> 件包裹 พัสดุ"
-            f"{' · 货到付款合计 ยอด COD ฿' + format(d['cod_total'], ',.0f') if d['cod_total'] else ''} · 打印时间 {fmt(time.time())}</p>"
+            f"{' · 货到付款合计 ยอด COD ฿' + cod_txt(d['cod_total']) if d['cod_total'] else ''} · 打印时间 {fmt(time.time())}</p>"
             "<table><tr><th>#</th><th>运单号 เลขพัสดุ</th><th>订单号</th><th>平台</th><th>件数</th><th>COD</th></tr>"
             f"{rows}</table><div class='sig'><div>交件人 ผู้ส่งมอบ：________________</div><div>快递员 พนักงานขนส่ง：________________</div>"
             "<div>时间 เวลา：________________</div></div></body></html>")

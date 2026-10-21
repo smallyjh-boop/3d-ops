@@ -31,7 +31,7 @@
     return `<div class="fm-slice ${f.active ? "" : "off"}" data-fid="${f.id}" data-pid="${esc(pid)}">
       <span class="pill fpill-${st}">${esc(D.status_zh[st] || st)}</span>
       ${f.material ? `<span class="mat-badge" data-notr>${esc(f.material)}</span>` : ""}
-      <span data-notr>${esc(f.printer === "*" ? "任何打印机" : f.printer)}</span>${f.spec ? ` · 规格 <b data-notr>${esc(f.spec)}</b>` : ""} · 一盘 ${f.per_plate} 个 · v${f.version || 1}
+      ${f.printer === "*" ? "<span>任何打印机</span>" : `<span data-notr>${esc(f.printer)}</span>`}${f.spec ? ` · 规格 <b data-notr>${esc(f.spec)}</b>` : ""} · 一盘 ${f.per_plate} 个 · v${f.version || 1}
       ${f.sku ? `<span class="mono small" data-notr>${esc(f.sku)}</span>` : ""}
       <span class="small muted">${f.grams ? H().num(f.grams, 0) + "g · " : ""}${f.hours ? H().num(f.hours, 1) + "h · " : ""}${size(f.size)} · ${fmtTime(f.created_at).slice(0, 10)}${f.active ? "" : " · 已停用"}</span>
       <span class="fm-acts">

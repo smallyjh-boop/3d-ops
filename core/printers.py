@@ -277,6 +277,27 @@ def detect(c):
     raise ValueError("连不上这个 IP。请确认打印机开机、和 NAS/电脑在同一个局域网，IP 没填错")
 
 
+def _human_err(e):
+    """v2.41：网络错误换成员工看得懂的中文（泰文界面会翻译），不再显示 [Errno 111] Connection refused。"""
+    s = str(e) or type(e).__name__
+    low = s.lower()
+    if "refused" in low or "errno 111" in low or "10061" in low:
+        return "打印机拒绝连接（打印机开着吗？局域网模式 / 访问码对吗？）"
+    if "timed out" in low or "timeout" in low:
+        return "连不上打印机（超时）：检查打印机是否开机、IP 是否对、是否在同一个网络"
+    if "no route" in low or "unreachable" in low or "errno 113" in low or "name or service" in low:
+        return "找不到这台打印机（IP 不对或不在同一个网络）"
+    return s
+
+
+def _no_conn_msg(c):
+    """v2.41：连接方式选了「自动识别」但还没认出来 → 说清楚，不是「没有设置连接」。"""
+    if (c.get("type") or "none") == "auto":
+        return ("这台打印机的连接方式是「自动识别」，但还没认出来是哪种（打印机没开 / IP 不通 / 不在同一个网络）。"
+                "确认打印机开着、IP 对，或者在 打印机 → 连接设置 里手动选连接方式")
+    return "这台打印机没有设置连接（打印机页 → 连接设置）"
+
+
 def _type(c):
     t = c.get("type") or "none"
     if t == "auto":
@@ -307,7 +328,7 @@ def poll_once(idx, p):
         elif t == "creality":
             _set(idx, creality_status(c["host"]))
     except Exception as e:  # 打印机关机等
-        _set(idx, {"state": "offline", "error": str(e) or type(e).__name__, "conn": t})
+        _set(idx, {"state": "offline", "error": _human_err(e), "conn": t})
 
 
 def test(p):
@@ -363,7 +384,7 @@ def command(idx, cmd):
         params = {"pause": {"pause": 1}, "resume": {"pause": 0}, "stop": {"stop": 1}}[cmd]
         creality_raw(c["host"], wait=1, send={"method": "set", "params": params})
     else:
-        raise ValueError("这台打印机没有设置连接")
+        raise ValueError(_no_conn_msg(c))
 
 
 def send_file(idx, local_path, remote_name, kind, ams_slot=None):
@@ -409,7 +430,7 @@ def send_file(idx, local_path, remote_name, kind, ams_slot=None):
             creality_raw(c["host"], wait=1, send={"method": "set",
                                                   "params": {"opGcodeFile": f"printprt:/usr/data/printer_data/gcodes/{name}"}})
             return name
-        raise ValueError("这台打印机没有设置连接（打印机页 → 连接设置）")
+        raise ValueError(_no_conn_msg(c))
     finally:
         if tmp:
             try:

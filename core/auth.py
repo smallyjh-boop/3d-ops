@@ -94,6 +94,8 @@ PRODUCTION_ALLOW = [
     ("POST", r"^/api/(stock/make|maintenance|materials/flag|pack/done)$"),
     ("GET", r"^/api/pack/lookup$"),
     ("GET", r"^/print/jobs$"),
+    ("GET", r"^/api/colors$"),                            # v2.41：颜色表（泰文颜色名，生产员工用泰文界面）
+    ("GET", r"^/fonts/"),                                 # v2.41：泰文字体
 ]
 SECRET_KEYS = ("ai_api_key", "imgbb_api_key", "image_api_key", "curator_api_key", "update_token")
 COST_KEYS = ("filament_price_cny_per_kg", "cny_to_thb", "material_loss_rate", "electricity_thb_per_kwh",

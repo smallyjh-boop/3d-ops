@@ -133,6 +133,19 @@ def ship_order(oid, user=""):
         return None
 
 
+def allow_again(oid, user=""):
+    """v2.41：退货 / 拒收后改回待发货（重新发货）：下次发货再开一张出库单（以前每单只出一次，重发不扣纸箱、包材）。"""
+    try:
+        c = db.conn()
+        if c.execute("DELETE FROM inv_order_out WHERE order_id=?", (oid,)).rowcount:
+            c.commit()
+            from core import orders
+            orders.log(oid, user or "系统", "重新发货", "下次发货会再开一张出库单")
+    except Exception as e:  # noqa: BLE001
+        log.warning("重新发货准备失败（订单 %s）：%s", oid, e)
+    return None
+
+
 def revert(oid, user=""):
     """订单从「已发货」改回「待发货」：出库单作废（数量冲回），以后再发货时重新出库。"""
     try:

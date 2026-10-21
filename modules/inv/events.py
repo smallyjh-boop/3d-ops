@@ -14,4 +14,7 @@ def on_order_status(oid, new, old=None, user=""):
         return shipout.ship_order(oid, user)
     if new in SHIP_FROM and old in SHIPPED:
         return shipout.revert(oid, user)
+    if new in SHIP_FROM and old in ("returned", "delivery_failed"):
+        # v2.41：退货 / 拒收后重新发：东西已经由售后验货退回库存，原来的出库单不作废，只是允许再出一次库
+        return shipout.allow_again(oid, user)
     return None

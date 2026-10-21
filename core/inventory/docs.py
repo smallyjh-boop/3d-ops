@@ -182,7 +182,12 @@ def stocktake_save(doc_id, counts, user=""):
     if not d or d["kind"] != "stocktake" or d["status"] != "draft":
         raise ValueError("这张盘点单已经确认或不存在")
     for lid, v in (counts or {}).items():
-        val = None if v in (None, "") else float(v)
+        try:
+            val = None if v in (None, "") else float(v)
+        except (TypeError, ValueError):      # v2.41：以前把 Python 的原始报错丢给用户
+            raise ValueError(f"实盘数「{v}」要填数字")
+        if val is not None and (not math.isfinite(val) or val < 0):
+            raise ValueError(f"实盘数「{v}」要填 0 或正数")
         if val is not None and val < 0:
             raise ValueError("实盘数不能是负数")
         c.execute("UPDATE inv_doc_lines SET counted=? WHERE id=? AND doc_id=?", (val, int(lid), d["id"]))

@@ -8,6 +8,7 @@
 任务和打印记录里存的是打印机序号；改顺序、删除打印机时用编码把序号对回来。
 """
 import re
+import time
 
 from . import db
 
@@ -127,9 +128,15 @@ def remap(old, new):
         j = new_idx.get(c)
         if j != i:
             mapping[i] = j
+    c = db.conn()
+    gone = [code for code in old_codes if code and code not in new_idx]
+    if gone and c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='spools'").fetchone():
+        # v2.41：删掉的打印机上装着的料卷 → 取下来放回库里（以前一直挂在已经不存在的编码上，新加的同型号打印机会「继承」它）
+        c.execute(f"UPDATE spools SET status='open', printer=NULL, slot=NULL, updated_at=? WHERE status='loaded' AND printer IN "
+                  f"({','.join('?' * len(gone))})", (time.time(), *gone))
+        c.commit()
     if not mapping:
         return {}
-    c = db.conn()
     for t in PRINTER_TABLES:
         if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,)).fetchone():
             continue

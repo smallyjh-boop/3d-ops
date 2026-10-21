@@ -425,6 +425,8 @@ def _ensure_empty(c, codes):
     full = sorted({r[0] for r in c.execute(f"SELECT location FROM inv_items WHERE active=1 AND location IN ({q})", list(codes))}, key=sort_key)
     if full:
         raise ValueError(f"{'、'.join(full[:5])} 里还放着东西，先把东西换到别的货位再删")
+    # v2.41：停用的物品还记着这些货位 → 清掉（以后重新启用时显示「还没有货位」，不会指向已经删掉的格子）
+    c.execute(f"UPDATE inv_items SET location=NULL WHERE active=0 AND location IN ({q})", list(codes))
 
 
 def _delete(c, rows):

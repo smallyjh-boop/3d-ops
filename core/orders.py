@@ -225,7 +225,10 @@ def _read_rows(path):
             except UnicodeDecodeError:
                 continue
         return [r for r in csv.reader(io.StringIO(text))]
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    except Exception:  # noqa: BLE001  v2.41：坏文件以前是 500
+        raise ValueError("这个文件打不开，不是有效的 Excel 表格。请在 Excel 里另存为 .xlsx 或 .csv 再试")
     best = None
     for ws in wb.worksheets:
         rows = [list(r) for r in ws.iter_rows(values_only=True)]
@@ -414,7 +417,9 @@ def _variant_info(pid, vi):
 # ---------------- 导入 ----------------
 def commit(token, mapping, platform="", profile_name="", user=""):
     """表格导入：把每一行转成标准订单格式，再交给 upsert（和 API 自动导入走同一条路）。"""
-    meta_path = os.path.join(IMPORT_DIR, token + ".json")
+    if not token or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", str(token)):      # v2.41：没带 / 乱带 token 以前是 500
+        raise ValueError("导入已过期，请重新选择文件")
+    meta_path = os.path.join(IMPORT_DIR, str(token) + ".json")
     if not os.path.exists(meta_path):
         raise ValueError("导入已过期，请重新选择文件")
     meta = json.load(open(meta_path, encoding="utf-8"))
@@ -775,6 +780,10 @@ def get_log(order_id, hide_money=False):
     return rows
 
 
+def _fmt_ts(v):
+    return dt.datetime.fromtimestamp(float(v)).strftime("%Y-%m-%d %H:%M") if v not in (None, "") else "（空）"
+
+
 def update_order(oid, user="", **kw):
     allowed = ("custom_note", "seller_note", "priority", "status", "ship_by", "kind", "tracking_no", "tags", "buyer",
                "receiver", "phone", "address", "postcode", "carrier", "cod", "ship_method", "payment") + MONEY_FIELDS
@@ -787,7 +796,10 @@ def update_order(oid, user="", **kw):
         if k in sets:
             sets[k] = _num(sets[k]) if sets[k] != "" else None
     if "ship_by" in sets:
-        sets["ship_by"] = _time(sets["ship_by"]) if sets["ship_by"] != "" else None
+        raw = sets["ship_by"]
+        sets["ship_by"] = _time(raw) if raw != "" else None
+        if raw != "" and sets["ship_by"] is None:      # v2.41：看不懂的日期以前会把原来的清空
+            raise ValueError(f"最晚发货时间「{raw}」看不懂，请填 2026-10-21 18:00 这样的格式")
     if "cod" in sets:
         sets["cod"] = _num(sets["cod"])
         if sets["cod"] is None:
@@ -800,6 +812,8 @@ def update_order(oid, user="", **kw):
         raise ValueError("订单不存在")
     def _same(k, v):
         ov = old[k]
+        if k == "ship_by" and v is not None and ov is not None:      # v2.41：页面上只到分钟，差几十秒不算改了
+            return abs(float(v) - float(ov)) < 60
         if v is None or ov is None:
             return ("" if v is None else str(v)) == ("" if ov is None else str(ov))
         if isinstance(ov, (int, float)) and not isinstance(v, str):
@@ -820,6 +834,8 @@ def update_order(oid, user="", **kw):
             log(oid, user, "状态", f"{STATUS_ZH.get(old['status'], old['status'])} → {STATUS_ZH.get(v, v)}", commit=False)
         elif k == "priority":
             log(oid, user, "加急" if int(v or 0) else "取消加急", "", commit=False)
+        elif k == "ship_by":
+            log(oid, user, FIELD_ZH.get(k, k), _fmt_ts(v), commit=False)
         else:
             log(oid, user, FIELD_ZH.get(k, k), str(v if v is not None else "（空）")[:200], commit=False)
     if "buyer" in sets or "phone" in sets:
@@ -1014,12 +1030,13 @@ def search(f):
             "ids_all": [o["id"] for o in out]}
 
 
-def batch(ids, action, value=None, user=""):
+def batch(ids, action, value=None, user="", errors=None):
+    """errors：传一个列表进来，没做成的订单和原因放进去（v2.41：以前没做成也不说）。"""
     with deferred_jobs(user):       # v2.40：批量改状态时生产任务最后统一刷一次
-        return _batch(ids, action, value, user)
+        return _batch(ids, action, value, user, errors)
 
 
-def _batch(ids, action, value=None, user=""):
+def _batch(ids, action, value=None, user="", errors=None):
     n = 0
     for oid in ids:
         oid = int(oid)
@@ -1049,7 +1066,9 @@ def _batch(ids, action, value=None, user=""):
             else:
                 raise ValueError("不支持的操作")
             n += 1
-        except ValueError:
+        except ValueError as e:
+            if errors is not None:
+                errors.append(str(e))
             continue
     return n
 
@@ -1087,6 +1106,7 @@ def edit_order(oid, data, user=""):
         sets["shop"] = str(data["shop"] or "")
     items = data.get("items")
     if items is not None:
+        items = [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []      # v2.41
         if not any(str(i.get("sku") or "").strip() for i in items):
             raise ValueError("至少要有一个商品")
         olds = [dict(r) for r in c.execute("SELECT sku, qty, unit_price, item_total FROM order_items WHERE order_id=? ORDER BY id", (oid,))]
@@ -1139,13 +1159,23 @@ def edit_order(oid, data, user=""):
                 sets["order_total"] = round(old["order_total"] + new_sum - old_sum, 2)
         log(oid, user, "修改商品", "；".join(f"{s}×{q}" for s, q in before) + " → " + "；".join(f"{s}×{q}" for s, q in after),
             commit=False)
+    # v2.41：没改的不写、不记（以前每次保存都记「平台费 None」「下单时间 1792…」）
+    def _diff(k, v):
+        ov = old[k]
+        if v is None or ov is None:
+            return (v is None) != (ov is None)
+        if isinstance(v, (int, float)) and isinstance(ov, (int, float)):
+            return abs(float(v) - float(ov)) >= (60 if k == "order_time" else 0.005)
+        return str(v) != str(ov)
+    sets = {k: v for k, v in sets.items() if _diff(k, v)}
     if sets:
         sets["updated_at"] = time.time()
         c.execute(f"UPDATE orders SET {', '.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), oid))
         for k in sets:
             if k in ("order_no", "order_time", "order_total", "shipping_fee", "platform_fee", "shop"):
+                v = _fmt_ts(sets[k]) if k == "order_time" else ("（空）" if sets[k] is None else str(sets[k]))
                 log(oid, user, {"order_no": "订单号", "order_time": "下单时间", "order_total": "订单金额", "shipping_fee": "运费",
-                                "platform_fee": "平台费", "shop": "店铺"}[k], str(sets[k]), commit=False)
+                                "platform_fee": "平台费", "shop": "店铺"}[k], v, commit=False)
     c.commit()
     if items is not None:
         from . import chain
@@ -1155,7 +1185,9 @@ def edit_order(oid, data, user=""):
 
 def create_manual(order, user=""):
     """手工订单：批发、大单、私下成交、预订单（报价）。"""
-    if not any((it.get("sku") or "").strip() for it in order.get("items") or []):
+    order = dict(order or {})
+    order["items"] = [dict(it, sku=str(it.get("sku") or "").strip()) for it in (order.get("items") or []) if isinstance(it, dict)]   # v2.41
+    if not any(it["sku"] for it in order["items"]):
         raise ValueError("请至少填一个商品 SKU")
     c = db.conn()
     now = time.time()

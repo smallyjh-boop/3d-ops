@@ -126,9 +126,13 @@ def pl(start=None, end=None, month=None):
         inv_used = None
 
     L = [_line("revenue", "销售收入（订单金额）", "รายได้จากการขาย (ยอดคำสั่งซื้อ)", rev, 0, (f"{len(rows)} 单", f"{len(rows)} คำสั่งซื้อ"))]
-    if st["vat_on"]:
+    if st["vat_on"] and st["incl_vat"]:
         L.append(_line("out_vat", "减：销项税 VAT", "หัก: ภาษีขาย VAT", -out_vat, 1, f"{vr * 100:g}%"))
         L.append(_line("rev_net", "不含税收入", "รายได้ไม่รวม VAT", rev_net, 2))
+    elif st["vat_on"]:
+        # v2.41：价格不含税——销项税是另外向买家收、要交给税务局的钱，不从收入里减（以前写「减：销项税」但收入不变，看起来算不平）
+        L.append(_line("out_vat", "销项税 VAT（价格不含税：另外向买家收，交给税务局，不算收入也不减收入）",
+                       "ภาษีขาย VAT (ราคาไม่รวม VAT: เก็บเพิ่มจากผู้ซื้อแล้วนำส่งสรรพากร ไม่นับเป็นรายได้)", out_vat, 4, f"{vr * 100:g}%"))
     L += [_line("fee", "减：平台扣费（佣金、服务费、手续费、卖家优惠）", "หัก: ค่าธรรมเนียมแพลตฟอร์ม", -fee_net, 1,
                 (f"其中按扣点估算 ฿{fee_est:,.0f}", f"ในนี้ประมาณจากอัตราค่าธรรมเนียม ฿{fee_est:,.0f}") if fee_est else "", est=bool(fee_est)),
           _line("material", "减：材料", "หัก: วัสดุ", -material, 1),
@@ -191,14 +195,17 @@ def breakdown(start, end, by="platform"):
                 k = (i["product_id"] or "（没对上产品）") if by == "product" else (i["sku"] or "?")
                 shares.append((k, share, i["qty"] or 1, i["name"] or ""))
         tot["qty"] += sum(s[2] for s in shares)
+        counted = set()      # v2.41：一张订单里同一个产品有好几个 SKU，订单数只算一次
         for k, share, qty, name in shares:
             g = groups.setdefault(k, {"key": k, "name": name, "orders": 0, "qty": 0, "revenue": 0.0, "fee": 0.0, "cost": 0.0, "profit": 0.0,
                                       "est_fee": 0})
-            g["orders"] += 1
+            if k not in counted:
+                g["orders"] += 1
+                g["est_fee"] += 1 if p["fee_estimated"] else 0
+                counted.add(k)
             g["qty"] += qty
             for f in ("revenue", "fee", "cost", "profit"):
                 g[f] += p[f] * share
-            g["est_fee"] += 1 if p["fee_estimated"] else 0
             if name and not g["name"]:
                 g["name"] = name
     if by == "product":
@@ -296,9 +303,15 @@ def tax(start, end):
             "missing_invoice": missing_invoice[:50] if st["vat_on"] else []}
 
 
-def overview(month=None):
-    s, e, label = period(month)
-    ps = dt.date(s.year - (s.month == 1), (s.month - 2) % 12 + 1, 1)
+def overview(month=None, start=None, end=None):
+    """v2.41：可以按任意期间（今年 / 自定义），和下面的损益表一致；对比的是紧挨着的前一段同样长的期间。"""
+    if start is not None:
+        s, e = start, end
+        label = f"{s.isoformat()} ~ {(e - dt.timedelta(days=1)).isoformat()}"
+        ps = s - (e - s)
+    else:
+        s, e, label = period(month)
+        ps = dt.date(s.year - (s.month == 1), (s.month - 2) % 12 + 1, 1)
     cur = pl(s, e)
     prev = pl(ps, s)
     cf = cashflow(s, e)

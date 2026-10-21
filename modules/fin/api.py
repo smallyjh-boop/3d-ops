@@ -12,6 +12,12 @@ PREFIXES = ["/api/fin/", "/api/expenses"] + [f"/api/v1/finance/{x}" for x in ("p
 fin.init()          # 自己的数据表
 
 
+def _method_zh(m):
+    """v2.41：导出里付款方式写中文（以前是 transfer / card 代码）。"""
+    from modules.fin.logic import book
+    return book.METHODS.get(m or "", m or "")
+
+
 def _period():
     a = request.args
     try:
@@ -72,7 +78,12 @@ def fin_orders_export():
 
 @bp.get("/api/fin/overview")
 def fin_overview():
-    return _wrap(lambda: fin.overview(request.args.get("month") or None))
+    def go():
+        if request.args.get("start"):        # v2.41：自定义期间 / 今年
+            s, e, _l = _period()
+            return fin.overview(start=s, end=e)
+        return fin.overview(request.args.get("month") or None)
+    return _wrap(go)
 
 
 @bp.get("/api/fin/pl")
@@ -214,7 +225,7 @@ def fin_export():
     w.append(["日期", "方向", "分类", "金额", "VAT", "有税票", "收款方", "付款方式", "备注", "记账人"])
     for r in fin.expenses(s.isoformat(), e.isoformat()):
         w.append([r["day"], "收入" if r["direction"] == "in" else "支出", r["category"], r["amount"], r.get("vat") or 0,
-                  "是" if r.get("tax_invoice") else "", r.get("payee") or "", r.get("method") or "", r.get("note") or "", r.get("username") or ""])
+                  "是" if r.get("tax_invoice") else "", r.get("payee") or "", _method_zh(r.get("method")), r.get("note") or "", r.get("username") or ""])
     w = wb.create_sheet("现金流")
     cf = fin.cashflow(s, e)
     w.append(["日期", "平台回款", "其他收入", "老板投入", "采购付款", "支出", "净流入", "累计"])

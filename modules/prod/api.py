@@ -718,6 +718,16 @@ def stock_post():
     return stock_get()
 
 
+@bp.delete("/api/jobs/<int:jid>")
+def job_delete(jid):
+    """v2.41：删除还没开始打的备货任务（以前生成了就删不掉，只能标完成）。"""
+    try:
+        production.delete_stock_job(jid, _uname())
+    except ValueError as e:
+        return err(str(e))
+    return jsonify({"ok": True})
+
+
 @bp.post("/api/stock/make")
 def stock_make():
     """人工确认后生成备货任务（排在订单任务后面）。"""

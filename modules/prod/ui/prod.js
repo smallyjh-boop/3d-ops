@@ -41,7 +41,8 @@
       (j.stock_n ? `<span class="pill tag-pill" title="先占住，发货出库时扣库存">📦 ${Z("用库存", "ใช้สต็อก")} ×${j.stock_n}</span>` : "");
     const btns = {
       todo: `<button class="big primary" data-start="${j.id}">▶ 开始打印…</button>` +
-        (j.stock > 0 && j.kind !== "stock" ? `<button class="big" data-usestock="${j.id}" title="先占住，发货出库时才扣库存">📦 ${Z(`用库存（可用 ${j.stock} 个）`, `ใช้สต็อก (มี ${j.stock} ชิ้น)`)}</button>` : ""),
+        (j.stock > 0 && j.kind !== "stock" ? `<button class="big" data-usestock="${j.id}" title="先占住，发货出库时才扣库存">📦 ${Z(`用库存（可用 ${j.stock} 个）`, `ใช้สต็อก (มี ${j.stock} ชิ้น)`)}</button>` : "") +
+        (j.kind === "stock" && !j.run_id ? `<button class="mini btn-edit-only" data-jdel="${j.id}">删除备货任务</button>` : ""),      // v2.41
       post: `<button class="big primary" data-js="packed">📦 已打包</button><button class="mini" data-js="todo">退回重打</button>`,
       packed: `<button class="big primary" data-js="done">🚚 已发货</button><button class="mini" data-js="post">退回</button>`,
     }[j.status] || "";
@@ -241,6 +242,10 @@
       if (d.rcancel) {
         if (!confirm("撤销这一盘？（还没真正开始打印时用，不扣料）")) return;
         await api(`/api/runs/${d.rcancel}/cancel`, { json: {} }); return loadBoard();
+      }
+      if (d.jdel) {
+        if (!confirm("删除这个备货任务？（已经打好的件已经在成品库存里，不受影响）")) return;
+        await api(`/api/jobs/${d.jdel}`, { method: "DELETE" }); toast("已删除"); return loadBoard();
       }
       if (d.usestock) {
         const n = prompt("用成品库存出几个？", "1"); if (!n) return;

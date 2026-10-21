@@ -48,7 +48,7 @@ function renderExpList() {
   const cnt = Object.fromEntries(Object.keys(LST_ZH).map((k) => [k, 0]));
   rows.forEach((p) => { const k = ((plat === "shopee" ? p.sp : p.lz) || {}).status || "none"; cnt[k] = (cnt[k] || 0) + 1; });
   $("#exp-sum").innerHTML = `显示 ${rows.length} 个 · ${plat === "shopee" ? "Shopee" : "Lazada"}：` +
-    ["none", "pending", "failed", "uploaded", "rejected", "live", "inactive", "update"].map((k) => `${LST_ZH[k]} ${cnt[k]}`).join(" · ");
+    ["none", "pending", "failed", "uploaded", "rejected", "live", "inactive", "update"].map((k) => `<span>${LST_ZH[k]}</span> ${cnt[k]}`).join(" · ");      // v2.41：标签单独一段，泰文才翻得到
   const row = (p) => `<tr class="${EXP_SEL.has(p.id) ? "sel" : ""}"><td><input type="checkbox" class="exp-p" value="${esc(p.id)}" ${EXP_SEL.has(p.id) ? "checked" : ""}></td>
       <td class="mono" data-notr>${esc(p.id)}${p.exported ? " 🔒" : ""}</td><td><span data-notr>${esc(p.name_zh)}</span>${p.active === false ? ' <span class="pill bad-pill">已下架</span>' : ""}</td>
       <td>${p.category ? `<span data-notr>${esc(LANG === "th" ? p.category_th || p.category : p.category)}</span>` : '<span class="bad">未选</span>'}</td>
@@ -165,7 +165,7 @@ async function doExport(e, url, note) {
     for (const part of parts) {
       const r = await api(url, { json: { product_ids: part.ids, force: $("#exp-force").checked, batch_name: part.name, group_id: part.group || "" } });
       html += (r.ok
-        ? `<p class="ok">✅ ${r.batch ? `批次「<span data-notr>${esc(r.batch.name)}</span>」：` : ""}已生成 ${r.rows} 行（一行一个 SKU），${part.ids.length} 个产品已改成「待上传」：</p><ul>${r.files.map((f) =>
+        ? `<p class="ok">✅ ${r.batch ? `批次「<span data-notr>${esc(r.batch.name)}</span>」：` : ""}已生成 ${r.rows} 行（一行一个 SKU），${r.batch && r.batch.items ? r.batch.items.length : part.ids.length} 个产品已改成「待上传」：</p><ul>${r.files.map((f) =>
             `<li><a href="/api/export/${encodeURIComponent(f.file)}">下载 ${esc(f.file)}</a> <span class="muted small">${f.rows} 行 · ${f.categories.map(esc).join("、")}</span></li>`).join("")}</ul>`
         : `<p class="bad">${parts.length > 1 ? `「<span data-notr>${esc(part.name)}</span>」` : ""}有红色项未处理，没有生成文件：</p>`) + list(r.errors, "bad") + list(r.warnings, "warn");
     }

@@ -4,10 +4,10 @@
   <div class="row between wrap gap">
     <h2>订单</h2>
     <div class="row gap wrap">
-      <label class="filebtn primary-file">导入订单表格<input type="file" id="ord-file" accept=".xlsx,.xlsm,.csv" hidden></label>
-      <button id="btn-ord-manual">＋ 手工订单（批发/定制/报价）</button>
-      <button id="btn-ord-rematch" title="新建产品或改了 SKU 以后点这里">重新匹配 SKU</button>
-      <button id="btn-ord-track" title="从平台 / BigSeller 复制 订单号,运单号 粘贴进来">批量填运单号</button>
+      <label class="filebtn primary-file btn-edit-only">导入订单表格<input type="file" id="ord-file" accept=".xlsx,.xlsm,.csv" hidden></label>
+      <button id="btn-ord-manual" class="btn-edit-only">＋ 手工订单（批发/定制/报价）</button>
+      <button id="btn-ord-rematch" class="btn-edit-only" title="新建产品或改了 SKU 以后点这里">重新匹配 SKU</button>
+      <button id="btn-ord-track" class="btn-edit-only" title="从平台 / BigSeller 复制 订单号,运单号 粘贴进来">批量填运单号</button>
     </div>
   </div>
   <p class="muted small">从 BigSeller / Lazada / Shopee / TikTok 后台导出订单表格，直接导入。第一次导入时确认每一列是什么，以后同样格式的表格自动识别。
@@ -71,24 +71,24 @@
   </div>
   <div id="ord-bulk" class="ord-bulk">
     <span id="ord-selinfo" class="small muted">勾选订单后批量处理</span>
-    <button data-bulk="approve" class="primary-lite">✔ 审核通过</button>
-    <button data-bulk="hold">⏸ 挂起</button>
+    <button data-bulk="approve" class="btn-edit-only primary-lite">✔ 审核通过</button>
+    <button class="btn-edit-only" data-bulk="hold">⏸ 挂起</button>
     <button data-bulk="label" class="primary-lite">🏷 打印面单</button>
-    <label class="filebtn mini-file" title="Lazada / Shopee / TikTok / BigSeller 批量下载的面单 PDF">⬆ 上传平台面单 PDF<input type="file" id="label-file" accept=".pdf" hidden></label>
+    <label class="filebtn mini-file btn-edit-only" title="Lazada / Shopee / TikTok / BigSeller 批量下载的面单 PDF">⬆ 上传平台面单 PDF<input type="file" id="label-file" accept=".pdf" hidden></label>
     <button data-bulk="pick">打印拣货单</button>
     <button data-bulk="pack">打印装箱单</button>
-    <button data-bulk="status:shipped">标记已发货</button>
-    <button data-bulk="status:completed">标记已完成</button>
-    <button data-bulk="ship_method:pickup">上门揽收</button>
-    <button data-bulk="ship_method:dropoff">送到网点</button>
-    <button data-bulk="status:delivery_failed">标记拒收/派送失败</button>
-    <button data-bulk="priority:1">加急</button>
-    <button data-bulk="priority:0">取消加急</button>
-    <button data-bulk="tag_add">加标签</button>
-    <button data-bulk="tag_remove">去标签</button>
-    <button data-bulk="status:cancelled" class="danger">取消订单</button>
-    <button data-bulk="export">导出 Excel</button>
-    <button data-bulk="delete" class="danger">删除</button>
+    <button class="btn-edit-only" data-bulk="status:shipped">标记已发货</button>
+    <button class="btn-edit-only" data-bulk="status:completed">标记已完成</button>
+    <button class="btn-edit-only" data-bulk="ship_method:pickup">上门揽收</button>
+    <button class="btn-edit-only" data-bulk="ship_method:dropoff">送到网点</button>
+    <button class="btn-edit-only" data-bulk="status:delivery_failed">标记拒收/派送失败</button>
+    <button class="btn-edit-only" data-bulk="priority:1">加急</button>
+    <button class="btn-edit-only" data-bulk="priority:0">取消加急</button>
+    <button class="btn-edit-only" data-bulk="tag_add">加标签</button>
+    <button class="btn-edit-only" data-bulk="tag_remove">去标签</button>
+    <button data-bulk="status:cancelled" class="btn-edit-only danger">取消订单</button>
+    <button class="btn-edit-only" data-bulk="export">导出 Excel</button>
+    <button data-bulk="delete" class="btn-edit-only danger">删除</button>
   </div>
   <table class="grid" id="ord-table"><thead><tr><th><input type="checkbox" id="ord-all"></th><th>订单</th><th>时间</th><th>买家</th><th>商品</th><th class="c-cost">金额</th><th>状态 / 生产</th><th>异常 / 标签</th><th></th></tr></thead><tbody></tbody></table>
   <div id="ord-pager" class="row gap pager"></div>
@@ -101,7 +101,7 @@
   <h2>打包核对</h2>
   <p class="muted small">先扫面单上的条码（订单号或快递单号，在 设置 → 订单与售后 里规定扫哪个），再核对商品：有条码的扫商品码；自产件可以在后处理时打印「内部商品标签」贴在袋子上再扫，或者对着图片点「✓ 装好了」（每个产品可以单独设置）。全部对上了才能点「打包完成」，防止错发漏发。扫码枪直接扫；手机可以点「📷 摄像头扫码」。</p>
   <div class="card pack-card">
-    <div class="row gap wrap"><input id="pk-code" placeholder="扫描 / 输入 订单号 或 SKU" style="width:320px;font-size:18px" autocomplete="off" data-notr>
+    <div class="row gap wrap"><input id="pk-code" placeholder="扫描 / 输入 订单号 或 SKU" style="width:320px;font-size:18px" autocomplete="off">
       <button id="btn-pk-cam">📷 摄像头扫码</button><button id="btn-pk-reset">重新开始</button></div>
     <video id="pk-video" class="hidden" playsinline muted></video>
     <div id="pk-out"></div>
@@ -119,7 +119,7 @@
       <button id="ho-open" class="primary">开始 / 继续这张交接单</button>
     </div>
     <div id="ho-cur" class="hidden">
-      <div class="row gap wrap" style="margin-top:10px"><input id="ho-code" placeholder="扫描运单号 / 订单号" style="width:320px;font-size:18px" autocomplete="off" data-notr>
+      <div class="row gap wrap" style="margin-top:10px"><input id="ho-code" placeholder="扫描运单号 / 订单号" style="width:320px;font-size:18px" autocomplete="off">
         <span id="ho-msg"></span></div>
       <div id="ho-info" class="small" style="margin:8px 0"></div>
       <table class="grid small" id="ho-table"><thead><tr><th>#</th><th>运单号</th><th>订单号</th><th>平台</th><th>件数</th><th>COD</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>

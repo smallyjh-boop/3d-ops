@@ -11,7 +11,7 @@
 """
 from html import escape as h
 
-from core.labels import code128_svg
+from core.labels import code128_svg, cod_txt
 
 CARRIERS = {
     "flash": {"name": "Flash Express", "th": "แฟลช เอ็กซ์เพรส", "color": "#FFD400", "ink": "#000", "keys": ["flash"], "layout": "courier"},
@@ -47,6 +47,12 @@ def _postcode_boxes(pc):
     return "".join(f'<span class="pcb">{h(ch)}</span>' for ch in pc.ljust(5)) if pc else ""
 
 
+def _ship_zh(m):
+    """v2.41：订单里只有 ship_method 代码（pickup / dropoff / self），面单上印中文。"""
+    from core.orders import SHIP_METHOD_ZH
+    return SHIP_METHOD_ZH.get(m or "", "")
+
+
 def _label(o, cfg, key, size):
     c = CARRIERS.get(key) or CARRIERS["generic"]
     w, hh = SIZES[size]
@@ -56,9 +62,9 @@ def _label(o, cfg, key, size):
     cod = o.get("cod")
     items = "，".join(f"{i.get('sku')}×{i.get('qty') or 1}" for i in o.get("items") or [])
     name = c["name"] or (o.get("carrier") or "")
-    cod_html = (f'<span class="cod">COD ฿{cod:,.0f}</span>' if cod else '<span class="nocod">ไม่เก็บเงินปลายทาง<br>非货到付款</span>')
+    cod_html = (f'<span class="cod">COD ฿{cod_txt(cod)}</span>' if cod else '<span class="nocod">ไม่เก็บเงินปลายทาง<br>非货到付款</span>')
     head = (f'<div class="hd" style="background:{c["color"]};color:{c["ink"]}"><span class="brand">{h(name) or "&nbsp;"}</span>'
-            f'<span class="sv">{h(o.get("ship_method_zh") or "")}</span></div>')
+            f'<span class="sv">{h(o.get("ship_method_zh") or _ship_zh(o.get("ship_method")))}</span></div>')
     tb = (f'<div class="bc">{code128_svg(track, 18 if small else 22, 2)}<div class="tn">{h(track)}</div></div>' if track
           else '<div class="bc notrk">（还没有运单号 ยังไม่มีเลขพัสดุ）</div>')
     recv = (f'<div class="box rc"><div class="lab">ผู้รับ / 收件人</div>'

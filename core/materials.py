@@ -461,7 +461,10 @@ def alerts(plan_rows=None):
         k = (r["material"], r["color"])
         d = bk.get(k) or {"sealed": 0, "open": 0, "loaded": 0}
         name = f"{r['material']} {r['color']}"
-        if r["short"]:
+        if r["kg"] < -0.0005:       # v2.41：记成了负数——多半是入库没记或料卷没登记，不是排队的单不够
+            out.append({"level": "bad", "key": list(k), "text": f"{name} 库存记成了负数（{r['kg']:.2f} kg）：多半是买来的料没入库，"
+                                                               "请到 耗材 / 库存 补入库或盘点"})
+        elif r["short"]:
             out.append({"level": "bad", "key": list(k), "text": f"{name} 不够打已经排队的单（还差 {max(0, r['pending_kg'] - r['kg']):.2f} kg），要马上补货"})
         elif r["urgent"]:
             import datetime as _dt

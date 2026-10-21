@@ -607,6 +607,7 @@ button.primary-lite{border-color:var(--accent);color:var(--accent)}
 .fin-pl tr.lv0 td{font-weight:600}.fin-pl tr.lv1 td:first-child{padding-left:22px;color:#374151}
 .fin-pl tr.lv2 td{font-weight:700;border-top:1px solid #cbd5e1;background:#f8fafc}
 .fin-pl tr.lv3 td{font-weight:800;font-size:15px;border-top:2px solid #0f172a;background:#eef2ff}
+.fin-pl tr.lv4 td{color:#6b7280;font-size:12px}.fin-pl tr.lv4 td:first-child{padding-left:22px}   /* v2.41：说明行，不参与加减 */
 td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .fin-chart{width:100%;height:150px;display:block}
 .fin-chart .fc-rev{fill:#93c5fd}.fin-chart .fc-profit{fill:none;stroke:#16a34a;stroke-width:2;vector-effect:non-scaling-stroke}

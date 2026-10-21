@@ -281,7 +281,7 @@
     if (act === "delete" && !confirmDelete(`这 ${ids.length} 个订单`)) return;
     await busy(b, async () => {
       const r = await api("/api/orders/batch", { json: { ids, action: act, value: act === "priority" ? +val : value } });
-      toast(`已处理 ${r.done} 个订单`);
+      toast(`已处理 ${r.done} 个订单` + ((r.errors || []).length ? `；${r.errors.length} 个没做成：${r.errors.slice(0, 3).join("；")}` : ""), !!(r.errors || []).length);
       if (act === "delete") SEL.clear();
       await loadOrders();
     });

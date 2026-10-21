@@ -230,7 +230,7 @@
     return `<details class="fcard fst-${st}" data-fid="${f.id}" ${st === "draft" ? "open" : ""}>
       <summary><span class="pill fpill-${st}">${esc(R.status_zh[st] || st)}</span>
         ${matBadge(p.material || "?", mm === "diff")}
-        <b data-notr>${esc(f.printer === "*" ? "任何打印机" : f.printer)}</b> · 一盘 ${f.per_plate} 个 · v${f.version || 1}
+        ${f.printer === "*" ? "<b>任何打印机</b>" : `<b data-notr>${esc(f.printer)}</b>`} · 一盘 ${f.per_plate} 个 · v${f.version || 1}
         ${f.sku ? `· <span class="mono" data-notr>${esc(f.sku)}</span>` : ""}
         <span class="muted small">${f.grams ? H().num(f.grams, 1) + "g" : ""} ${f.hours ? "· " + H().num(f.hours, 2) + "h" : ""}
           ${rp.layers ? "· " + rp.layers + " 层" : ""} ${rp.support_pct != null ? "· 支撑 " + rp.support_pct + "%" : ""}

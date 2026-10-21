@@ -17,6 +17,12 @@ from .config import DATA_DIR
 LABEL_DIR = os.path.join(DATA_DIR, "labels")
 
 
+def cod_txt(v):
+    """v2.41：货到付款金额照实印（1250.5 印成 1,250.50；以前四舍五入成 1,250，快递员会少收）。"""
+    v = float(v or 0)
+    return f"{v:,.2f}" if abs(v - round(v)) > 1e-9 else f"{v:,.0f}"
+
+
 def _pypdf():
     try:
         import pypdf
@@ -165,7 +171,7 @@ def self_made_html(orders, cfg):
         cod = o.get("cod")
         out.append(f"""<div class="lb">
   <div class="row"><span class="big">{h(o.get('carrier') or '')}</span>
-    {f'<span class="cod">COD ฿{cod:,.0f}</span>' if cod else '<span class="small">ไม่เก็บเงินปลายทาง</span>'}</div>
+    {f'<span class="cod">COD ฿{cod_txt(cod)}</span>' if cod else '<span class="small">ไม่เก็บเงินปลายทาง</span>'}</div>
   {f'<div class="bc">{code128_svg(track, 46)}<div>{h(track)}</div></div>' if track else ''}
   <div class="box"><div class="small">ผู้รับ / 收件人</div>
     <div class="big">{h(o.get('receiver') or o.get('buyer') or '')}　{h(o.get('phone') or '')}</div>

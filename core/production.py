@@ -152,6 +152,21 @@ def generate(user=""):
     return {"created": n, "cancelled": cancelled}
 
 
+def delete_stock_job(job_id, user=""):
+    """v2.41：删除备货任务（只能删还没在打的；打好的件每盘打完时已经进了成品库存）。"""
+    c = db.conn()
+    j = _job(c, job_id)
+    if (j["kind"] or "order") != "stock":
+        raise ValueError("只有备货任务可以删除；订单的任务请修改或取消订单")
+    if j["run_id"]:
+        raise ValueError("这个备货任务正在打印，先在生产看板结束这一盘")
+    c.execute("DELETE FROM jobs WHERE id=?", (job_id,))
+    c.commit()
+    from . import db as _db
+    _db.audit(user, "删除备货任务", j["sku"] or "", f"#{job_id} ×{j['qty']}")
+    schedule()
+
+
 def create_job(product_id, sku, qty, kind="stock", order_id=None, user="", note=""):
     """备货任务 / 补发任务。"""
     from . import orders, store
@@ -821,7 +836,8 @@ def cancel_run(rid, user=""):
     if r["status"] != "printing":      # v2.40：已经打完 / 失败的批次不能再撤销（会把已发货的任务改回待打印）
         raise ValueError("这一盘已经结束了，不能撤销")
     for jid in json.loads(r["alloc"] or "{}"):
-        c.execute("UPDATE jobs SET status='todo', run_id=NULL, updated_at=?, updated_by=? WHERE id=?", (_now(), user, int(jid)))
+        # v2.41：撤销后不再锁定在那台打印机（开始打印时锁的），排单可以换别的机器
+        c.execute("UPDATE jobs SET status='todo', run_id=NULL, pin=0, updated_at=?, updated_by=? WHERE id=?", (_now(), user, int(jid)))
     c.execute("UPDATE print_runs SET status='cancelled', ended_at=? WHERE id=?", (_now(), rid))
     c.commit()
     schedule()
@@ -845,7 +861,15 @@ def set_status(job_id, status, user="", printer=None, note=None):
     if note is not None:
         sets["note"] = note
     if printer is not None and printer != "":
-        sets["printer"] = int(printer)
+        from . import fleet
+        prs = load_config().get("printers") or []
+        i = int(printer)
+        if not (0 <= i < len(prs)):
+            raise ValueError("没有这台打印机")
+        if fleet.tech_of(prs[i]) != fleet.job_tech(j["material"]):      # v2.41：以前返回成功、其实没换
+            raise ValueError(f"这是{'光固化' if fleet.job_tech(j['material']) == 'resin' else 'FDM'}的任务，"
+                             f"不能换到「{prs[i].get('name') or i}」（{'光固化' if fleet.tech_of(prs[i]) == 'resin' else 'FDM'}打印机）")
+        sets["printer"] = i
         sets["pin"] = 1
     if not status:
         pass

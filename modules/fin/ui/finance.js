@@ -78,7 +78,7 @@
       <td class="num ${cls(l.amount)}">${m(l.amount)}</td><td class="muted small">${esc(TH() ? (l.note_th || "") : (l.note || ""))}</td></tr>`).join("")}</tbody></table>`;
   }
   async function overview(box) {
-    const r = await api(`/api/fin/overview?month=${PER.mode === "month" ? PER.month : thisMonth()}`);
+    const r = await api(`/api/fin/overview?${q()}`);      // v2.41：和下面的损益表同一个期间
     const pl = await api(`/api/fin/pl?${q()}`);
     const s = r.summary, c = r.change;
     const warn = [];
@@ -86,7 +86,7 @@
     if (s.missing_data_orders) warn.push(Z(`${s.missing_data_orders} 单商品没对上 SKU 或缺克数，成本偏低。`, `${s.missing_data_orders} คำสั่งซื้อจับคู่ SKU ไม่ได้หรือไม่มีกรัม ต้นทุนจะต่ำกว่าจริง`));
     if (r.unpaid_count) warn.push(Z(`${r.unpaid_count} 单超时未回款（${m(r.reconcile.unpaid_amount)}）。`, `${r.unpaid_count} คำสั่งซื้อยังไม่ได้รับเงินเกินกำหนด (${m(r.reconcile.unpaid_amount)})`));
     if (r.diff_count) warn.push(Z(`${r.diff_count} 单平台扣费比预计多（共多 ${m(r.reconcile.diff_amount)}）。`, `${r.diff_count} คำสั่งซื้อถูกหักค่าธรรมเนียมมากกว่าที่คาด (รวม ${m(r.reconcile.diff_amount)})`));
-    if (s.fixed_estimated) warn.push(Z("固定费用（房租、人工、折旧）本期没记账，按设置估算了。", "ค่าใช้จ่ายคงที่ (ค่าเช่า ค่าแรง ค่าเสื่อม) งวดนี้ยังไม่ได้บันทึก จึงประมาณจากการตั้งค่า"));
+    if (s.fixed_estimated) warn.push(Z("有几项固定费用（房租、人工、折旧、维修）本期没记账，按设置估算了。", "ค่าใช้จ่ายคงที่บางรายการ (ค่าเช่า ค่าแรง ค่าเสื่อม ค่าซ่อม) งวดนี้ยังไม่ได้บันทึก จึงประมาณจากการตั้งค่า"));
     const tile = (label, val, sub = "", klass = "", go = "") => `<div class="tile ${klass}" ${go ? `data-go="${go}"` : ""}><span>${label}</span><b>${val}${sub}</b></div>`;
     box.innerHTML = bar("fin-ov") +
       `<div class="tiles">
@@ -211,7 +211,7 @@
           ${vat ? `<label>${Z("其中 VAT", "ในนี้ VAT")}<input type="number" step="any" id="fb-vat" placeholder="${Z("有税票才填", "กรอกเมื่อมีใบกำกับภาษี")}"></label>
           <label class="row"><input type="checkbox" id="fb-inv"> ${Z("有正式税票", "มีใบกำกับภาษีเต็มรูป")}</label>` : ""}
           <label>${Z("收款方 / 付款方", "ผู้รับ/ผู้จ่าย")}<input id="fb-payee" data-notr></label>
-          <label>${Z("付款方式", "วิธีชำระ")}<select id="fb-method">${Object.entries(cats.methods).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></label>
+          <label>${Z("付款方式", "วิธีชำระ")}<select id="fb-method">${["transfer", "cash", "card", "platform", "other"].concat(Object.keys(cats.methods)).filter((k, i, a) => cats.methods[k] && a.indexOf(k) === i).map((k) => [k, cats.methods[k]]).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></label>
           <label>${Z("备注", "หมายเหตุ")}<input id="fb-note" data-notr></label>
           <label>${Z("票据（照片 / PDF，可空）", "ใบเสร็จ (รูป/PDF เว้นได้)")}<input type="file" id="fb-file" accept="image/*,.pdf"></label>
         </div>

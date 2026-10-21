@@ -147,7 +147,10 @@ def do_import(token, mapping, platform, shop="", user=""):
     platform = (platform or "").strip().lower()
     if platform not in ("lazada", "shopee", "tiktok", "other"):
         raise ValueError("请选择平台")
-    mp = {k: int(v) for k, v in (mapping or {}).items() if v not in (None, "", -1, "-1") and k in FIELDS}
+    try:
+        mp = {k: int(v) for k, v in (mapping or {}).items() if v not in (None, "", -1, "-1") and k in FIELDS}
+    except (TypeError, ValueError):      # v2.41
+        raise ValueError("对列设置不对，请重新选择每一列")
     if "order_no" not in mp:
         raise ValueError("请选择「订单号」是哪一列")
     if "net" not in mp and "amount" not in mp:

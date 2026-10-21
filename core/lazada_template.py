@@ -231,7 +231,7 @@ def check_product(p, prices, cat=None, cfg=None):
         warnings.append("没有包装内容（What's in the box）")
     if not (c.get("hashtags_shopee") or "").strip():
         warnings.append("没有 Shopee 标签（会被搜索，建议补上）")
-    elif not (20 <= len(d) <= 3000):
+    if d and not (20 <= len(d) <= 3000):      # v2.41：以前写成了 elif，没有 Shopee 标签时就不查详情长度
         warnings.append(f"详情建议 20-3000 字符（现在 {len(d)}）")
     skus = [(v.get("sku") or "").strip().upper() for v in p.get("variants", []) if (v.get("sku") or "").strip()]
     dup = sorted({x for x in skus if skus.count(x) > 1})
