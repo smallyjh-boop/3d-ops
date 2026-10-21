@@ -324,7 +324,7 @@ def overview(month=None, start=None, end=None):
     def chg(a, b):
         return round((a - b) / abs(b) * 100, 1) if b else None
     keys = ("revenue", "gross", "net", "orders", "aov", "fees")
-    return {"month": label, "summary": cur["summary"], "prev": prev["summary"],
+    return {"month": label, "custom": start is not None, "summary": cur["summary"], "prev": prev["summary"],
             "change": {k: chg(cur["summary"][k] or 0, prev["summary"][k] or 0) for k in keys},
             "cash": cf["total"], "has_settlements": cf["has_settlements"], "reconcile": rc["total"],
             "unpaid_count": len(rc["unpaid"]), "diff_count": len(rc["diff"]), "unknown_count": len(rc["unknown"]),

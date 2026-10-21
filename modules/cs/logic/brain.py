@@ -50,6 +50,16 @@ def rule_intent(text):
     return "other"
 
 
+def human_rule(text):
+    """v2.41 复审：消息里只要有任何一个必须人工的意图的关键词（退款 / 投诉 / 改订单）就返回它，
+    不管排在前面的批发、定制有没有命中（rule_intent 只返回第一个，「取消定制的订单」会被判成定制）。"""
+    t = (text or "").lower()
+    for k in HUMAN_INTENTS:
+        if any(w.lower() in t for w in KEYWORDS.get(k, [])):
+            return k
+    return None
+
+
 def _qty_in(text):
     """消息里的数量（10 ชิ้น / 50 อัน / 100个 / x20）"""
     nums = [int(m) for m in re.findall(r"(\d{1,5})\s*(?:ชิ้น|อัน|ตัว|個|个|件|pcs|pieces|ea)", text or "", re.I)]
@@ -253,6 +263,7 @@ def draft(conv, msgs, orders_found, instruction=""):
     """生成回复草稿。返回 analysis dict。"""
     s = data.settings()
     ctx, pending, intent0, q = build_context(conv, msgs, orders_found, instruction)
+    human0 = human_rule(" ".join(m["text"] for m in pending) or " ".join(m["text"] for m in msgs if m["role"] == "buyer")[-500:])
     cfg = _cs_cfg()
     system = SYSTEM.format(shop=s.get("shop_name") or "我们的店", persona=s.get("persona"),
                            forbidden=s.get("forbidden") or "退款、赔偿、补发、免运费、额外折扣",
@@ -267,10 +278,10 @@ def draft(conv, msgs, orders_found, instruction=""):
         reason = INTENTS[intent] + "，需要人工确认"
     # v2.41：按规则从买家消息里认出是退款 / 投诉这类必须人工的 → 不管 AI 怎么分类都转人工
     # （买家消息是外人写的，可能故意引导 AI 把退款说成普通咨询，从而被全自动发出去）
-    if intent0 in HUMAN_INTENTS and intent not in HUMAN_INTENTS:
+    if human0 and intent not in HUMAN_INTENTS:
         needs = True
         tier = "human"
-        reason = (reason + "；" if reason else "") + f"消息里像是「{INTENTS.get(intent0, intent0)}」，需要人工确认"
+        reason = (reason + "；" if reason else "") + f"消息里像是「{INTENTS.get(human0, human0)}」，需要人工确认"
     # 规则兜底：回复里出现「不能随便承诺」的词 → 转人工（AI 有时会忍不住答应）
     hit = forbidden_hit(str(d.get("reply") or ""), s)
     if hit:

@@ -21,6 +21,7 @@ docs = importlib.import_module("core.inventory.docs")    # core.inventory.docs �
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS inv_order_out (order_id INTEGER PRIMARY KEY, doc_id INTEGER, ts REAL);
+CREATE TABLE IF NOT EXISTS inv_order_reship (order_id INTEGER PRIMARY KEY, since REAL);
 """
 log = logging.getLogger("3dops")
 
@@ -31,11 +32,37 @@ def init():
     c.commit()
 
 
+def _reship_goods(c, order, since):
+    """v2.41 复审：退货 / 拒收后重新发货的成品 = 上次发货之后售后验货放回库存的件（按 SKU，不超过订单数量）。
+    还没验货入库就重发（原包裹再寄）→ 东西没回过库存，不扣。"""
+    import json
+    back = {}
+    for r in c.execute("SELECT inspect_items FROM aftersales WHERE order_id=? AND inspected_at IS NOT NULL AND inspected_at>?",
+                       (order["id"], since or 0)):
+        try:
+            for x in json.loads(r["inspect_items"] or "[]"):
+                k = (x.get("sku") or "").upper()
+                back[k] = back.get(k, 0) + int(x.get("restock") or 0)
+        except (ValueError, TypeError):
+            continue
+    out = []
+    for it in order.get("items") or []:
+        k = (it.get("sku") or "").upper()
+        n = min(back.get(k, 0), int(it.get("qty") or 1))
+        if n > 0:
+            back[k] -= n
+            out.append((it["sku"], it.get("product_id"), it.get("name") or "", it.get("color") or "", n))
+    return out
+
+
 def _goods_lines(c, order):
     from core import chain
     from core.inventory import goods
     out = []
-    if chain.prod_on():
+    rs = c.execute("SELECT since FROM inv_order_reship WHERE order_id=?", (order["id"],)).fetchone()
+    if rs:
+        out = _reship_goods(c, order, rs["since"])
+    elif chain.prod_on():
         for j in c.execute("SELECT sku, product_id, name, color, COALESCE(stock_n,0) n FROM jobs WHERE order_id=? AND kind='order' "
                            "AND COALESCE(stock_n,0)>0", (order["id"],)):
             out.append((j["sku"], j["product_id"], j["name"], j["color"], int(j["n"])))
@@ -137,10 +164,14 @@ def allow_again(oid, user=""):
     """v2.41：退货 / 拒收后改回待发货（重新发货）：下次发货再开一张出库单（以前每单只出一次，重发不扣纸箱、包材）。"""
     try:
         c = db.conn()
-        if c.execute("DELETE FROM inv_order_out WHERE order_id=?", (oid,)).rowcount:
+        r = c.execute("SELECT ts FROM inv_order_out WHERE order_id=?", (oid,)).fetchone()
+        if r:
+            c.execute("INSERT OR REPLACE INTO inv_order_reship(order_id, since) VALUES(?,?)", (oid, r["ts"] or 0))
+            c.execute("DELETE FROM inv_order_out WHERE order_id=?", (oid,))
             c.commit()
             from core import orders
-            orders.log(oid, user or "系统", "重新发货", "下次发货会再开一张出库单")
+            orders.log(oid, user or "系统", "重新发货",
+                       "下次发货会再开一张出库单：纸箱、包材照扣；成品只扣售后验货放回库存的件（没验货就重发 = 原包裹再寄，不扣成品）")
     except Exception as e:  # noqa: BLE001
         log.warning("重新发货准备失败（订单 %s）：%s", oid, e)
     return None

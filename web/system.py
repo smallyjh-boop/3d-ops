@@ -365,30 +365,42 @@ def _login_key(username):
     return (str(username or "").strip().lower(), request.remote_addr or "")
 
 
-def _login_locked(key):
+def _login_prune(now):
+    """防止被刷爆内存（v2.41 复审：不能整个清空——那样随便编 5000 个用户名就能把正被锁的账号解开）。
+    先去掉过期的；还太多就去掉没锁住、最久没动的；锁住的账号最后才动。"""
+    for k in [k for k, v in _LOGIN_FAILS.items() if not v or now - v[-1] >= LOGIN_WINDOW]:
+        del _LOGIN_FAILS[k]
+    if len(_LOGIN_FAILS) <= 5000:
+        return
+    order = sorted(_LOGIN_FAILS, key=lambda k: (len(_LOGIN_FAILS[k]) >= LOGIN_MAX_FAILS, _LOGIN_FAILS[k][-1]))
+    for k in order[:len(_LOGIN_FAILS) - 4000]:
+        del _LOGIN_FAILS[k]
+
+
+def _login_reserve(key):
+    """检查有没有锁住，同时先记一次「失败」占住名额（同一把锁里做完）：
+    并发发一堆请求也最多试 LOGIN_MAX_FAILS 次；登录成功再整个清掉。返回 False = 锁住了。"""
     now = time.time()
     with _LOGIN_LOCK:
         fails = [t for t in _LOGIN_FAILS.get(key, []) if now - t < LOGIN_WINDOW]
+        if len(fails) >= LOGIN_MAX_FAILS:
+            _LOGIN_FAILS[key] = fails
+            return False
+        fails.append(now)
         _LOGIN_FAILS[key] = fails
-        return len(fails) >= LOGIN_MAX_FAILS
-
-
-def _login_failed(key):
-    with _LOGIN_LOCK:
-        _LOGIN_FAILS.setdefault(key, []).append(time.time())
-        if len(_LOGIN_FAILS) > 5000:          # 防止被刷爆内存
-            _LOGIN_FAILS.clear()
+        if len(_LOGIN_FAILS) > 5000:
+            _login_prune(now)
+        return True
 
 
 @app.post("/api/auth/login")
 def auth_login():
     b = request.get_json(force=True) or {}
     key = _login_key(b.get("username"))
-    if _login_locked(key):
+    if not _login_reserve(key):
         return err("密码错太多次了，请 15 分钟后再试（忘记密码请找老板重设）", 429)
     u = db.authenticate(b.get("username"), b.get("password"))
     if not u:
-        _login_failed(key)
         return err("用户名或密码不对", 401)
     with _LOGIN_LOCK:
         _LOGIN_FAILS.pop(key, None)

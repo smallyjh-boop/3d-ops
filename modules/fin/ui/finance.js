@@ -98,7 +98,7 @@
         ${tile(Z("现金净流入", "เงินสดสุทธิ"), m(r.cash.net), "", r.cash.net < 0 ? "warn" : "", "fin_cash")}
         ${tile(Z("超时未回款", "ยังไม่ได้รับเงิน"), m(r.reconcile.unpaid_amount), "", r.unpaid_count ? "warn" : "", "fin_settle")}
       </div>
-      <p class="muted small">${Z(`${r.month} · 箭头是和上个月比`, `${r.month} · ลูกศรเทียบกับเดือนก่อน`)}</p>
+      <p class="muted small">${r.custom ? Z(`${r.month} · 箭头是和前一段同样长的期间比`, `${r.month} · ลูกศรเทียบกับช่วงก่อนหน้าที่ยาวเท่ากัน`) : Z(`${r.month} · 箭头是和上个月比`, `${r.month} · ลูกศรเทียบกับเดือนก่อน`)}</p>
       ${warn.length ? `<div class="card warn-box small">${warn.map((w) => `<div>⚠ ${esc(w)}</div>`).join("")}</div>` : ""}
       <div class="lanes two">
         <div class="card"><h3>${Z("损益表", "งบกำไรขาดทุน")} <span class="muted small">${esc(pl.period)}</span></h3>${plTable(pl.lines)}

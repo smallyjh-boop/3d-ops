@@ -107,11 +107,12 @@ async function loadBatches() {
   const r = await api(`/api/listing/batches?platform=${$("#bt-plat").value}`);
   $("#exp-batches").innerHTML = r.batches.map((b) => {
     const c = b.counts;
-    const done = (c.live || 0) + (c.inactive || 0) === b.items.length && b.items.length;
+    // v2.41 复审：挪到别的批次的产品不算在这一批里（不然这一批永远不会「完成」）
+    const done = (c.live || 0) + (c.inactive || 0) + (c.moved || 0) === b.items.length && b.items.length > (c.moved || 0);
     return `<details class="batch ${done ? "batch-done" : ""}" data-bid="${b.id}"><summary>
         <span class="pill ${b.platform === "shopee" ? "plat-shopee" : "plat-lazada"}">${b.platform === "shopee" ? "Shopee" : "Lazada"}</span>
         <b data-notr>${esc(b.name)}</b> <span class="muted small">${fmtTime(b.created_at)} · ${b.items.length} 个产品 · <span data-notr>${esc(b.username || "")}</span></span>
-        <span class="small">${["pending", "failed", "uploaded", "rejected", "live", "inactive", "update"].filter((k) => c[k]).map((k) => `<span class="lst lst-${k}">${LST_ZH[k]} ${c[k]}</span>`).join("")}</span></summary>
+        <span class="small">${["pending", "failed", "uploaded", "rejected", "live", "inactive", "update"].filter((k) => c[k]).map((k) => `<span class="lst lst-${k}">${LST_ZH[k]} ${c[k]}</span>`).join("")}${c.moved ? `<span class="lst lst-none" title="后来在别的批次重新导出了"><span>移到别的批次</span> ${c.moved}</span>` : ""}</span></summary>
       <div class="batch-body">
         <div class="row gap wrap">${b.files.map((f) => `<a class="btn mini-btn" href="/api/export/${encodeURIComponent(f.file)}">⬇ ${esc(f.file)}</a>`).join("")}</div>
         <div class="row gap wrap" style="margin:8px 0">${c.pending ? '<button class="primary mini" data-bt="ok">⬆ 整批上传成功（待上传的改成「平台审核中」）</button>' : ""}

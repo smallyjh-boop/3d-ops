@@ -136,4 +136,59 @@ ai_copy.call = lambda cfg, system, user, image_b64=None: _json.dumps({"lang": "t
     "wholesale_items": [], "kb_ids_used": [], "save_as_faq": False})
 a = brain.draft({"id": 0, "platform": "lazada", "buyer": "x"}, [{"id": 1, "role": "buyer", "text": "ขอคืนเงินค่ะ สินค้าแตก", "ts": 1}], [])
 ok(a["needs_human"], f"refund message goes to a person even if AI says 'product' ({a.get('human_reason_zh')})")
+# ==== v2.41 发布前审查 ====
+# R1 登录锁定不能靠刷 5000 个假用户名清零
+from web import system as WS
+vk = ("victim", "1.2.3.4")
+for _ in range(8):
+    WS._login_reserve(vk)
+for i in range(5100):
+    WS._login_reserve((f"junk{i}", "1.2.3.4"))
+ok(WS._login_reserve(vk) is False and len(WS._LOGIN_FAILS) <= 5001, f"lock survives the junk-username flood ({len(WS._LOGIN_FAILS)})")
+WS._LOGIN_FAILS.clear()
+# R2 生产员工能看到「上传平台面单 PDF」
+html = open(APP + "/modules/orders/ui/page.html", encoding="utf-8").read()
+seg = html[html.index("上传平台面单") - 200: html.index("上传平台面单")]
+ok("btn-edit-only" not in seg.split("<label")[-1], "label PDF upload button visible to production")
+# R3 退货后重发：没验货（原包裹再寄）不扣成品；验货放回库存后重发，扣回放回的件
+config.save_config({"stock_auto_use": True})
+cur = production.stock_qty(sku); production.stock_add(sku, 50 - cur, "t", "t")
+o5 = manual("RS2"); production.generate("t")
+ok(jobs_of(o5["id"])[0]["stock_n"] == 1, f"RS2 ships from stock ({jobs_of(o5['id'])})")
+config.save_config({"stock_auto_use": False})
+orders.update_order(o5["id"], "t", status="shipped")
+ok(production.stock_qty(sku) == 49, f"first ship deducts 1 ({production.stock_qty(sku)})")
+for st_ in ("returned", "to_ship", "shipped"):
+    orders.update_order(o5["id"], "t", status=st_)
+ok(production.stock_qty(sku) == 49, f"re-ship without inspection: no extra goods deducted ({production.stock_qty(sku)})")
+from core import extras
+orders.update_order(o5["id"], "t", status="returned")
+aid = extras.as_add(o5["id"], "return", "退回", user="t")
+aid = aid if isinstance(aid, int) else (aid or {}).get("id")
+extras.as_inspect(aid, [{"item_id": orders.get_order(o5["id"])["items"][0]["id"], "restock": 1}], "", "t")
+ok(production.stock_qty(sku) == 50, f"inspection put it back ({production.stock_qty(sku)})")
+for st_ in ("to_ship", "shipped"):
+    orders.update_order(o5["id"], "t", status=st_)
+ok(production.stock_qty(sku) == 49, f"re-ship after restock deducts the restocked piece ({production.stock_qty(sku)})")
+# R4 客服：退款 / 改订单的词排在批发、定制后面也要转人工
+ai_copy.call = lambda cfg, system, user, image_b64=None: _json.dumps({"lang": "zh", "intent": "custom", "reply": "好的",
+    "reply_zh": "好的", "needs_human": False, "confidence": 0.99, "buyer_msgs_zh": [], "summary_zh": "",
+    "wholesale_items": [], "kb_ids_used": [], "save_as_faq": False})
+for txt in ("取消订单，定制的那个", "ยกเลิกออเดอร์ที่สั่งทำ", "改地址，顺便问批发价"):
+    a = brain.draft({"id": 0, "platform": "lazada", "buyer": "x"}, [{"id": 1, "role": "buyer", "text": txt, "ts": 1}], [])
+    ok(a["needs_human"], f"'{txt}' goes to a person")
+# R5 打印机改编码：料卷跟着走，不卸下
+cfg = config.load_config(); oldp = copy.deepcopy(cfg["printers"])
+c1 = oldp[0].get("code")
+C.post("/api/spools", json={"material": "PLA", "color": "白色", "count": 1})
+sp2 = db.conn().execute("SELECT code FROM spools ORDER BY id DESC LIMIT 1").fetchone()["code"]
+db.conn().execute("UPDATE spools SET status='loaded', printer=? WHERE code=?", (c1, sp2)); db.conn().commit()
+newp = copy.deepcopy(oldp); newp[0]["code"] = "RN-99"
+fleet.remap(oldp, newp)
+row = db.conn().execute("SELECT status, printer FROM spools WHERE code=?", (sp2,)).fetchone()
+ok(row["status"] == "loaded" and row["printer"] == "RN-99", f"renamed printer keeps its spool ({dict(row)})")
+# R7 自定义期间的总览说明
+ov = fin.overview(start=dt.date(2026, 1, 1), end=dt.date(2026, 2, 15)) if hasattr(fin, "overview") else None
+if ov is not None:
+    ok(ov.get("custom") is True, "custom-period overview flagged")
 print("ERRORS", E_)
