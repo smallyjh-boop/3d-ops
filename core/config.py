@@ -203,4 +203,9 @@ def save_config(cfg):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2)
     os.replace(tmp, CONFIG_PATH)
+    try:                                       # v2.40 复审：同一秒内改两次设置，缓存不能还用旧的
+        from . import print_files
+        print_files._CFG_MEMO["cfg"] = None
+    except Exception:
+        pass
     return merged

@@ -110,7 +110,13 @@ production.start_run(j["id"], 0, 1, [], None, False, "t", CONF)
 production.finish_run(db.conn().execute("SELECT run_id FROM jobs WHERE id=?", (j["id"],)).fetchone()["run_id"] or db.conn().execute("SELECT MAX(id) FROM print_runs").fetchone()[0], "t")
 s0 = production.stock_qty(sku)
 C.post("/api/orders/batch", json={"ids": [o["id"]], "action": "status", "value": "shipped"})
-ok(not jobs_of(o["id"]) and production.stock_qty(sku) == s0, f"shipped with partial print: job dropped, no phantom stock (+{production.stock_qty(sku) - s0})")
+jh = jobs_of(o["id"])
+ok(len(jh) == 1 and jh[0]["status"] == "done" and jh[0]["qty_done"] == 1 and production.stock_qty(sku) == s0,
+   f"shipped with partial print: job closed as done (trace kept), no phantom stock (+{production.stock_qty(sku) - s0}, {[(x['status'], x['qty_done']) for x in jh]})")
+# 复审 M2：误点发货又改回待发货 → 任务回来，已经打好的数量还在，不重打
+C.post("/api/orders/batch", json={"ids": [o["id"]], "action": "status", "value": "to_ship"})
+jh = jobs_of(o["id"])
+ok(len(jh) == 1 and jh[0]["status"] == "todo" and jh[0]["qty_done"] == 1, f"shipped -> to_ship: job back with qty_done kept ({[(x['status'], x['qty_done']) for x in jh]})")
 # H2 认不出 / 平台中间状态（待揽收、已打包、ON_HOLD）不删生产任务
 orders.upsert([{"platform": "shopee", "order_no": "H2", "status": "待发货", "items": [{"sku": sku, "qty": 1}]}], source="t")
 production.generate("t"); oh = q("H2")["id"]
@@ -138,4 +144,42 @@ ok(r.status_code == 400 and "之前已经补发过" in r.get_json()["error"], f"
 orders.upsert([{"platform": "wholesale", "order_no": "W-100", "status": "待发货", "items": [{"sku": sku, "qty": 1}]}], source="t")
 orders.upsert([{"platform": "", "order_no": "W-100", "status": "已发货", "items": [{"sku": sku, "qty": 1}]}], source="t")
 ok(db.conn().execute("SELECT status FROM orders WHERE platform='wholesale' AND order_no='W-100'").fetchone()[0] == "to_ship", "wholesale order not overwritten by an unknown-platform sheet")
+# ==== 复审（第二轮） ====
+# H1' 平台同步一次把两单改成已发货，两单都有「用库存发」的件 → 两单都扣成品库存
+config.save_config({"stock_auto_use": True})
+cur = production.stock_qty(sku); production.stock_add(sku, 100 - cur, "t", "t")
+orders.upsert([{"platform": "shopee", "order_no": n_, "status": "待发货", "items": [{"sku": sku, "qty": 3}]} for n_ in ("SA1", "SB1")], source="t")
+production.generate("t")
+for n_ in ("SA1", "SB1"):
+    jj = jobs_of(q(n_)["id"])[0]
+    db.conn().execute("UPDATE jobs SET stock_n=1, qty_done=1, status='todo' WHERE id=?", (jj["id"],))
+db.conn().commit()
+config.save_config({"stock_auto_use": False})
+orders.upsert([{"platform": "shopee", "order_no": n_, "status": "已发货"} for n_ in ("SA1", "SB1")], source="t")
+production.generate("t")
+ok(production.stock_qty(sku) == 98, f"two orders shipped in one sync both deduct stock (stock {production.stock_qty(sku)}, want 98)")
+ok(all(jobs_of(q(n_)["id"]) and jobs_of(q(n_)["id"])[0]["status"] == "done" for n_ in ("SA1", "SB1")), "both partial jobs kept as done")
+# L3 已揽收 / 已出库 = 已发货
+orders.upsert([{"platform": "shopee", "order_no": "L3a", "status": "已揽收", "items": [{"sku": sku, "qty": 1}]},
+               {"platform": "shopee", "order_no": "L3b", "status": "已出库", "items": [{"sku": sku, "qty": 1}]}], source="t")
+ok(q("L3a")["status"] == "shipped" and q("L3b")["status"] == "shipped", f"已揽收/已出库 -> shipped ({q('L3a')['status']}, {q('L3b')['status']})")
+# L4 设置刚改完，切片检查马上用新设置
+from core import print_files
+print_files._cfg_cached(); config.save_config({"_memo_probe": 7})
+ok(print_files._cfg_cached().get("_memo_probe") == 7, "config cache refreshed right after save")
+# L5 补发：同一次提交里同 SKU 两行加起来也不能超；数量 / 金额乱填报清楚的错
+o = C.post("/api/orders/manual", json={"order_no": "L5", "items": [{"sku": sku, "qty": 2, "unit_price": 100}]}).get_json()
+iid = o["items"][0]["id"]
+r = C.post("/api/aftersales", json={"order_id": o["id"], "kind": "reship", "reason": "x", "items": [{"item_id": iid, "qty": 2}, {"item_id": iid, "qty": 2}]})
+ok(r.status_code == 400 and not [x for x in jobs_of(o["id"]) if x["kind"] == "reship"], f"two lines of same SKU summed against bought qty ({r.status_code})")
+r = C.post("/api/aftersales", json={"order_id": o["id"], "kind": "reship", "reason": "x", "items": [{"item_id": iid, "qty": "abc"}]})
+ok(r.status_code == 400 and "数字" in r.get_json()["error"], f"non-numeric reship qty -> clear error ({r.status_code})")
+r = C.post("/api/aftersales", json={"order_id": o["id"], "kind": "other", "reason": "y", "penalty": -5}).get_json()
+aid = r.get("id") or (r.get("aftersale") or {}).get("id")
+from core import extras
+db.conn().execute("UPDATE aftersales SET amount=-3 WHERE id=?", (aid,)); db.conn().commit()
+try:
+    extras.as_update(aid, {"amount": "abc"}, "t"); ok(False, "non-numeric amount accepted")
+except ValueError as e:
+    ok("数字" in str(e), f"non-numeric amount over old negative -> clear error ({e})")
 print("ERRORS", E_)

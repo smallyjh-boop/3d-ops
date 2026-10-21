@@ -130,12 +130,17 @@ def generate(user=""):
     cancelled = c.execute("""DELETE FROM jobs WHERE status='todo' AND COALESCE(qty_done,0)=0 AND run_id IS NULL
         AND kind='order' AND order_id IN (SELECT id FROM orders WHERE status IN
         ('cancelled','returned','delivery_failed','shipped','completed','unpaid') OR COALESCE(hold,0)=1)""").rowcount
-    # 已经发货 / 完成的订单还挂着打了一部分（或部分用库存）的任务：件已经跟着包裹走了，只删任务，不进库存
+    # 已经发货 / 完成的订单还挂着打了一部分（或部分用库存）的任务：件已经跟着包裹走了 → 标「已完成」，不进库存。
+    # 不删：发货出库按任务的 stock_n 扣成品，售后追溯按任务找打印记录（v2.40 复审）
+    now0 = _now()
     for j in c.execute("""SELECT id, order_id, sku, qty_done, qty FROM jobs WHERE kind='order' AND run_id IS NULL AND status='todo'
         AND COALESCE(qty_done,0)>0 AND order_id IN (SELECT id FROM orders WHERE status IN ('shipped','completed'))""").fetchall():
-        c.execute("DELETE FROM jobs WHERE id=?", (j["id"],))
+        c.execute("UPDATE jobs SET status='done', done_at=?, alert='shipped_partial', updated_at=? WHERE id=?", (now0, now0, j["id"]))
         _olog(j["order_id"], user or "系统", "订单已发货，剩下的不再生产", f"{j['sku']} 已打 {j['qty_done']}/{j['qty']}")
         cancelled += 1
+    # 发货又改回待发货（误操作撤回）：上面标掉的任务恢复，打好的数量还在
+    c.execute("""UPDATE jobs SET status='todo', done_at=NULL, alert='' WHERE alert='shipped_partial' AND status='done'
+        AND order_id IN (SELECT id FROM orders WHERE status IN ('to_ship','quote'))""")
     # v2.35：还没发货就取消的订单，「用库存发」占住的数量放回去（只用库存、没打印过的任务直接删）
     cancelled += c.execute("""DELETE FROM jobs WHERE kind='order' AND run_id IS NULL AND COALESCE(stock_n,0)>0
         AND COALESCE(qty_done,0)<=COALESCE(stock_n,0) AND status IN ('todo','post')

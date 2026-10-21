@@ -141,14 +141,26 @@ def as_add(order_id, kind, reason, amount=None, note="", user="", reship_items=N
     if kind == "reship":
         done = {r[0]: r[1] for r in c.execute("SELECT UPPER(sku), SUM(qty) FROM jobs WHERE order_id=? AND kind='reship' GROUP BY UPPER(sku)",
                                                   (order_id,))}
-        for it in reship_items or []:       # v2.40：补发（几次加起来）不能比原来买的多（先全部检查，再建任务）
+        # v2.40：补发（几次加起来、同一次里几行同 SKU 加起来）不能比原来这个 SKU 买的多（先全部检查，再建任务）
+        bought, want = {}, {}
+        for i in o["items"]:
+            k = (i.get("sku") or "").upper()
+            bought[k] = bought.get(k, 0) + int(i.get("qty") or 1)
+        for it in reship_items or []:
             item = next((i for i in o["items"] if i["id"] == int(it.get("item_id") or 0)), None)
             if not item:
                 continue
-            left = (item.get("qty") or 1) - int(done.get((item["sku"] or "").upper()) or 0)
-            if int(it.get("qty") or 0) > left:
-                raise ValueError(f"{item['sku']} 原订单只有 {item.get('qty') or 1} 个，补发数量不能比这个多"
-                                 + (f"（之前已经补发过 {item.get('qty', 1) - left} 个）" if left < (item.get("qty") or 1) else ""))
+            try:
+                q = int(it.get("qty") or 0)
+            except (TypeError, ValueError):
+                raise ValueError("补发数量要填数字")
+            k = (item.get("sku") or "").upper()
+            want[k] = want.get(k, 0) + max(q, 0)
+        for k, q in want.items():
+            before = int(done.get(k) or 0)
+            if q + before > bought.get(k, 0):
+                raise ValueError(f"{k} 原订单只有 {bought.get(k, 0)} 个，补发数量不能比这个多"
+                                 + (f"（之前已经补发过 {before} 个）" if before else ""))
         for it in reship_items or []:
             item = next((i for i in o["items"] if i["id"] == int(it.get("item_id") or 0)), None)
             q = int(it.get("qty") or 0)
@@ -210,7 +222,11 @@ def as_update(aid, data, user="", owner=True):
                 v = _f(v, k == "penalty")
             except ValueError:
                 # 以前存进去的负数：页面整张提交时值没变 → 照旧保存，不卡住这条记录
-                if old[k] is not None and v not in (None, "") and abs(float(v) - float(old[k])) < 1e-9:
+                try:
+                    same = old[k] is not None and v not in (None, "") and abs(float(v) - float(old[k])) < 1e-9
+                except (TypeError, ValueError):
+                    raise ValueError(f"金额「{v}」要填数字")
+                if same:
                     v = float(old[k])
                 else:
                     raise

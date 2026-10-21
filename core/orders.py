@@ -139,7 +139,7 @@ STATUS_RULES = [
     ("cancelled", ["取消", "cancel", "ยกเลิก", "关闭", "closed", "失败", "failed"]),
     ("returned", ["退货", "退款", "return", "refund", "คืน"]),
     ("completed", ["已完成", "完成", "已签收", "complete", "delivered", "สำเร็จ", "จัดส่งสำเร็จ", "ได้รับสินค้า"]),
-    ("shipped", ["已发货", "运输中", "shipped", "shipping", "in transit", "in_transit", "awaiting_collection", "จัดส่งแล้ว", "กำลังจัดส่ง"]),
+    ("shipped", ["已发货", "已揽收", "已出库", "运输中", "shipped", "shipping", "in transit", "in_transit", "awaiting_collection", "จัดส่งแล้ว", "กำลังจัดส่ง"]),
     ("unpaid", ["未付款", "待付款", "unpaid", "pending payment", "ยังไม่ชำระ", "รอชำระ"]),
     ("to_ship", ["待发货", "待处理", "待打单", "已付款", "待揽收", "待打印", "已打包", "待出库", "to pack", "ready_to_ship",
                  "awaiting_fulfillment", "awaiting_shipment", "awaiting shipment", "to ship", "ready to ship", "pending", "packed", "processing",
@@ -624,8 +624,9 @@ def upsert(orders, source="api", default_platform="", user="", audit=True):
     held = 0
     for oid in new_ids + [x[0] for x in status_changed if x[2] == "to_ship"]:
         held += 1 if auto_review(oid) else 0
-    for oid, _o, new in status_changed:
-        on_status_change(oid, new, user or source, _o)
+    with deferred_jobs(user or source):      # v2.40 复审：所有单都先发货出库，最后统一刷新生产任务
+        for oid, _o, new in status_changed:
+            on_status_change(oid, new, user or source, _o)
     for oid in new_ids:
         r = c.execute("SELECT status FROM orders WHERE id=?", (oid,)).fetchone()
         if r and r["status"] == "delivery_failed":
