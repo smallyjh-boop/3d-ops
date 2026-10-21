@@ -227,8 +227,9 @@ def materials_update():
 @bp.get("/api/spools")
 def spools_list():
     a = request.args
-    return jsonify({"items": materials.spools(a.get("material") or "", a.get("color") or "", a.get("status") or "active",
-                                              a.get("printer") or ""), "status_zh": materials.SPOOL_ST,
+    items = materials.spools(a.get("material") or "", a.get("color") or "", a.get("status") or "active", a.get("printer") or "")
+    # v2.41.1：生产角色看不到料卷价格（strip_prices 对生产角色去掉 price）
+    return jsonify({"items": auth.strip_prices(items, auth.current_user() or {"role": "production"}), "status_zh": materials.SPOOL_ST,
                     "alerts": materials.alerts()})
 
 
@@ -238,7 +239,7 @@ def spools_receive():
     b = request.get_json(force=True) or {}
     try:
         codes_ = materials.receive(b.get("material"), (b.get("color") or "").strip(), b.get("count"), b.get("net_g") or 1000,
-                                   (b.get("brand") or "").strip()[:40], b.get("price"), _uname())
+                                   (b.get("brand") or "").strip()[:40], b.get("price") if (auth.current_user() or {}).get("role") != "production" else None, _uname())
     except (TypeError, ValueError) as e:
         return err(str(e) or "请填写正确的数量")
     return jsonify({"codes": codes_, "plan": materials.plan()})
@@ -252,7 +253,7 @@ def spool_act(sid, act):
                                    b.get("grams"), b.get("brand"), b.get("note"))
     except (TypeError, ValueError) as e:
         return err(str(e) or "数字不对")
-    return jsonify({"spool": s})
+    return jsonify({"spool": auth.strip_prices(s, auth.current_user() or {"role": "production"})})
 
 
 @bp.get("/print/spools")

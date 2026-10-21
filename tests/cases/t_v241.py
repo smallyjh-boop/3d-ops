@@ -191,4 +191,11 @@ ok(row["status"] == "loaded" and row["printer"] == "RN-99", f"renamed printer ke
 ov = fin.overview(start=dt.date(2026, 1, 1), end=dt.date(2026, 2, 15)) if hasattr(fin, "overview") else None
 if ov is not None:
     ok(ov.get("custom") is True, "custom-period overview flagged")
+# v2.41.1：生产角色拿不到料卷价格，也填不进去
+C.post("/api/spools", json={"material": "PLA", "color": "黑色", "count": 1, "price": 450})
+its = PK.get("/api/spools").get_json()["items"]
+ok(its and not any("price" in x for x in its), "production does not receive spool prices")
+ok(any(x.get("price") == 450 for x in C.get("/api/spools").get_json()["items"]), "owner still sees spool price")
+PK.post("/api/spools", json={"material": "PLA", "color": "灰色", "count": 1, "price": 999})
+ok(db.conn().execute("SELECT price FROM spools WHERE color='灰色' ORDER BY id DESC LIMIT 1").fetchone()[0] is None, "production cannot set a spool price")
 print("ERRORS", E_)
