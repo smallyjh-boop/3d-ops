@@ -182,4 +182,18 @@ try:
     extras.as_update(aid, {"amount": "abc"}, "t"); ok(False, "non-numeric amount accepted")
 except ValueError as e:
     ok("数字" in str(e), f"non-numeric amount over old negative -> clear error ({e})")
+r = C.post("/api/aftersales", json={"order_id": o["id"], "kind": "reship", "reason": "x", "items": [{"item_id": "zz", "qty": 1}]})
+ok(r.status_code == 400 and "重新选择" in r.get_json()["error"], f"bad item_id -> clear error ({r.status_code})")
+# 复审 M：待发货 → 平台中间状态（ON_HOLD = other）→ 已发货，「用库存发」的件照样扣库存；other 期间仍然占着
+config.save_config({"stock_auto_use": True})
+cur = production.stock_qty(sku); production.stock_add(sku, 100 - cur, "t", "t")
+orders.upsert([{"platform": "shopee", "order_no": "OH1", "status": "待发货", "items": [{"sku": sku, "qty": 1}]}], source="t")
+production.generate("t")
+config.save_config({"stock_auto_use": False})
+oo = q("OH1")["id"]
+ok(jobs_of(oo) and jobs_of(oo)[0]["stock_n"] == 1, f"OH1 uses 1 from stock ({[(x['stock_n'], x['status']) for x in jobs_of(oo)]})")
+orders.upsert([{"platform": "shopee", "order_no": "OH1", "status": "ON_HOLD"}], source="t"); production.generate("t")
+ok(q("OH1")["status"] == "other" and production.reserved(sku) >= 1, f"other: stock still reserved ({production.reserved(sku)})")
+orders.upsert([{"platform": "shopee", "order_no": "OH1", "status": "已发货"}], source="t"); production.generate("t")
+ok(production.stock_qty(sku) == 99, f"other -> shipped deducts stock (stock {production.stock_qty(sku)}, want 99)")
 print("ERRORS", E_)

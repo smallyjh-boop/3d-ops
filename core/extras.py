@@ -66,6 +66,14 @@ def _aslog(aid, user, action, detail="", commit=True):
         c.commit()
 
 
+def _iid(it):
+    """补发 / 退货行里的订单商品 id；乱填 → 清楚的错误（v2.40 复审）。"""
+    try:
+        return int((it or {}).get("item_id") or 0)
+    except (TypeError, ValueError, AttributeError):
+        raise ValueError("要补发 / 退货的商品不对，请重新选择")
+
+
 def _f(v, allow_neg=False):
     try:
         x = float(v) if v not in (None, "") else None
@@ -147,7 +155,7 @@ def as_add(order_id, kind, reason, amount=None, note="", user="", reship_items=N
             k = (i.get("sku") or "").upper()
             bought[k] = bought.get(k, 0) + int(i.get("qty") or 1)
         for it in reship_items or []:
-            item = next((i for i in o["items"] if i["id"] == int(it.get("item_id") or 0)), None)
+            item = next((i for i in o["items"] if i["id"] == _iid(it)), None)
             if not item:
                 continue
             try:
@@ -162,7 +170,7 @@ def as_add(order_id, kind, reason, amount=None, note="", user="", reship_items=N
                 raise ValueError(f"{k} 原订单只有 {bought.get(k, 0)} 个，补发数量不能比这个多"
                                  + (f"（之前已经补发过 {before} 个）" if before else ""))
         for it in reship_items or []:
-            item = next((i for i in o["items"] if i["id"] == int(it.get("item_id") or 0)), None)
+            item = next((i for i in o["items"] if i["id"] == _iid(it)), None)
             q = int(it.get("qty") or 0)
             if item and q > 0 and item.get("product_id"):
                 j = production.create_job(item["product_id"], item["sku"], q, "reship", order_id, user, f"补发：{reason}")
@@ -290,7 +298,7 @@ def as_inspect(aid, items, result_note="", user=""):
     by_id = {i["id"]: i for i in (o or {}).get("items", [])}
     done, scrap_rows, restock_n, scrap_n = [], [], 0, 0
     for it in items or []:
-        item = by_id.get(int(it.get("item_id") or 0))
+        item = by_id.get(_iid(it))
         if not item:
             continue
         rs, sc = max(0, int(it.get("restock") or 0)), max(0, int(it.get("scrap") or 0))

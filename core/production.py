@@ -348,7 +348,7 @@ def reserved(sku, c=None):
     """v2.35：还没发货的订单「用库存发」占住的成品个数（发货出库时才真正扣库存）。"""
     c = c or db.conn()
     r = c.execute("""SELECT COALESCE(SUM(j.stock_n),0) FROM jobs j JOIN orders o ON o.id=j.order_id
-                     WHERE UPPER(j.sku)=? AND j.kind='order' AND COALESCE(j.stock_n,0)>0 AND o.status IN ('to_ship','quote','unpaid')""",
+                     WHERE UPPER(j.sku)=? AND j.kind='order' AND COALESCE(j.stock_n,0)>0 AND o.status IN ('to_ship','quote','unpaid','other')""",
                   ((sku or "").upper(),)).fetchone()
     return int(r[0] or 0)
 
