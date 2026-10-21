@@ -130,7 +130,8 @@
       <p class="small"><span data-notr>${esc((po.supplier || {}).name || "")}</span>${po.expected_date ? ` · <span>预计到货</span> ${esc(po.expected_date)}` : ""}${po.tracking ? ` · <span>运单</span> <span data-notr>${esc(po.tracking)}</span>` : ""}
         ${po.note ? ` · <span data-notr>${esc(po.note)}</span>` : ""}</p>
       <table class="grid small"><thead><tr><th>物品</th><th>数量</th><th>单价</th><th>金额</th><th>已到</th><th>${open ? "这次到货" : ""}</th></tr></thead><tbody>${lines}</tbody></table>
-      ${po.total === undefined ? "" : `<p class="small"><span>货款</span> ฿${num(po.goods_total)} + <span>运费</span> ฿${num(po.ship_fee)} + <span>其他</span> ฿${num(po.other_fee)} = <b>฿${num(po.total)}</b> ·
+      ${po.total === undefined ? "" : `<p class="small"><span>货款</span> ฿${num(po.goods_total)} + <span>运费</span> ฿${num(po.fees_counted ? po.ship_fee : 0)} + <span>其他</span> ฿${num(po.fees_counted ? po.other_fee : 0)} = <b>฿${num(po.total)}</b> ·
+        ${po.paid > po.total + 0.01 ? `<span class="warn">多付了 ฿${num(po.paid - po.total)}（找供应商退回或抵下次）</span> ·` : ""}
         <span>已付</span> <b>฿${num(po.paid)}</b>（<span>${PAY_ZH[po.pay_status]}</span>）</p>`}
       ${(po.payments || []).length ? `<div class="small muted">${po.payments.map((x) => `${esc(x.day)} ฿${num(x.amount)} <span data-notr>${esc(x.method || "")} ${esc(x.note || "")}</span>`).join("<br>")}</div>` : ""}
       ${po.docs && po.docs.length ? `<p class="small">入库单：<span data-notr>${po.docs.map((d) => esc(d.no)).join("、")}</span></p>` : ""}
@@ -139,7 +140,7 @@
         ${open && can("inv.in") ? '<button class="primary" id="pv-rcv">到货入库（填了数量的行）</button><button id="pv-rcv-all">全部到货</button>' : ""}
         ${po.status === "partial" && can("inv.in") ? '<button id="pv-close">结单（剩下的不要了）</button>' : ""}
         ${open && can("inv.in") ? '<button id="pv-track">填运单号</button>' : ""}
-        ${po.status !== "cancelled" && can("inv.pay") && po.pay_status !== "paid" ? '<button id="pv-pay">记付款</button>' : ""}
+        ${(po.status !== "cancelled" || po.total > 0) && can("inv.pay") && po.pay_status !== "paid" ? '<button id="pv-pay">记付款</button>' : ""}
         ${["draft", "ordered"].includes(po.status) && can("inv.in") ? '<button class="danger" id="pv-cancel">取消采购单</button>' : ""}
         <button data-mclose>关闭</button></div>`);
     m.classList.add("wide");

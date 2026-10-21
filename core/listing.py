@@ -36,7 +36,15 @@ def init():
 def exported_to(p, platform):
     """v2.40：导出过这个平台没有（exported_at 同时是 SKU 锁；只导出过 Shopee 时不算导出过 Lazada）。"""
     if platform == "lazada":
-        return bool(p.get("exported_at")) and p.get("exported_first") != "shopee"
+        if not p.get("exported_at") or p.get("exported_first") == "shopee":
+            return False
+        # v2.40 以前只导出过 Shopee 的老产品没有标记：exported_at 和 shopee_exported_at 是同一次导出写的（相差几秒），
+        # 而且没有任何 Lazada 上架记录 → 当作没导出过 Lazada
+        lz = (p.get("listing") or {}).get("lazada") or {}
+        sp_at = p.get("shopee_exported_at")
+        if not lz and sp_at and abs(float(p["exported_at"]) - float(sp_at)) < 5:
+            return False
+        return True
     return bool(p.get("shopee_exported_at"))
 
 

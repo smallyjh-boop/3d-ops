@@ -102,4 +102,40 @@ r = C.post("/api/aftersales", json={"order_id": o["id"], "kind": "refund", "reas
 ok(r.status_code == 400, f"negative refund refused ({r.status_code})")
 r = C.post("/api/aftersales", json={"order_id": o["id"], "kind": "reship", "reason": "坏了", "items": [{"item_id": item_id, "qty": 1}]})
 ok(r.status_code == 200, "reship 1 of 1 ok")
+# ==== 发布前审查发现的问题 ====
+# H1 已发货的订单：打了一部分的件不进成品库存（已经跟着包裹走了）
+o = manual("H1", items=[{"sku": sku, "qty": 3, "unit_price": 100}]) if False else C.post("/api/orders/manual", json={"order_no": "H1", "items": [{"sku": sku, "qty": 3, "unit_price": 100}]}).get_json()
+j = jobs_of(o["id"])[0]
+production.start_run(j["id"], 0, 1, [], None, False, "t", CONF)
+production.finish_run(db.conn().execute("SELECT run_id FROM jobs WHERE id=?", (j["id"],)).fetchone()["run_id"] or db.conn().execute("SELECT MAX(id) FROM print_runs").fetchone()[0], "t")
+s0 = production.stock_qty(sku)
+C.post("/api/orders/batch", json={"ids": [o["id"]], "action": "status", "value": "shipped"})
+ok(not jobs_of(o["id"]) and production.stock_qty(sku) == s0, f"shipped with partial print: job dropped, no phantom stock (+{production.stock_qty(sku) - s0})")
+# H2 认不出 / 平台中间状态（待揽收、已打包、ON_HOLD）不删生产任务
+orders.upsert([{"platform": "shopee", "order_no": "H2", "status": "待发货", "items": [{"sku": sku, "qty": 1}]}], source="t")
+production.generate("t"); oh = q("H2")["id"]
+for st_ in ("待揽收", "已打包", "ON_HOLD"):
+    orders.upsert([{"platform": "shopee", "order_no": "H2", "status": st_}], source="t"); production.generate("t")
+    ok(len(jobs_of(oh)) == 1, f"status {st_} -> {q('H2')['status']}: job kept")
+# M3 批量改状态不再每单重排（60 单要很快）
+import time as _t
+ids = [manual(f"B{i}")["id"] for i in range(60)]
+t0 = _t.time(); C.post("/api/orders/batch", json={"ids": ids, "action": "status", "value": "cancelled"}); dt_ = _t.time() - t0
+ok(dt_ < 2.5 and not any(jobs_of(i) for i in ids), f"batch cancel 60 orders in {dt_:.2f}s, jobs removed")
+# M4 改订单商品不会删补发任务
+config.save_config({"stock_auto_use": True}); production.stock_add(sku, 5, "t", "t")
+o = C.post("/api/orders/manual", json={"order_no": "M4", "items": [{"sku": sku, "qty": 2, "unit_price": 100}]}).get_json()
+C.post("/api/aftersales", json={"order_id": o["id"], "kind": "reship", "reason": "坏了", "items": [{"item_id": o["items"][0]["id"], "qty": 1}]})
+C.post(f"/api/orders/{o['id']}/edit", json={"items": [{"sku": sku, "qty": 3, "unit_price": 100}]})
+ok(any(x["kind"] == "reship" for x in jobs_of(o["id"])), "reship job survives editing items")
+config.save_config({"stock_auto_use": False})
+# L10 平台罚款 / 赔付可以负数；补发累计不超过原数量
+r = C.post("/api/aftersales", json={"order_id": o["id"], "kind": "other", "reason": "平台赔付", "penalty": -30})
+ok(r.status_code == 200, f"negative penalty (platform compensation) allowed ({r.status_code})")
+r = C.post("/api/aftersales", json={"order_id": o["id"], "kind": "reship", "reason": "又坏了", "items": [{"item_id": orders.get_order(o["id"])["items"][0]["id"], "qty": 3}]})
+ok(r.status_code == 400 and "之前已经补发过" in r.get_json()["error"], f"cumulative reship capped ({r.status_code})")
+# L11 没有平台列的表格不会撞到批发单
+orders.upsert([{"platform": "wholesale", "order_no": "W-100", "status": "待发货", "items": [{"sku": sku, "qty": 1}]}], source="t")
+orders.upsert([{"platform": "", "order_no": "W-100", "status": "已发货", "items": [{"sku": sku, "qty": 1}]}], source="t")
+ok(db.conn().execute("SELECT status FROM orders WHERE platform='wholesale' AND order_no='W-100'").fetchone()[0] == "to_ship", "wholesale order not overwritten by an unknown-platform sheet")
 print("ERRORS", E_)

@@ -66,12 +66,14 @@ def _aslog(aid, user, action, detail="", commit=True):
         c.commit()
 
 
-def _f(v):
+def _f(v, allow_neg=False):
     try:
         x = float(v) if v not in (None, "") else None
     except (TypeError, ValueError):
         raise ValueError(f"金额「{v}」要填数字")
-    if x is not None and (x != x or x in (float("inf"), float("-inf")) or x < 0):      # v2.40：售后金额不能是负数
+    if x is not None and (x != x or x in (float("inf"), float("-inf"))):
+        raise ValueError(f"金额「{v}」要填数字")
+    if x is not None and x < 0 and not allow_neg:      # v2.40：退款等不能是负数（「平台罚款 / 赔付」可以负数＝平台赔给我们）
         raise ValueError(f"金额「{v}」不能是负数")
     return x
 
@@ -134,13 +136,19 @@ def as_add(order_id, kind, reason, amount=None, note="", user="", reship_items=N
         raise ValueError("售后类型不对")
     if responsibility and responsibility not in AS_RESP:
         raise ValueError("责任方不对")
-    _f(amount), _f(return_shipping), _f(penalty)       # v2.40：先检查，免得补发任务建了一半才报错
+    _f(amount), _f(return_shipping), _f(penalty, True)       # v2.40：先检查，免得补发任务建了一半才报错
     jobs, cost_rows = [], []
     if kind == "reship":
-        for it in reship_items or []:       # v2.40：补发不能比原来买的多（先全部检查，再建任务）
+        done = {r[0]: r[1] for r in c.execute("SELECT UPPER(sku), SUM(qty) FROM jobs WHERE order_id=? AND kind='reship' GROUP BY UPPER(sku)",
+                                                  (order_id,))}
+        for it in reship_items or []:       # v2.40：补发（几次加起来）不能比原来买的多（先全部检查，再建任务）
             item = next((i for i in o["items"] if i["id"] == int(it.get("item_id") or 0)), None)
-            if item and int(it.get("qty") or 0) > (item.get("qty") or 1):
-                raise ValueError(f"{item['sku']} 原订单只有 {item.get('qty') or 1} 个，补发数量不能比这个多")
+            if not item:
+                continue
+            left = (item.get("qty") or 1) - int(done.get((item["sku"] or "").upper()) or 0)
+            if int(it.get("qty") or 0) > left:
+                raise ValueError(f"{item['sku']} 原订单只有 {item.get('qty') or 1} 个，补发数量不能比这个多"
+                                 + (f"（之前已经补发过 {item.get('qty', 1) - left} 个）" if left < (item.get("qty") or 1) else ""))
         for it in reship_items or []:
             item = next((i for i in o["items"] if i["id"] == int(it.get("item_id") or 0)), None)
             q = int(it.get("qty") or 0)
@@ -159,7 +167,7 @@ def as_add(order_id, kind, reason, amount=None, note="", user="", reship_items=N
                     "evidence, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (order_id, kind, reason, _f(amount), note, "closed" if stage in AS_DONE else "open", now, user,
                      ",".join(map(str, jobs)), stage, due, responsibility or "", staff or "", pcodes, pfiles,
-                     _items_cost(cost_rows) if cost_rows else None, return_tracking or "", _f(return_shipping), _f(penalty),
+                     _items_cost(cost_rows) if cost_rows else None, return_tracking or "", _f(return_shipping), _f(penalty, True),
                      "[]", now)).lastrowid
     c.commit()
     _aslog(aid, user, "登记", f"{AS_KIND.get(kind, kind)} · {reason} · {AS_STAGE[stage]}")
@@ -198,7 +206,14 @@ def as_update(aid, data, user="", owner=True):
             continue
         v = data[k]
         if k in AS_LOSS:
-            v = _f(v)
+            try:
+                v = _f(v, k == "penalty")
+            except ValueError:
+                # 以前存进去的负数：页面整张提交时值没变 → 照旧保存，不卡住这条记录
+                if old[k] is not None and v not in (None, "") and abs(float(v) - float(old[k])) < 1e-9:
+                    v = float(old[k])
+                else:
+                    raise
         elif k == "due_at":
             v = orders._time(v) if v else None
         elif k == "stage" and v not in AS_STAGE:

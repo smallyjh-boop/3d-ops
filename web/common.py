@@ -626,6 +626,20 @@ def _hide_inv_money(resp):
     return resp
 
 
+@app.after_request
+def _hide_markup(resp):
+    """v2.40 审查：产品接口（保存、图片、复制……）返回整个产品时也不把加价率给员工。"""
+    if not request.path.startswith("/api/products") or not resp.is_json:
+        return resp
+    u = auth.current_user()
+    if not u or u.get("role") in ("owner", "api"):
+        return resp
+    data = resp.get_json(silent=True)
+    if data is not None:
+        resp.set_data(json.dumps(_drop_keys(data, {"markup"}), ensure_ascii=False))
+    return resp
+
+
 def _strip_as(d):
     if not auth.is_owner():
         for k in extras.AS_LOSS + ("loss",):

@@ -151,13 +151,20 @@
     };
     const updFile = () => {
       const n = count();
-      const f = files.filter((x) => x.per_plate === n && x.status !== "draft" && x.active).sort((a, b) => (b.status === "verified") - (a.status === "verified"))[0];
-      const draft = files.find((x) => x.per_plate === n && x.status === "draft" && x.active);
+      // v2.40：机型 / 喷嘴 / 热床板对不上这台打印机的文件不选它，说明原因
+      const fit = (x) => x.machine_ok !== false;
+      const f = files.filter((x) => x.per_plate === n && x.status !== "draft" && x.active && fit(x)).sort((a, b) => (b.status === "verified") - (a.status === "verified"))[0];
+      const draft = files.find((x) => x.per_plate === n && x.status === "draft" && x.active && fit(x));
+      const misfit = !f && !draft ? files.find((x) => x.per_plate === n && x.active && !fit(x)) : null;
       let html;
-      if (f) html = `📄 用文件：<span data-notr>${esc(f.filename)}</span> v${f.version} · <span class="pill fpill-${f.status}">${esc(FST[f.status])}</span> · 每盘 ${H().num(f.grams, 0)}g · ${H().num(f.hours, 1)}h`;
-      else if (draft) html = `📄 有一盘 ${n} 个的文件，但还没复核（草稿）。可以在这里确认后直接用。`;
-      else if (o.has_model) html = `📄 还没有一盘 ${n} 个的文件，开始时会<b>按打印方案自动切片</b>（大约 10 秒到 1 分钟）。`;
-      else html = `<span class="warn">没有一盘 ${n} 个的切片文件，这个产品也没有 3D 模型。现有文件：${files.map((x) => x.per_plate + " 个").join("、") || "无"}。可以手动开始。</span>`;
+      if (misfit) html = `<span class="warn">一盘 ${n} 个的文件 <span data-notr>${esc(misfit.filename)}</span> 不能用在这台打印机：${esc((misfit.machine_errors || []).join("；"))}</span><br>`;
+      else html = "";
+      let html0;
+      if (f) html0 = `📄 用文件：<span data-notr>${esc(f.filename)}</span> v${f.version} · <span class="pill fpill-${f.status}">${esc(FST[f.status])}</span> · 每盘 ${H().num(f.grams, 0)}g · ${H().num(f.hours, 1)}h`;
+      else if (draft) html0 = `📄 有一盘 ${n} 个的文件，但还没复核（草稿）。可以在这里确认后直接用。`;
+      else if (o.has_model) html0 = `📄 还没有一盘 ${n} 个的文件，开始时会<b>按打印方案自动切片</b>（大约 10 秒到 1 分钟）。`;
+      else html0 = `<span class="warn">没有一盘 ${n} 个的切片文件，这个产品也没有 3D 模型。现有文件：${files.map((x) => x.per_plate + " 个").join("、") || "无"}。可以手动开始。</span>`;
+      html += html0;
       const ff = f || draft;
       const p = ff && ff.report && ff.report.params || {};
       const mc = o.material_check;

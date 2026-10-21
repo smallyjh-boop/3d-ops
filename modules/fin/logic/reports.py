@@ -110,6 +110,10 @@ def pl(start=None, end=None, month=None):
     FIX_KEYS = (("房租", "monthly_rent", "ค่าเช่า"), ("人工工资", "monthly_labor", "ค่าแรง"),
                 ("设备折旧", "monthly_depreciation", "ค่าเสื่อม"), ("设备维修", "monthly_maintenance", "ค่าซ่อมบำรุง"))
     est_items = [(zh, th, float(cfg.get(k) or 0)) for zh, k, th in FIX_KEYS if not by_cat.get(zh) and float(cfg.get(k) or 0)]
+    # 设置里自己加了固定费用分类（例如「工资」）并且记了账：分不清对应哪一项 → 照以前，记了就都不估，免得重复算
+    custom = [k for k in st["fixed_cats"] if k not in {z for z, _k, _t in FIX_KEYS}]
+    if any(by_cat.get(k) for k in custom):
+        est_items = []
     fixed_est = sum(v for _z, _t, v in est_items) * days / 30.0
     opex = sum(by_cat.values())
     op_profit = gross - loss - opex - fixed_est

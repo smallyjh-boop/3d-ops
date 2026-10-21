@@ -305,8 +305,10 @@ def get_po(pid):
         # v2.40：结单（剩下的不要了）/ 取消：只付到了的那部分（以前结单后还按下单数量算，取消后到了的部分查不到）
         d["goods_total"] = round(sum((x["received"] or 0) * (x["unit_cost"] or 0) for x in d["lines"]), 2)
         got = any((x["received"] or 0) > 0 for x in d["lines"])
+        d["fees_counted"] = got
         d["total"] = round(d["goods_total"] + ((po["ship_fee"] or 0) + (po["other_fee"] or 0) if got else 0), 2)
     else:
+        d["fees_counted"] = True
         d["goods_total"] = round(sum((x["qty"] or 0) * (x["unit_cost"] or 0) for x in d["lines"]), 2)
         d["total"] = round(d["goods_total"] + (po["ship_fee"] or 0) + (po["other_fee"] or 0), 2)
     d["payments"] = [dict(r) for r in c.execute("SELECT * FROM inv_payments WHERE po_id=? ORDER BY id", (po["id"],))]

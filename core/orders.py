@@ -141,7 +141,8 @@ STATUS_RULES = [
     ("completed", ["已完成", "完成", "已签收", "complete", "delivered", "สำเร็จ", "จัดส่งสำเร็จ", "ได้รับสินค้า"]),
     ("shipped", ["已发货", "运输中", "shipped", "shipping", "in transit", "in_transit", "awaiting_collection", "จัดส่งแล้ว", "กำลังจัดส่ง"]),
     ("unpaid", ["未付款", "待付款", "unpaid", "pending payment", "ยังไม่ชำระ", "รอชำระ"]),
-    ("to_ship", ["待发货", "待处理", "待打单", "已付款", "awaiting_shipment", "awaiting shipment", "to ship", "ready to ship", "pending", "packed", "processing",
+    ("to_ship", ["待发货", "待处理", "待打单", "已付款", "待揽收", "待打印", "已打包", "待出库", "to pack", "ready_to_ship",
+                 "awaiting_fulfillment", "awaiting_shipment", "awaiting shipment", "to ship", "ready to ship", "pending", "packed", "processing",
                  "ที่ต้องจัดส่ง", "รอจัดส่ง", "เตรียมจัดส่ง"]),
 ]
 STATUS_ZH = {"unpaid": "未付款", "to_ship": "待发货", "shipped": "已发货", "completed": "已完成",
@@ -527,7 +528,7 @@ def upsert(orders, source="api", default_platform="", user="", audit=True):
         old = c.execute("SELECT * FROM orders WHERE platform=? AND order_no=?", (plat, no)).fetchone()
         if not old and plat == "other":
             # v2.40：表格里没有平台列、文件名也认不出平台 → 按订单号找已有的订单（只有一个才算同一单），不重复建
-            same = c.execute("SELECT * FROM orders WHERE order_no=? AND platform NOT IN ('manual')", (no,)).fetchall()
+            same = c.execute("SELECT * FROM orders WHERE order_no=? AND platform IN ('lazada','shopee','tiktok')", (no,)).fetchall()
             if len(same) == 1:
                 old, plat = same[0], same[0]["platform"]
                 fields["platform"] = plat
@@ -570,15 +571,26 @@ def upsert(orders, source="api", default_platform="", user="", audit=True):
                     if unit is not None or total is not None:
                         c.execute("UPDATE order_items SET unit_price=COALESCE(?, unit_price), item_total=COALESCE(?, item_total) WHERE id=?",
                                   (unit, total, r["id"]))
+                # 以前没对上 SKU 的行：现在产品库里有了就补上（以前再导一次表格会顺便补，跳过重建后要单独做）
+                for r in c.execute("SELECT id, sku FROM order_items WHERE order_id=? AND product_id IS NULL", (oid,)).fetchall():
+                    hit = match_sku(r["sku"], idx)
+                    if hit:
+                        info = _variant_info(*hit)
+                        c.execute("UPDATE order_items SET product_id=?, variant_idx=?, name=COALESCE(NULLIF(name,''), ?), color=?, "
+                                  "material=?, grams=?, hours=? WHERE id=?",
+                                  (hit[0], hit[1], info.get("name", ""), info.get("color", ""), info.get("material", ""),
+                                   info.get("grams"), info.get("hours"), r["id"]))
+                _auto_ship_by(c, oid)
+                _ship_defaults(c, oid)
                 continue
-            locked = c.execute("SELECT COUNT(*) FROM jobs WHERE order_id=? AND (run_id IS NOT NULL OR COALESCE(qty_done,0)>COALESCE(stock_n,0) OR status NOT IN ('todo','post'))",      # v2.40：只用库存发、还没打的不算开始
+            locked = c.execute("SELECT COUNT(*) FROM jobs WHERE order_id=? AND COALESCE(kind,'order')='order' AND (run_id IS NOT NULL OR COALESCE(qty_done,0)>COALESCE(stock_n,0) OR status NOT IN ('todo','post'))",      # v2.40：只用库存发、还没打的不算开始
                                (oid,)).fetchone()[0] \
                 if _has_jobs_table(c) else 0
             if locked:
                 stats["skipped_items_locked"] += 1
                 continue
             if _has_jobs_table(c):   # 还没开始打印的任务按新明细重新生成
-                c.execute("DELETE FROM jobs WHERE order_id=? AND status IN ('todo','post') AND run_id IS NULL", (oid,))
+                c.execute("DELETE FROM jobs WHERE order_id=? AND COALESCE(kind,'order')='order' AND status IN ('todo','post') AND run_id IS NULL", (oid,))
             c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))
         else:
             fields.update(imported_at=now, updated_at=now)
@@ -1002,6 +1014,11 @@ def search(f):
 
 
 def batch(ids, action, value=None, user=""):
+    with deferred_jobs(user):       # v2.40：批量改状态时生产任务最后统一刷一次
+        return _batch(ids, action, value, user)
+
+
+def _batch(ids, action, value=None, user=""):
     n = 0
     for oid in ids:
         oid = int(oid)
@@ -1082,13 +1099,13 @@ def edit_order(oid, data, user=""):
             items = None      # v2.39：商品没变（只改了地址、备注…）→ 商品明细、生产任务、金额都不动
     if items is not None:
         if _has_jobs_table(c) and c.execute(
-                "SELECT COUNT(*) FROM jobs WHERE order_id=? AND (run_id IS NOT NULL OR COALESCE(qty_done,0)>COALESCE(stock_n,0) OR status NOT IN ('todo','post'))",      # v2.40：只用库存发、还没打的不算开始
+                "SELECT COUNT(*) FROM jobs WHERE order_id=? AND COALESCE(kind,'order')='order' AND (run_id IS NOT NULL OR COALESCE(qty_done,0)>COALESCE(stock_n,0) OR status NOT IN ('todo','post'))",      # v2.40：只用库存发、还没打的不算开始
                 (oid,)).fetchone()[0]:
             raise ValueError("这个订单已经开始打印了，不能再改商品。可以加备注，或者取消后重新下单")
         before = [(r["sku"], r["qty"]) for r in olds]
         old_sum = sum(r["item_total"] or 0 for r in olds)
         if _has_jobs_table(c):
-            c.execute("DELETE FROM jobs WHERE order_id=? AND status IN ('todo','post') AND run_id IS NULL", (oid,))
+            c.execute("DELETE FROM jobs WHERE order_id=? AND COALESCE(kind,'order')='order' AND status IN ('todo','post') AND run_id IS NULL", (oid,))
         c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))
         idx = sku_index()
         pool = list(olds)
@@ -1284,16 +1301,48 @@ def set_hold(oid, hold, reason="", user=""):
 SHIP_FROM = ("to_ship", "quote", "unpaid")
 
 
+_defer = __import__("threading").local()
+
+
+class deferred_jobs:
+    """with deferred_jobs(user): 批量改状态时，生产任务最后统一刷新一次。"""
+    def __init__(self, user=""):
+        self.user = user
+
+    def __enter__(self):
+        self.outer = getattr(_defer, "on", False)
+        _defer.on = True
+        if not self.outer:
+            _defer.pending = False
+        return self
+
+    def __exit__(self, *exc):
+        if self.outer:
+            return False
+        _defer.on = False
+        if getattr(_defer, "pending", False):
+            _defer.pending = False
+            try:
+                from . import chain
+                chain.order_changed(self.user)
+            except Exception as e:  # noqa: BLE001
+                print("更新生产任务失败：", e)
+        return False
+
+
 def on_status_change(oid, new, user="", old=None):
     """状态变化的联动：拒收 / 派送失败 → 自动登记售后（等包裹退回验货），买家档案里记一次拒收；
     待发货 → 已发货：按设置自动扣包材（v2.18）。"""
     from . import chain
     chain.order_status(oid, new, old, user)      # v2.31：库存模块开着时「已发货」自动扣包材（库存模块自己判断）
     if old in ACTIVE_STATUSES and new not in ACTIVE_STATUSES:     # v2.40：离开「待发货」→ 还没开始的生产任务停下
-        try:
-            chain.order_changed(user)
-        except Exception as e:  # noqa: BLE001
-            print("更新生产任务失败：", e)
+        if getattr(_defer, "on", False):
+            _defer.pending = True            # 批量操作：最后统一刷一次（一单一刷太慢）
+        else:
+            try:
+                chain.order_changed(user)
+            except Exception as e:  # noqa: BLE001
+                print("更新生产任务失败：", e)
     try:                                          # v2.37：批发站的订单状态变了，马上通知批发网站
         r = db.conn().execute("SELECT platform, order_no FROM orders WHERE id=?", (oid,)).fetchone()
         if r and r["platform"] == "wholesale":
@@ -1411,6 +1460,11 @@ def mask_key(key):
 
 # ---------------- v2.11 运单号批量导入 ----------------
 def import_tracking(text, mark_shipped=False, user=""):
+    with deferred_jobs(user):       # v2.40：批量改状态时生产任务最后统一刷一次
+        return _import_tracking(text, mark_shipped, user)
+
+
+def _import_tracking(text, mark_shipped=False, user=""):
     """每行：订单号, 运单号[, 物流公司]（逗号 / Tab / 空格分隔）。"""
     c = db.conn()
     done, missing, bad = [], [], []
@@ -1539,6 +1593,11 @@ def handover_remove(hid, oid, user=""):
 
 
 def handover_close(hid, user=""):
+    with deferred_jobs(user):       # v2.40：批量改状态时生产任务最后统一刷一次
+        return _handover_close(hid, user)
+
+
+def _handover_close(hid, user=""):
     """交接完成：单里的订单都标记「已发货」，生产任务标记已发货。"""
     d = handover_get(hid)
     if not d:

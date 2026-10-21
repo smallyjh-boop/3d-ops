@@ -103,6 +103,12 @@ def ship_order(oid, user=""):
         skipped = []
         for k in list(merged):
             it = ledger.get_item(merged[k]["item_id"])
+            if it and not it["active"] and it["category"] == "goods":
+                # 成品停用了也要照扣（不扣的话「用库存发」的件发出去了库存还在），顺便重新启用
+                c.execute("UPDATE inv_items SET active=1 WHERE id=?", (it["id"],))
+                c.commit()
+                orders.log(oid, user or "系统", "发货出库", f"成品 {it['name_zh']} 已停用，已重新启用并照常扣库存")
+                continue
             if not it or not it["active"]:
                 skipped.append((it or {}).get("name_zh") or str(merged[k]["item_id"]))
                 del merged[k]

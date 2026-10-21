@@ -303,6 +303,22 @@ def _printer_ok(file_printer, printer_name):
     return file_printer in ("*", "", None) or file_printer == printer_name
 
 
+_CFG_MEMO = {"t": "", "cfg": None}
+
+
+def _cfg_cached():
+    """排单时每个任务都要查一遍：设置文件没改过就不重复读（v2.40 审查：性能）。"""
+    from .config import CONFIG_PATH, load_config
+    try:
+        st = os.stat(CONFIG_PATH)
+        mt = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        mt = None
+    if _CFG_MEMO["cfg"] is None or _CFG_MEMO["t"] != mt:
+        _CFG_MEMO.update(t=mt, cfg=load_config())
+    return _CFG_MEMO["cfg"]
+
+
 def candidates(product_id, sku, printer_name, color="", usable_only=True):
     """这台打印机能用的文件，按合适程度排序：同 SKU > 同颜色 > 已验证 > 已复核 > 新版本。"""
     if not product_id:
@@ -331,8 +347,7 @@ def candidates(product_id, sku, printer_name, color="", usable_only=True):
         # v2.40：机型 / 喷嘴 / 热床板对不上这台打印机的文件不算能用（以前排单和开始对话框会选中它，开始时才报错）
         try:
             from modules.prod import slicecheck
-            from .config import load_config
-            cfg = load_config()
+            cfg = _cfg_cached()
             idx = next((i for i, p in enumerate(cfg.get("printers") or []) if (p.get("name") or "") == printer_name), None)
             if idx is not None:
                 rows = [r for r in rows if slicecheck.check(r, idx, cfg)["ok"]]

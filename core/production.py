@@ -125,10 +125,17 @@ def generate(user=""):
             if use > 0:
                 _reserve(c, jid, use, int(r["qty"] or 1), 0, now, user or "系统")
                 _olog(r["oid"], user or "系统", "用库存发", f"{r['sku']} ×{use}（发货出库时扣库存）")
-    # v2.40：订单不再「待发货 / 报价」（取消、退货、拒收、已经发货 / 完成、改回未付款）或挂起 → 还没开始的任务删掉，不再排单
+    # v2.40：订单取消 / 退货 / 拒收 / 已经发货 / 已完成 / 改回未付款，或挂起 → 还没开始的任务删掉，不再排单。
+    # 只列明确的状态：认不出的状态（other，例如「待揽收」「已打包」）当作还没发，任务照常（审查发现的问题）
     cancelled = c.execute("""DELETE FROM jobs WHERE status='todo' AND COALESCE(qty_done,0)=0 AND run_id IS NULL
-        AND kind='order' AND order_id IN (SELECT id FROM orders WHERE status NOT IN ('to_ship','quote')
-        OR COALESCE(hold,0)=1)""").rowcount
+        AND kind='order' AND order_id IN (SELECT id FROM orders WHERE status IN
+        ('cancelled','returned','delivery_failed','shipped','completed','unpaid') OR COALESCE(hold,0)=1)""").rowcount
+    # 已经发货 / 完成的订单还挂着打了一部分（或部分用库存）的任务：件已经跟着包裹走了，只删任务，不进库存
+    for j in c.execute("""SELECT id, order_id, sku, qty_done, qty FROM jobs WHERE kind='order' AND run_id IS NULL AND status='todo'
+        AND COALESCE(qty_done,0)>0 AND order_id IN (SELECT id FROM orders WHERE status IN ('shipped','completed'))""").fetchall():
+        c.execute("DELETE FROM jobs WHERE id=?", (j["id"],))
+        _olog(j["order_id"], user or "系统", "订单已发货，剩下的不再生产", f"{j['sku']} 已打 {j['qty_done']}/{j['qty']}")
+        cancelled += 1
     # v2.35：还没发货就取消的订单，「用库存发」占住的数量放回去（只用库存、没打印过的任务直接删）
     cancelled += c.execute("""DELETE FROM jobs WHERE kind='order' AND run_id IS NULL AND COALESCE(stock_n,0)>0
         AND COALESCE(qty_done,0)<=COALESCE(stock_n,0) AND status IN ('todo','post')
@@ -496,7 +503,15 @@ def send_options(job_id, printer_idx=None):
             capacity = g.get("capacity")
     except Exception:  # 没有模型时只看已有文件
         p = None
-    usable = [f for f in files if f["status"] in ("reviewed", "verified")]
+    # v2.40 审查：机型 / 喷嘴 / 热床板对不上这台打印机的文件，对话框里照样列出（带原因），但不算可用、不默认选它
+    try:
+        from modules.prod import slicecheck
+        for f in files:
+            sc = slicecheck.check(f, idx)
+            f["machine_ok"], f["machine_errors"] = sc["ok"], sc["errors"]
+    except ImportError:
+        pass
+    usable = [f for f in files if f["status"] in ("reviewed", "verified") and f.get("machine_ok", True)]
     if not capacity:
         capacity = max([f["per_plate"] for f in files] or [remaining or 1])
     merge_total = sum(m["remaining"] for m in merge)
@@ -510,7 +525,7 @@ def send_options(job_id, printer_idx=None):
                           (f"；近 30 天卖了 {sug['sold30']} 个，建议常备 {sug['target']} 个、现有 {sug['stock']} 个，"
                            f"这一盘还有空位，建议顺便多打 {extra} 个备货（可以不要）" if extra else "")
                           + (f"；一盘最多 {capacity} 个，剩下的下一盘再打" if remaining + merge_total > capacity else ""))}
-    best = next((f for f in files if f["status"] in ("reviewed", "verified")), files[0] if files else None)
+    best = next((f for f in usable), next((f for f in files if f.get("machine_ok", True)), files[0] if files else None))
     mcheck = material_check(j, print_files.ensure_params(best) if best else None, idx)
     return {"material_check": mcheck,
             "job": j, "printer": idx, "printer_name": pname, "remaining": remaining, "merge": merge, "capacity": capacity,
@@ -709,7 +724,7 @@ def _drop_cancelled_partial(c, user=""):
     """v2.39：订单取消 / 退货 / 拒收时，已经打了一部分、还没在打的任务：不再排单，已经打好的件转成品库存。"""
     rows = c.execute("""SELECT * FROM jobs WHERE kind='order' AND run_id IS NULL AND status='todo'
         AND COALESCE(qty_done,0)>COALESCE(stock_n,0)
-        AND order_id IN (SELECT id FROM orders WHERE status IN ('cancelled','returned','delivery_failed','shipped','completed'))""").fetchall()
+        AND order_id IN (SELECT id FROM orders WHERE status IN ('cancelled','returned','delivery_failed'))""").fetchall()
     for j in rows:
         made = (j["qty_done"] or 0) - (j["stock_n"] or 0)
         c.execute("DELETE FROM jobs WHERE id=?", (j["id"],))

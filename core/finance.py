@@ -95,10 +95,10 @@ def report(days=30):
         its = items.get(o["id"], [])
         pr = order_profit(cfg, o, its)
         d = _day(o["order_time"])
-        row = daily.setdefault(d, {"day": d, "orders": 0, "revenue": 0, "fee": 0, "material": 0, "machine": 0,
+        row = daily.setdefault(d, {"day": d, "orders": 0, "revenue": 0, "out_vat": 0, "fee": 0, "material": 0, "machine": 0,
                                    "packaging": 0, "failure": 0, "expenses": 0, "profit": 0})
         row["orders"] += 1
-        for k in ("revenue", "fee", "material", "machine", "packaging", "failure", "profit"):
+        for k in ("revenue", "out_vat", "fee", "material", "machine", "packaging", "failure", "profit"):     # v2.40：含 VAT，行能对上账
             row[k] += pr[k]
         missing += pr["missing_data"]
         plat = by_platform.setdefault(o["platform"] or "其他", {"platform": o["platform"] or "其他", "orders": 0, "revenue": 0, "profit": 0})
@@ -118,7 +118,7 @@ def report(days=30):
     from . import extras
     for a in extras.as_losses(since):
         d = _day(a["created_at"])
-        row = daily.setdefault(d, {"day": d, "orders": 0, "revenue": 0, "fee": 0, "material": 0, "machine": 0,
+        row = daily.setdefault(d, {"day": d, "orders": 0, "revenue": 0, "out_vat": 0, "fee": 0, "material": 0, "machine": 0,
                                    "packaging": 0, "failure": 0, "expenses": 0, "profit": 0})
         row["aftersales"] = row.get("aftersales", 0) + a["loss"]
         row["profit"] -= a["loss"]

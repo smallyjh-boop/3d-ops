@@ -72,4 +72,12 @@ p["white_bg"] = {"file": "r_wb_test.jpg", "url": ""}; store.save(p)
 keep = [i["raw"] for i in p["images"] if i["raw"] != raw]
 C.post(f"/api/products/{src}/images/reorder", json={"order": keep})
 ok(not store.load(src).get("white_bg"), "deleting the render used as white-bg clears white_bg")
+# 审查 L12：保存等接口返回的产品里也没有加价率
+r = N.post(f"/api/products/{only_lz}", json=N.get(f"/api/products/{only_lz}").get_json()).get_json()
+ok("markup" not in r, "save response to staff has no markup")
+# 审查 L14：v2.40 以前只导出过 Shopee 的老产品（没有标记）
+p = store.load(only_lz); p["exported_at"] = 1000; p["shopee_exported_at"] = 1002; p["listing"] = {}; p.pop("exported_first", None); store.save(p)
+ok(listing.status_of(store.load(only_lz), "lazada")["status"] == "none", "legacy shopee-only product is not lazada pending")
+p["shopee_exported_at"] = 900000; store.save(p)
+ok(listing.status_of(store.load(only_lz), "lazada")["status"] == "pending", "legacy lazada-then-shopee product still lazada pending")
 print("ERRORS", E_)
