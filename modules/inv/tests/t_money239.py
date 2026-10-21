@@ -1,10 +1,10 @@
-# v2.38：员工权限（全功能测试的高优先级问题）
+# v2.39：员工权限（全功能测试的高优先级问题）
 #  6 库存 / 采购的金额只给老板和有「入库」或「付款」权限的员工；生产角色看不到料卷价格
 #  9 订单操作记录不把金额给员工看     8 没有「取消/拒收」权限的员工不能借「登记售后」把订单改成拒收
 import os as _os
 T = _os.environ["T3D_TMP"]; APP = _os.environ["T3D_APP"]
 import os, sys, shutil
-D = T + "/m_money238"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T + "/v13", D)
+D = T + "/m_money239"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T + "/v13", D)
 import sqlite3; c0 = sqlite3.connect(D + "/app.db"); c0.execute("delete from users"); c0.commit(); c0.close()
 os.environ["LH_DATA_DIR"] = D; sys.path.insert(0, APP)
 E_ = 0

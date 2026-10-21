@@ -1,11 +1,11 @@
-# v2.38：全功能测试发现的高优先级问题——订单、生产部分
+# v2.39：全功能测试发现的高优先级问题——订单、生产部分
 #  1 重新导入旧表格不能把已发货改回待发货      2 修改订单不覆盖订单金额（改商品按差额）
 #  4 打印中的订单不能删；任务不在了「打完」不重复扣料   5 打了一部分的订单取消 → 停止排单，已打好的进成品库存
 #  7 数量负数 / 0 当 1
 import os as _os
 T = _os.environ["T3D_TMP"]; APP = _os.environ["T3D_APP"]
 import os, sys, shutil
-D = T + "/v238"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T + "/v13", D)
+D = T + "/v239"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T + "/v13", D)
 import sqlite3; c0 = sqlite3.connect(D + "/app.db"); c0.execute("delete from users"); c0.commit(); c0.close()
 os.environ["LH_DATA_DIR"] = D; sys.path.insert(0, APP)
 E_ = 0

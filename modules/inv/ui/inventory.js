@@ -30,7 +30,7 @@
     const box = $("#inv-body"); if (!box) return;
     $$("#inv-views [data-iv]").forEach((b) => b.classList.toggle("on", b.dataset.iv === VIEW));
     $$("#inv-actions [data-perm]").forEach((b) => b.classList.toggle("hidden", !can(b.dataset.perm)));
-    const seeMoney = can("inv.pay") || can("inv.in");      // v2.38：支出统计只给有金额权限的人
+    const seeMoney = can("inv.pay") || can("inv.in");      // v2.39：支出统计只给有金额权限的人
     $$('#inv-views [data-iv="expense"]').forEach((b) => b.classList.toggle("hidden", !seeMoney));
     if (VIEW === "expense" && !seeMoney) VIEW = "items";
     const al = META.alerts || [];
@@ -65,7 +65,7 @@
         <span class="muted small">${(cnt[c.id] || {})[key] || 0}</span>${!catalog && (cnt[c.id] || {}).low ? ` <span class="bad small">⚠${cnt[c.id].low}</span>` : ""}</span>`)).join("");
     const total = r.items.reduce((s, x) => s + (x.value || 0), 0);
     const cols = CAT_COLS[CAT] || CAT_COLS[""];
-    const money = !r.items.length || r.items.some((x) => x.avg_cost !== undefined);   // v2.38：没有金额权限时不显示金额列
+    const money = !r.items.length || r.items.some((x) => x.avg_cost !== undefined);   // v2.39：没有金额权限时不显示金额列
     const has = (k) => cols.includes(k) && (k !== "transit" || r.items.some((x) => x.transit)) && (money || (k !== "cost" && k !== "value"));
     const zeroN = CAT ? ((cnt[CAT] || {}).zero || 0) : sum("zero");
     const head = `<tr><th>编码</th><th>名称</th>${CAT ? "" : "<th>分类</th>"}${has("brand") ? "<th>品牌 / 规格</th>" : ""}<th>库存</th>

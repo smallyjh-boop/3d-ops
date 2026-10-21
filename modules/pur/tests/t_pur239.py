@@ -1,10 +1,10 @@
-# v2.38：全功能测试的高优先级问题——库存、采购、对账
+# v2.39：全功能测试的高优先级问题——库存、采购、对账
 # 10 采购到货不能超量   11 作废采购入库单 → 采购单、财务一起退回   12 同一物品写几行出库，合起来看库存
 # 13 Shopee 订单没有订单金额时，对账按商品合计算（以前收入当 0、扣费算成负数）
 import os as _os
 T = _os.environ["T3D_TMP"]; APP = _os.environ["T3D_APP"]
 import os, sys, shutil, time, datetime as dt
-D = T + "/m_pur238"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T + "/v13", D)
+D = T + "/m_pur239"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T + "/v13", D)
 import sqlite3; c0 = sqlite3.connect(D + "/app.db"); c0.execute("delete from users"); c0.commit(); c0.close()
 os.environ["LH_DATA_DIR"] = D; sys.path.insert(0, APP)
 E_ = 0

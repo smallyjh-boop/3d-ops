@@ -701,7 +701,7 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
 
 
 def _drop_cancelled_partial(c, user=""):
-    """v2.38：订单取消 / 退货 / 拒收时，已经打了一部分、还没在打的任务：不再排单，已经打好的件转成品库存。"""
+    """v2.39：订单取消 / 退货 / 拒收时，已经打了一部分、还没在打的任务：不再排单，已经打好的件转成品库存。"""
     rows = c.execute("""SELECT * FROM jobs WHERE kind='order' AND run_id IS NULL AND status='todo'
         AND COALESCE(qty_done,0)>COALESCE(stock_n,0)
         AND order_id IN (SELECT id FROM orders WHERE status IN ('cancelled','returned','delivery_failed'))""").fetchall()
@@ -731,13 +731,13 @@ def finish_run(rid, user="", actual_count=None):
     inventory.consume_production(r["material"], r["color"], r["grams"] or 0, f"打印完成 批次#{rid}", user, r["printer"], f"run:{rid}")
     for jid, n in alloc.items():
         j = c.execute("SELECT * FROM jobs WHERE id=?", (int(jid),)).fetchone()
-        if not j:      # v2.38：任务已经不在了（订单被删）→ 打好的件进成品库存，别中途报错（报错时耗材已经扣了）
+        if not j:      # v2.39：任务已经不在了（订单被删）→ 打好的件进成品库存，别中途报错（报错时耗材已经扣了）
             stock_add(r["sku"], n, f"任务已删除，打好的进库存 批次#{rid}", user, r["product_id"], r["name"], r["color"])
             continue
         done = (j["qty_done"] or 0) + n
         if j["kind"] == "stock":
             stock_add(j["sku"], n, f"备货打印 批次#{rid}", user, j["product_id"], j["name"], j["color"])
-        gone = (j["kind"] or "order") == "order" and j["order_id"] and c.execute(       # v2.38：打的时候订单被取消了
+        gone = (j["kind"] or "order") == "order" and j["order_id"] and c.execute(       # v2.39：打的时候订单被取消了
             "SELECT 1 FROM orders WHERE id=? AND status IN ('cancelled','returned','delivery_failed')", (j["order_id"],)).fetchone()
         if done >= j["qty"] and not gone:
             status = "done" if j["kind"] == "stock" else "post"
@@ -752,7 +752,7 @@ def finish_run(rid, user="", actual_count=None):
     if r["extra"]:
         stock_add(r["sku"], r["extra"], f"多打进库存 批次#{rid}", user, r["product_id"], r["name"], r["color"])
     c.execute("UPDATE print_runs SET status='done', ended_at=?, alert='' WHERE id=?", (now, rid))
-    _drop_cancelled_partial(c, user)      # v2.38：打的时候订单被取消了 → 这一盘打完后停下
+    _drop_cancelled_partial(c, user)      # v2.39：打的时候订单被取消了 → 这一盘打完后停下
     c.commit()
     schedule()
     return dict(_run(c, rid))
@@ -775,7 +775,7 @@ def fail_run(rid, reason="", note="", user=""):
     alloc = json.loads(r["alloc"] or "{}")
     for jid in alloc:
         j = c.execute("SELECT * FROM jobs WHERE id=?", (int(jid),)).fetchone()
-        if not j:      # v2.38：任务已经不在了
+        if not j:      # v2.39：任务已经不在了
             continue
         c.execute("UPDATE jobs SET status='todo', run_id=NULL, fails=COALESCE(fails,0)+1, pin=0, alert='', "
                   "consumed_g=COALESCE(consumed_g,0)+?, updated_at=?, updated_by=? WHERE id=?",
@@ -783,7 +783,7 @@ def fail_run(rid, reason="", note="", user=""):
         _olog(j["order_id"], user, f"打印失败（{reason or '其他'}）", note or "")
     c.execute("UPDATE print_runs SET status='failed', ended_at=?, fail_reason=?, fail_note=? WHERE id=?",
               (now, reason, note, rid))
-    _drop_cancelled_partial(c, user)      # v2.38
+    _drop_cancelled_partial(c, user)      # v2.39
     c.commit()
     schedule()
     return dict(_run(c, rid))

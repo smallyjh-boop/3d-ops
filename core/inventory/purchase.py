@@ -93,7 +93,7 @@ def _clean_lines(lines):
             uc = float(ln["unit_cost"]) if ln.get("unit_cost") not in (None, "") else (it["avg_cost"] or 0)
         except (TypeError, ValueError):
             raise ValueError(f"第 {i + 1} 行：数量 / 单价不对")
-        if not (math.isfinite(q) and math.isfinite(uc)):      # v2.38
+        if not (math.isfinite(q) and math.isfinite(uc)):      # v2.39
             raise ValueError(f"第 {i + 1} 行：数量 / 单价不对")
         if q <= 0 or uc < 0:
             raise ValueError(f"第 {i + 1} 行：数量要大于 0、单价不能是负数")
@@ -112,7 +112,7 @@ def save_po(d, user=""):
     for k in ("ship_fee", "other_fee"):
         try:
             fees[k] = float(d.get(k) or 0)
-            if not math.isfinite(fees[k]):      # v2.38
+            if not math.isfinite(fees[k]):      # v2.39
                 raise ValueError
         except (TypeError, ValueError):
             raise ValueError("运费 / 其他费用要是数字")
@@ -200,12 +200,12 @@ def receive(pid, qtys=None, user="", note=""):
             v = qtys.get(str(ln["id"]), qtys.get(ln["id"]))
             if v in (None, "", 0, "0"):
                 continue
-            if ln["rolls"] and abs(float(v) - round(float(v))) > 1e-9:      # v2.38：按卷的耗材只能整卷到货
+            if ln["rolls"] and abs(float(v) - round(float(v))) > 1e-9:      # v2.39：按卷的耗材只能整卷到货
                 raise ValueError("按卷采购的耗材，到货要填整数卷")
             q = float(v) * (ln["net_g"] or 1000) if ln["rolls"] else float(v)
         if q <= 0:
             continue
-        if qtys is not None and q > left + 1e-6:      # v2.38：不能比还没到的多（以前能收成 14/10）
+        if qtys is not None and q > left + 1e-6:      # v2.39：不能比还没到的多（以前能收成 14/10）
             it = ledger.get_item(ln["item_id"]) or {}
             unit = "卷" if ln["rolls"] else (it.get("unit") or "")
             left_show = left / (ln["net_g"] or 1000) if ln["rolls"] else left
@@ -234,7 +234,7 @@ def receive(pid, qtys=None, user="", note=""):
 
 
 def on_receipt_void(d, amount, user=""):
-    """v2.38：采购到货入库单被作废：已到数量减回去、状态退回「已下单 / 部分到货」、财务记一笔负的到货。"""
+    """v2.39：采购到货入库单被作废：已到数量减回去、状态退回「已下单 / 部分到货」、财务记一笔负的到货。"""
     c = db.conn()
     po = c.execute("SELECT * FROM inv_po WHERE no=?", (d["ref"][3:],)).fetchone()
     if not po:

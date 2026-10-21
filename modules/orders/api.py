@@ -192,7 +192,7 @@ def orders_export():
 def order_delete(oid):
     try:
         orders_mod.delete_order(oid, _uname())
-    except ValueError as e:      # v2.38：正在打印的订单不能删
+    except ValueError as e:      # v2.39：正在打印的订单不能删
         return err(str(e))
     return jsonify({"ok": True})
 
@@ -405,7 +405,7 @@ def aftersales_one(aid):
 @bp.post("/api/aftersales")
 def aftersales_post():
     b = request.get_json(force=True) or {}
-    if b.get("status") and b.get("order_id"):      # v2.38：借售后把订单改成取消 / 拒收，一样要 orders.cancel 权限
+    if b.get("status") and b.get("order_id"):      # v2.39：借售后把订单改成取消 / 拒收，一样要 orders.cancel 权限
         denied = _cancel_denied(int(b["order_id"]), b)
         if denied:
             return denied

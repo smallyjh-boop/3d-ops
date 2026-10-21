@@ -441,7 +441,7 @@ ORDER_FIELDS = ("platform", "shop", "order_no", "status", "order_time", "ship_by
                 "carrier", "cod", "payment", "ship_method") + MONEY_FIELDS
 
 
-# v2.38：导入 / 推送时挡住「旧表格把状态改回去」：
+# v2.39：导入 / 推送时挡住「旧表格把状态改回去」：
 #   已发货以后（已发货、已完成、退货、拒收）→ 未付款 / 待发货；待发货 → 未付款；已完成 → 已发货；已取消 → 任何别的状态。
 #   退货被驳回（退货 → 已完成）、拒收后重新派送（拒收 → 已发货 / 已完成）照常更新。
 _AFTER_SHIP = ("shipped", "completed", "returned", "delivery_failed")
@@ -553,7 +553,7 @@ def upsert(orders, source="api", default_platform="", user="", audit=True):
             info = _variant_info(*hit) if hit else {}
             if not hit and sku:
                 stats["unmatched"][sku] = stats["unmatched"].get(sku, 0) + 1
-            qty = max(1, int(_num(it.get("qty")) or 1))     # v2.38：负数 / 0 当 1
+            qty = max(1, int(_num(it.get("qty")) or 1))     # v2.39：负数 / 0 当 1
             unit = _num(it.get("unit_price"))
             total = _num(it.get("item_total")) or (unit * qty if unit is not None else None)
             c.execute("""INSERT INTO order_items(order_id, sku, product_id, variant_idx, name, variation, qty, unit_price,
@@ -709,7 +709,7 @@ def log(order_id, user, action, detail="", commit=True):
 
 def get_log(order_id, hide_money=False):
     rows = [dict(r) for r in db.conn().execute("SELECT * FROM order_log WHERE order_id=? ORDER BY id DESC", (order_id,))]
-    if hide_money:       # v2.38：员工看不到金额（订单金额、平台费、售后损失等）
+    if hide_money:       # v2.39：员工看不到金额（订单金额、平台费、售后损失等）
         money = {"订单金额", "运费", "平台费"} | {FIELD_LABELS[k] for k in MONEY_FIELDS}
         for r in rows:
             if r.get("action") in money:
@@ -1036,7 +1036,7 @@ def edit_order(oid, data, user=""):
                 rows.append((it, sku, max(1, int(_num(it.get("qty")) or 1)), _num(it.get("unit_price"))))
         sig = lambda a: sorted((str(s), int(q), None if u is None else round(float(u), 4)) for s, q, u in a)
         if sig([(r["sku"], r["qty"], r["unit_price"]) for r in olds]) == sig([(s, q, u) for _it, s, q, u in rows]):
-            items = None      # v2.38：商品没变（只改了地址、备注…）→ 商品明细、生产任务、金额都不动
+            items = None      # v2.39：商品没变（只改了地址、备注…）→ 商品明细、生产任务、金额都不动
     if items is not None:
         if _has_jobs_table(c) and c.execute(
                 "SELECT COUNT(*) FROM jobs WHERE order_id=? AND (status!='todo' OR COALESCE(qty_done,0)>0 OR run_id IS NOT NULL)",
@@ -1053,7 +1053,7 @@ def edit_order(oid, data, user=""):
         for it, sku, qty, unit in rows:
             hit = match_sku(sku, idx)
             info = _variant_info(*hit) if hit else {}
-            # v2.38：没改的行沿用原来的行金额（导入时可能有折扣，或者只有合计没有单价），改了的行按单价 × 数量
+            # v2.39：没改的行沿用原来的行金额（导入时可能有折扣，或者只有合计没有单价），改了的行按单价 × 数量
             same = next((r for r in pool if r["sku"] == sku and r["qty"] == qty and
                          (unit is None or (r["unit_price"] is not None and abs(r["unit_price"] - unit) < 1e-6))), None)
             if same:
@@ -1070,7 +1070,7 @@ def edit_order(oid, data, user=""):
                        info.get("color", ""), info.get("material", ""), info.get("grams"), info.get("hours")))
         after = [(s, q) for _it, s, q, _u in rows]
         if "order_total" not in data:
-            # v2.38：没填金额 → 原来的金额不动（运费、折扣的差额保留）；商品合计变了就按差额调整
+            # v2.39：没填金额 → 原来的金额不动（运费、折扣的差额保留）；商品合计变了就按差额调整
             if old["order_total"] is None:
                 if new_sum:
                     sets["order_total"] = round(new_sum, 2)
@@ -1125,7 +1125,7 @@ def create_manual(order, user=""):
         sku = (it.get("sku") or "").strip()
         hit = match_sku(sku, idx)
         info = _variant_info(*hit) if hit else {}
-        qty = max(1, int(_num(it.get("qty")) or 1))     # v2.38：负数 / 0 当 1
+        qty = max(1, int(_num(it.get("qty")) or 1))     # v2.39：负数 / 0 当 1
         unit = _num(it.get("unit_price"))
         c.execute("""INSERT INTO order_items(order_id, sku, product_id, variant_idx, name, variation, qty, unit_price,
                      item_total, color, material, grams, hours) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -1145,9 +1145,9 @@ def create_manual(order, user=""):
 def delete_order(oid, user=""):
     c = db.conn()
     if _has_jobs_table(c) and c.execute("SELECT 1 FROM jobs WHERE order_id=? AND run_id IS NOT NULL", (oid,)).fetchone():
-        raise ValueError("这个订单正在打印，不能删除。先在生产看板把这一盘「打完」或「失败」，再删除订单")   # v2.38
+        raise ValueError("这个订单正在打印，不能删除。先在生产看板把这一盘「打完」或「失败」，再删除订单")   # v2.39
     if _has_jobs_table(c):
-        # v2.38：已经打好、还没发出去的件（打了一部分 / 待打包 / 已打包）转成品库存，别跟着订单一起没了
+        # v2.39：已经打好、还没发出去的件（打了一部分 / 待打包 / 已打包）转成品库存，别跟着订单一起没了
         made = c.execute("""SELECT sku, product_id, name, color, COALESCE(qty_done,0)-COALESCE(stock_n,0) n FROM jobs
             WHERE order_id=? AND COALESCE(kind,'order')='order' AND status IN ('todo','post','packed')
             AND COALESCE(qty_done,0)>COALESCE(stock_n,0)""", (oid,)).fetchall()

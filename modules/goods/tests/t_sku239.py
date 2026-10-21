@@ -1,8 +1,8 @@
-# v2.38：已导出产品删 / 加 / 挪变体后，SKU 跟着变体走（以前按行号套回旧 SKU → 错位、重复）；上架检查拦重复 SKU
+# v2.39：已导出产品删 / 加 / 挪变体后，SKU 跟着变体走（以前按行号套回旧 SKU → 错位、重复）；上架检查拦重复 SKU
 import os as _os
 T = _os.environ["T3D_TMP"]; APP = _os.environ["T3D_APP"]
 import os, sys, shutil, copy, time
-D = T + "/m_sku238"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T + "/v13", D)
+D = T + "/m_sku239"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T + "/v13", D)
 import sqlite3; c0 = sqlite3.connect(D + "/app.db"); c0.execute("delete from users"); c0.commit(); c0.close()
 os.environ["LH_DATA_DIR"] = D; sys.path.insert(0, APP)
 E_ = 0

@@ -278,7 +278,7 @@ def _save_from_client(pid, p):
         # 选品工具推过来的草稿：填了颜色就算补齐了
         p["draft"] = bool(old.get("draft")) and not any((v.get("opt1_zh") or "").strip() for v in p.get("variants", []))
         if old.get("exported_at"):
-            # v2.38：已导出产品的 SKU 跟着变体走，不按行号（以前删 / 加 / 挪了一行，后面的 SKU 会错位甚至重复）。
+            # v2.39：已导出产品的 SKU 跟着变体走，不按行号（以前删 / 加 / 挪了一行，后面的 SKU 会错位甚至重复）。
             # 页面带回来的 SKU 是这个产品原来的 → 保留；新行（没有 SKU）按颜色 + 规格找原来的；都没有 → 生成新的。
             key = lambda v, rn=None: ((v.get("opt1_zh") or "").strip(),
                                       (rn or {}).get((v.get("opt2_zh") or "").strip(), (v.get("opt2_zh") or "").strip()))
@@ -493,7 +493,7 @@ def _strip_order(o):
 def _cancel_denied(oid, b):
     """改成「已取消 / 拒收」要 orders.cancel 权限（状态没变不算）。"""
     st = b.get("status")
-    if st not in ("cancelled", "delivery_failed", "returned"):     # v2.38：退货一样会停产，同样要这个权限
+    if st not in ("cancelled", "delivery_failed", "returned"):     # v2.39：退货一样会停产，同样要这个权限
         return None
     try:
         if orders_mod.get_order(oid)["status"] == st:
@@ -585,7 +585,7 @@ def _ext_cors(resp):   # 浏览器扩展跨域访问 /api/v1/…（v2.30 从客�
     return resp
 
 
-# v2.38：库存 / 采购的金额（平均成本、库存金额、单价、采购金额、付款）只给老板和有「入库」「付款」权限的员工看
+# v2.39：库存 / 采购的金额（平均成本、库存金额、单价、采购金额、付款）只给老板和有「入库」「付款」权限的员工看
 INV_MONEY = {"avg_cost", "value", "unit_cost", "amount", "goods_total", "ship_fee", "other_fee", "total", "paid", "payments",
              "unpaid", "in_transit", "month_paid", "month_received", "price", "stock_value_now"}
 

@@ -287,7 +287,7 @@ def reconcile(start, end):
         "SELECT order_id, SUM(COALESCE(item_total,0)) FROM order_items WHERE order_id IN "
         "(SELECT id FROM orders WHERE order_time>=? AND order_time<?) GROUP BY order_id", (s_ts, e_ts))}
     for o in orders:
-        # v2.38：没有订单金额（Shopee 导出常见）→ 按商品合计，和损益表、订单明细一样（以前当成 0，扣费算成负数）
+        # v2.39：没有订单金额（Shopee 导出常见）→ 按商品合计，和损益表、订单明细一样（以前当成 0，扣费算成负数）
         rev = float(o["order_total"] if o["order_total"] is not None else (item_sum.get(o["id"]) or 0))
         rate = cfg.get("shopee_fee_rate") if o["platform"] == "shopee" and cfg.get("shopee_fee_rate") else cfg.get("platform_fee_rate", 0)
         expect = rev * (1 - float(rate or 0))

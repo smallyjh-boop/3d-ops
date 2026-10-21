@@ -235,7 +235,7 @@ def check_product(p, prices, cat=None, cfg=None):
         warnings.append(f"详情建议 20-3000 字符（现在 {len(d)}）")
     skus = [(v.get("sku") or "").strip().upper() for v in p.get("variants", []) if (v.get("sku") or "").strip()]
     dup = sorted({x for x in skus if skus.count(x) > 1})
-    if dup:      # v2.38：重复 SKU 导出后平台订单会对错颜色
+    if dup:      # v2.39：重复 SKU 导出后平台订单会对错颜色
         errors.append(f"SKU 重复：{'、'.join(dup)}（每个变体的 SKU 要不一样）")
     pk = p.get("package", {})
     for k, lab in (("length", "长"), ("width", "宽"), ("height", "高")):

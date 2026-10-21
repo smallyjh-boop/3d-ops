@@ -32,7 +32,7 @@
   async function summary() {
     try {
       const r = await api("/api/inv/po-summary");
-      if (r.unpaid === undefined) { $("#po-sum").innerHTML = `<div>进行中<b>${r.open}</b></div>`; return; }   // v2.38：没有金额权限
+      if (r.unpaid === undefined) { $("#po-sum").innerHTML = `<div>进行中<b>${r.open}</b></div>`; return; }   // v2.39：没有金额权限
       $("#po-sum").innerHTML = `<div>进行中<b>${r.open}</b></div><div>在途金额<b>฿${num(r.in_transit)}</b></div><div>还没付清<b class="${r.unpaid ? "warn" : ""}">฿${num(r.unpaid)}</b></div>
         <div>本月到货<b>฿${num(r.month_received)}</b></div><div>本月付款<b>฿${num(r.month_paid)}</b></div>`;
     } catch { $("#po-sum").innerHTML = ""; }

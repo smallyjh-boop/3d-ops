@@ -61,7 +61,7 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
     sign = DOC_KINDS[kind][2]
     c = db.conn()
     clean = []
-    so_far = {}           # v2.38：同一个物品写了好几行 → 累计起来看库存够不够
+    so_far = {}           # v2.39：同一个物品写了好几行 → 累计起来看库存够不够
     for i, ln in enumerate(lines or []):
         it = ledger.get_item(ln.get("item_id"))
         if not it:
@@ -74,7 +74,7 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
                 q = int(ln["rolls"]) * float(ln.get("net_g") or 1000)
         except (TypeError, ValueError):
             raise ValueError(f"第 {i + 1} 行：数量不对")
-        if not math.isfinite(q):                      # v2.38："nan" / "inf" 会把库存写坏
+        if not math.isfinite(q):                      # v2.39："nan" / "inf" 会把库存写坏
             raise ValueError(f"第 {i + 1} 行：数量不对")
         if not q or (sign and q < 0):
             raise ValueError(f"第 {i + 1} 行：数量要大于 0")
@@ -139,7 +139,7 @@ def void(doc_id, user=""):
         uc = (m["a"] / m["q"]) if m["q"] else None
         _apply(c, it, m["kind"], -m["q"], uc if m["q"] < 0 else uc, d["id"], user, f"作废 {d['no']}")
     c.commit()
-    if (d["ref"] or "").startswith("po:"):       # v2.38：采购单的到货入库单作废 → 采购单的已到数量、状态、财务记录一起退回
+    if (d["ref"] or "").startswith("po:"):       # v2.39：采购单的到货入库单作废 → 采购单的已到数量、状态、财务记录一起退回
         from . import purchase
         purchase.on_receipt_void(d, sum(abs(m["a"] or 0) for m in mv), user)
     db.audit(user, "库存·作废单据", d["no"], "")
