@@ -93,6 +93,8 @@ def _clean_lines(lines):
             uc = float(ln["unit_cost"]) if ln.get("unit_cost") not in (None, "") else (it["avg_cost"] or 0)
         except (TypeError, ValueError):
             raise ValueError(f"第 {i + 1} 行：数量 / 单价不对")
+        if not (math.isfinite(q) and math.isfinite(uc)):      # v2.38
+            raise ValueError(f"第 {i + 1} 行：数量 / 单价不对")
         if q <= 0 or uc < 0:
             raise ValueError(f"第 {i + 1} 行：数量要大于 0、单价不能是负数")
         out.append({"item_id": it["id"], "qty": q, "unit_cost": uc, "rolls": rolls if it["category"] == "filament" else None,
@@ -110,6 +112,8 @@ def save_po(d, user=""):
     for k in ("ship_fee", "other_fee"):
         try:
             fees[k] = float(d.get(k) or 0)
+            if not math.isfinite(fees[k]):      # v2.38
+                raise ValueError
         except (TypeError, ValueError):
             raise ValueError("运费 / 其他费用要是数字")
     sup = int(d["supplier_id"]) if d.get("supplier_id") not in (None, "") else None
@@ -196,6 +200,8 @@ def receive(pid, qtys=None, user="", note=""):
             v = qtys.get(str(ln["id"]), qtys.get(ln["id"]))
             if v in (None, "", 0, "0"):
                 continue
+            if ln["rolls"] and abs(float(v) - round(float(v))) > 1e-9:      # v2.38：按卷的耗材只能整卷到货
+                raise ValueError("按卷采购的耗材，到货要填整数卷")
             q = float(v) * (ln["net_g"] or 1000) if ln["rolls"] else float(v)
         if q <= 0:
             continue
@@ -207,7 +213,7 @@ def receive(pid, qtys=None, user="", note=""):
                              f"供应商多发了的话，多出来的另开一张采购入库单")
         q = min(q, left) if qtys is None else q
         uc = (ln["unit_cost"] or 0) * (1 + fee_rate)
-        dl = {"item_id": ln["item_id"], "qty": q, "unit_cost": round(uc, 6), "note": ln["note"] or ""}
+        dl = {"item_id": ln["item_id"], "qty": q, "unit_cost": round(uc, 6), "note": ln["note"] or "", "po_line": ln["id"]}
         if ln["rolls"]:
             dl.update(rolls=int(round(q / (ln["net_g"] or 1000))), net_g=ln["net_g"], brand=ln["brand"])
         doc_lines.append(dl)
@@ -233,8 +239,17 @@ def on_receipt_void(d, amount, user=""):
     po = c.execute("SELECT * FROM inv_po WHERE no=?", (d["ref"][3:],)).fetchone()
     if not po:
         return
-    for dl in c.execute("SELECT item_id, qty FROM inv_doc_lines WHERE doc_id=?", (d["id"],)).fetchall():
+    lines = c.execute("SELECT id, qty, COALESCE(received,0) r FROM inv_po_lines WHERE po_id=?", (po["id"],)).fetchall()
+    closed = po["status"] == "received" and any(ln["r"] < (ln["qty"] or 0) - 1e-9 for ln in lines)   # 手动「结单」过的
+    for dl in c.execute("SELECT item_id, qty, extra FROM inv_doc_lines WHERE doc_id=?", (d["id"],)).fetchall():
         left = abs(dl["qty"] or 0)
+        try:
+            pl = (json.loads(dl["extra"] or "{}") or {}).get("po_line")
+        except ValueError:
+            pl = None
+        if pl:      # 入库时记了是采购单哪一行 → 精确退回这一行
+            c.execute("UPDATE inv_po_lines SET received=MAX(0, COALESCE(received,0)-?) WHERE id=? AND po_id=?", (left, pl, po["id"]))
+            continue
         for ln in c.execute("SELECT id, COALESCE(received,0) r FROM inv_po_lines WHERE po_id=? AND item_id=? ORDER BY id DESC",
                             (po["id"], dl["item_id"])).fetchall():
             take = min(left, ln["r"])
@@ -243,7 +258,7 @@ def on_receipt_void(d, amount, user=""):
                 left -= take
             if left <= 1e-9:
                 break
-    if po["status"] in ("partial", "received", "closed"):
+    if po["status"] in ("partial", "received") and not closed:
         got = c.execute("SELECT SUM(COALESCE(received,0)) FROM inv_po_lines WHERE po_id=?", (po["id"],)).fetchone()[0] or 0
         c.execute("UPDATE inv_po SET status=?, received_at=NULL WHERE id=?", ("partial" if got > 1e-9 else "ordered", po["id"]))
     c.commit()

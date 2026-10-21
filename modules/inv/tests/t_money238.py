@@ -53,6 +53,10 @@ ok(buyer.get("/api/inv/expense").status_code == 200, "inv.in staff can open expe
 boss.post("/api/spools", json={"material": "PLA", "color": "白色", "count": 1, "price": 450})
 sp = pk.get("/api/spools").get_json()
 ok("price" not in walk(sp, set()), "production: spool price hidden")
+code = db.conn().execute("SELECT code FROM spools ORDER BY rowid DESC LIMIT 1").fetchone()[0]
+if True:
+    r = pk.post(f"/api/spools/{code}/weigh", json={"grams": 900})
+    ok("price" not in walk(r.get_json(), set()), f"production: spool action response hides price ({r.status_code})")
 
 # ---- 9 订单操作记录
 sku = next(v["sku"] for x in store.list_products() for v in (store.load(x["id"]).get("variants") or []) if v.get("sku"))
@@ -74,6 +78,8 @@ o2 = boss.post("/api/orders/manual", json={"order_no": "AS1", "items": [{"sku": 
 r = nok.post("/api/aftersales", json={"order_id": o2["id"], "kind": "return", "reason": "拒收", "status": "delivery_failed"})
 st = db.conn().execute("SELECT status FROM orders WHERE id=?", (o2["id"],)).fetchone()["status"]
 ok(r.status_code == 403 and st == "to_ship", f"aftersales cannot set delivery_failed without orders.cancel ({r.status_code}, {st})")
+r = nok.post("/api/aftersales", json={"order_id": o2["id"], "kind": "return", "reason": "退货", "status": "returned"})
+ok(r.status_code == 403, f"aftersales cannot set returned without orders.cancel ({r.status_code})")
 r = nok.post("/api/aftersales", json={"order_id": o2["id"], "kind": "other", "reason": "问问题"})
 ok(r.status_code == 200, "aftersales without status change still allowed")
 print("ERRORS", E_)

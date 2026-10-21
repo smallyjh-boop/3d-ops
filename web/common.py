@@ -493,7 +493,7 @@ def _strip_order(o):
 def _cancel_denied(oid, b):
     """改成「已取消 / 拒收」要 orders.cancel 权限（状态没变不算）。"""
     st = b.get("status")
-    if st not in ("cancelled", "delivery_failed"):
+    if st not in ("cancelled", "delivery_failed", "returned"):     # v2.38：退货一样会停产，同样要这个权限
         return None
     try:
         if orders_mod.get_order(oid)["status"] == st:
@@ -605,7 +605,7 @@ def _drop_keys(o, keys):
 @app.after_request
 def _hide_inv_money(resp):
     p = request.path
-    if not (p.startswith("/api/inv/") or p == "/api/spools") or not resp.is_json:
+    if not (p.startswith("/api/inv/") or p.startswith("/api/spools")) or not resp.is_json:
         return resp
     u = auth.current_user()
     if not u or u.get("role") == "api" or _sees_inv_money(u):

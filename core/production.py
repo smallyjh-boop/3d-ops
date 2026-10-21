@@ -737,7 +737,9 @@ def finish_run(rid, user="", actual_count=None):
         done = (j["qty_done"] or 0) + n
         if j["kind"] == "stock":
             stock_add(j["sku"], n, f"备货打印 批次#{rid}", user, j["product_id"], j["name"], j["color"])
-        if done >= j["qty"]:
+        gone = (j["kind"] or "order") == "order" and j["order_id"] and c.execute(       # v2.38：打的时候订单被取消了
+            "SELECT 1 FROM orders WHERE id=? AND status IN ('cancelled','returned','delivery_failed')", (j["order_id"],)).fetchone()
+        if done >= j["qty"] and not gone:
             status = "done" if j["kind"] == "stock" else "post"
             c.execute("UPDATE jobs SET qty_done=?, status=?, printed_at=?, done_at=CASE WHEN ?='done' THEN ? ELSE done_at END, "
                       "run_id=NULL, consumed_g=COALESCE(consumed_g,0)+?, updated_at=?, updated_by=? WHERE id=?",

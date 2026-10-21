@@ -34,6 +34,12 @@ orders.upsert([{"platform": "lazada", "order_no": "R2", "status": "待发货", "
 orders.upsert([{"platform": "lazada", "order_no": "R2", "status": "已取消"}], source="t")
 orders.upsert([{"platform": "lazada", "order_no": "R2", "status": "待发货"}], source="t")
 ok(q("R2")["status"] == "cancelled", "cancelled not revived by old sheet")
+for old_st, new_raw, want in (("returned", "已完成", "completed"), ("delivery_failed", "已发货", "shipped"),
+                              ("delivery_failed", "已完成", "completed"), ("completed", "已发货", "completed"),
+                              ("to_ship", "未付款", "to_ship"), ("unpaid", "待发货", "to_ship")):
+    orders.update_order(q("R1")["id"], "t", status=old_st)
+    orders.upsert([{"platform": "lazada", "order_no": "R1", "status": new_raw}], source="t")
+    ok(q("R1")["status"] == want, f"{old_st} + sheet {new_raw} -> {want} ({q('R1')['status']})")
 
 # ---- 7 数量负数 / 0
 orders.upsert([{"platform": "lazada", "order_no": "N1", "status": "待发货", "items": [{"sku": sku, "qty": -2}]}], source="t")
@@ -51,6 +57,22 @@ r = C.post(f"/api/orders/{oid}/edit", json={"items": [{"sku": sku, "qty": 3, "un
 ok(r["order_total"] == 400, f"edit qty 2->3 adjusts by item delta 300 -> 400 ({r['order_total']})")
 r = C.post(f"/api/orders/{oid}/edit", json={"order_total": 350, "items": [{"sku": sku, "qty": 3, "unit_price": 100}]}).get_json()
 ok(r["order_total"] == 350, "explicit total wins")
+# 导入的订单：行金额有折扣 / 只有合计没单价 → 只改地址不动金额；加一行按差额
+orders.upsert([{"platform": "lazada", "order_no": "E2", "status": "待发货", "order_total": 200,
+                "items": [{"sku": sku, "qty": 2, "unit_price": 100, "item_total": 180}]}], source="t")
+o2 = q("E2")["id"]
+r = C.post(f"/api/orders/{o2}/edit", json={"address": "新地址", "items": [{"sku": sku, "qty": 2, "unit_price": 100}]}).get_json()
+ok(r["order_total"] == 200 and r["items"][0]["item_total"] == 180, f"address-only edit keeps total 200 / line 180 ({r['order_total']}, {r['items'][0]['item_total']})")
+orders.upsert([{"platform": "lazada", "order_no": "E3", "status": "待发货", "order_total": 500,
+                "items": [{"sku": sku, "qty": 3, "item_total": 450}]}], source="t")
+o3 = q("E3")["id"]
+r = C.post(f"/api/orders/{o3}/edit", json={"items": [{"sku": sku, "qty": 3, "unit_price": None}, {"sku": sku, "qty": 1, "unit_price": 50}]}).get_json()
+ok(r["order_total"] == 550, f"no unit price line kept, add 50 -> 550 ({r['order_total']})")
+jid0 = jobs_of(o2)[0]["id"] if jobs_of(o2) else None
+db.conn().execute("UPDATE jobs SET note='客户要亮面', pin=1 WHERE order_id=?", (o2,)); db.conn().commit()
+C.post(f"/api/orders/{o2}/edit", json={"custom_note": "x", "items": [{"sku": sku, "qty": 2, "unit_price": 100}]})
+j = jobs_of(o2)[0] if jobs_of(o2) else {}
+ok(j.get("id") == jid0 and j.get("note") == "客户要亮面" and j.get("pin") == 1, "unchanged items keep production job, its note and pinned printer")
 
 # ---- 4 打印中的订单不能删；任务没了打完不重复扣料
 o = C.post("/api/orders/manual", json={"order_no": "D1", "items": [{"sku": sku, "qty": 1, "unit_price": 100}]}).get_json()
@@ -91,4 +113,24 @@ ok(len(jobs_of(o["id"])) == 1, "job in a running plate stays until the plate end
 s0 = production.stock_qty(sku)
 production.finish_run(rid, "t")
 ok(not jobs_of(o["id"]) and production.stock_qty(sku) == s0 + 1, f"cancel during print -> stop after plate, piece to stock ({production.stock_qty(sku) - s0})")
+# 3 件打了 1 件，第二盘打剩下 2 件时订单取消 → 打完后不进打包队列，3 件都转成品库存
+o = C.post("/api/orders/manual", json={"order_no": "P3", "items": [{"sku": sku, "qty": 3, "unit_price": 100}]}).get_json()
+jid = jobs_of(o["id"])[0]["id"]
+production.start_run(jid, None, 1, [], None, False, "t", CONF)
+production.finish_run(db.conn().execute("SELECT run_id FROM jobs WHERE id=?", (jid,)).fetchone()["run_id"] or
+                      db.conn().execute("SELECT MAX(id) FROM print_runs").fetchone()[0], "t")
+production.start_run(jid, None, 2, [], None, False, "t", CONF)
+rid = db.conn().execute("SELECT run_id FROM jobs WHERE id=?", (jid,)).fetchone()["run_id"]
+orders.update_order(o["id"], "t", status="cancelled")
+s0 = production.stock_qty(sku)
+production.finish_run(rid, "t")
+ok(not jobs_of(o["id"]) and production.stock_qty(sku) == s0 + 3, f"last plate after cancel -> all 3 to stock, not packing ({production.stock_qty(sku) - s0}, {jobs_of(o['id'])})")
+# 删除订单：已经打好的件转成品库存
+o = C.post("/api/orders/manual", json={"order_no": "DEL2", "items": [{"sku": sku, "qty": 2, "unit_price": 100}]}).get_json()
+jid = jobs_of(o["id"])[0]["id"]
+production.start_run(jid, None, 1, [], None, False, "t", CONF)
+production.finish_run(db.conn().execute("SELECT run_id FROM jobs WHERE id=?", (jid,)).fetchone()["run_id"] or
+                      db.conn().execute("SELECT MAX(id) FROM print_runs").fetchone()[0], "t")
+s0 = production.stock_qty(sku)
+ok(C.delete(f"/api/orders/{o['id']}").status_code == 200 and production.stock_qty(sku) == s0 + 1, f"delete order -> printed piece to stock ({production.stock_qty(sku) - s0})")
 print("ERRORS", E_)

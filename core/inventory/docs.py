@@ -102,7 +102,7 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
                                                        user, now, user, now)).lastrowid
     for it, qty, uc, lnote, ln in clean:
         c.execute("INSERT INTO inv_doc_lines(doc_id, item_id, qty, unit_cost, note, extra) VALUES(?,?,?,?,?,?)",
-                  (doc_id, it["id"], qty, uc, lnote, json.dumps({k: ln.get(k) for k in ("rolls", "net_g", "brand") if ln.get(k)})))
+                  (doc_id, it["id"], qty, uc, lnote, json.dumps({k: ln.get(k) for k in ("rolls", "net_g", "brand", "po_line") if ln.get(k)})))
     c.commit()
     label = DOC_KINDS[kind][0]
     for it, qty, uc, lnote, ln in clean:

@@ -112,7 +112,7 @@ PERMS = [
     ("models.delete", "删除 3D 模型和模型库文件"),
     ("products.delete", "删除产品"),
     ("orders.edit", "修改订单的商品和金额"),
-    ("orders.cancel", "取消订单 / 标记拒收"),
+    ("orders.cancel", "取消订单 / 标记退货、拒收"),
     ("orders.delete", "删除订单"),
     ("materials.adjust", "耗材盘点改数 / 删除料卷"),
     ("cs.delete", "删除客服消息和会话"),

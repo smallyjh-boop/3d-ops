@@ -271,7 +271,7 @@
       value = prompt("挂起原因（例如：等买家确认颜色 / 疑似重复下单）", "等买家确认");
       if (value === null) return;
     }
-    if (act === "status" && ["cancelled", "delivery_failed"].includes(val) && !CAN("orders.cancel")) { toast("你的账号没有「取消订单 / 标记拒收」的权限，请老板在 系统 → 设置 → 账号与权限 里开通", true); return; }
+    if (act === "status" && ["cancelled", "delivery_failed", "returned"].includes(val) && !CAN("orders.cancel")) { toast("你的账号没有「取消订单 / 标记退货、拒收」的权限，请老板在 系统 → 设置 → 账号与权限 里开通", true); return; }
     if (act === "status" && val === "delivery_failed" && !confirm(`把这 ${ids.length} 个订单标记为「拒收/派送失败」？会自动登记售后，等包裹退回验货。`)) return;
     if (act === "tag_add" || act === "tag_remove") {
       value = prompt(act === "tag_add" ? "要加的标签（例如：VIP、催单、待确认设计）" : "要去掉的标签");

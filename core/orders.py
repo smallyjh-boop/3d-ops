@@ -441,15 +441,21 @@ ORDER_FIELDS = ("platform", "shop", "order_no", "status", "order_time", "ship_by
                 "carrier", "cod", "payment", "ship_method") + MONEY_FIELDS
 
 
-# v2.38：导入 / 推送时状态只往前走（旧表格再导入一次不能把已发货改回待发货）
-_STATUS_RANK = {"unpaid": 0, "to_ship": 1, "shipped": 2, "completed": 3,
-                "cancelled": 4, "returned": 4, "delivery_failed": 4}
+# v2.38：导入 / 推送时挡住「旧表格把状态改回去」：
+#   已发货以后（已发货、已完成、退货、拒收）→ 未付款 / 待发货；待发货 → 未付款；已完成 → 已发货；已取消 → 任何别的状态。
+#   退货被驳回（退货 → 已完成）、拒收后重新派送（拒收 → 已发货 / 已完成）照常更新。
+_AFTER_SHIP = ("shipped", "completed", "returned", "delivery_failed")
 
 
 def status_backward(old, new):
-    """导入的状态比系统里的旧（例如 已发货 → 待发货、已取消 → 待发货）→ True，不覆盖。"""
-    a, b = _STATUS_RANK.get(old), _STATUS_RANK.get(new)
-    return a is not None and b is not None and b < a
+    """导入的状态比系统里的旧 → True，不覆盖。"""
+    if not old or not new or old == new:
+        return False
+    if old == "cancelled":
+        return new in STATUS_ZH and new not in ("quote", "other")
+    if new in ("unpaid", "to_ship") and old in _AFTER_SHIP:
+        return True
+    return (old, new) in (("to_ship", "unpaid"), ("completed", "shipped"))
 
 
 def _status_of(v):
@@ -970,7 +976,7 @@ def batch(ids, action, value=None, user=""):
                 tags = tags + [v] if action == "tag_add" else [t for t in tags if t != v]
                 update_order(oid, user, tags=",".join(tags))
             elif action == "delete":
-                delete_order(oid)
+                delete_order(oid, user)
             elif action == "approve":
                 set_hold(oid, False, "", user)
             elif action == "hold":
@@ -1022,38 +1028,54 @@ def edit_order(oid, data, user=""):
     if items is not None:
         if not any(str(i.get("sku") or "").strip() for i in items):
             raise ValueError("至少要有一个商品")
+        olds = [dict(r) for r in c.execute("SELECT sku, qty, unit_price, item_total FROM order_items WHERE order_id=? ORDER BY id", (oid,))]
+        rows = []
+        for it in items:
+            sku = str(it.get("sku") or "").strip()
+            if sku:
+                rows.append((it, sku, max(1, int(_num(it.get("qty")) or 1)), _num(it.get("unit_price"))))
+        sig = lambda a: sorted((str(s), int(q), None if u is None else round(float(u), 4)) for s, q, u in a)
+        if sig([(r["sku"], r["qty"], r["unit_price"]) for r in olds]) == sig([(s, q, u) for _it, s, q, u in rows]):
+            items = None      # v2.38：商品没变（只改了地址、备注…）→ 商品明细、生产任务、金额都不动
+    if items is not None:
         if _has_jobs_table(c) and c.execute(
                 "SELECT COUNT(*) FROM jobs WHERE order_id=? AND (status!='todo' OR COALESCE(qty_done,0)>0 OR run_id IS NOT NULL)",
                 (oid,)).fetchone()[0]:
             raise ValueError("这个订单已经开始打印了，不能再改商品。可以加备注，或者取消后重新下单")
-        before = [(r["sku"], r["qty"]) for r in c.execute("SELECT sku, qty FROM order_items WHERE order_id=?", (oid,))]
-        old_sum = c.execute("SELECT SUM(item_total) FROM order_items WHERE order_id=?", (oid,)).fetchone()[0]
+        before = [(r["sku"], r["qty"]) for r in olds]
+        old_sum = sum(r["item_total"] or 0 for r in olds)
         if _has_jobs_table(c):
             c.execute("DELETE FROM jobs WHERE order_id=? AND status='todo'", (oid,))
         c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))
         idx = sku_index()
-        for it in items:
-            sku = str(it.get("sku") or "").strip()
-            if not sku:
-                continue
+        pool = list(olds)
+        new_sum = 0.0
+        for it, sku, qty, unit in rows:
             hit = match_sku(sku, idx)
             info = _variant_info(*hit) if hit else {}
-            qty = max(1, int(_num(it.get("qty")) or 1))
-            unit = _num(it.get("unit_price"))
+            # v2.38：没改的行沿用原来的行金额（导入时可能有折扣，或者只有合计没有单价），改了的行按单价 × 数量
+            same = next((r for r in pool if r["sku"] == sku and r["qty"] == qty and
+                         (unit is None or (r["unit_price"] is not None and abs(r["unit_price"] - unit) < 1e-6))), None)
+            if same:
+                pool.remove(same)
+                total = same["item_total"] if same["item_total"] is not None else (unit * qty if unit is not None else None)
+                unit = unit if unit is not None else same["unit_price"]
+            else:
+                total = unit * qty if unit is not None else None
+            new_sum += total or 0
             c.execute("""INSERT INTO order_items(order_id, sku, product_id, variant_idx, name, variation, qty, unit_price,
                          item_total, color, material, grams, hours) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                       (oid, sku, hit[0] if hit else None, hit[1] if hit else None, it.get("name") or info.get("name", ""),
-                       it.get("variation", ""), qty, unit, unit * qty if unit is not None else None,
+                       it.get("variation", ""), qty, unit, total,
                        info.get("color", ""), info.get("material", ""), info.get("grams"), info.get("hours")))
-        after = [(str(i.get("sku") or "").strip(), max(1, int(_num(i.get("qty")) or 1))) for i in items if str(i.get("sku") or "").strip()]
+        after = [(s, q) for _it, s, q, _u in rows]
         if "order_total" not in data:
             # v2.38：没填金额 → 原来的金额不动（运费、折扣的差额保留）；商品合计变了就按差额调整
-            tot = c.execute("SELECT SUM(item_total) FROM order_items WHERE order_id=?", (oid,)).fetchone()[0]
             if old["order_total"] is None:
-                if tot is not None:
-                    sets["order_total"] = tot
-            elif tot is not None and old_sum is not None and abs(tot - old_sum) > 0.004:
-                sets["order_total"] = round(old["order_total"] + tot - old_sum, 2)
+                if new_sum:
+                    sets["order_total"] = round(new_sum, 2)
+            elif abs(new_sum - old_sum) > 0.004:
+                sets["order_total"] = round(old["order_total"] + new_sum - old_sum, 2)
         log(oid, user, "修改商品", "；".join(f"{s}×{q}" for s, q in before) + " → " + "；".join(f"{s}×{q}" for s, q in after),
             commit=False)
     if sets:
@@ -1120,12 +1142,22 @@ def create_manual(order, user=""):
     return get_order(oid)
 
 
-def delete_order(oid):
+def delete_order(oid, user=""):
     c = db.conn()
     if _has_jobs_table(c) and c.execute("SELECT 1 FROM jobs WHERE order_id=? AND run_id IS NOT NULL", (oid,)).fetchone():
         raise ValueError("这个订单正在打印，不能删除。先在生产看板把这一盘「打完」或「失败」，再删除订单")   # v2.38
     if _has_jobs_table(c):
+        # v2.38：已经打好、还没发出去的件（打了一部分 / 待打包 / 已打包）转成品库存，别跟着订单一起没了
+        made = c.execute("""SELECT sku, product_id, name, color, COALESCE(qty_done,0)-COALESCE(stock_n,0) n FROM jobs
+            WHERE order_id=? AND COALESCE(kind,'order')='order' AND status IN ('todo','post','packed')
+            AND COALESCE(qty_done,0)>COALESCE(stock_n,0)""", (oid,)).fetchall()
+        no = (c.execute("SELECT order_no FROM orders WHERE id=?", (oid,)).fetchone() or {"order_no": oid})["order_no"]
         c.execute("DELETE FROM jobs WHERE order_id=?", (oid,))
+        c.commit()
+        if made:
+            from . import production
+            for m in made:
+                production.stock_add(m["sku"], m["n"], f"删除订单 {no}，已打好的转成品库存", user or "系统", m["product_id"], m["name"], m["color"])
     c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))
     c.execute("DELETE FROM order_log WHERE order_id=?", (oid,))
     c.execute("DELETE FROM orders WHERE id=?", (oid,))

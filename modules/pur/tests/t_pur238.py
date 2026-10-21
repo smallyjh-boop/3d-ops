@@ -53,6 +53,33 @@ for bad in ("nan", "inf", "-inf"):
     ok(r.status_code == 400, f"qty {bad} refused")
 ok(C.get("/api/inv/items").status_code == 200 and qty() == 1, "items page still loads")
 
+# ---- 采购单本身拒绝 nan
+r = C.post("/api/inv/po", json={"supplier_id": sid, "lines": [{"item_id": it["id"], "qty": "nan", "unit_cost": 5}]})
+ok(r.status_code == 400, f"PO line qty nan refused ({r.status_code})")
+# ---- 按卷耗材：只能整卷到货；作废按采购单那一行精确退回；手动结单的作废后保持结单
+fil = C.post("/api/inv/items", json={"name_zh": "PLA 白", "category": "filament", "unit": "g", "material": "PLA", "color": "白色"}).get_json()
+fil = fil.get("item") or fil
+po2 = C.post("/api/inv/po", json={"supplier_id": sid, "lines": [{"item_id": fil["id"], "rolls": 3, "net_g": 1000, "unit_cost": 0.4},
+                                                                 {"item_id": fil["id"], "rolls": 2, "net_g": 1000, "unit_cost": 0.5}]}).get_json()["po"]
+C.post(f"/api/inv/po/{po2['id']}/order")
+l1, l2 = po2["lines"][0]["id"], po2["lines"][1]["id"]
+r = C.post(f"/api/inv/po/{po2['id']}/receive", json={"qtys": {str(l1): 1.5}})
+ok(r.status_code == 400 and "整数卷" in r.get_json()["error"], "half roll refused")
+C.post(f"/api/inv/po/{po2['id']}/receive", json={"qtys": {str(l2): 2}})
+C.post(f"/api/inv/po/{po2['id']}/receive", json={"qtys": {str(l1): 1}})
+dno = db.conn().execute("SELECT no FROM inv_docs WHERE ref=? AND status='done' ORDER BY id DESC", ("po:" + po2["no"],)).fetchone()["no"]
+C.post(f"/api/inv/docs/{dno}/void")
+p3 = C.get(f"/api/inv/po/{po2['id']}").get_json()["po"]
+rec = {x["id"]: x["received"] for x in p3["lines"]}
+ok(rec[l1] == 0 and rec[l2] == 2000, f"void rolls back exactly the right line {rec}")
+C.post(f"/api/inv/po/{po2['id']}/receive", json={"qtys": {str(l1): 1}})
+C.post(f"/api/inv/po/{po2['id']}/close")
+st = C.get(f"/api/inv/po/{po2['id']}").get_json()["po"]["status"]
+dno = db.conn().execute("SELECT no FROM inv_docs WHERE ref=? AND status='done' ORDER BY id DESC", ("po:" + po2["no"],)).fetchone()["no"]
+C.post(f"/api/inv/docs/{dno}/void")
+st2 = C.get(f"/api/inv/po/{po2['id']}").get_json()["po"]["status"]
+ok(st == "received" and st2 == "received", f"closed PO stays closed after void ({st} -> {st2})")
+
 # ---- 13 对账：没有订单金额
 from modules.fin import logic as fin
 sku = next(v["sku"] for x in store.list_products() for v in (store.load(x["id"]).get("variants") or []) if v.get("sku"))

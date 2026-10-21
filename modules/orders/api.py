@@ -191,7 +191,7 @@ def orders_export():
 @bp.delete("/api/orders/<int:oid>")
 def order_delete(oid):
     try:
-        orders_mod.delete_order(oid)
+        orders_mod.delete_order(oid, _uname())
     except ValueError as e:      # v2.38：正在打印的订单不能删
         return err(str(e))
     return jsonify({"ok": True})
