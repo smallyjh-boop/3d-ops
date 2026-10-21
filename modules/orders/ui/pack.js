@@ -26,6 +26,8 @@
     const scanLeft = Object.keys(PK.need).some((k) => PK.mode[k] === "scan" && !done(k));
     $("#pk-out").innerHTML = `${msg ? `<p class="${bad ? "bad big-msg" : "ok"}">${esc(msg)}</p>` : ""}
       <h3>订单 <span class="mono" data-notr>${esc(o.order_no)}</span> <span class="muted small">${esc(h.PLAT[o.platform] || o.platform)} · <span data-notr>${esc(o.receiver || o.buyer || "")}</span></span></h3>
+      ${o.status !== "to_ship" ? `<p class="bad big-msg">这个订单是「${esc(o.status_zh || o.status)}」，不是待发货，确认一下再打包</p>` : ""}
+      ${o.hold ? '<p class="bad big-msg">这个订单还在「待审核」挂起中，先别打包</p>' : ""}
       ${o.custom_note ? `<div class="note-flag" data-notr>✎ ${esc(o.custom_note)}</div>` : ""}
       ${o.buyer_note ? `<div class="small" data-notr>💬 ${esc(o.buyer_note)}</div>` : ""}
       <table class="grid pk-table"><thead><tr><th></th><th>SKU</th><th>商品</th><th>颜色</th><th>要装</th><th>已核对</th><th>怎么核对</th></tr></thead><tbody>

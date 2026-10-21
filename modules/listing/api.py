@@ -35,7 +35,8 @@ def export_shopee():
     n = shopee.fill(rows, os.path.join(EXPORT_DIR, name))
     for p in prods:
         if not p.get("exported_at"):
-            p["exported_at"] = int(time.time())
+            p["exported_at"] = int(time.time())          # 锁住 SKU（Shopee 上也用这些 SKU）
+            p["exported_first"] = "shopee"               # v2.40：只导出过 Shopee，Lazada 还不算「待上传」
         p["shopee_exported_at"] = int(time.time())
         store.save(p)
     _mark_stock(prods, "shopee")
@@ -81,6 +82,7 @@ def export():
             for p in plist:
                 if not p.get("exported_at"):
                     p["exported_at"] = int(time.time())
+                p.pop("exported_first", None)            # v2.40：Lazada 也导出过了
                 store.save(p)
     if not files_out:
         return jsonify({"ok": False, "errors": errors or ["所选产品都没有可用的类目"], "warnings": warnings})

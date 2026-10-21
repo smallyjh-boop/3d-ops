@@ -159,6 +159,7 @@ def do_import(token, mapping, platform, shop="", user=""):
     bid = cur.lastrowid
     n = new = 0
     touched, days = set(), []
+    seen = {}
     for r in rows:
         cells = [_cell(x) for x in r]
         if not any(cells):
@@ -174,7 +175,12 @@ def do_import(token, mapping, platform, shop="", user=""):
         if day:
             days.append(day)
         fee = get("fee_name") if "fee_name" in mp else ("settlement" if "net" in mp else "")
-        h = hashlib.sha1(("|".join(cells)).encode("utf-8", "ignore")).hexdigest()[:24]
+        # v2.40：同一个文件里一模一样的两行（同一单两笔同样的佣金）都要算；第 2 行起加序号。
+        # 同一个文件再导一次，序号一样 → 还是认得出是重复的；第 1 行不加序号，和以前导过的数据对得上
+        base = "|".join(cells)
+        k_ = seen.get(base, 0)
+        seen[base] = k_ + 1
+        h = hashlib.sha1((base + (f"#{k_}" if k_ else "")).encode("utf-8", "ignore")).hexdigest()[:24]
         try:
             c.execute("INSERT INTO fin_settle_lines(batch_id, platform, shop, order_no, order_key, fee_name, amount, wht, vat, day, ref, "
                       "row_hash, is_item) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",

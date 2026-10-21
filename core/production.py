@@ -125,8 +125,9 @@ def generate(user=""):
             if use > 0:
                 _reserve(c, jid, use, int(r["qty"] or 1), 0, now, user or "系统")
                 _olog(r["oid"], user or "系统", "用库存发", f"{r['sku']} ×{use}（发货出库时扣库存）")
+    # v2.40：订单不再「待发货 / 报价」（取消、退货、拒收、已经发货 / 完成、改回未付款）或挂起 → 还没开始的任务删掉，不再排单
     cancelled = c.execute("""DELETE FROM jobs WHERE status='todo' AND COALESCE(qty_done,0)=0 AND run_id IS NULL
-        AND kind='order' AND order_id IN (SELECT id FROM orders WHERE status IN ('cancelled','returned','delivery_failed')
+        AND kind='order' AND order_id IN (SELECT id FROM orders WHERE status NOT IN ('to_ship','quote')
         OR COALESCE(hold,0)=1)""").rowcount
     # v2.35：还没发货就取消的订单，「用库存发」占住的数量放回去（只用库存、没打印过的任务直接删）
     cancelled += c.execute("""DELETE FROM jobs WHERE kind='order' AND run_id IS NULL AND COALESCE(stock_n,0)>0
@@ -612,6 +613,10 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
     if idx is None:
         raise ValueError("请选择打印机")
     names = _printer_names()
+    busy = c.execute("SELECT id FROM print_runs WHERE printer=? AND status='printing' LIMIT 1", (idx,)).fetchone()
+    if busy:      # v2.40：一台打印机同时只能有一盘在打
+        raise ValueError(f"「{names[idx] if idx < len(names) else idx}」上还有一盘（批次 #{busy['id']}）在打，"
+                         "先在生产看板把它「打完」「失败」或「撤销」")
     jobs = [j] + [dict(_job(c, int(x))) for x in (merge_ids or []) if int(x) != job_id]
     for x in jobs[1:]:
         if x["product_id"] != j["product_id"] or (x["color"] or "") != (j["color"] or "") or x["status"] != "todo" or x["run_id"]:
@@ -704,7 +709,7 @@ def _drop_cancelled_partial(c, user=""):
     """v2.39：订单取消 / 退货 / 拒收时，已经打了一部分、还没在打的任务：不再排单，已经打好的件转成品库存。"""
     rows = c.execute("""SELECT * FROM jobs WHERE kind='order' AND run_id IS NULL AND status='todo'
         AND COALESCE(qty_done,0)>COALESCE(stock_n,0)
-        AND order_id IN (SELECT id FROM orders WHERE status IN ('cancelled','returned','delivery_failed'))""").fetchall()
+        AND order_id IN (SELECT id FROM orders WHERE status IN ('cancelled','returned','delivery_failed','shipped','completed'))""").fetchall()
     for j in rows:
         made = (j["qty_done"] or 0) - (j["stock_n"] or 0)
         c.execute("DELETE FROM jobs WHERE id=?", (j["id"],))
@@ -793,6 +798,8 @@ def cancel_run(rid, user=""):
     """还没真正开始（例如发错了）：撤销，不扣料。"""
     c = db.conn()
     r = dict(_run(c, rid))
+    if r["status"] != "printing":      # v2.40：已经打完 / 失败的批次不能再撤销（会把已发货的任务改回待打印）
+        raise ValueError("这一盘已经结束了，不能撤销")
     for jid in json.loads(r["alloc"] or "{}"):
         c.execute("UPDATE jobs SET status='todo', run_id=NULL, updated_at=?, updated_by=? WHERE id=?", (_now(), user, int(jid)))
     c.execute("UPDATE print_runs SET status='cancelled', ended_at=? WHERE id=?", (_now(), rid))
@@ -838,6 +845,9 @@ def set_status(job_id, status, user="", printer=None, note=None):
         sets.update(status="todo", fails=(j["fails"] or 0) + 1)
     elif status in ("packed", "done", "todo"):
         sets["status"] = status
+        if status == "todo" and j["status"] in ("post", "packed"):
+            # v2.40：退回重打 → 打好的件作废重打（用库存发的那几个照旧占着）
+            sets.update(qty_done=j["stock_n"] or 0, printed_at=None, plates_done=0)
         if status == "packed":
             sets["packed_at"] = now
         if status == "done":
@@ -850,7 +860,7 @@ def set_status(job_id, status, user="", printer=None, note=None):
     if status == "done" and j["order_id"]:
         left = c.execute("SELECT COUNT(*) FROM jobs WHERE order_id=? AND status!='done'", (j["order_id"],)).fetchone()[0]
         if not left:
-            shipped = c.execute("UPDATE orders SET status='shipped', shipped_at=?, updated_at=? WHERE id=? AND status IN ('to_ship','quote')",
+            shipped = c.execute("UPDATE orders SET status='shipped', shipped_at=?, updated_at=? WHERE id=? AND status='to_ship'",       # v2.40：报价单打完不自动算发货
                                 (now, now, j["order_id"])).rowcount
     c.commit()
     if status == "done" and j["order_id"] and locals().get("shipped"):

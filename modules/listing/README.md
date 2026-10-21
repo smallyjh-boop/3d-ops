@@ -16,3 +16,4 @@
 
 - 1.0（系统 v2.31.0）：从内核拆成模块。
 - 1.1（系统 v2.34.0）：泰文翻译从内核 static/i18n.js 搬到模块自己的 i18n/th.json（只在这个模块里用到的那些），界面不变。
+- 1.2（系统 v2.40.0）：导出 Shopee 时记 exported_first=shopee，Lazada 导出后去掉；core/listing.exported_to() 判断导出过哪个平台；库存待同步按平台判断。

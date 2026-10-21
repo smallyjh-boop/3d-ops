@@ -59,6 +59,8 @@ def product_get(pid):
     except FileNotFoundError:
         return err("找不到这个产品", 404)
     codes.ensure_skus(load_config(), p)
+    if not auth.is_owner():
+        p.pop("markup", None)        # v2.40：员工看不到、也改不了加价率（保存时沿用原来的）
     return jsonify(p)
 
 
@@ -101,6 +103,17 @@ def product_duplicate(pid):
     p = dict(src)
     p["id"] = store.new_id(_prefix(cfg))
     p["images"], p["white_bg"], p["exported_at"] = [], None, None
+    # v2.40：上架 / 导出状态不跟着复制（以前新产品显示「已导出」、Shopee「待上传」）
+    for k in ("shopee_exported_at", "exported_first", "listing", "ad_designs", "seo_review", "seo_undo", "seo_log",
+              "title_changed_at", "copy_dirty_after_export", "edit_rev", "edited_by", "edited_at"):
+        p.pop(k, None)
+    p["listing"] = {}
+    # v2.40：模型文件一起复制（以前只复制了模型信息，新产品打开模型是 404）
+    import shutil as _sh
+    for sub in ("model", "models", "source_files"):
+        sd = os.path.join(store.product_dir(pid), sub)
+        if os.path.isdir(sd):
+            _sh.copytree(sd, os.path.join(store.product_dir(p["id"]), sub), dirs_exist_ok=True)
     for v in p.get("variants", []):
         v["image"], v["sku"] = "", ""
     p["name_zh"] = (src.get("name_zh") or "") + "（副本）"
@@ -113,6 +126,11 @@ def product_duplicate(pid):
 def pricing_preview():
     data = request.get_json(force=True) or {}
     cfg = load_config()
+    if not auth.is_owner() and data.get("id"):      # v2.40：员工那边没有加价率 → 用保存着的算售价
+        try:
+            data["markup"] = store.load(data["id"]).get("markup")
+        except FileNotFoundError:
+            data.pop("markup", None)
     codes.ensure_skus(cfg, data)
     return jsonify({"rows": auth.strip_prices(pricing.price_product(cfg, data), auth.current_user()),
                     "summary": pricing.cost_summary(cfg) if auth.is_owner() else None,
@@ -569,6 +587,9 @@ def image_reorder(pid):
         for v in p.get("variants", []):
             if v.get("image") == i["raw"]:
                 v["image"] = ""
+        wb = p.get("white_bg") or {}
+        if wb.get("file") and wb["file"] in (i.get("file"), i.get("raw")):      # v2.40：白底图就是这张（渲染图）→ 一起清掉
+            p["white_bg"] = None
     store.save(p)
     return jsonify(p)
 

@@ -221,10 +221,16 @@ def _save_from_client(pid, p):
     cfg = load_config()
     try:
         old = store.load(pid)
+        if not auth.is_owner():
+            p["markup"] = old.get("markup")          # v2.40：加价率只有老板能改
         p["images"] = old.get("images", [])
         p["white_bg"] = old.get("white_bg")
         p["exported_at"] = old.get("exported_at")
         p["shopee_exported_at"] = old.get("shopee_exported_at")
+        if old.get("exported_first"):
+            p["exported_first"] = old["exported_first"]       # v2.40：只导出过 Shopee（由导出接口维护）
+        else:
+            p.pop("exported_first", None)
         p["listing"] = old.get("listing") or {}      # 上架进度由导出 / 标记接口维护（没导出过的是 {}，不能存成 null）
         if "specs" in old:
             p["specs"] = old.get("specs")              # 规格由选品工具同步 / 「确认规格」接口维护（v2.16）

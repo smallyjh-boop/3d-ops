@@ -175,7 +175,7 @@
     try { o = await api(`/api/orders/${oid}`); } catch (err) { toast(err.message, true); return; }
     let skus = [];
     try { const r = await api("/api/skus"); skus = Array.isArray(r) ? r : (r.skus || []); } catch { skus = []; }
-    const locked = (o.jobs || []).some((j) => j.status !== "todo" || j.qty_done > 0 || j.run_id);
+    const locked = (o.jobs || []).some((j) => j.run_id || (j.qty_done || 0) > (j.stock_n || 0) || !["todo", "post"].includes(j.status));   // v2.40：只用库存发的不算开始
     const manual = !["lazada", "shopee", "tiktok"].includes(o.platform) || o.source === "manual";
     const itemRow = (i) => `<tr><td><input data-it="sku" list="oe-skus" value="${esc(i.sku || "")}" data-notr ${locked ? "readonly" : ""}></td>
       <td><input data-it="name" value="${esc(i.name || "")}" data-notr ${locked ? "readonly" : ""}></td>

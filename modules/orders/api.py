@@ -490,7 +490,10 @@ def pack_lookup():
     r = scanning.find_order(code)
     if not r:
         return err(scanning.not_found_msg(code), 404)
+    if r["status"] in ("cancelled", "returned", "delivery_failed"):      # v2.40：取消 / 退货的订单不要打包
+        return err(f"订单 {r['order_no']} 是「{orders_mod.STATUS_ZH.get(r['status'])}」，不要打包！")
     o = orders_mod.get_order(r["id"])
+    o["status_zh"] = orders_mod.STATUS_ZH.get(o["status"], o["status"])
     o["jobs"] = production.list_jobs(order_id=r["id"])
     cfg = load_config()
     for it, m in zip(o.get("items") or [], scanning.modes_for_items(o.get("items") or [], cfg)):
@@ -522,6 +525,9 @@ def pack_done():
     """核对完成：这个订单已打印好的任务标记为已打包。"""
     b = request.get_json(force=True) or {}
     oid = int(b.get("order_id") or 0)
+    o = orders_mod.get_order(oid)
+    if o and o["status"] in ("cancelled", "returned", "delivery_failed"):      # v2.40
+        return err(f"订单 {o['order_no']} 是「{orders_mod.STATUS_ZH.get(o['status'])}」，不要打包！")
     n = 0
     for j in production.list_jobs(order_id=oid):
         if j["status"] == "post":

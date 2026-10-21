@@ -179,7 +179,8 @@ def pending(platform="lazada", cfg=None):
     out = []
     for item in store.list_products():
         p = store.load(item["id"])
-        if not enabled(p, cfg) or not p.get("exported_at"):
+        from .listing import exported_to
+        if not enabled(p, cfg) or not exported_to(p, platform):      # v2.40：按这个平台导出过没有
             continue
         for r in compute(p, cfg, av):
             if not r["sku"]:

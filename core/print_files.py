@@ -328,6 +328,16 @@ def candidates(product_id, sku, printer_name, color="", usable_only=True):
             rows = [r for r in rows if not material_of(r) or recipes.same_material(material_of(r), need) != "diff"]
         except Exception:  # noqa: BLE001
             pass
+        # v2.40：机型 / 喷嘴 / 热床板对不上这台打印机的文件不算能用（以前排单和开始对话框会选中它，开始时才报错）
+        try:
+            from modules.prod import slicecheck
+            from .config import load_config
+            cfg = load_config()
+            idx = next((i for i, p in enumerate(cfg.get("printers") or []) if (p.get("name") or "") == printer_name), None)
+            if idx is not None:
+                rows = [r for r in rows if slicecheck.check(r, idx, cfg)["ok"]]
+        except ImportError:
+            pass
     sku = (sku or "").strip().upper()
 
     def score(r):

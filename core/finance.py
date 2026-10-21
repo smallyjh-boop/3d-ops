@@ -58,12 +58,16 @@ def order_profit(cfg, o, items):
     resin_g = sum((i["grams"] or 0) * (i["qty"] or 1) for i in items if "material" in keys and is_resin(i["material"]))
     material = (grams - resin_g) * tpg + resin_g * pricing.thb_per_gram(cfg, "RESIN") * (1 + cfg.get("material_loss_rate", 0))
     machine = hours * mh
-    packaging = cfg.get("packaging_per_item", 0) if items else 0
+    # v2.40：「每件包材」按件数算（以前每单只算一次）
+    packaging = (cfg.get("packaging_per_item", 0) or 0) * sum((i["qty"] or 1) for i in items) if items else 0
     failure = (material + machine) * cfg.get("failure_rate", 0)
     cost = material + machine + packaging + failure
-    profit = revenue - fee - cost
+    # v2.40：开了 VAT、价格含税 → 利润按不含税收入算（和损益表一致）
+    vr = float(cfg.get("fin_vat_rate", 0.07) or 0)
+    out_vat = revenue * vr / (1 + vr) if cfg.get("fin_vat_on") and cfg.get("fin_prices_incl_vat", True) else 0.0
+    profit = revenue - out_vat - fee - cost
     missing = any(not i["product_id"] or not i["grams"] for i in items)
-    return {"revenue": round(revenue, 2), "fee": round(fee, 2), "fee_estimated": fee_est, "fee_source": fee_src,
+    return {"revenue": round(revenue, 2), "out_vat": round(out_vat, 2), "fee": round(fee, 2), "fee_estimated": fee_est, "fee_source": fee_src,
             "fee_detail": {k: v for k, v in {**parts, "seller_discount": g("seller_discount"),
                                               "platform_discount": g("platform_discount"),
                                               "settlement": g("settlement")}.items() if v is not None},

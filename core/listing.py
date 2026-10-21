@@ -33,14 +33,20 @@ def init():
     c.commit()
 
 
+def exported_to(p, platform):
+    """v2.40：导出过这个平台没有（exported_at 同时是 SKU 锁；只导出过 Shopee 时不算导出过 Lazada）。"""
+    if platform == "lazada":
+        return bool(p.get("exported_at")) and p.get("exported_first") != "shopee"
+    return bool(p.get("shopee_exported_at"))
+
+
 def status_of(p, platform):
     st = ((p.get("listing") or {}).get(platform) or {})
     if st.get("status"):
         return st
     # 老数据：导出过但没有记录状态 → 当作待上传
-    key = "exported_at" if platform == "lazada" else "shopee_exported_at"
-    if p.get(key):
-        return {"status": "pending", "at": p.get(key)}
+    if exported_to(p, platform):
+        return {"status": "pending", "at": p.get("exported_at" if platform == "lazada" else "shopee_exported_at")}
     return {"status": "none"}
 
 

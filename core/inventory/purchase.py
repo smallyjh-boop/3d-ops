@@ -279,8 +279,8 @@ def pay(pid, amount, method="转账", day=None, note="", user=""):
         amt = round(float(amount), 2)
     except (TypeError, ValueError):
         raise ValueError("金额要是数字")
-    if not amt:
-        raise ValueError("金额不能是 0")
+    if not math.isfinite(amt) or amt <= 0:       # v2.40：负数会把「已付」冲掉
+        raise ValueError("付款金额要大于 0")
     day = str(day or dt.date.today().isoformat())[:10]
     c.execute("INSERT INTO inv_payments(po_id, ts, day, amount, method, note, username) VALUES(?,?,?,?,?,?,?)",
               (po["id"], ledger._now(), day, amt, str(method or "")[:20], str(note or "")[:200], user))
@@ -301,8 +301,14 @@ def get_po(pid):
     d["supplier"] = dict(sup) if sup else None
     d["lines"] = [dict(r) for r in c.execute("SELECT l.*, i.code, i.name_zh, i.name_th, i.unit, i.category FROM inv_po_lines l "
                                              "JOIN inv_items i ON i.id=l.item_id WHERE l.po_id=? ORDER BY l.id", (po["id"],))]
-    d["goods_total"] = round(sum((x["qty"] or 0) * (x["unit_cost"] or 0) for x in d["lines"]), 2)
-    d["total"] = round(d["goods_total"] + (po["ship_fee"] or 0) + (po["other_fee"] or 0), 2)
+    if d["status"] in ("received", "cancelled"):
+        # v2.40：结单（剩下的不要了）/ 取消：只付到了的那部分（以前结单后还按下单数量算，取消后到了的部分查不到）
+        d["goods_total"] = round(sum((x["received"] or 0) * (x["unit_cost"] or 0) for x in d["lines"]), 2)
+        got = any((x["received"] or 0) > 0 for x in d["lines"])
+        d["total"] = round(d["goods_total"] + ((po["ship_fee"] or 0) + (po["other_fee"] or 0) if got else 0), 2)
+    else:
+        d["goods_total"] = round(sum((x["qty"] or 0) * (x["unit_cost"] or 0) for x in d["lines"]), 2)
+        d["total"] = round(d["goods_total"] + (po["ship_fee"] or 0) + (po["other_fee"] or 0), 2)
     d["payments"] = [dict(r) for r in c.execute("SELECT * FROM inv_payments WHERE po_id=? ORDER BY id", (po["id"],))]
     d["paid"] = round(sum(p["amount"] for p in d["payments"]), 2)
     d["pay_status"] = "paid" if d["paid"] >= d["total"] - 0.01 and d["total"] > 0 else ("partial" if d["paid"] else "unpaid")
@@ -403,7 +409,7 @@ def summary():
     transit = c.execute("SELECT COALESCE(SUM((l.qty-COALESCE(l.received,0))*l.unit_cost),0) FROM inv_po_lines l JOIN inv_po p ON p.id=l.po_id "
                         "WHERE p.status IN ('ordered','partial') AND l.qty>COALESCE(l.received,0)").fetchone()[0]
     unpaid = 0.0
-    for r in c.execute("SELECT id FROM inv_po WHERE status IN ('ordered','partial','received')").fetchall():
+    for r in c.execute("SELECT id FROM inv_po WHERE status IN ('ordered','partial','received','cancelled')").fetchall():
         d = get_po(r["id"])
         unpaid += max(0.0, d["total"] - d["paid"])
     m0 = _dt.date.today().replace(day=1)

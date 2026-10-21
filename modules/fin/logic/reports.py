@@ -105,11 +105,12 @@ def pl(start=None, end=None, month=None):
         v = float(e.get("vat") or 0) if (st["vat_on"] and e.get("tax_invoice")) else 0
         in_vat += v
         by_cat[e["kind"]] = by_cat.get(e["kind"], 0) + amt - v
-    fixed_recorded = sum(v for k, v in by_cat.items() if k in st["fixed_cats"])
     days = max(0, (min(end, dt.date.today() + dt.timedelta(days=1)) - start).days)     # 还没到的日子不算
-    fixed_est = 0.0
-    if not fixed_recorded:
-        fixed_est = pricing.fixed_monthly(cfg) * days / 30.0
+    # v2.40：按项估算——记了账的那项用记的，没记的那几项按设置估算（以前只要记了一项，其余全部不算）
+    FIX_KEYS = (("房租", "monthly_rent", "ค่าเช่า"), ("人工工资", "monthly_labor", "ค่าแรง"),
+                ("设备折旧", "monthly_depreciation", "ค่าเสื่อม"), ("设备维修", "monthly_maintenance", "ค่าซ่อมบำรุง"))
+    est_items = [(zh, th, float(cfg.get(k) or 0)) for zh, k, th in FIX_KEYS if not by_cat.get(zh) and float(cfg.get(k) or 0)]
+    fixed_est = sum(v for _z, _t, v in est_items) * days / 30.0
     opex = sum(by_cat.values())
     op_profit = gross - loss - opex - fixed_est
     net = op_profit + other_in
@@ -135,8 +136,11 @@ def pl(start=None, end=None, month=None):
     for k, v in sorted(by_cat.items(), key=lambda x: -x[1]):
         L.append(_line("exp:" + k, "减：" + k, "หัก: " + k, -v, 1, ("固定费用", "ค่าใช้จ่ายคงที่") if k in st["fixed_cats"] else ""))
     if fixed_est:
-        L.append(_line("fixed_est", "减：固定费用（房租、人工、折旧、维护，本期没记账，按设置估算）",
-                       "หัก: ค่าใช้จ่ายคงที่ (ประมาณจากการตั้งค่า)", -fixed_est, 1, (f"฿{pricing.fixed_monthly(cfg):,.0f}/月 × {days} 天", f"฿{pricing.fixed_monthly(cfg):,.0f}/เดือน × {days} วัน"), est=True))
+        mon = sum(v for _z, _t, v in est_items)
+        L.append(_line("fixed_est", "减：固定费用（本期没记账的几项，按设置估算）",
+                       "หัก: ค่าใช้จ่ายคงที่ (รายการที่ยังไม่บันทึก ประมาณจากการตั้งค่า)", -fixed_est, 1,
+                       (f"{'、'.join(z for z, _t, _v in est_items)}：฿{mon:,.0f}/月 × {days} 天",
+                        f"{', '.join(t for _z, t, _v in est_items)}: ฿{mon:,.0f}/เดือน × {days} วัน"), est=True))
     L.append(_line("op_profit", "经营利润", "กำไรจากการดำเนินงาน", op_profit, 2))
     if other_in:
         L.append(_line("other_in", "加：其他收入", "บวก: รายได้อื่น", other_in, 1))

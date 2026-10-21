@@ -99,11 +99,25 @@ def ship_order(oid, user=""):
                 merged[k]["qty"] += ln["qty"]
             else:
                 merged[k] = dict(ln)
-        c.execute("INSERT INTO inv_order_out(order_id, ts) VALUES(?,?)", (oid, time.time()))
+        # v2.40：停用了的物品（例如停用的纸箱）跳过并记一笔，其它照常出库（以前整张出库单不开，包材也不扣，还不提示）
+        skipped = []
+        for k in list(merged):
+            it = ledger.get_item(merged[k]["item_id"])
+            if not it or not it["active"]:
+                skipped.append((it or {}).get("name_zh") or str(merged[k]["item_id"]))
+                del merged[k]
+        if skipped:
+            orders.log(oid, user or "系统", "发货出库跳过", "这些物品已停用，没扣库存：" + "、".join(skipped))
+        c.execute("INSERT INTO inv_order_out(order_id, ts) VALUES(?,?)", (oid, time.time()))      # 先占住，防止同时出两次库
         c.commit()
         if not merged:
             return None
-        d = docs.create("ship", list(merged.values()), f"订单 {o['order_no']}", user or "系统", ref=f"order:{oid}", allow_negative=True)
+        try:
+            d = docs.create("ship", list(merged.values()), f"订单 {o['order_no']}", user or "系统", ref=f"order:{oid}", allow_negative=True)
+        except Exception:
+            c.execute("DELETE FROM inv_order_out WHERE order_id=? AND doc_id IS NULL", (oid,))     # v2.40：没开成 → 以后还能再出库
+            c.commit()
+            raise
         c.execute("UPDATE inv_order_out SET doc_id=? WHERE order_id=?", (d["id"], oid))
         c.commit()
         orders.log(oid, user or "系统", "发货出库", f"{d['no']}：{len(merged)} 样")

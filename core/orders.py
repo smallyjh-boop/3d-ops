@@ -74,7 +74,7 @@ FIELDS = {
               "หมายเลขโทรศัพท์"],
     "address": ["收件地址", "收货地址", "详细地址", "地址", "shipping address", "delivery address", "address", "ที่อยู่ในการจัดส่ง",
                 "ที่อยู่จัดส่ง", "ที่อยู่"],
-    "postcode": ["邮编", "邮政编码", "postcode", "postal code", "zip code", "zipcode", "zip", "รหัสไปรษณีย์"],
+    "postcode": ["邮编", "邮政编码", "postcode", "post code", "postal code", "zip code", "zipcode", "zip", "รหัสไปรษณีย์"],
     "carrier": ["物流公司", "物流方式", "快递公司", "承运商", "shipping provider", "shipping option", "delivery option",
                 "carrier", "logistics", "ตัวเลือกการจัดส่ง", "บริษัทขนส่ง", "ขนส่ง"],
     "cod": ["货到付款金额", "代收货款", "cod amount", "cod value", "เก็บเงินปลายทาง"],
@@ -85,7 +85,7 @@ FIELDS = {
     "product_name": ["商品名称", "产品名称", "商品标题", "item name", "product name", "product", "ชื่อสินค้า"],
     "variation": ["规格", "变种", "属性", "variation", "variant", "ตัวเลือกสินค้า", "ชื่อตัวเลือก"],
     "qty": ["数量", "商品数量", "quantity", "qty", "จำนวน"],
-    "unit_price": ["单价", "商品单价", "成交价", "unit price", "deal price", "item price", "paid price", "ราคาต่อชิ้น", "ราคาขาย"],
+    "unit_price": ["单价", "商品单价", "成交价", "paid price", "deal price", "unit price", "item price", "ราคาต่อชิ้น", "ราคาขาย"],
     "item_total": ["商品总价", "商品金额", "小计", "subtotal", "item total", "ราคารวมสินค้า"],
     "order_total": ["订单金额", "订单总额", "实付金额", "order amount", "order total", "total amount", "grand total",
                     "ยอดรวมคำสั่งซื้อ", "ยอดชำระ"],
@@ -103,8 +103,17 @@ FIELDS = {
     "payment_fee": ["支付手续费", "交易手续费", "payment fee", "transaction fee", "ค่าธรรมเนียมการชำระเงิน", "ค่าธรรมเนียมธุรกรรม"],
     "settlement": ["结算金额", "预计结算", "实际到账", "回款金额", "payout amount", "settlement amount", "escrow amount",
                    "release amount", "ยอดเงินที่ได้รับ", "ยอดที่ได้รับ"],
-    "payment": ["付款方式", "支付方式", "payment method", "วิธีการชำระเงิน"],
-    "tracking_no": ["运单号", "物流单号", "tracking number", "tracking no", "เลขพัสดุ", "หมายเลขติดตามพัสดุ"],
+    "payment": ["付款方式", "支付方式", "payment method", "pay method", "วิธีการชำระเงิน"],
+    "tracking_no": ["运单号", "物流单号", "tracking number", "tracking no", "tracking code", "เลขพัสดุ", "หมายเลขติดตามพัสดุ"],
+}
+# v2.40：表头里有这些词就不算这个字段（Shopee「Parent SKU」是商品级、「Reverse Shipping Fee」是退货运费、
+# Lazada「buyerFailedDeliveryUserName」不是买家、「sellerNote」不是买家留言……）
+FIELDS_NOT = {
+    "sku": ["parent", "lazada sku", "shop sku", "父"], "buyer": ["failed", "email", "registration"],
+    "shipping_fee": ["reverse", "return", "rebate", "estimated"], "buyer_note": ["seller", "卖家"],
+    "status": ["return", "refund", "退款"], "qty": ["returned", "number of product", "退"],
+    "carrier": ["fm", "cd ", "type"], "tracking_no": ["url", "fm", "cd "], "order_time": ["update", "paid", "complete"],
+    "order_no": ["item id"],
 }
 FIELD_LABELS = {
     "order_no": "订单号（必选）", "platform": "平台", "shop": "店铺", "status": "订单状态", "order_time": "下单时间",
@@ -252,18 +261,33 @@ def find_header(rows):
     return idx
 
 
+def _norm_header(h):
+    """v2.40：orderNumber → order number、tracking_code → tracking code，方便和关键词比。"""
+    h = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(h or "").strip())
+    h = re.sub(r"[_\s]+", " ", h.replace("*", " "))
+    return h.lower().strip()
+
+
+def _has_word(w, hl):
+    if w.isascii():       # 英文词按整词找（「shop」不能匹配「shopee」）
+        return re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", hl) is not None
+    return w in hl
+
+
 def auto_map(headers):
     """{列序号: 字段}；每个字段只用一次，优先匹配更长、更具体的词。"""
     cand = []
     for ci, h in enumerate(headers):
-        hl = h.lower().strip()
+        hl = _norm_header(h)
         if not hl:
             continue
         for field, words in FIELDS.items():
+            if any(_has_word(x, hl + " ") if x.endswith(" ") else _has_word(x, hl) for x in FIELDS_NOT.get(field, [])):
+                continue
             for rank, w in enumerate(words):
                 if w == hl:
                     cand.append((0, -len(w), rank, ci, field))
-                elif w in hl:
+                elif _has_word(w, hl):
                     cand.append((1, -len(w), rank, ci, field))
     cand.sort()
     used_c, used_f, out = set(), set(), {}
@@ -501,6 +525,12 @@ def upsert(orders, source="api", default_platform="", user="", audit=True):
             fields["raw"] = json.dumps(o["raw"], ensure_ascii=False)[:20000]
         items = o.get("items")
         old = c.execute("SELECT * FROM orders WHERE platform=? AND order_no=?", (plat, no)).fetchone()
+        if not old and plat == "other":
+            # v2.40：表格里没有平台列、文件名也认不出平台 → 按订单号找已有的订单（只有一个才算同一单），不重复建
+            same = c.execute("SELECT * FROM orders WHERE order_no=? AND platform NOT IN ('manual')", (no,)).fetchall()
+            if len(same) == 1:
+                old, plat = same[0], same[0]["platform"]
+                fields["platform"] = plat
         if old:
             sets = {k: v for k, v in fields.items() if k not in ("platform", "order_no", "source") and v not in (None, "")}
             if not o.get("order_time"):
@@ -527,15 +557,28 @@ def upsert(orders, source="api", default_platform="", user="", audit=True):
                 status_changed.append((oid, old["status"], sets["status"]))
             if items is None:          # 只更新状态（例如平台推送「已发货」）
                 continue
-            locked = c.execute("SELECT COUNT(*) FROM jobs WHERE order_id=? AND (status!='todo' OR COALESCE(qty_done,0)>0 "
-                               "OR run_id IS NOT NULL)",
+            # v2.40：商品没变（同样的 SKU 和数量）→ 不删重建（生产任务上指定的打印机、备注会丢），只补价格
+            cur = [dict(r) for r in c.execute("SELECT id, sku, qty FROM order_items WHERE order_id=? ORDER BY id", (oid,))]
+            new_rows = [(str(it.get("sku") or "").strip(), max(1, int(_num(it.get("qty")) or 1)), it) for it in items]
+            if sorted((r["sku"], r["qty"]) for r in cur) == sorted((s_, q_) for s_, q_, _ in new_rows):
+                pool = list(cur)
+                for s_, q_, it in new_rows:
+                    r = next(x for x in pool if x["sku"] == s_ and x["qty"] == q_)
+                    pool.remove(r)
+                    unit = _num(it.get("unit_price"))
+                    total = _num(it.get("item_total")) or (unit * q_ if unit is not None else None)
+                    if unit is not None or total is not None:
+                        c.execute("UPDATE order_items SET unit_price=COALESCE(?, unit_price), item_total=COALESCE(?, item_total) WHERE id=?",
+                                  (unit, total, r["id"]))
+                continue
+            locked = c.execute("SELECT COUNT(*) FROM jobs WHERE order_id=? AND (run_id IS NOT NULL OR COALESCE(qty_done,0)>COALESCE(stock_n,0) OR status NOT IN ('todo','post'))",      # v2.40：只用库存发、还没打的不算开始
                                (oid,)).fetchone()[0] \
                 if _has_jobs_table(c) else 0
             if locked:
                 stats["skipped_items_locked"] += 1
                 continue
             if _has_jobs_table(c):   # 还没开始打印的任务按新明细重新生成
-                c.execute("DELETE FROM jobs WHERE order_id=? AND status='todo'", (oid,))
+                c.execute("DELETE FROM jobs WHERE order_id=? AND status IN ('todo','post') AND run_id IS NULL", (oid,))
             c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))
         else:
             fields.update(imported_at=now, updated_at=now)
@@ -1039,13 +1082,13 @@ def edit_order(oid, data, user=""):
             items = None      # v2.39：商品没变（只改了地址、备注…）→ 商品明细、生产任务、金额都不动
     if items is not None:
         if _has_jobs_table(c) and c.execute(
-                "SELECT COUNT(*) FROM jobs WHERE order_id=? AND (status!='todo' OR COALESCE(qty_done,0)>0 OR run_id IS NOT NULL)",
+                "SELECT COUNT(*) FROM jobs WHERE order_id=? AND (run_id IS NOT NULL OR COALESCE(qty_done,0)>COALESCE(stock_n,0) OR status NOT IN ('todo','post'))",      # v2.40：只用库存发、还没打的不算开始
                 (oid,)).fetchone()[0]:
             raise ValueError("这个订单已经开始打印了，不能再改商品。可以加备注，或者取消后重新下单")
         before = [(r["sku"], r["qty"]) for r in olds]
         old_sum = sum(r["item_total"] or 0 for r in olds)
         if _has_jobs_table(c):
-            c.execute("DELETE FROM jobs WHERE order_id=? AND status='todo'", (oid,))
+            c.execute("DELETE FROM jobs WHERE order_id=? AND status IN ('todo','post') AND run_id IS NULL", (oid,))
         c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))
         idx = sku_index()
         pool = list(olds)
@@ -1246,6 +1289,11 @@ def on_status_change(oid, new, user="", old=None):
     待发货 → 已发货：按设置自动扣包材（v2.18）。"""
     from . import chain
     chain.order_status(oid, new, old, user)      # v2.31：库存模块开着时「已发货」自动扣包材（库存模块自己判断）
+    if old in ACTIVE_STATUSES and new not in ACTIVE_STATUSES:     # v2.40：离开「待发货」→ 还没开始的生产任务停下
+        try:
+            chain.order_changed(user)
+        except Exception as e:  # noqa: BLE001
+            print("更新生产任务失败：", e)
     try:                                          # v2.37：批发站的订单状态变了，马上通知批发网站
         r = db.conn().execute("SELECT platform, order_no FROM orders WHERE id=?", (oid,)).fetchone()
         if r and r["platform"] == "wholesale":
@@ -1454,6 +1502,10 @@ def handover_scan(hid, code, user=""):
         raise ValueError(f"订单 {r['order_no']} 是「{STATUS_ZH.get(r['status'])}」状态，不能发货！")
     if r["hold"]:
         raise ValueError(f"订单 {r['order_no']} 还在「待审核」挂起中，先审核通过再发")
+    if r["status"] == "unpaid":       # v2.40
+        raise ValueError(f"订单 {r['order_no']} 还是「未付款」，不能发货")
+    if r["status"] == "quote":
+        raise ValueError(f"订单 {r['order_no']} 是报价单，客户确认下单后先改成「待发货」再发")
     if r["handover_id"] == hid:
         raise ValueError(f"订单 {r['order_no']} 已经扫过了")
     warn = []
@@ -1498,7 +1550,7 @@ def handover_close(hid, user=""):
     c = db.conn()
     n = 0
     for o in d["orders"]:
-        if o["status"] in ("to_ship", "unpaid", "quote", "other"):
+        if o["status"] in ("to_ship", "other"):          # v2.40：未付款、报价单不会被交接成已发货
             update_order(o["id"], user, status="shipped")
             n += 1
         if _has_jobs_table(c):

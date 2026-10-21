@@ -68,9 +68,12 @@ def _aslog(aid, user, action, detail="", commit=True):
 
 def _f(v):
     try:
-        return float(v) if v not in (None, "") else None
+        x = float(v) if v not in (None, "") else None
     except (TypeError, ValueError):
         raise ValueError(f"金额「{v}」要填数字")
+    if x is not None and (x != x or x in (float("inf"), float("-inf")) or x < 0):      # v2.40：售后金额不能是负数
+        raise ValueError(f"金额「{v}」不能是负数")
+    return x
 
 
 def _items_cost(rows):
@@ -131,8 +134,13 @@ def as_add(order_id, kind, reason, amount=None, note="", user="", reship_items=N
         raise ValueError("售后类型不对")
     if responsibility and responsibility not in AS_RESP:
         raise ValueError("责任方不对")
+    _f(amount), _f(return_shipping), _f(penalty)       # v2.40：先检查，免得补发任务建了一半才报错
     jobs, cost_rows = [], []
     if kind == "reship":
+        for it in reship_items or []:       # v2.40：补发不能比原来买的多（先全部检查，再建任务）
+            item = next((i for i in o["items"] if i["id"] == int(it.get("item_id") or 0)), None)
+            if item and int(it.get("qty") or 0) > (item.get("qty") or 1):
+                raise ValueError(f"{item['sku']} 原订单只有 {item.get('qty') or 1} 个，补发数量不能比这个多")
         for it in reship_items or []:
             item = next((i for i in o["items"] if i["id"] == int(it.get("item_id") or 0)), None)
             q = int(it.get("qty") or 0)

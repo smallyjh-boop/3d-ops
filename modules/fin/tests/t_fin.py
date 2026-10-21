@@ -102,7 +102,8 @@ x = C.get(f"/api/fin/expenses?month={M}").get_json()
 ok(x["total_out"] == 5300 and x["total_in"] == 20050 and x["rows"][0]["has_receipt"] in (True, False), f"expense list {x['total_out']} {x['total_in']}")
 pl3 = fin.pl(*fin.period(M)[:2])
 s3 = pl3["summary"]
-ok(s3["fixed_estimated"] == 0 and any(l["key"] == "exp:房租" for l in pl3["lines"]) and any(l["key"] == "other_in" for l in pl3["lines"])
+fx = next((l for l in pl3["lines"] if l["key"] == "fixed_est"), None)       # v2.40：按项估算——记了房租，房租不再估，其它照估
+ok((fx is None or "房租" not in fx["note"]) and any(l["key"] == "exp:房租" for l in pl3["lines"]) and any(l["key"] == "other_in" for l in pl3["lines"])
    and s3["capital_in"] == 20000, "recorded rent replaces estimate; capital not income")
 # 旧接口（利润页的其他支出）
 ok(C.post("/api/expenses", json={"day": d1.isoformat(), "kind": "运费补贴", "amount": 10}).status_code == 200, "old expense API still works")

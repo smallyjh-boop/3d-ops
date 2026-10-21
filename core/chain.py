@@ -18,7 +18,15 @@ def order_changed(user=""):
         from . import production
         return production.generate(user)
     r = modules.emit("order.changed", user=user)
-    return sum(v for v in r.values() if isinstance(v, int))
+    # v2.40：生产模块返回 {"created", "cancelled"}（以前这里只加 int，结果永远是 0）
+    out = {"created": 0, "cancelled": 0}
+    for v in r.values():
+        if isinstance(v, dict):
+            for k in out:
+                out[k] += int(v.get(k) or 0)
+        elif isinstance(v, int) and not isinstance(v, bool):
+            out["created"] += v
+    return out
 
 
 def reschedule():
