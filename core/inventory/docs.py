@@ -2,6 +2,7 @@
 每张单据有单号，确认后生成流水（ledger.post）。耗材的单据通过 materials 的函数改数量（料卷跟着变），流水带单号。"""
 import datetime as dt
 import json
+import math
 
 from .. import db
 from . import ledger
@@ -60,6 +61,7 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
     sign = DOC_KINDS[kind][2]
     c = db.conn()
     clean = []
+    so_far = {}           # v2.38：同一个物品写了好几行 → 累计起来看库存够不够
     for i, ln in enumerate(lines or []):
         it = ledger.get_item(ln.get("item_id"))
         if not it:
@@ -72,14 +74,20 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
                 q = int(ln["rolls"]) * float(ln.get("net_g") or 1000)
         except (TypeError, ValueError):
             raise ValueError(f"第 {i + 1} 行：数量不对")
+        if not math.isfinite(q):                      # v2.38："nan" / "inf" 会把库存写坏
+            raise ValueError(f"第 {i + 1} 行：数量不对")
         if not q or (sign and q < 0):
             raise ValueError(f"第 {i + 1} 行：数量要大于 0")
         qty = q * sign if sign else q
-        if qty < 0 and not allow_negative and it["category"] != "filament" and (it["qty"] or 0) + qty < -1e-6:
-            raise ValueError(f"第 {i + 1} 行：{it['name_zh']} 库存只有 {it['qty']:g} {it['unit']}，不够出")
+        so_far[it["id"]] = so_far.get(it["id"], 0) + qty
+        if qty < 0 and not allow_negative and it["category"] != "filament" and (it["qty"] or 0) + so_far[it["id"]] < -1e-6:
+            raise ValueError(f"第 {i + 1} 行：{it['name_zh']} 库存只有 {it['qty']:g} {it['unit']}，不够出"
+                             + ("（这张单里同一个物品有好几行，合起来算）" if so_far[it["id"]] != qty else ""))
         uc = ln.get("unit_cost")
         if uc not in (None, ""):
             uc = float(uc)
+            if not math.isfinite(uc):
+                raise ValueError(f"第 {i + 1} 行：单价不对")
             if uc < 0:
                 raise ValueError(f"第 {i + 1} 行：单价不能是负数")
         clean.append((it, qty, uc, str(ln.get("note") or "")[:200], ln))
@@ -131,6 +139,9 @@ def void(doc_id, user=""):
         uc = (m["a"] / m["q"]) if m["q"] else None
         _apply(c, it, m["kind"], -m["q"], uc if m["q"] < 0 else uc, d["id"], user, f"作废 {d['no']}")
     c.commit()
+    if (d["ref"] or "").startswith("po:"):       # v2.38：采购单的到货入库单作废 → 采购单的已到数量、状态、财务记录一起退回
+        from . import purchase
+        purchase.on_receipt_void(d, sum(abs(m["a"] or 0) for m in mv), user)
     db.audit(user, "库存·作废单据", d["no"], "")
     return get(d["id"])
 

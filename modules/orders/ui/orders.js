@@ -198,7 +198,7 @@
         <tbody>${(o.items || []).map(itemRow).join("")}</tbody></table>
       ${locked ? "" : '<button class="mini" id="oe-add">＋ 加一行商品</button>'}
       <div class="form3 c-final">
-        <label>订单金额 ฿（空 = 按商品合计）<input id="oe-total" type="number" step="0.01" value=""></label>
+        <label>订单金额 ฿（空 = 不变，改商品时按差额调整）<input id="oe-total" type="number" step="0.01" value="" placeholder="${o.order_total ?? ""}"></label>
         <label>运费 ฿<input id="oe-ship" type="number" step="0.01" value="${o.shipping_fee ?? ""}"></label>
         <label>平台费 ฿<input id="oe-fee" type="number" step="0.01" value="${o.platform_fee ?? ""}"></label>
       </div>
@@ -352,6 +352,7 @@
       <p>新订单 <b>${r.orders_new}</b> 个，更新 <b>${r.orders_updated}</b> 个，商品 ${r.items} 行。新生产任务 <b>${(r.jobs || {}).created || 0}</b> 个。
       ${(r.jobs || {}).cancelled ? `取消了 ${r.jobs.cancelled} 个还没打印的任务（订单已取消）。` : ""}
       ${r.skipped_items_locked ? `<span class="muted">${r.skipped_items_locked} 个订单已经在生产，商品明细没有改动。</span>` : ""}
+      ${r.status_kept ? `<span class="muted">${r.status_kept} 个订单表格里的状态比系统里旧（例如系统里已发货、表格还是待发货），状态没改。</span>` : ""}
       ${r.held ? `<b class="warn">${r.held} 个新订单命中审单规则，已挂起到「待审核」（不会排产），请去看一下。</b>` : ""}</p>
       ${un.length ? `<p class="bad">以下 SKU 在产品库里找不到（不会生成生产任务，利润也算不准）：</p>
         <p data-notr>${un.map((u) => `<span class="pill bad-pill mono">${esc(u.sku)} ×${u.rows}</span>`).join(" ")}</p>

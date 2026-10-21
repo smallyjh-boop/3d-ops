@@ -32,6 +32,7 @@
   async function summary() {
     try {
       const r = await api("/api/inv/po-summary");
+      if (r.unpaid === undefined) { $("#po-sum").innerHTML = `<div>进行中<b>${r.open}</b></div>`; return; }   // v2.38：没有金额权限
       $("#po-sum").innerHTML = `<div>进行中<b>${r.open}</b></div><div>在途金额<b>฿${num(r.in_transit)}</b></div><div>还没付清<b class="${r.unpaid ? "warn" : ""}">฿${num(r.unpaid)}</b></div>
         <div>本月到货<b>฿${num(r.month_received)}</b></div><div>本月付款<b>฿${num(r.month_paid)}</b></div>`;
     } catch { $("#po-sum").innerHTML = ""; }
@@ -53,7 +54,7 @@
     $("#po-body").innerHTML = `<table class="grid small"><thead><tr><th>单号</th><th>供应商</th><th>状态</th><th>预计到货</th><th>行数</th><th>金额</th><th>付款</th><th>创建</th><th></th></tr></thead><tbody>` +
       (r.po.map((p) => `<tr><td class="mono" data-notr>${esc(p.no)}</td><td data-notr>${esc((p.supplier || {}).name || "—")}</td>
         <td><span class="${ST_CLS[p.status] || ""}">${esc(r.status[p.status] || p.status)}</span></td><td>${esc(p.expected_date || "")}</td>
-        <td>${p.lines.length}</td><td>฿${num(p.total)}</td><td>${PAY_ZH[p.pay_status]}${p.paid ? ` <span class="muted">฿${num(p.paid)}</span>` : ""}</td>
+        <td>${p.lines.length}</td><td>${p.total === undefined ? "" : "฿" + num(p.total)}</td><td>${PAY_ZH[p.pay_status]}${p.paid ? ` <span class="muted">฿${num(p.paid)}</span>` : ""}</td>
         <td class="nowrap">${fmtTime(p.created_at)}</td><td><button class="mini" data-po="${p.id}">打开</button></td></tr>`).join("") ||
         `<tr><td colspan="9" class="muted">${status === "open" ? "没有进行中的采购单" : "还没有采购单"}</td></tr>`) + "</tbody></table>";
   }
@@ -121,17 +122,17 @@
     const lines = po.lines.map((l) => {
       const left = Math.max(0, (l.qty || 0) - (l.received || 0));
       const roll = l.rolls ? ` <span class="muted" data-notr>（${l.rolls} ${TH() ? "ม้วน" : "卷"} × ${num(l.net_g, 0)} g）</span>` : "";
-      return `<tr><td data-notr>${esc(l.code)} ${esc(itName(l))}</td><td>${num(l.qty)} ${esc(l.unit)}${roll}</td><td>฿${num(l.unit_cost, 4)}</td>
-        <td>฿${num((l.qty || 0) * (l.unit_cost || 0))}</td><td>${num(l.received || 0)}</td>
-        <td>${open && left > 0 ? `<input type="number" step="any" data-rcv="${l.id}" placeholder="${l.rolls ? num(left / (l.net_g || 1000), 2) + (TH() ? " ม้วน" : " 卷") : num(left)}" style="width:80px">` : ""}</td></tr>`;
+      return `<tr><td data-notr>${esc(l.code)} ${esc(itName(l))}</td><td>${num(l.qty)} ${esc(l.unit)}${roll}</td><td>${l.unit_cost === undefined ? "" : "฿" + num(l.unit_cost, 4)}</td>
+        <td>${l.unit_cost === undefined ? "" : "฿" + num((l.qty || 0) * (l.unit_cost || 0))}</td><td>${num(l.received || 0)}</td>
+        <td>${open && left > 0 ? `<input type="number" step="any" min="0" max="${l.rolls ? left / (l.net_g || 1000) : left}" data-rcv="${l.id}" placeholder="${l.rolls ? num(left / (l.net_g || 1000), 2) + (TH() ? " ม้วน" : " 卷") : num(left)}" style="width:80px">` : ""}</td></tr>`;
     }).join("");
     const m = MODAL.open(`<h3>采购单 <span data-notr>${esc(po.no)}</span> <span class="${ST_CLS[po.status] || ""}">${esc(window.PO_STATUS ? PO_STATUS[po.status] : po.status_zh)}</span></h3>
       <p class="small"><span data-notr>${esc((po.supplier || {}).name || "")}</span>${po.expected_date ? ` · <span>预计到货</span> ${esc(po.expected_date)}` : ""}${po.tracking ? ` · <span>运单</span> <span data-notr>${esc(po.tracking)}</span>` : ""}
         ${po.note ? ` · <span data-notr>${esc(po.note)}</span>` : ""}</p>
       <table class="grid small"><thead><tr><th>物品</th><th>数量</th><th>单价</th><th>金额</th><th>已到</th><th>${open ? "这次到货" : ""}</th></tr></thead><tbody>${lines}</tbody></table>
-      <p class="small"><span>货款</span> ฿${num(po.goods_total)} + <span>运费</span> ฿${num(po.ship_fee)} + <span>其他</span> ฿${num(po.other_fee)} = <b>฿${num(po.total)}</b> ·
-        <span>已付</span> <b>฿${num(po.paid)}</b>（<span>${PAY_ZH[po.pay_status]}</span>）</p>
-      ${po.payments.length ? `<div class="small muted">${po.payments.map((x) => `${esc(x.day)} ฿${num(x.amount)} <span data-notr>${esc(x.method || "")} ${esc(x.note || "")}</span>`).join("<br>")}</div>` : ""}
+      ${po.total === undefined ? "" : `<p class="small"><span>货款</span> ฿${num(po.goods_total)} + <span>运费</span> ฿${num(po.ship_fee)} + <span>其他</span> ฿${num(po.other_fee)} = <b>฿${num(po.total)}</b> ·
+        <span>已付</span> <b>฿${num(po.paid)}</b>（<span>${PAY_ZH[po.pay_status]}</span>）</p>`}
+      ${(po.payments || []).length ? `<div class="small muted">${po.payments.map((x) => `${esc(x.day)} ฿${num(x.amount)} <span data-notr>${esc(x.method || "")} ${esc(x.note || "")}</span>`).join("<br>")}</div>` : ""}
       ${po.docs && po.docs.length ? `<p class="small">入库单：<span data-notr>${po.docs.map((d) => esc(d.no)).join("、")}</span></p>` : ""}
       <div class="row gap wrap" style="margin-top:8px">
         ${po.status === "draft" && can("inv.in") ? '<button id="pv-edit">修改</button><button class="primary" id="pv-order">下单（变在途）</button>' : ""}

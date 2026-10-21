@@ -441,6 +441,17 @@ ORDER_FIELDS = ("platform", "shop", "order_no", "status", "order_time", "ship_by
                 "carrier", "cod", "payment", "ship_method") + MONEY_FIELDS
 
 
+# v2.38：导入 / 推送时状态只往前走（旧表格再导入一次不能把已发货改回待发货）
+_STATUS_RANK = {"unpaid": 0, "to_ship": 1, "shipped": 2, "completed": 3,
+                "cancelled": 4, "returned": 4, "delivery_failed": 4}
+
+
+def status_backward(old, new):
+    """导入的状态比系统里的旧（例如 已发货 → 待发货、已取消 → 待发货）→ True，不覆盖。"""
+    a, b = _STATUS_RANK.get(old), _STATUS_RANK.get(new)
+    return a is not None and b is not None and b < a
+
+
 def _status_of(v):
     s = str(v or "").strip()
     return s if s in STATUS_ZH else norm_status(s)
@@ -490,6 +501,10 @@ def upsert(orders, source="api", default_platform="", user="", audit=True):
                 sets.pop("order_time", None)
             if not status_raw:
                 sets.pop("status", None)
+            elif status_backward(old["status"], sets.get("status")):
+                sets.pop("status", None)
+                sets.pop("status_raw", None)
+                stats["status_kept"] = stats.get("status_kept", 0) + 1
             sets["updated_at"] = now
             c.execute(f"UPDATE orders SET {', '.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), old["id"]))
             oid = old["id"]
@@ -532,7 +547,7 @@ def upsert(orders, source="api", default_platform="", user="", audit=True):
             info = _variant_info(*hit) if hit else {}
             if not hit and sku:
                 stats["unmatched"][sku] = stats["unmatched"].get(sku, 0) + 1
-            qty = int(_num(it.get("qty")) or 1)
+            qty = max(1, int(_num(it.get("qty")) or 1))     # v2.38：负数 / 0 当 1
             unit = _num(it.get("unit_price"))
             total = _num(it.get("item_total")) or (unit * qty if unit is not None else None)
             c.execute("""INSERT INTO order_items(order_id, sku, product_id, variant_idx, name, variation, qty, unit_price,
@@ -686,8 +701,16 @@ def log(order_id, user, action, detail="", commit=True):
         c.commit()
 
 
-def get_log(order_id):
-    return [dict(r) for r in db.conn().execute("SELECT * FROM order_log WHERE order_id=? ORDER BY id DESC", (order_id,))]
+def get_log(order_id, hide_money=False):
+    rows = [dict(r) for r in db.conn().execute("SELECT * FROM order_log WHERE order_id=? ORDER BY id DESC", (order_id,))]
+    if hide_money:       # v2.38：员工看不到金额（订单金额、平台费、售后损失等）
+        money = {"订单金额", "运费", "平台费"} | {FIELD_LABELS[k] for k in MONEY_FIELDS}
+        for r in rows:
+            if r.get("action") in money:
+                r["detail"] = "***"
+            elif r.get("detail"):
+                r["detail"] = re.sub(r"฿\s*-?[\d,]+(?:\.\d+)?", "฿***", r["detail"])
+    return rows
 
 
 def update_order(oid, user="", **kw):
@@ -1004,6 +1027,7 @@ def edit_order(oid, data, user=""):
                 (oid,)).fetchone()[0]:
             raise ValueError("这个订单已经开始打印了，不能再改商品。可以加备注，或者取消后重新下单")
         before = [(r["sku"], r["qty"]) for r in c.execute("SELECT sku, qty FROM order_items WHERE order_id=?", (oid,))]
+        old_sum = c.execute("SELECT SUM(item_total) FROM order_items WHERE order_id=?", (oid,)).fetchone()[0]
         if _has_jobs_table(c):
             c.execute("DELETE FROM jobs WHERE order_id=? AND status='todo'", (oid,))
         c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))
@@ -1023,9 +1047,13 @@ def edit_order(oid, data, user=""):
                        info.get("color", ""), info.get("material", ""), info.get("grams"), info.get("hours")))
         after = [(str(i.get("sku") or "").strip(), max(1, int(_num(i.get("qty")) or 1))) for i in items if str(i.get("sku") or "").strip()]
         if "order_total" not in data:
+            # v2.38：没填金额 → 原来的金额不动（运费、折扣的差额保留）；商品合计变了就按差额调整
             tot = c.execute("SELECT SUM(item_total) FROM order_items WHERE order_id=?", (oid,)).fetchone()[0]
-            if tot is not None:
-                sets["order_total"] = tot
+            if old["order_total"] is None:
+                if tot is not None:
+                    sets["order_total"] = tot
+            elif tot is not None and old_sum is not None and abs(tot - old_sum) > 0.004:
+                sets["order_total"] = round(old["order_total"] + tot - old_sum, 2)
         log(oid, user, "修改商品", "；".join(f"{s}×{q}" for s, q in before) + " → " + "；".join(f"{s}×{q}" for s, q in after),
             commit=False)
     if sets:
@@ -1075,7 +1103,7 @@ def create_manual(order, user=""):
         sku = (it.get("sku") or "").strip()
         hit = match_sku(sku, idx)
         info = _variant_info(*hit) if hit else {}
-        qty = int(_num(it.get("qty")) or 1)
+        qty = max(1, int(_num(it.get("qty")) or 1))     # v2.38：负数 / 0 当 1
         unit = _num(it.get("unit_price"))
         c.execute("""INSERT INTO order_items(order_id, sku, product_id, variant_idx, name, variation, qty, unit_price,
                      item_total, color, material, grams, hours) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -1094,6 +1122,8 @@ def create_manual(order, user=""):
 
 def delete_order(oid):
     c = db.conn()
+    if _has_jobs_table(c) and c.execute("SELECT 1 FROM jobs WHERE order_id=? AND run_id IS NOT NULL", (oid,)).fetchone():
+        raise ValueError("这个订单正在打印，不能删除。先在生产看板把这一盘「打完」或「失败」，再删除订单")   # v2.38
     if _has_jobs_table(c):
         c.execute("DELETE FROM jobs WHERE order_id=?", (oid,))
     c.execute("DELETE FROM order_items WHERE order_id=?", (oid,))

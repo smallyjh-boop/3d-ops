@@ -5,6 +5,9 @@
 import datetime as dt
 
 
+import json
+
+
 import os
 
 
@@ -275,10 +278,33 @@ def _save_from_client(pid, p):
         # 选品工具推过来的草稿：填了颜色就算补齐了
         p["draft"] = bool(old.get("draft")) and not any((v.get("opt1_zh") or "").strip() for v in p.get("variants", []))
         if old.get("exported_at"):
-            old_sku = [v.get("sku") for v in old.get("variants", [])]
-            for i, v in enumerate(p.get("variants", [])):
-                if i < len(old_sku) and old_sku[i]:
-                    v["sku"] = old_sku[i]
+            # v2.38：已导出产品的 SKU 跟着变体走，不按行号（以前删 / 加 / 挪了一行，后面的 SKU 会错位甚至重复）。
+            # 页面带回来的 SKU 是这个产品原来的 → 保留；新行（没有 SKU）按颜色 + 规格找原来的；都没有 → 生成新的。
+            key = lambda v, rn=None: ((v.get("opt1_zh") or "").strip(),
+                                      (rn or {}).get((v.get("opt2_zh") or "").strip(), (v.get("opt2_zh") or "").strip()))
+            key_of = {v["sku"]: key(v, renames) for v in old.get("variants", []) if v.get("sku")}   # 原来的 SKU → 颜色 + 规格
+            by_key = {}
+            for sk, k in key_of.items():
+                by_key.setdefault(k, sk)
+            new_vars = p.get("variants", [])
+            sent = [v.get("sku") for v in new_vars]
+            for v in new_vars:
+                v["sku"] = ""
+            claimed = set()
+
+            def take(v, sk):
+                v["sku"] = sk
+                claimed.add(sk)
+            for v, sk in zip(new_vars, sent):      # ① 带回来的 SKU，颜色规格也对得上
+                if sk in key_of and sk not in claimed and key_of[sk] == key(v):
+                    take(v, sk)
+            for v in new_vars:                     # ② 按颜色 + 规格找原来的（新加的行、删了又加回来的颜色）
+                sk = by_key.get(key(v))
+                if not v["sku"] and sk and sk not in claimed:
+                    take(v, sk)
+            for v, sk in zip(new_vars, sent):      # ③ 带回来的 SKU 没人用（改了颜色名）→ 保留
+                if not v["sku"] and sk in key_of and sk not in claimed:
+                    take(v, sk)
     except FileNotFoundError:
         pass
     codes.ensure_skus(cfg, p)
@@ -556,6 +582,41 @@ def _ext_cors(resp):   # 浏览器扩展跨域访问 /api/v1/…（v2.30 从客�
         resp.headers["Access-Control-Allow-Origin"] = o
         resp.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-API-Key"
         resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return resp
+
+
+# v2.38：库存 / 采购的金额（平均成本、库存金额、单价、采购金额、付款）只给老板和有「入库」「付款」权限的员工看
+INV_MONEY = {"avg_cost", "value", "unit_cost", "amount", "goods_total", "ship_fee", "other_fee", "total", "paid", "payments",
+             "unpaid", "in_transit", "month_paid", "month_received", "price", "stock_value_now"}
+
+
+def _sees_inv_money(u):
+    return u.get("role") == "owner" or auth.has_perm(u, "inv.pay") or auth.has_perm(u, "inv.in")
+
+
+def _drop_keys(o, keys):
+    if isinstance(o, dict):
+        return {k: _drop_keys(v, keys) for k, v in o.items() if k not in keys}
+    if isinstance(o, list):
+        return [_drop_keys(v, keys) for v in o]
+    return o
+
+
+@app.after_request
+def _hide_inv_money(resp):
+    p = request.path
+    if not (p.startswith("/api/inv/") or p == "/api/spools") or not resp.is_json:
+        return resp
+    u = auth.current_user()
+    if not u or u.get("role") == "api" or _sees_inv_money(u):
+        return resp
+    if p == "/api/inv/expense" and resp.status_code < 400:
+        r = jsonify({"error": "支出统计只有老板和有「入库」或「付款」权限的员工能看"})
+        r.status_code = 403
+        return r
+    data = resp.get_json(silent=True)
+    if data is not None:
+        resp.set_data(json.dumps(_drop_keys(data, INV_MONEY), ensure_ascii=False))
     return resp
 
 

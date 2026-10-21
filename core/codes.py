@@ -113,11 +113,11 @@ def ensure_skus(cfg, product):
     pid = product["id"]
     locked = bool(product.get("exported_at"))
     spec_en = {x.get("spec_id"): x.get("name_en") for x in product.get("specs") or [] if x.get("name_en")}
-    used = set()
+    # v2.38：已导出产品先把所有锁定的 SKU 记下，新生成的不会和排在后面的旧 SKU 重复
+    used = {v["sku"] for v in product.get("variants", []) if v.get("sku")} if locked else set()
     fallback = {}
     for i, v in enumerate(product.get("variants", [])):
         if locked and v.get("sku"):
-            used.add(v["sku"])
             continue
         parts = [pid]
         c = find_color(cfg, v.get("opt1_zh"))

@@ -30,6 +30,9 @@
     const box = $("#inv-body"); if (!box) return;
     $$("#inv-views [data-iv]").forEach((b) => b.classList.toggle("on", b.dataset.iv === VIEW));
     $$("#inv-actions [data-perm]").forEach((b) => b.classList.toggle("hidden", !can(b.dataset.perm)));
+    const seeMoney = can("inv.pay") || can("inv.in");      // v2.38：支出统计只给有金额权限的人
+    $$('#inv-views [data-iv="expense"]').forEach((b) => b.classList.toggle("hidden", !seeMoney));
+    if (VIEW === "expense" && !seeMoney) VIEW = "items";
     const al = META.alerts || [];
     $("#inv-alerts").innerHTML = al.length ? `<div class="warnbox small"><b>低于补货线</b>：` +
       al.map((a) => `<span class="chip" data-notr>${esc(TH() && a.name_th ? a.name_th : a.name_zh)} ${num(a.qty, 1)}/${num(a.reorder_point, 1)} ${esc(uLab(a.unit))}</span>`).join(" ") + "</div>" : "";
@@ -62,7 +65,8 @@
         <span class="muted small">${(cnt[c.id] || {})[key] || 0}</span>${!catalog && (cnt[c.id] || {}).low ? ` <span class="bad small">⚠${cnt[c.id].low}</span>` : ""}</span>`)).join("");
     const total = r.items.reduce((s, x) => s + (x.value || 0), 0);
     const cols = CAT_COLS[CAT] || CAT_COLS[""];
-    const has = (k) => cols.includes(k) && (k !== "transit" || r.items.some((x) => x.transit));
+    const money = !r.items.length || r.items.some((x) => x.avg_cost !== undefined);   // v2.38：没有金额权限时不显示金额列
+    const has = (k) => cols.includes(k) && (k !== "transit" || r.items.some((x) => x.transit)) && (money || (k !== "cost" && k !== "value"));
     const zeroN = CAT ? ((cnt[CAT] || {}).zero || 0) : sum("zero");
     const head = `<tr><th>编码</th><th>名称</th>${CAT ? "" : "<th>分类</th>"}${has("brand") ? "<th>品牌 / 规格</th>" : ""}<th>库存</th>
       ${has("transit") ? "<th>在途</th>" : ""}${has("reorder") ? "<th>补货线</th>" : ""}${has("cost") ? "<th>平均单价</th>" : ""}${has("value") ? "<th>金额</th>" : ""}
@@ -80,7 +84,7 @@
     $("#inv-body").innerHTML = `<div class="row gap wrap" style="margin-bottom:8px"><div class="chips" id="inv-cats">${chips}</div>
         <input id="inv-q" placeholder="搜索编码 / 名称 / 品牌" value="${esc(q)}" style="width:200px">
         ${catalog ? `<select id="inv-sub"><option value="all" ${SUB === "all" ? "selected" : ""}>全部物品</option><option value="zero" ${SUB === "zero" ? "selected" : ""}>没有库存的</option>
-          <option value="inactive" ${SUB === "inactive" ? "selected" : ""}>已停用的</option></select>` : `<span class="muted small">库存金额 <b>฿${num(total, 0)}</b></span>`}</div>
+          <option value="inactive" ${SUB === "inactive" ? "selected" : ""}>已停用的</option></select>` : money ? `<span class="muted small">库存金额 <b>฿${num(total, 0)}</b></span>` : ""}</div>
       <table class="grid small"><thead>${head}</thead><tbody>` +
       (r.items.map(row).join("") || `<tr><td colspan="12" class="muted">${catalog ? "没有物品（点「＋ 新物品」建档）" : "现在没有库存。买了东西用「＋ 采购入库」，物品资料在「物品资料」里"}</td></tr>`) + "</tbody></table>" +
       (!catalog && zeroN ? `<p class="small muted"><span>没有库存的物品（从没入过库或已经用完）不显示在这里，请看</span> <a href="#" data-goiv="catalog">物品资料</a>（<b data-notr>${zeroN}</b>）</p>` : "");
@@ -110,7 +114,7 @@
       </div>
       ${id && r.loc ? `<p class="small">📍 ${r.loc.code ? `<a href="#" data-locgo="${r.loc.id}" class="mono" data-notr>${esc(r.loc.code)}</a> <span data-notr>${esc(TH() ? r.loc.human_th : r.loc.human_zh)}</span>`
         : `<span class="warn">还没有货位</span>${r.loc.suggest ? ` <span data-notr>（${esc(TH() ? "แนะนำ" : "推荐放")} <b class="mono">${esc(r.loc.suggest)}</b>）</span>` : ""}`}</p>` : ""}
-      ${id ? `<p class="small">${TH() ? `สต็อก ${qtyText(it)} · ราคาเฉลี่ย ฿${num(it.avg_cost, fil ? 3 : 2)} · มูลค่า ฿${num(it.value, 0)}` : `库存 ${qtyText(it)} · 平均单价 ฿${num(it.avg_cost, fil ? 3 : 2)} · 金额 ฿${num(it.value, 0)}`}
+      ${id ? `<p class="small">${it.avg_cost === undefined ? (TH() ? `สต็อก ${qtyText(it)}` : `库存 ${qtyText(it)}`) : TH() ? `สต็อก ${qtyText(it)} · ราคาเฉลี่ย ฿${num(it.avg_cost, fil ? 3 : 2)} · มูลค่า ฿${num(it.value, 0)}` : `库存 ${qtyText(it)} · 平均单价 ฿${num(it.avg_cost, fil ? 3 : 2)} · 金额 ฿${num(it.value, 0)}`}
         ${edit ? `<label class="small"><input type="checkbox" data-k="active" ${it.active ? "checked" : ""}> 启用</label>` : ""}</p>` : ""}
       <div class="row gap">${edit ? '<button class="primary" id="inv-it-save">保存</button>' : ""}<button data-mclose>关闭</button></div>
       ${id ? `<h4>最近流水</h4>${movesTable(r.moves, false)}` : ""}`);
