@@ -265,6 +265,12 @@ def draft(conv, msgs, orders_found, instruction=""):
     reason = str(d.get("human_reason_zh") or "")
     if (intent in HUMAN_INTENTS or tier == "human") and not reason:
         reason = INTENTS[intent] + "，需要人工确认"
+    # v2.41：按规则从买家消息里认出是退款 / 投诉这类必须人工的 → 不管 AI 怎么分类都转人工
+    # （买家消息是外人写的，可能故意引导 AI 把退款说成普通咨询，从而被全自动发出去）
+    if intent0 in HUMAN_INTENTS and intent not in HUMAN_INTENTS:
+        needs = True
+        tier = "human"
+        reason = (reason + "；" if reason else "") + f"消息里像是「{INTENTS.get(intent0, intent0)}」，需要人工确认"
     # 规则兜底：回复里出现「不能随便承诺」的词 → 转人工（AI 有时会忍不住答应）
     hit = forbidden_hit(str(d.get("reply") or ""), s)
     if hit:
