@@ -38,7 +38,7 @@ th{background:#f9fafb}
 <h2><span class="m get">GET</span>/api/v1/ping</h2>
 <p>测试密钥和网络是否正常。</p>
 <pre><code>curl -H "Authorization: Bearer lh_xxxx" {{BASE}}/api/v1/ping
-→ {"ok": true, "version": "2.37.1", "time": 1791200000}</code></pre>
+→ {"ok": true, "version": "2.38.0", "time": 1791200000}</code></pre>
 
 <h2><span class="m post">POST</span>/api/v1/orders　推送订单（新增或更新）</h2>
 <p>平台 + 订单号相同视为同一个订单：再次推送只更新状态等信息，不会重复，也不会覆盖你在系统里写的定制备注和加急。
@@ -231,6 +231,10 @@ v2.12 起每行多 <code>spools</code>：<code>{"sealed": 未开封卷数, "open
 <p>给批发网站用。只能调：<code>GET /api/v1/ping</code>、<code>GET /api/v1/skus</code>、<code>GET /api/v1/images/…</code>（商品图片）、<code>GET /api/v1/orders</code>、<code>POST /api/v1/orders</code>、<code>POST /api/v1/orders/status</code>。
 推送和改状态时平台一律当作 <code>wholesale</code>（传别的平台也会被改掉），所以碰不到 Lazada / Shopee 的订单；查询只返回批发订单。
 SKU 不返回成本、底价、建议价、手填价、机时；订单不返回成本利润和平台费。批发订单和其他订单一样生成生产任务、占用耗材库存。其他接口一律 403。</p>
+<h2>AI 接待密钥（scope = chat，v2.38）</h2>
+<p>给「AI 接待成交系统」（系统一 ai-sales-desk，LINE / Facebook 聊天成交）用。权限和批发站密钥一样窄：只能调 <code>GET /api/v1/ping</code>、<code>GET /api/v1/skus</code>、<code>GET /api/v1/images/…</code>、<code>GET /api/v1/orders</code>、<code>POST /api/v1/orders</code>、<code>POST /api/v1/orders/status</code>。
+推送和改状态时平台一律当作 <code>chat</code>，碰不到 Lazada / Shopee / 批发站的订单；查询只返回 chat 订单（含自己客户的收货信息，发货用）。
+SKU 不返回成本、底价、建议价、手填价、机时；订单不返回成本利润和平台费。聊天订单和其他订单一样生成生产任务、占用耗材库存。其他接口一律 403。</p>
 <h2><span class="m post">POST</span>/api/v1/wholesale/hook　登记回调地址（v2.37）</h2>
 <pre><code>POST /api/v1/wholesale/hook
 {"url": "https://shop.example.com/erp/hook/", "secret": "至少 16 位的随机字符串"}</code></pre>

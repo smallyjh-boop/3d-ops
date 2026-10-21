@@ -598,6 +598,17 @@ def _v1_wholesale():
     return (getattr(g, "user", None) or {}).get("scope") == "wholesale"
 
 
+CHAT_PLATFORM = "chat"
+# 只能碰自己平台订单的密钥：scope → 平台（v2.36 批发站、v2.38 AI 接待）
+OWN_PLATFORM_SCOPES = {"wholesale": WHOLESALE_PLATFORM, "chat": CHAT_PLATFORM}
+
+
+def _v1_own_platform():
+    """批发站 / AI 接待密钥：返回它只能碰的平台名；其他密钥返回空字符串。"""
+    from flask import g
+    return OWN_PLATFORM_SCOPES.get((getattr(g, "user", None) or {}).get("scope") or "", "")
+
+
 def _v1_read_only():
     from flask import g
     return (getattr(g, "user", None) or {}).get("scope") == "read"

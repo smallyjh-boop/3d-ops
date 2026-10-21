@@ -332,6 +332,13 @@ def _api_guard(path):
               or (request.method == "POST" and path in ("/api/v1/orders", "/api/v1/orders/status", "/api/v1/wholesale/hook")))
         if not ok:
             return jsonify({"ok": False, "error": "这个密钥只能给批发站用（读 SKU、推送和查询批发订单）"}), 403
+    elif scope == "chat":
+        # AI 接待密钥（v2.38，系统一 ai-sales-desk）：只能读 SKU 和图片、推送 / 查询 / 改状态聊天订单（platform 强制为 chat）
+        ok = ((request.method in ("GET", "HEAD") and (path in ("/api/v1/ping", "/api/v1/skus", "/api/v1/orders")
+                                                       or path.startswith("/api/v1/images/")))
+              or (request.method == "POST" and path in ("/api/v1/orders", "/api/v1/orders/status")))
+        if not ok:
+            return jsonify({"ok": False, "error": "这个密钥只能给 AI 接待系统用（读 SKU、推送和查询聊天订单）"}), 403
     elif scope == "finance":
         # 财务密钥（规范第 11 条）：只能读 /api/v1/finance/…（和 ping）
         if not (request.method in ("GET", "HEAD") and (path.startswith("/api/v1/finance/") or path == "/api/v1/ping")):

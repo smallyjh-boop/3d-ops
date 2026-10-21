@@ -1,5 +1,5 @@
 "use strict";
-const APP_JS_VERSION = "2.37.1";   // 必须和 app.py 的 VERSION 一致
+const APP_JS_VERSION = "2.38.0";   // 必须和 app.py 的 VERSION 一致
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -759,7 +759,7 @@ function L(x) {   // 双语字段按界面语言显示
 
 // ---------------- 公用小工具（订单、生产、客服、工作台……各模块都用；v2.34 从 ops.js 搬到内核）----------------
 (function () {
-  const PLAT = { lazada: "Lazada", shopee: "Shopee", tiktok: "TikTok", manual: "手工", wholesale: "批发站", other: "其他" };
+  const PLAT = { lazada: "Lazada", shopee: "Shopee", tiktok: "TikTok", manual: "手工", wholesale: "批发站", chat: "聊天成交", other: "其他" };
   const KIND_ZH = { normal: "", manual: "私下成交", wholesale: "批发/大单", custom: "定制单", quote: "报价" };
   const JOB_ZH = { todo: "待打印", printing: "打印中", post: "后处理", packed: "已打包", done: "已发货", failed: "打印失败" };
   const role = () => (typeof ME !== "undefined" && ME ? ME.role : "owner");
@@ -801,7 +801,7 @@ function L(x) {   // 双语字段按界面语言显示
     if (!isOwner()) return;
     INTG = await api("/api/integrations");
     $("#intg-keys tbody").innerHTML = INTG.keys.map((k) => `<tr><td data-notr>${esc(k.name)}</td><td class="mono" data-notr>${esc(k.prefix)}…</td>
-      <td>${k.scope === "read" ? '<span class="pill ok-pill">只读</span>' : k.scope === "ops" ? '<span class="pill warn-pill">运营写回</span>' : k.scope === "catalog" ? '<span class="pill tag-pill">建产品</span>' : k.scope === "wholesale" ? '<span class="pill tag-pill">批发站</span>' : "完整"}</td>
+      <td>${k.scope === "read" ? '<span class="pill ok-pill">只读</span>' : k.scope === "ops" ? '<span class="pill warn-pill">运营写回</span>' : k.scope === "catalog" ? '<span class="pill tag-pill">建产品</span>' : k.scope === "wholesale" ? '<span class="pill tag-pill">批发站</span>' : k.scope === "chat" ? '<span class="pill tag-pill">AI 接待</span>' : "完整"}</td>
       <td class="nowrap">${day(k.created_at)}</td><td class="nowrap">${k.last_used ? fmtTime(k.last_used) : "-"}</td><td>${k.uses || 0}</td>
       <td><input type="checkbox" data-keyact="${k.id}" ${k.active ? "checked" : ""}></td>
       <td><button class="danger mini-x" data-keydel="${k.id}">删除</button></td></tr>`).join("") || '<tr><td colspan="8" class="muted">还没有密钥</td></tr>';
