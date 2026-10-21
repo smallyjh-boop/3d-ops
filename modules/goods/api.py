@@ -377,6 +377,10 @@ def scene_ai(pid):
 def files(pid, kind, name):
     if kind not in ("raw", "out", "model", "source_files"):
         abort(404)
+    try:
+        store.safe_id(pid)
+    except ValueError:      # v2.41：乱写的产品编码以前是 500
+        abort(404)
     return send_from_directory(store.image_dir(pid, kind), name, as_attachment=kind == "source_files")
 
 

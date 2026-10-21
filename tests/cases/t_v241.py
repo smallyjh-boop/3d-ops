@@ -117,4 +117,23 @@ st = inv.stocktake_start("pack", "t")
 lid = st["lines"][0]["id"]
 r = C.post(f"/api/inv/stocktake/{st['id']}/save", json={"counts": {str(lid): "abc"}})
 ok(r.status_code == 400 and "数字" in r.get_json()["error"], f"stocktake non-number friendly error ({r.get_json()})")
+# ==== 客服 / 系统（代码审查后加固）====
+# 登录：连续输错锁 15 分钟
+X = A.app.test_client()
+codes = [X.post("/api/auth/login", json={"username": "nobody", "password": f"x{i}"}).status_code for i in range(9)]
+ok(codes[:8] == [401] * 8 and codes[8] == 429, f"login locked after 8 failures {codes}")
+ok(X.post("/api/auth/login", json={"username": "boss", "password": "secret123"}).status_code == 200, "other accounts not affected")
+# 关机接口：本机的表单 POST（别的网页伪造的）不收
+r = A.app.test_client().post("/api/shutdown", data="x=1", content_type="application/x-www-form-urlencoded")
+ok(r.status_code == 403, f"shutdown refuses non-JSON post ({r.status_code})")
+ok(C.get("/files/../../x/raw/a.jpg").status_code == 404 and C.get("/files/a%20b/raw/a.jpg").status_code == 404, "bad product id in file url -> 404")
+# 客服：买家消息按规则像退款 → 就算 AI 说是普通咨询，也转人工
+from core import ai_copy
+from modules.cs.logic import brain
+import json as _json
+ai_copy.call = lambda cfg, system, user, image_b64=None: _json.dumps({"lang": "th", "intent": "product", "reply": "ได้เลยค่ะ",
+    "reply_zh": "好的", "needs_human": False, "confidence": 0.99, "buyer_msgs_zh": [], "summary_zh": "",
+    "wholesale_items": [], "kb_ids_used": [], "save_as_faq": False})
+a = brain.draft({"id": 0, "platform": "lazada", "buyer": "x"}, [{"id": 1, "role": "buyer", "text": "ขอคืนเงินค่ะ สินค้าแตก", "ts": 1}], [])
+ok(a["needs_human"], f"refund message goes to a person even if AI says 'product' ({a.get('human_reason_zh')})")
 print("ERRORS", E_)

@@ -354,12 +354,44 @@ def auth_setup():
     return jsonify({"user": u})
 
 
+# v2.41：连续输错密码先锁一会儿（同一个账号 + 同一个来源：15 分钟内错 8 次 → 锁 15 分钟）。
+# 以前只是每次错了等 0.5 秒，同时发很多个请求就能很快地猜（NAS 开了外网访问时尤其要防）
+_LOGIN_FAILS = {}
+_LOGIN_LOCK = threading.Lock()
+LOGIN_MAX_FAILS, LOGIN_WINDOW = 8, 15 * 60
+
+
+def _login_key(username):
+    return (str(username or "").strip().lower(), request.remote_addr or "")
+
+
+def _login_locked(key):
+    now = time.time()
+    with _LOGIN_LOCK:
+        fails = [t for t in _LOGIN_FAILS.get(key, []) if now - t < LOGIN_WINDOW]
+        _LOGIN_FAILS[key] = fails
+        return len(fails) >= LOGIN_MAX_FAILS
+
+
+def _login_failed(key):
+    with _LOGIN_LOCK:
+        _LOGIN_FAILS.setdefault(key, []).append(time.time())
+        if len(_LOGIN_FAILS) > 5000:          # 防止被刷爆内存
+            _LOGIN_FAILS.clear()
+
+
 @app.post("/api/auth/login")
 def auth_login():
     b = request.get_json(force=True) or {}
+    key = _login_key(b.get("username"))
+    if _login_locked(key):
+        return err("密码错太多次了，请 15 分钟后再试（忘记密码请找老板重设）", 429)
     u = db.authenticate(b.get("username"), b.get("password"))
     if not u:
+        _login_failed(key)
         return err("用户名或密码不对", 401)
+    with _LOGIN_LOCK:
+        _LOGIN_FAILS.pop(key, None)
     session.permanent = b.get("remember", True) is not False   # 记住登录：关浏览器也不用重新登录（默认 30 天，用着就一直续期）
     session["uid"] = u["id"]
     db.audit(u["username"], "登录")
@@ -460,6 +492,8 @@ def api_version():
 def api_shutdown():
     """新版本启动时用来关闭还在运行的旧版本（只接受本机请求）。"""
     if request.remote_addr not in ("127.0.0.1", "::1") or os.environ.get("LH_DOCKER") == "1":
+        abort(403)
+    if not request.is_json:      # v2.41：别的网页用表单偷偷 POST 过来关掉程序（浏览器跨站发不了 JSON，除非我们同意）
         abort(403)
     threading.Timer(0.3, lambda: os._exit(0)).start()
     return jsonify({"ok": True})
