@@ -1,0 +1,11 @@
+/* 运营分析（v2.46） */
+.ops-head { align-items: center; margin-bottom: 6px }
+.ops-head h2 { margin: 0 }
+#ops-dash .tiles .tile small { display: block; font-weight: normal; font-size: 12px; margin-top: 2px }
+#ops-dash .tile[data-ops-go] { cursor: pointer }
+.oa-chart { width: 100%; height: 140px; display: block }
+.oa-chart .oa-rev { fill: #60a5fa } .oa-chart .oa-neg { fill: #ef4444 } .oa-chart .oa-zero { stroke: #94a3b8; stroke-width: 1 }
+#ops-dash .card table.grid, #ops-lz .card table.grid, #ops-life table.grid { width: 100% }
+#ops-life td, #ops-lz td { vertical-align: top }
+#ops-lz textarea[data-rv-text] { width: 100%; min-width: 180px; box-sizing: border-box }
+#ops-alerts h4 { margin: 12px 0 4px }

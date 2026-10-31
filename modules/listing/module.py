@@ -14,7 +14,7 @@ MODULE = {
     "id": "listing",
     "name_zh": "上架导出",
     "name_th": "ส่งออกลงขาย",
-    "version": "1.9",
+    "version": "1.10",
     "desc_zh": "导出 Lazada / Shopee 上架表格、上架批次和状态、库存待同步到平台。",
     "desc_th": "ส่งออกไฟล์ลงสินค้า Lazada / Shopee สถานะการลงขาย และสต็อกที่ต้องอัปเดตบนแพลตฟอร์ม",
     "depends": ["goods"],

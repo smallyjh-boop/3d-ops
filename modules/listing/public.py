@@ -6,3 +6,46 @@ def online_shops():
     from . import online
     online.init()
     return online.all_platforms()
+
+
+def online_skus():
+    """v2.46（运营分析：商品生命周期、售价低于最低价）：{SellerSku 大写: [{platform, shop_id, item_id, status, created, price}]}。
+    status 是统一的叫法（live 在售 / uploaded 审核中 / rejected / inactive / deleted）；price = 平台上实际卖的价（有促销价用促销价）；
+    created = 商品在平台上建的时间（Unix 秒，没有为 None）。"""
+    import json
+    from core import db
+    from . import online
+    online.init()
+    out = {}
+    for r in db.conn().execute("SELECT platform, shop_id, item_id, status, created, skus FROM online_items"):
+        for s in json.loads(r["skus"] or "[]"):
+            sku = str(s.get("seller_sku") or "").strip().upper()
+            if sku:
+                out.setdefault(sku, []).append({"platform": r["platform"], "shop_id": r["shop_id"], "item_id": r["item_id"],
+                                                "status": r["status"], "created": r["created"] or None,
+                                                "price": s.get("special_price") or s.get("price") or None})
+    return out
+
+
+def online_item_names(platform="lazada"):
+    """v2.46：{item_id: (商品名, ERP 产品编号)}（运营分析的评价列表显示是哪个商品）。"""
+    from core import db
+    from . import online
+    online.init()
+    return {str(r["item_id"]): (r["name"] or "", r["product_id"] or "")
+            for r in db.conn().execute("SELECT item_id, name, product_id FROM online_items WHERE platform=?", (platform,))}
+
+
+def online_item_ids(platform="lazada", shop_id=None, status="live"):
+    """v2.46（运营分析：拉评价要按商品拉）：这个店铺在线商品的平台编号 [item_id]（status 空 = 全部）。"""
+    from core import db
+    from . import online
+    online.init()
+    q, a = "SELECT item_id FROM online_items WHERE platform=?", [platform]
+    if shop_id is not None:
+        q += " AND shop_id=?"
+        a.append(int(shop_id))
+    if status:
+        q += " AND status=?"
+        a.append(status)
+    return [r[0] for r in db.conn().execute(q + " ORDER BY updated DESC", a)]

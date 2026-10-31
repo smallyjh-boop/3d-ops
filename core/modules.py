@@ -19,6 +19,7 @@ MODULE 字段：
     settings: [("分组标题", [("配置键", "说明", 类型?), ...])]   settings_module: 放在设置的哪个大分类（默认 "addons"）
     config_defaults: {"配置键": 默认值}     secrets: ["配置键"]（密钥：不发回浏览器）
     events: {"事件名": 处理函数}           startup: 函数（程序启动、模块开着时在后台线程里调用一次）
+    todo: 函数 fn(add)                   今日待办 / 手机提醒（v2.46，写法见 core/todo.py；模块关着不收）
 
 模块之间只能：调用对方说明书里写的对外函数，或者收发事件（emit / on）。不直接读写别的模块的数据表。
 
@@ -217,6 +218,9 @@ def load_all(app):
                     settings_schema.register(meta.get("settings_module") or "addons", title, fields, module_of=mid)
                 for ev, fn in (meta.get("events") or {}).items():
                     _handlers.setdefault(ev, []).append((mid, fn))
+                if meta.get("todo"):                                 # v2.46 今日待办（core/todo.py）
+                    from . import todo as _todo
+                    _todo.register(mid, meta["todo"])
                 if os.path.isfile(os.path.join(rec["dir"], "api.py")):
                     api = importlib.import_module(f"{rec.get('pkg') or 'modules'}.{mid}.api")
                     bp = getattr(api, "bp", None)
