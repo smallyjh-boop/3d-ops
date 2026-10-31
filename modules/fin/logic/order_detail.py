@@ -1,7 +1,7 @@
 """财务 → 订单明细（v2.32）：每一单一行——收入拆分、平台费用拆分、到账、生产成本、利润、回款状态。
 
 口径和损益表一样：按下单日期，不含取消 / 退款 / 未付款 / 报价单。
-回款状态：settled 已回款（导入过结算表，有到账金额）/ overdue 超时未回款（已发货或已完成超过设置的天数）/ pending 待回款。
+回款状态（v2.49 和平台对账同一套，见 recon.py）：paid 已到账 / settled 已结算（平台算好了还没打款）/ overdue 超时未回款 / pending 待回款。
 费用来源：settlement 结算表（实际到账反推）/ detail 订单表里的费用明细 / import 订单表里的平台费 / estimate 按扣点估算。
 """
 import datetime as dt
@@ -12,7 +12,8 @@ from core import db
 from core.config import load_config
 from .common import period, r2, settings, ts
 
-SETTLE_ZH = {"settled": "已回款", "pending": "待回款", "overdue": "超时未回款"}
+SETTLE_ZH = {"paid": "已到账", "settled": "已结算", "pending": "待回款", "overdue": "超时未回款"}
+SOURCE_ZH = {"api": "接口", "import": "导入表格", "order": "订单表", "estimate": "估算"}
 FEE_SRC_ZH = {"settlement": "结算表", "detail": "费用明细", "import": "导入的平台费", "estimate": "按扣点估算", "none": "无平台费（手工单）"}
 PLAT_ZH = {"lazada": "Lazada", "shopee": "Shopee", "tiktok": "TikTok", "manual": "手工单", "other": "其他"}
 MONEY = ("order_total", "shipping_fee", "buyer_shipping", "platform_discount", "seller_discount", "commission", "service_fee",
@@ -54,12 +55,16 @@ def rows(start=None, end=None, month=None, platform="", shop="", settle="", q=""
         for it in c.execute(f"SELECT * FROM order_items WHERE order_id IN ({','.join('?' * len(chunk))})", chunk):
             items.setdefault(it["order_id"], []).append(it)
     now = time.time()
-    out, counts = [], {"settled": 0, "pending": 0, "overdue": 0}
+    from .recon import classify
+    rc = classify(orders, cfg, now)       # v2.49：回款状态和「平台对账」同一套（已到账 / 已结算 / 待回款 / 超时未回款）
+    out, counts = [], {"paid": 0, "settled": 0, "pending": 0, "overdue": 0}
     tot = {k: 0.0 for k in ("revenue", "fee", "net", "material", "machine", "packaging", "failure", "cost", "profit")}
     for o in orders:
         its = items.get(o["id"], [])
         p = order_profit(cfg, o, its)
-        s = _settle_state(o, st, now)
+        rr = rc.get(o["id"])
+        s = _settle_state(o, st, now) if not rr else {"paid": "paid", "settled": "settled", "unsettled": "overdue"}.get(rr["state"], rr["state"])
+        s = "pending" if s == "open" else s
         counts[s] += 1
         if settle and s != settle:
             continue
@@ -73,7 +78,9 @@ def rows(start=None, end=None, month=None, platform="", shop="", settle="", q=""
                "material": r2(p["material"]), "machine": r2(p["machine"]), "packaging": r2(p["packaging"]), "failure": r2(p["failure"]),
                "cost": r2(p["cost"]), "profit": r2(p["profit"]),
                "margin": round(p["profit"] / p["revenue"] * 100, 1) if p["revenue"] else None,
-               "grams": r2(p.get("grams")), "hours": r2(p.get("hours")), "missing_data": bool(p.get("missing_data")), "settle": s}
+               "grams": r2(p.get("grams")), "hours": r2(p.get("hours")), "missing_data": bool(p.get("missing_data")), "settle": s,
+               "source": rr["source"] if rr else ("order" if o["settlement"] is not None else "estimate"), "issue": rr["issue"] if rr else "",
+               "paid_at": rr["paid_at"] if rr else None, "sku_list": sorted({i["sku"] for i in its if i["sku"]})[:20]}
         out.append(row)
         for k in tot:
             tot[k] += row[k] or 0
@@ -81,14 +88,14 @@ def rows(start=None, end=None, month=None, platform="", shop="", settle="", q=""
     tot["orders"] = len(out)
     tot["margin"] = round(tot["profit"] / tot["revenue"] * 100, 1) if tot["revenue"] else None
     return {"period": label, "rows": out, "total": tot, "counts": counts, "settle_days": st["settle_days"],
-            "settle_zh": SETTLE_ZH, "fee_src_zh": FEE_SRC_ZH}
+            "settle_zh": SETTLE_ZH, "fee_src_zh": FEE_SRC_ZH, "source_zh": SOURCE_ZH}
 
 
 COLS = [("order_no", "订单号"), ("platform", "平台"), ("shop", "店铺"), ("order_time", "下单时间"), ("status", "订单状态"), ("skus", "商品"),
         ("order_total", "订单金额"), ("buyer_shipping", "买家运费"), ("platform_discount", "平台优惠"), ("seller_discount", "店铺优惠"),
         ("commission", "佣金"), ("service_fee", "服务费"), ("payment_fee", "支付手续费"), ("fee", "平台扣费合计"), ("fee_source", "扣费来源"),
         ("settlement", "实际到账"), ("net", "到账（没结算的为估算）"), ("material", "材料"), ("machine", "机时（电费+分摊）"),
-        ("packaging", "包材"), ("failure", "失败损耗"), ("cost", "生产成本"), ("profit", "利润"), ("margin", "利润率 %"), ("settle", "回款状态")]
+        ("packaging", "包材"), ("failure", "失败损耗"), ("cost", "生产成本"), ("profit", "利润"), ("margin", "利润率 %"), ("settle", "回款状态"), ("source", "到账数据来源")]
 
 
 def export_xlsx(**kw):
@@ -116,6 +123,8 @@ def export_xlsx(**kw):
                 v = STATUS_ZH.get(v, v)
             elif k == "settle":
                 v = SETTLE_ZH.get(v, v)
+            elif k == "source":
+                v = SOURCE_ZH.get(v, v)
             line.append(v)
         ws.append(line)
     t = d["total"]

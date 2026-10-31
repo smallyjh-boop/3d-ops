@@ -16,7 +16,7 @@ import uuid
 
 from core import db
 from core.config import DATA_DIR
-from .common import day_of, r2, settings, ts
+from .common import day_of, r2
 
 DIR = os.path.join(DATA_DIR, "finance", "settle_imports")
 SCHEMA = """
@@ -57,6 +57,8 @@ def init():
     c = db.conn()
     c.executescript(SCHEMA)
     c.commit()
+    from . import recon
+    recon.init()
 
 
 def key(order_no):
@@ -332,61 +334,7 @@ def order_lines(platform, order_no):
                                                "ORDER BY id", (platform, key(order_no)))]
 
 
-def reconcile(start, end):
-    """对账（按下单日期的期间）：
-       settled 已回款的订单（到账 vs 订单金额，平台实际扣了多少）
-       diff    平台扣费比按扣点估算的多出 容差 以上的
-       unpaid  已发货 / 已完成超过 N 天还没有回款记录的
-       unknown 结算表里有、系统里找不到的订单号（订单没导入？）"""
-    from core.config import load_config
-    from core.finance import EXCLUDE
-    cfg = load_config()
-    st = settings(cfg)
-    sync_pending()
-    c = db.conn()
-    s_ts, e_ts = ts(start), ts(end)
-    orders = c.execute(f"SELECT id, platform, shop, order_no, status, order_time, order_total, settlement FROM orders WHERE order_time>=? "
-                       f"AND order_time<? AND status NOT IN ({','.join('?' * len(EXCLUDE))}) AND COALESCE(platform,'') NOT IN ('manual','')",
-                       (s_ts, e_ts, *EXCLUDE)).fetchall()
-    settled, diff, unpaid = [], [], []
-    now = time.time()
-    tot = {"orders": len(orders), "settled": 0, "revenue": 0.0, "net": 0.0, "fees": 0.0, "unpaid_amount": 0.0, "diff_amount": 0.0}
-    item_sum = {r[0]: r[1] for r in c.execute(
-        "SELECT order_id, SUM(COALESCE(item_total,0)) FROM order_items WHERE order_id IN "
-        "(SELECT id FROM orders WHERE order_time>=? AND order_time<?) GROUP BY order_id", (s_ts, e_ts))}
-    for o in orders:
-        # v2.39：没有订单金额（Shopee 导出常见）→ 按商品合计，和损益表、订单明细一样（以前当成 0，扣费算成负数）
-        rev = float(o["order_total"] if o["order_total"] is not None else (item_sum.get(o["id"]) or 0))
-        rate = cfg.get("shopee_fee_rate") if o["platform"] == "shopee" and cfg.get("shopee_fee_rate") else cfg.get("platform_fee_rate", 0)
-        expect = rev * (1 - float(rate or 0))
-        row = {"id": o["id"], "platform": o["platform"], "shop": o["shop"], "order_no": o["order_no"], "status": o["status"],
-               "day": day_of(o["order_time"]) if o["order_time"] else "", "revenue": r2(rev)}
-        if o["settlement"] is not None:
-            net = float(o["settlement"])
-            fee = rev - net
-            row.update(net=r2(net), fee=r2(fee), fee_rate=round(fee / rev * 100, 1) if rev else None, expected=r2(expect),
-                       diff=r2(expect - net))
-            settled.append(row)
-            tot["settled"] += 1; tot["revenue"] += rev; tot["net"] += net; tot["fees"] += fee
-            if expect - net > st["tolerance"]:
-                diff.append(row); tot["diff_amount"] += expect - net
-        elif o["status"] in ("shipped", "completed") and o["order_time"] and now - o["order_time"] > st["settle_days"] * 86400:
-            row["days"] = int((now - o["order_time"]) // 86400)
-            unpaid.append(row); tot["unpaid_amount"] += rev
-    known = {}
-    for o in c.execute("SELECT platform, order_no FROM orders"):
-        known.setdefault(o["platform"], set()).add(key(o["order_no"]))
-    unknown = []
-    for r in c.execute("SELECT platform, order_no, order_key, SUM(amount) a, MAX(day) d FROM fin_settle_lines WHERE COALESCE(order_key,'')!='' "
-                       "AND day>=? AND day<? GROUP BY platform, order_key", (start.isoformat(), end.isoformat())):
-        if r["order_key"] not in known.get(r["platform"], set()):
-            unknown.append({"platform": r["platform"], "order_no": r["order_no"], "amount": r2(r["a"]), "day": r["d"]})
-    adj = c.execute("SELECT COALESCE(SUM(amount),0) a FROM fin_settle_lines WHERE COALESCE(order_key,'')='' AND day>=? AND day<?",
-                    (start.isoformat(), end.isoformat())).fetchone()["a"]
-    tot = {k: (r2(v) if isinstance(v, float) else v) for k, v in tot.items()}
-    tot["fee_rate"] = round(tot["fees"] / tot["revenue"] * 100, 1) if tot["revenue"] else None
-    tot["adjustments"] = r2(adj)
-    diff.sort(key=lambda x: -x["diff"])
-    unpaid.sort(key=lambda x: -x["days"])
-    return {"total": tot, "settled": settled[:500], "diff": diff[:300], "unpaid": unpaid[:300], "unknown": unknown[:300],
-            "settings": {"days": st["settle_days"], "tolerance": st["tolerance"]}}
+def reconcile(start, end, platform=""):
+    """对账：v2.49 起在 recon.py（自动标每单状态：已到账 / 已结算 / 超时未回款 / 平台没结算 / 扣费异常）。这里保留旧的调用方式。"""
+    from . import recon
+    return recon.reconcile(start, end, platform)

@@ -453,6 +453,14 @@ class LazadaConnector(Connector):
         d = self._call("/finance/transaction/details/get", p).get("data")
         return d if isinstance(d, list) else ((d or {}).get("list") or (d or {}).get("data") or [])
 
+    def payout_status(self, created_after):
+        """GetPayoutStatus（v2.49，财务模块的平台对账用）：created_after = YYYY-MM-DD，返回这天之后建的结算单（statement）列表：
+        [{statement_number, created_at, updated_at, paid("0"/"1"), payout("3962.41 THB"), opening_balance, closing_balance,
+          item_revenue, fees_total, refunds, shipment_fee, …}]（字段按 open.lazada.com 文档 /finance/payout/status/get）。"""
+        self._ensure_token()
+        d = self._call("/finance/payout/status/get", {"created_after": created_after}).get("data")
+        return d if isinstance(d, list) else ((d or {}).get("list") or (d or {}).get("data") or [])
+
     @staticmethod
     def _ok(r, path):
         """评价、退货接口：外层 code 是 0，里面还有 success / error_code。"""

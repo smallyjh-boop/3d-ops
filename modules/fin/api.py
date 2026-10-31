@@ -120,10 +120,39 @@ def fin_tax():
 
 @bp.get("/api/fin/reconcile")
 def fin_reconcile():
+    """v2.49：对账页一次拿全：每个平台的数据状态卡片、数字卡片、每单状态、四类问题、导入记录。platform= 只看一个平台。"""
     def go():
         s, e, label = _period()
-        return dict(fin.reconcile(s, e), period=label, batches=fin.settle_batches(20))
+        plat = (request.args.get("platform") or "").strip().lower()
+        if plat and plat not in ("lazada", "shopee", "tiktok", "other"):
+            raise ValueError("平台不对")
+        bs = fin.settle_batches(40)
+        for b in bs:
+            b["source"] = "api" if '"api"' in (b.get("mapping") or "") else "import"
+            b.pop("mapping", None)
+        return dict(fin.reconcile(s, e, plat), period=label, batches=bs, platforms=fin.platform_status())
     return _wrap(go)
+
+
+@bp.get("/api/fin/reconcile/order")
+def fin_reconcile_order():
+    """一单的结算明细按费用分类（佣金、支付手续费、运费、优惠券、罚款…）。"""
+    a = request.args
+    return _wrap(lambda: fin.order_breakdown((a.get("platform") or "").lower(), a.get("order_no") or ""))
+
+
+@bp.post("/api/fin/reconcile/check")
+def fin_reconcile_check():
+    """标「已核对」/ 取消：{platform, order_no, checked: true/false, note}。"""
+    b = request.get_json(force=True) or {}
+    return _wrap(lambda: fin.set_checked((b.get("platform") or "").lower(), b.get("order_no") or "", bool(b.get("checked", True)),
+                                         _uname(), b.get("note") or ""))
+
+
+@bp.post("/api/fin/settle/sync")
+def fin_settle_sync():
+    """「立即同步」：Lazada 财务流水（运营分析模块）+ Lazada 结算单（GetPayoutStatus）。"""
+    return _wrap(lambda: dict(fin.sync_now(_uname()), ok=True))
 
 
 # ---------------- 收支 ----------------

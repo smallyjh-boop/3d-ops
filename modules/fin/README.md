@@ -15,11 +15,17 @@
 - `logic/common.py`
 - `logic/reports.py`
 - `logic/settle.py`
+- `logic/recon.py`
 - `module.py`
 - `tests/t_fin.py`
+- `tests/t_recon249.py`
 - `ui/finance.js`
 - `ui/page.html`
 - `ui/page.js`
+- `ui/orders.js`
+- `ui/settle.js`
+- `ui/boot.js`
+- `ui/page.css`
 
 ## 改动记录
 
@@ -31,3 +37,4 @@
 - 1.5（系统 v2.40.0）：固定费用按项估算（记了房租，人工、折旧、维修照估）；每单利润：开 VAT 且价格含税时按不含税收入算，「每件包材」按件数算；结算表同一个文件里一模一样的两行都算（再导一次仍去重）。测试 tests/t_v240fin.py。
 - 1.6（系统 v2.41.0）：利润构成每个产品每单只算一次；月份 / 自选日期的总览一致；不含税模式下的销项税单独一行说明；导出的付款方式写中文、选项顺序固定；结算表对列出错时提示清楚。测试 tests/cases/t_v241.py。
 - 1.7（系统 v2.47.0）：新增 settle_import_lines()：别的模块用接口拉到的结算明细（运营分析模块的 Lazada 财务流水）直接记进平台对账，按每行的平台编号去重，对上的订单写「实际到账」，利润按真实扣费算。测试 modules/ops/tests/t_ops246.py。
+- 1.8（系统 v2.49.0）：菜单 8 个并成 5 个：总览（损益 + 利润分析图）· 订单利润（订单明细和订单模块的「每单利润」并成一张表，可按订单 / 平台 / 店铺 / SKU / 天看）· 平台对账 · 收支与现金流（两个页签）· 税务；旧菜单 fin_profit / fin_cash / profit 跳到新页面。页面统一用 UX 组件（数字卡片 → 图 → 表）。平台对账自动化（logic/recon.py）：Lazada 财务流水（运营分析模块每小时拉）+ 结算单 GetPayoutStatus（/finance/payout/status/get，本模块每小时拉，表 fin_payouts）→ 每单自动标 已到账 / 已结算 / 待回款 / 超时未回款 / 平台没结算 + 扣费异常，每单显示来源（接口 / 导入表格 / 估算）、可展开看费用拆分、可标「已核对」（表 fin_checked）；顶部每个平台的数据状态卡片和「立即同步」；Shopee / TikTok 超过 fin_import_remind_days（默认 14）天没导入进今日待办（分组「财务」）。测试 tests/t_recon249.py。
