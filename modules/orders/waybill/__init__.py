@@ -82,12 +82,13 @@ def enabled(cfg=None):
 
 
 # ---------------- 打印 ----------------
-def print_html(ids, user=""):
+def print_html(ids, user="", blocked=()):
     """勾选的订单 → 平台面单打印页。没有面单的列在页面上方（不打印）。返回 (html, 打了的订单id, 没面单的订单id)。"""
     from core import labels as core_labels, orders as orders_mod
     tpl = load_template()
     inv = _inv()
-    entries, missing, have = [], [], []
+    entries, have = [], []
+    missing = [(b["order_no"], f"订单{b['status_zh']}，不打 / ยกเลิกแล้ว ไม่พิมพ์") for b in blocked]      # v2.42
     orders = [o for o in (orders_mod.get_order(int(i)) for i in ids) if o]
     for o in orders:
         path, why = sources.ensure(o)

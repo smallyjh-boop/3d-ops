@@ -1570,6 +1570,22 @@ def handover_list(limit=50):
     return out
 
 
+BLOCK_SHIP = ("cancelled", "returned", "delivery_failed")      # v2.42：这些状态不打面单、不打包、不交接
+
+
+def _refresh_one(r):
+    """订单的平台开了接口就先同步一次（一分钟内同步过就不再拉）。返回是否拉过。"""
+    try:
+        from . import integrations
+        plat = r["platform"] if "platform" in r.keys() else None
+        if not plat:
+            return False
+        integrations.refresh_platforms([plat])
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def handover_scan(hid, code, user=""):
     """扫面单上的运单号或订单号，加进交接单。返回 {ok, order, warn}。"""
     c = db.conn()
@@ -1585,6 +1601,8 @@ def handover_scan(hid, code, user=""):
     r = scanning.find_order(code)
     if not r:
         raise ValueError(scanning.not_found_msg(code))
+    if _refresh_one(r):                          # v2.42：先从平台拉一次最新状态（买家刚取消的单也拦住）
+        r = scanning.find_order(code) or r
     if r["status"] in ("cancelled", "returned", "delivery_failed"):
         raise ValueError(f"订单 {r['order_no']} 是「{STATUS_ZH.get(r['status'])}」状态，不能发货！")
     if r["hold"]:

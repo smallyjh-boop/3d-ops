@@ -72,6 +72,7 @@
   }
   async function printLabels(ids) {
     const r = await api("/api/labels/check", { json: { ids } });
+    if ((r.blocked || []).length) alert(`这些订单已取消 / 退货，不打面单、不要发货：\n${r.blocked.map((b) => `${b.order_no}（${b.status_zh}）`).join("\n")}`);
     if (r.have.length) window.open(`/print/labels?type=platform&ids=${r.have.join(",")}`, "_blank");
     if (r.missing.length) {
       const msg = r.have.length ? `另外 ${r.missing.length} 个订单没有平台面单，打印自制面单吗？` :

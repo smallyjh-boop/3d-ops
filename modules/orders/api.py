@@ -3,7 +3,7 @@ v2.31 从 web/orders.py 搬过来。"""
 from flask import Blueprint
 
 from web.common import *  # noqa: F401,F403
-from core import chain
+from core import chain, integrations
 from core.labels import cod_txt
 
 bp = Blueprint("m_orders", __name__)
@@ -373,12 +373,27 @@ def labels_check():
     """勾选的订单哪些有平台面单。v2.34：没有的、平台接口接通了的，顺便去平台取（waybill/sources.ensure）。"""
     from modules.orders.waybill import sources as _wbs
     ids = [int(x) for x in (request.get_json(force=True) or {}).get("ids") or []]
-    have, missing = [], []
-    for oid in ids:
-        o = orders_mod.get_order(oid)
-        ok = bool(o and _wbs.ensure(o)[0])
-        (have if ok else missing).append(oid)
-    return jsonify({"have": have, "missing": missing})
+    have, missing, blocked = [], [], []
+    for o in _printable(ids, blocked):
+        ok = bool(_wbs.ensure(o)[0])
+        (have if ok else missing).append(o["id"])
+    return jsonify({"have": have, "missing": missing, "blocked": blocked})
+
+
+def _printable(ids, blocked=None):
+    """v2.42：要打面单的订单：先从平台拉一次最新状态，已取消 / 退货 / 拒收的拦下（放进 blocked），返回能打的订单。"""
+    orders = [o for o in (orders_mod.get_order(int(i)) for i in ids) if o]
+    integrations.refresh_platforms({o.get("platform") for o in orders})
+    out = []
+    for o in orders:
+        o = orders_mod.get_order(o["id"]) or o
+        if o["status"] in orders_mod.BLOCK_SHIP:
+            if blocked is not None:
+                blocked.append({"id": o["id"], "order_no": o["order_no"], "status": o["status"],
+                                "status_zh": orders_mod.STATUS_ZH.get(o["status"], o["status"])})
+            continue
+        out.append(o)
+    return out
 
 
 @bp.get("/api/dashboard")
@@ -497,7 +512,9 @@ def pack_lookup():
     r = scanning.find_order(code)
     if not r:
         return err(scanning.not_found_msg(code), 404)
-    if r["status"] in ("cancelled", "returned", "delivery_failed"):      # v2.40：取消 / 退货的订单不要打包
+    if orders_mod._refresh_one(r):            # v2.42：先从平台拉一次最新状态，买家刚取消的单也拦住
+        r = scanning.find_order(code) or r
+    if r["status"] in orders_mod.BLOCK_SHIP:      # v2.40：取消 / 退货的订单不要打包
         return err(f"订单 {r['order_no']} 是「{orders_mod.STATUS_ZH.get(r['status'])}」，不要打包！")
     o = orders_mod.get_order(r["id"])
     o["status_zh"] = orders_mod.STATUS_ZH.get(o["status"], o["status"])
@@ -533,7 +550,9 @@ def pack_done():
     b = request.get_json(force=True) or {}
     oid = int(b.get("order_id") or 0)
     o = orders_mod.get_order(oid)
-    if o and o["status"] in ("cancelled", "returned", "delivery_failed"):      # v2.40
+    if o and orders_mod._refresh_one(o):     # v2.42
+        o = orders_mod.get_order(oid)
+    if o and o["status"] in orders_mod.BLOCK_SHIP:      # v2.40
         return err(f"订单 {o['order_no']} 是「{orders_mod.STATUS_ZH.get(o['status'])}」，不要打包！")
     n = 0
     for j in production.list_jobs(order_id=oid):
@@ -649,9 +668,13 @@ def labels_print():
     kind = request.args.get("type") or "self"
     if not ids:
         return err("请先勾选订单")
+    blocked = []
+    ids = [o["id"] for o in _printable(ids, blocked)]          # v2.42：已取消 / 退货 / 拒收的不打
+    if not ids:
+        return err("选中的订单都已取消 / 退货，不能打面单：" + "、".join(f"{b['order_no']}（{b['status_zh']}）" for b in blocked), 409)
     if kind == "platform":
         if waybill.enabled() and request.args.get("raw") != "1":     # v2.34：按自定义模板排（加信息区）
-            html, have, _miss = waybill.print_html(ids, _uname())
+            html, have, _miss = waybill.print_html(ids, _uname(), blocked=blocked)
             if not have:
                 return err("选中的订单都还没有平台面单", 404)
             return app.response_class(html, mimetype="text/html")

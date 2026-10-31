@@ -297,6 +297,25 @@ def start_scheduler():
         threading.Thread(target=_loop, daemon=True, name="shop-sync").start()
 
 
+def refresh_platforms(platforms, max_age=60):
+    """v2.42：打印面单、打包核对、发货交接之前，先把这些平台（开了接口的店铺）的最新订单状态拉一次，
+    买家刚取消的单马上能拦住。上次同步不到 max_age 秒就不重复拉。返回拉不下来的说明（不影响后面的操作）。"""
+    errs = []
+    plats = {p for p in platforms if p}
+    if not plats:
+        return errs
+    now = time.time()
+    for r in db.conn().execute("SELECT id, platform, name, last_sync FROM shops WHERE enabled=1").fetchall():
+        cls = connectors.REGISTRY.get(r["platform"])
+        if r["platform"] not in plats or not cls or not cls.READY or (r["last_sync"] or 0) > now - max_age:
+            continue
+        try:
+            sync_shop(r["id"])
+        except Exception as e:  # noqa: BLE001  平台连不上：照本地状态继续
+            errs.append(f"{r['name']}：{e}")
+    return errs
+
+
 # ---------------- 推送 ----------------
 def webhook(platform, headers, body, url):
     """平台推送：先记日志；找到这个平台已启用的店铺，交给连接器解析。"""
