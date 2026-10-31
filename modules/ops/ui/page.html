@@ -1,22 +1,19 @@
-<!-- 运营分析模块的页面（v2.46）。内容由 ops.js 按界面语言写出来（Z(中文, 泰文)），这里只放外框。 -->
-<section id="tab-ops_todo" class="panel hidden"><div class="row gap wrap ops-head"><h2>今日待办</h2>
-  <button class="mini" data-ops-reload="ops_todo">刷新</button></div><div id="ops-todo"></div></section>
-<section id="tab-ops_dash" class="panel hidden"><div class="row gap wrap ops-head"><h2>运营看板</h2>
-  <button class="mini" data-ops-reload="ops_dash">刷新</button></div><div id="ops-dash"></div></section>
-<section id="tab-ops_life" class="panel hidden"><div class="row gap wrap ops-head"><h2>商品生命周期</h2>
-  <button class="mini" data-ops-reload="ops_life">刷新</button></div><div id="ops-life"></div></section>
-<section id="tab-ops_lazada" class="panel hidden"><div class="row gap wrap ops-head"><h2>Lazada 数据</h2>
-  <button class="mini" data-ops-reload="ops_lazada">刷新</button></div><div id="ops-lz"></div></section>
-<!-- v2.48 第二期：内容由 market.js（竞品、爆款雷达、竞店）和 plan.js（计划、营销日历、流量数据）写出来 -->
-<section id="tab-ops_plans" class="panel hidden"><div class="row gap wrap ops-head"><h2>爆款 / 上量计划</h2>
-  <button class="mini" data-ops-reload="ops_plans">刷新</button></div><div id="ops-plans"></div></section>
-<section id="tab-ops_cal" class="panel hidden"><div class="row gap wrap ops-head"><h2>营销日历</h2>
-  <button class="mini" data-ops-reload="ops_cal">刷新</button></div><div id="ops-cal"></div></section>
-<section id="tab-ops_traffic" class="panel hidden"><div class="row gap wrap ops-head"><h2>流量数据</h2>
-  <button class="mini" data-ops-reload="ops_traffic">刷新</button></div><div id="ops-traffic"></div></section>
-<section id="tab-ops_comp" class="panel hidden"><div class="row gap wrap ops-head"><h2>竞品</h2>
-  <button class="mini" data-ops-reload="ops_comp">刷新</button></div><div id="ops-comp"></div></section>
-<section id="tab-ops_radar" class="panel hidden"><div class="row gap wrap ops-head"><h2>爆款雷达</h2>
-  <button class="mini" data-ops-reload="ops_radar">刷新</button></div><div id="ops-radar"></div></section>
-<section id="tab-ops_shops" class="panel hidden"><div class="row gap wrap ops-head"><h2>竞店</h2>
-  <button class="mini" data-ops-reload="ops_shops">刷新</button></div><div id="ops-shops"></div></section>
+<!-- 运营分析模块的页面（v2.49：顶部大菜单「运营」的 4 个页面）。页面头、筛选条、页签由 hub.js 写出来，
+     每个页签一个 <div class="ops-sub">（内容由 ops.js / market.js / plan.js 按界面语言写，Z(中文, 泰文)）。 -->
+<section id="tab-ops_overview" class="panel hidden" data-ops-page="ops_overview">
+  <div class="ops-sub" data-sub="ops_dash" id="ops-dash"></div>
+  <div class="ops-sub hidden" data-sub="ops_lazada" id="ops-lz"></div>
+</section>
+<section id="tab-ops_goods" class="panel hidden" data-ops-page="ops_goods">
+  <div class="ops-sub" data-sub="ops_life" id="ops-life"></div>
+  <div class="ops-sub hidden" data-sub="ops_sugg" id="ops-sugg"></div>
+</section>
+<section id="tab-ops_market" class="panel hidden" data-ops-page="ops_market">
+  <div class="ops-sub" data-sub="ops_comp" id="ops-comp"></div>
+  <div class="ops-sub hidden" data-sub="ops_shops" id="ops-shops"></div>
+  <div class="ops-sub hidden" data-sub="ops_radar" id="ops-radar"></div>
+</section>
+<section id="tab-ops_plan" class="panel hidden" data-ops-page="ops_plan">
+  <div class="ops-sub" data-sub="ops_plans" id="ops-plans"></div>
+  <div class="ops-sub hidden" data-sub="ops_cal" id="ops-cal"></div>
+</section>

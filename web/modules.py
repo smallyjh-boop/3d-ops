@@ -36,7 +36,7 @@ def modules_ui(mid, name):
     return r
 
 
-# ---------------- 今日待办（v2.46，core/todo.py）：各模块交上来的待办，工作台卡片和「运营分析 → 今日待办」页面共用 ----------------
+# ---------------- 待办（v2.46，core/todo.py）：各模块交上来的待办；v2.49 起在右上角 🔔 抽屉里看（static/shell.js） ----------------
 from core import todo as _todo  # noqa: E402
 _todo.init()
 
@@ -44,7 +44,14 @@ _todo.init()
 @app.get("/api/todo")
 def todo_list():
     u = auth.current_user() or {"role": "owner"}
-    return jsonify({"ok": True, **_todo.collect(u.get("role"), include_done=request.args.get("all") == "1")})
+    return jsonify({"ok": True, **_todo.collect(u.get("role"), include_done=request.args.get("all") == "1"), "sources": _todo.sources()})
+
+
+@app.get("/api/todo/count")
+def todo_count():
+    """v2.49 右上角 🔔：每个页面每分钟问一次（服务器按角色缓存 45 秒）。"""
+    u = auth.current_user() or {"role": "owner"}
+    return jsonify({"ok": True, **_todo.counts(u.get("role"))})
 
 
 @app.post("/api/todo/state")
@@ -55,3 +62,16 @@ def todo_state():
     except ValueError as e:
         return err(str(e))
     return jsonify({"ok": True})
+
+
+# ---------------- 全局搜索（v2.49，core/search.py）：顶部 🔍 / Ctrl+K ----------------
+from core import search as _search  # noqa: E402
+
+
+@app.get("/api/search")
+def global_search():
+    u = auth.current_user() or {"role": "owner"}
+    try:
+        return jsonify({"ok": True, **_search.search(request.args.get("q") or "", u, int(request.args.get("limit") or 8))})
+    except ValueError as e:
+        return err(str(e))

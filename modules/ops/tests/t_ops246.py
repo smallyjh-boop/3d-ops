@@ -57,6 +57,28 @@ ok(r["fin_net"] is not None and "net" in r["fin_net"], "finance net profit shown
 ok(r["health"]["orders_30d"] == r["summary"]["d30"]["n"] and "skus_missing_cost" in r["health"], "data health")
 ok(len(r["daily"]) == 30 and r["daily"][-1]["day"] == dt.date.today().isoformat(), "30 days chart")
 ok(CL.get("/api/oa/dashboard").status_code == 403, "dashboard owner only")
+# v2.49：经营概况顶部的筛选条（时间段 / 平台 / 店铺）
+r7 = C.get("/api/oa/dashboard?range=7").get_json()
+ok(r7["period"]["days"] == 7 and len(r7["daily"]) == 7 and r7["kpi"]["n"] == r7["summary"]["d7"]["n"]
+   and abs(r7["kpi"]["revenue"] - r7["summary"]["d7"]["revenue"]) < 0.01, f"range 7 days {r7['kpi']} {r7['summary']['d7']}")
+rt = C.get("/api/oa/dashboard?range=today").get_json()
+ok(rt["period"]["days"] == 1 and rt["kpi"]["n"] == rt["summary"]["today"]["n"] and len(rt["daily"]) == 7, "today (chart still shows 7 days)")
+ok(r["kpi"]["n"] == r["summary"]["d30"]["n"] and "kpi_prev" in r, "default = 30 days")
+rp = C.get("/api/oa/dashboard?range=30&platform=lazada").get_json()
+ok(rp["breakdown_source"] == "ops" and all(x["key"] == "lazada" for x in rp["platforms"]) and 0 < rp["kpi"]["n"] <= r["kpi"]["n"], "platform filter")
+rx = C.get("/api/oa/dashboard?range=30&platform=nosuch").get_json()
+ok(rx["kpi"]["n"] == 0 and not rx["loss_orders"], "platform filter with no orders")
+rc = C.get(f"/api/oa/dashboard?range=custom&from={(dt.date.today() - dt.timedelta(days=9)).isoformat()}&to={dt.date.today().isoformat()}").get_json()
+ok(rc["period"]["days"] == 10 and rc["period"]["to"] == dt.date.today().isoformat(), "custom range")
+rb = C.get("/api/oa/dashboard?range=custom&from=garbage").get_json()
+ok(rb["ok"] and rb["period"]["days"] == 30, "bad custom date → 30 days")
+ok("lazada" in r7["filters"]["platforms"] and isinstance(r7["filters"]["shops"], list), "filter options")
+ok(isinstance(r7["lazada"]["status"], list) and "performance" in r7["lazada"], "lazada status + performance on overview")
+from modules.ops import lazada as LZ_
+pl_ = LZ_.perf_label({"name": "Cancellation Rate", "type": "", "value": "1.5%", "target": "≤ 2%", "ok": None})
+ok(pl_["zh"] == "取消率" and pl_["th"] and pl_["better"] == "low" and pl_["v"] == 1.5 and pl_["t"] == 2 and pl_["ok"] is True, f"perf label {pl_}")
+pl_ = LZ_.perf_label({"name": "Ship on Time", "type": "", "value": "90%", "target": "95%", "ok": None})
+ok(pl_["zh"] == "准时发货率" and pl_["better"] == "high" and pl_["ok"] is False, f"ship on time below target {pl_}")
 # 售价低于最低价
 p = store.load("3DP0019"); p["variants"][0]["manual_price"] = 1; store.save(p)
 r = C.get("/api/oa/dashboard").get_json()
@@ -85,6 +107,8 @@ ok(C.get("/api/oa/lifecycle").get_json() and row("3DP0015-WH") and
    next(x for x in C.get("/api/oa/lifecycle").get_json()["rows"] if x["sku"] == "3DP0015-WH" and x["platform"] == "lazada")["stage"] == "hero",
    "hero rule from settings")
 save_config({"oa_hero_qty_30d": 10})
+lcl = CL.get("/api/oa/lifecycle").get_json()        # v2.49：商品表现给上架客服看，没有成本利润
+ok(lcl["ok"] and lcl["rows"] and not any(("profit" in k or "cost" in k or "floor" in k) for x in lcl["rows"] for k in x), "listing staff: lifecycle without cost / profit")
 
 # ---------- 今日待办 ----------
 t = C.get("/api/todo").get_json()
@@ -305,14 +329,21 @@ ok(r["sent"] == 1 and len(sent) == 1, "retried next round")
 
 # ---------- 页面文件、菜单 ----------
 mods = {m["id"]: m for m in C.get("/api/modules").get_json()["modules"]}
-ok([m["tab"] for m in mods["ops"]["menus"]] == ["ops_todo", "ops_dash", "ops_life", "ops_lazada", "ops_plans", "ops_cal", "ops_traffic",
-                                                  "ops_comp", "ops_radar", "ops_shops"], "menus")
+# v2.49：顶部大菜单「运营」4 个页面（经营概况 / 商品表现 / 市场与竞争 / 计划与活动），页签和旧页面 id 是 ghost 菜单
+vis = lambda ms: [m["tab"] for m in ms if not m["ghost"]]
+ok(vis(mods["ops"]["menus"]) == ["ops_overview", "ops_goods", "ops_market", "ops_plan"] and all(m["mod"] == "ops" for m in mods["ops"]["menus"]), "menus")
+ghost = {m["tab"]: m for m in mods["ops"]["menus"] if m["ghost"]}
+ok({"ops_dash", "ops_lazada", "ops_life", "ops_sugg", "ops_traffic", "opschg", "ops_comp", "ops_radar", "ops_shops", "ops_plans", "ops_cal"} == set(ghost)
+   and ghost["ops_comp"]["panel"] == "ops_market" and ghost["ops_comp"]["parent"] == "ops_market" and ghost["opschg"]["panel"] == "ops_goods"
+   and ghost["ops_dash"]["panel"] == "ops_overview" and ghost["ops_plans"]["panel"] == "ops_plan", "old page ids redirect to the new pages")
+ok("ops_todo" not in {m["tab"] for m in mods["ops"]["menus"]}, "today's to-do page gone (🔔 drawer instead)")
 ml = {m["id"]: m for m in CL.get("/api/modules").get_json()["modules"]}
-ok([m["tab"] for m in ml["ops"]["menus"]] == ["ops_todo", "ops_lazada", "ops_plans", "ops_cal", "ops_comp", "ops_radar", "ops_shops"], "listing menus")
-for f in ("page.html", "ops.js", "page.js", "page.css"):
+ok(vis(ml["ops"]["menus"]) == ["ops_goods", "ops_market", "ops_plan"] and "ops_dash" not in {m["tab"] for m in ml["ops"]["menus"]}, "listing menus (no overview)")
+for f in ("page.html", "ops.js", "hub.js", "page.js", "page.css"):
     ok(C.get(f"/m/ops/{f}").status_code == 200, f"ui {f}")
 html = C.get("/m/ops/page.html").get_data(as_text=True)
-ok(all(f'id="tab-{t_}"' in html for t_ in ("ops_todo", "ops_dash", "ops_life", "ops_lazada")), "page sections")
+ok(all(f'id="tab-{t_}"' in html for t_ in ("ops_overview", "ops_goods", "ops_market", "ops_plan")) and all(f'id="ops-{b}"' in html for b in ("dash", "lz", "life", "sugg")),
+   "page sections")
 th = json.load(open(os.path.join(APP, "modules", "ops", "i18n", "th.json"), encoding="utf-8"))
 ok(len(th) > 20, "Thai dictionary")
 print("ERRORS", E_)

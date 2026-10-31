@@ -1,7 +1,8 @@
 <!-- 模块 listing 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上）。v2.43 改成「上架工作台」：一次看一个平台、流程条、底部操作条、分页 -->
 <section id="tab-export" class="panel hidden">
+  <!-- v2.49：「商品 → 上架」一个菜单，上架工作台 / 在线商品 两个页签（在线商品的旧链接 #online 照样能打开） -->
+  <div class="ux-tabs lst-tabs"><button class="ux-tab on" data-lst-tab="export">上架工作台</button><button class="ux-tab" data-lst-tab="online">在线商品</button></div>
   <div class="lw-top">
-    <h2>上架工作台</h2>
     <div class="seg" id="lw-plat"><button data-plat="lazada" class="on">Lazada</button><button data-plat="shopee">Shopee</button></div>
     <div class="seg" id="lw-view"><button data-view="main" class="on">上架商品</button><button data-view="batches">批次记录</button><button data-view="stock">库存同步</button></div>
     <span class="small muted" id="exp-tplbar">类目模板库：<span id="exp-tplinfo">…</span> <a href="#" data-goto-cfg="goods">管理 →</a></span>
@@ -84,8 +85,8 @@
 
 <!-- v2.44：在线商品（从店铺拉回来的商品；按平台分，现在接了 Lazada） -->
 <section id="tab-online" class="panel hidden">
+  <div class="ux-tabs lst-tabs"><button class="ux-tab" data-lst-tab="export">上架工作台</button><button class="ux-tab on" data-lst-tab="online">在线商品</button></div>
   <div class="lw-top">
-    <h2>在线商品</h2>
     <div class="seg" id="ol-plat"><button data-plat="lazada" class="on">Lazada</button><button data-plat="shopee">Shopee</button></div>
     <select id="ol-shop" class="small" style="width:auto"></select>
     <span class="small muted" id="ol-synced"></span>

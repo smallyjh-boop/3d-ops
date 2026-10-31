@@ -32,3 +32,4 @@ web/orders.py
 web/production.py
 web/inventory.py
 static/ops.js
+modules/link/ui/opschg.js

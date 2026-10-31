@@ -14,15 +14,16 @@ MODULE = {
     "id": "listing",
     "name_zh": "上架导出",
     "name_th": "ส่งออกลงขาย",
-    "version": "2.1",
+    "version": "2.2",
     "desc_zh": "导出 Lazada / Shopee 上架表格、上架批次和状态、库存待同步到平台。",
     "desc_th": "ส่งออกไฟล์ลงสินค้า Lazada / Shopee สถานะการลงขาย และสต็อกที่ต้องอัปเดตบนแพลตฟอร์ม",
     "depends": ["goods"],
     "public": public,             # 别的模块用：online_shops() 产品在哪些店铺在线（产品库显示）
     "order": 2,
     "menus": [
-        {"tab": "export", "mod": "goods", "zh": "上架工作台", "th": "พื้นที่ลงสินค้า", "roles": "owner,listing", "after": "edit"},
-        {"tab": "online", "mod": "goods", "zh": "在线商品", "th": "สินค้าออนไลน์", "roles": "owner,listing", "after": "export"},
+        # v2.49：菜单只留「上架」一个，在线商品是页面顶上的页签（ghost：不在菜单里，菜单高亮「上架」）
+        {"tab": "export", "mod": "goods", "zh": "上架", "th": "ลงขาย", "roles": "owner,listing", "after": "edit"},
+        {"tab": "online", "mod": "goods", "zh": "在线商品", "th": "สินค้าออนไลน์", "roles": "owner,listing", "after": "export", "ghost": True, "parent": "export"},
     ],
     "settings_module": "goods",
     "settings": [("Lazada 接口推送", [

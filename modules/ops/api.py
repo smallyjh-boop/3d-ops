@@ -21,12 +21,21 @@ def _wrap(fn):
 
 @bp.get("/api/oa/dashboard")
 def oa_dashboard():
-    return _wrap(dash.dashboard)
+    args = request.args.to_dict()            # v2.49：range / from / to / platform / shop（页面顶部的筛选条）
+    return _wrap(lambda: dash.dashboard(args))
 
 
 @bp.get("/api/oa/lifecycle")
 def oa_lifecycle():
-    return _wrap(lifecycle.board)
+    """v2.49：上架客服也能看（商品表现），成本、利润、最低价去掉（和竞品 / 雷达一样，mkt_api._strip）。"""
+    def go():
+        b = lifecycle.board()
+        if not auth.is_owner():
+            for r in b["rows"]:
+                r.pop("below_floor", None)
+            b = mkt_api._strip(b)
+        return b
+    return _wrap(go)
 
 
 @bp.get("/api/oa/lazada")
