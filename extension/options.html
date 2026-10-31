@@ -1,36 +1,70 @@
 <!doctype html>
 <html lang="zh"><head><meta charset="utf-8"><title>3D 运营管理系统 · 插件</title>
 <style>
-body{font:14px/1.5 system-ui,-apple-system,"Segoe UI","Noto Sans Thai","Microsoft YaHei",sans-serif;margin:0;padding:16px;width:360px;color:#1d2330;background:#fff}
-h3{margin:0 0 10px}label{display:block;margin:8px 0}input,select{width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #cfd5dd;border-radius:6px;font:inherit}
-button{padding:7px 14px;border-radius:6px;border:1px solid #0f6fde;background:#0f6fde;color:#fff;font:inherit;cursor:pointer;margin-right:6px}
-button.sec{background:#fff;color:#0f6fde}.muted{color:#6b7280;font-size:12px}#st{margin-top:10px;font-size:13px}.ok{color:#1b7f3b}.bad{color:#c62828}
-hr{border:0;border-top:1px solid #e5e7eb;margin:14px 0 10px}h4{margin:0 0 6px}
-label.chk{display:flex;gap:6px;align-items:flex-start}label.chk input{width:auto;margin-top:3px}
-.lbl{border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;margin:6px 0;font-size:13px}.lbl b{word-break:break-all}
-.lbl button{padding:3px 10px;font-size:12px;margin:4px 6px 0 0}.last{font-size:12px;margin:3px 0;white-space:pre-line}
+/* v3.0.2：一屏放下 —— 状态一行 → 三个大按钮 + 最近结果 → 收起的「连接设置」「设置」；说明都收进「?」 */
+:root{--ink:#1d2330;--muted:#6b7280;--line:#e5e7eb;--accent:#0f6fde;--ok:#1b7f3b;--bad:#c62828}
+body{font:13px/1.45 system-ui,-apple-system,"Segoe UI","Noto Sans Thai","Microsoft YaHei",sans-serif;margin:0;padding:12px 14px;width:360px;color:var(--ink);background:#fff;box-sizing:border-box}
+*{box-sizing:border-box}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.top h3{margin:0;font-size:14px}
+.top select{width:auto;padding:2px 4px;font-size:12px}
+#st{display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:8px;background:#f3f4f6;font-weight:600;min-height:34px}
+#st.ok{background:#ecfdf3;color:var(--ok)}#st.bad{background:#fef2f2;color:var(--bad)}
+input,select{width:100%;padding:6px 8px;border:1px solid #cfd5dd;border-radius:6px;font:inherit;background:#fff}
+label{display:block;margin:6px 0}
+label .lt{display:flex;align-items:center;gap:4px;font-size:12px;color:#374151;margin-bottom:2px}
+button{padding:6px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;font:inherit;cursor:pointer}
+button.sec{background:#fff;color:var(--accent)}button:disabled{opacity:.55;cursor:wait}
+.acts{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.acts button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:9px 4px;background:#fff;color:var(--ink);border:1px solid #d5dbe3;border-radius:10px;font-size:12px;line-height:1.25}
+.acts button b{font-size:20px;line-height:1}.acts button:hover{border-color:var(--accent);background:#f5f9ff}
+#last{font-size:12px;margin:6px 2px 0;min-height:17px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted);font-weight:400}
+details{border-top:1px solid var(--line);margin-top:10px;padding-top:6px}
+summary{cursor:pointer;font-weight:600;font-size:13px;padding:2px 0;color:#374151}
+#conn{border-top:0;margin-top:4px;padding-top:0}#conn>summary{font-weight:400;font-size:12px;color:var(--muted)}#conn[open]>summary{color:#374151;font-weight:600}
+#conn[open]{border:1px solid var(--line);border-radius:8px;padding:4px 10px 10px}
+label.chk{display:flex;gap:6px;align-items:flex-start;margin:7px 0}label.chk input{width:auto;margin:2px 0 0;flex:none}
+.q{display:inline-flex;align-items:center;justify-content:center;flex:none;width:15px;height:15px;border-radius:50%;background:#e5e7eb;color:#4b5563;font-size:10px;font-weight:700;cursor:pointer;user-select:none}
+.tip{display:none;background:#f8fafc;border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin:2px 0 6px;font-size:12px;color:#4b5563;font-weight:400}
+.tip.on{display:block}
+.lbl{border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:6px 8px;margin:8px 0 0;font-size:12px}.lbl b{word-break:break-all}
+.lbl button{padding:2px 10px;font-size:12px;margin:4px 6px 0 0}
+.sub{font-size:12px;color:var(--muted);margin:8px 0 0;font-weight:600}
 </style></head><body>
-<h3 data-t="h3">3D 运营管理系统 · 浏览器扩展</h3>
-<label><span data-t="server">局域网地址（NAS 或电脑）</span><input id="server" placeholder="http://192.168.1.20:8790"></label>
-<label><span data-t="server2">外网地址（Tailscale，可不填）</span><input id="server2" placeholder="http://100.x.x.x:8790"></label>
-<p class="muted" data-t="s2help">不在店里时用：电脑装好 Tailscale 并登录同一个账号，局域网地址连不上会自动换这个。</p>
-<label><span data-t="key">API 密钥</span><input id="key" placeholder="lh_..."></label>
-<p class="muted" data-t="keyhelp">在 3D 运营管理系统：系统 → 设置 → 账号与权限 →「员工的扩展密钥」生成一个（每个员工一个，回复会记在这个名字下）。</p>
-<label><span data-t="lang">面板语言</span><select id="lang"><option value="zh">中文</option><option value="th">ภาษาไทย</option></select></label>
-<button id="save" data-t="save">保存并测试</button>
-<div id="st"></div>
-<hr>
-<h4 data-t="lbltitle">面单 PDF 转交</h4>
-<label class="chk"><input type="checkbox" id="label_forward"><span data-t="lblon">在卖家中心 / BigSeller 下载面单 PDF 时，提示发到系统（点「发送到系统」才发）</span></label>
+<div class="top"><h3 data-t="h3">3D 运营管理系统 · 插件</h3>
+  <select id="lang" title="面板语言 / ภาษา"><option value="zh">中文</option><option value="th">ไทย</option></select></div>
+<div id="st">…</div>
+
+<details id="conn">
+  <summary>⚙ <span data-t="conn">连接设置</span></summary>
+  <label><span class="lt"><span data-t="server">局域网地址（NAS 或电脑）</span></span><input id="server" placeholder="http://192.168.1.20:8790"></label>
+  <label><span class="lt"><span data-t="server2">外网地址（Tailscale，可不填）</span><span class="q" data-q="s2help">?</span></span><input id="server2" placeholder="http://100.x.x.x:8790"></label>
+  <div class="tip" id="s2help" data-t="s2help">不在店里时用：电脑装好 Tailscale 并登录同一个账号，局域网地址连不上会自动换这个。</div>
+  <label><span class="lt"><span data-t="key">API 密钥</span><span class="q" data-q="keyhelp">?</span></span><input id="key" placeholder="lh_..."></label>
+  <div class="tip" id="keyhelp" data-t="keyhelp">在 3D 运营管理系统：系统 → 设置 → 账号与权限 →「员工的扩展密钥」生成一个（每个员工一个，回复会记在这个名字下）。</div>
+  <button id="save" data-t="save">保存并测试</button>
+</details>
+
+<div class="acts">
+  <button id="oa-run" title=""><b>📊</b><span data-t="oarun">采集当前页</span></button>
+  <button id="oa-patrol"><b>🔭</b><span data-t="oapatrol">开始今日巡逻</span></button>
+  <button id="lbl-tab"><b>📄</b><span data-t="lbltab">发送当前 PDF</span></button>
+</div>
+<div id="last"></div>
 <div id="lbl-list"></div>
-<button class="sec" id="lbl-tab" data-t="lbltab">把当前标签页的 PDF 发到系统</button>
-<p class="muted" data-t="lblhelp">有的平台点「打印面单」是在新标签页打开 PDF，不是下载：在那个标签页点这个按钮。系统按每页上的订单号 / 运单号自动对应订单。</p>
-<div id="lbl-st"></div>
-<hr>
-<h4 data-t="oatitle">运营采集（竞品、搜索结果、店铺、卖家后台数据）</h4>
-<button id="oa-run" data-t="oarun">采集当前页</button><button class="sec" id="oa-patrol" data-t="oapatrol">🔭 开始今日巡逻</button>
-<label class="chk"><input type="checkbox" id="oa_auto_back"><span data-t="oaauto">打开卖家中心的数据页面（商品表现 / 流量 / 关键词）时自动采集（同一页 12 小时一次）</span></label>
-<p class="muted" data-t="oahelp">在 Lazada / Shopee / TikTok 的商品页、搜索结果页、店铺页，右下角有采集按钮，列表里每个商品卡片左上角有「📊 采集」。今日巡逻：人在电脑旁时用，按系统里的清单一页一页看，每天有上限，遇到验证码马上停。结果在系统「商品 → 竞品 / 爆款雷达 / 竞店」和「工作台 → 流量数据」。</p>
-<div id="oa-st"></div>
+
+<details id="opts">
+  <summary data-t="opts">设置</summary>
+  <label class="chk"><input type="checkbox" id="label_forward"><span data-t="lblon">下载面单 PDF 时提示发到系统</span><span class="q" data-q="lblhelp">?</span></label>
+  <div class="tip" id="lblhelp" data-t="lblhelp">在卖家中心 / BigSeller 下载面单 PDF 时弹出提示，点「发送到系统」才发。有的平台点「打印面单」是在新标签页打开 PDF：在那个标签页点上面的「📄 发送当前 PDF」。系统按每页上的订单号 / 运单号自动对应订单。</div>
+  <label class="chk"><input type="checkbox" id="oa_auto_back"><span data-t="oaauto">卖家中心数据页自动采集</span><span class="q" data-q="oahelp">?</span></label>
+  <div class="tip" id="oahelp" data-t="oahelp">打开卖家中心的数据页面（商品表现 / 流量 / 关键词）时自动采集，同一页 12 小时一次。在 Lazada / Shopee / TikTok 的商品页、搜索结果页、店铺页，右下角有采集按钮，列表里每个商品卡片左上角有「📊 采集」。今日巡逻：人在电脑旁时用，按系统里的清单一页一页看，每天有上限，遇到验证码马上停。结果在系统「商品 → 竞品 / 爆款雷达 / 竞店」和「工作台 → 流量数据」。</div>
+  <div class="sub" data-t="cs">AI 客服（聊天页右下角的面板）</div>
+  <label class="chk"><input type="checkbox" id="cs_autorun"><span data-t="csauto">打开聊天页时 AI 客服默认开启</span><span class="q" data-q="cshelp">?</span></label>
+  <label class="chk"><input type="checkbox" id="cs_patrol"><span data-t="cspatrol">有未读消息、我没在操作时，自动切到那个买家</span></label>
+  <label class="chk"><input type="checkbox" id="cs_sync"><span data-t="cssync">回复同时填进平台的输入框</span></label>
+  <div class="tip" id="cshelp" data-t="cshelp">和聊天页面板里的开关是同一个设置，改了以后刷新聊天页生效。每个聊天页的模式（关 / 半自动 / 全自动）在面板里选。</div>
+</details>
 <script src="options.js"></script>
 </body></html>

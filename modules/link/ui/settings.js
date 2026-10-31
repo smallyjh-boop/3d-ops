@@ -76,34 +76,93 @@
     $("#intg-hooks tbody").innerHTML = INTG.webhooks.map((w) => `<tr><td class="nowrap">${fmtTime(w.ts)}</td><td>${esc(w.platform)}</td>
       <td data-notr>${esc(w.result || "")}</td><td class="mono small" data-notr>${esc(w.body || "")}</td></tr>`).join("") || '<tr><td colspan="4" class="muted">没有平台推送记录</td></tr>';
   }
+  // ---- 店铺设置表单（v2.49）：上面一行基本信息；一个应用一张卡片（Key / Secret / 授权 / 换 token 都在卡片里）；
+  //      token 收进每张卡片的「高级」；一般不用的单独应用收在最下面。分组来自连接器的 groups / fields[].group（core/connectors describe）。
+  const TT = (s) => (window.I18N ? I18N.t(s) : s);
+  const tip = (s) => (s ? UX.help(TT(s)) : "");
+  const fmtDay = (ts) => { const d = new Date(ts * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  function appStatus(shop, g, fields, cr) {
+    const pre = g.prefix || "";
+    const filled = fields.some((f) => !f.token && cr[f.key]);
+    if (!filled) return g.slot ? UX.dot("", "没填，用主应用") : UX.dot("warn", "未填");
+    if (!cr[pre + "access_token"]) return UX.dot("warn", "未授权");
+    const ex = (shop && shop.expires) || {}, now = Date.now() / 1000;
+    const end = ex[pre + "refresh_expire"] || (!cr[pre + "refresh_token"] && ex[pre + "token_expire"]) || 0;
+    if (end && end < now) return UX.dot("bad", "授权过期");
+    if (end && end < now + 7 * 86400) return UX.dot("warn", `已授权 · ${fmtDay(end)} 到期`);
+    return UX.dot("ok", "已授权") + (end ? ` <span class="muted small">有效至 ${fmtDay(end)}</span>` : "");
+  }
+  function credInput(f, cr, label) {
+    return `<label>${esc(label)}<input data-cred="${f.key}" ${f.secret ? 'type="password" autocomplete="new-password"' : 'autocomplete="off"'} value="${esc(cr[f.key] || "")}" data-notr></label>`;
+  }
+  function appCard(shop, c, g, cr) {
+    const fields = c.fields.filter((f) => f.group === g.slot);
+    if (!fields.length) return "";
+    const main = c.fields.filter((f) => f.group === (c.groups[0] || {}).slot);
+    // 卡片里不用重复写「聊天应用 App Key（…）」：用主应用同名字段的短名字
+    const short = (f) => (g === c.groups[0] ? f.label : ((main.find((m) => m.base === f.base) || f).label));
+    const keys = fields.filter((f) => !f.token), toks = fields.filter((f) => f.token);
+    const id = g.slot || "main";
+    return `<div class="sf-app" data-slot="${esc(g.slot)}">
+      <div class="sf-app-h"><h4>${esc(g.title)}${tip(g.help)}</h4>${appStatus(shop, g, fields, cr)}</div>
+      ${g.for ? `<div class="sf-app-for">${esc(g.for)}</div>` : ""}
+      <div class="sf-keys">${keys.map((f) => credInput(f, cr, short(f))).join("")}</div>
+      ${c.ready && c.auth ? `<div class="sf-auth">
+        <button data-authurl data-app="${esc(g.slot)}">① 打开授权页</button>
+        <input id="sf-code-${id}" placeholder="${esc(TT("② 授权后把浏览器地址栏的整个网址贴到这里"))}" data-notr>
+        <button class="primary" data-authcode data-app="${esc(g.slot)}">③ 换 token</button>${tip("先填好上面的 Key / Secret。点①会自动保存并打开平台授权页，用卖家账号登录同意；跳转后把地址栏整个网址贴到②，点③。")}
+      </div>` : ""}
+      ${toks.length ? `<details class="sf-adv"><summary>高级（手动填 token）</summary><div class="sf-keys">${toks.map((f) => credInput(f, cr, short(f))).join("")}</div></details>` : ""}
+    </div>`;
+  }
   function shopForm(shop) {
     const plat = shop ? shop.platform : (INTG.connectors[0] || {}).platform;
     const box = $("#shop-form");
+    box.dataset.sid = shop ? shop.id : "";
     const render = (p) => {
-      const c = INTG.connectors.find((x) => x.platform === p) || { fields: [] };
+      const c0 = INTG.connectors.find((x) => x.platform === p) || { fields: [], groups: [] };
+      const c = { ...c0, groups: c0.groups && c0.groups.length ? c0.groups : [{ slot: "", prefix: "", title: "应用授权" }],
+        fields: (c0.fields || []).map((f) => ({ group: "", base: f.key, ...f })), auth: p === "lazada" || p === "shopee" };
       const cr = (shop && shop.platform === p && shop.creds) || {};
-      box.innerHTML = `<div class="row between"><h4>${shop ? "店铺设置" : "添加店铺"}</h4><button class="mini" data-shopcancel>取消</button></div>
-        <div class="form4">
-          <label>平台<select id="sf-platform" ${shop ? "disabled" : ""}>${INTG.connectors.map((x) => `<option value="${x.platform}" ${x.platform === p ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select></label>
+      const common = c.fields.filter((f) => f.group === "common");
+      const groups = c.groups.filter((g) => !g.more), more = c.groups.filter((g) => g.more);
+      const moreFilled = more.filter((g) => c.fields.some((f) => f.group === g.slot && cr[f.key])).length;
+      box.innerHTML = `<div class="sf-head"><h4>${shop ? "店铺设置" : "添加店铺"} · ${esc(c.label || p)}${c.ready && c.note ? tip(c.note) : ""}</h4>
+          <button class="mini-x" data-shopcancel>✕ 取消</button></div>
+        <div class="sf-basic">
+          ${shop ? "" : `<label>平台<select id="sf-platform">${INTG.connectors.map((x) => `<option value="${x.platform}" ${x.platform === p ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select></label>`}
           <label>店铺名称<input id="sf-name" value="${esc(shop ? shop.name : "")}" data-notr></label>
           <label>同步间隔（分钟）<input id="sf-interval" type="number" min="5" value="${shop ? shop.interval_min : 15}"></label>
-          <label class="row" style="align-self:center"><input type="checkbox" id="sf-enabled" ${shop && shop.enabled ? "checked" : ""} ${c.ready ? "" : "disabled"}> 启用自动同步</label>
+          ${common.map((f) => `<label><span>${esc(f.label)}${tip("Lazada 后台应用里填的 Callback URL，必须是 https，一字不差（例如 https://www.google.com/）。所有应用共用；不填就用本系统地址。")}</span><input data-cred="${f.key}" value="${esc(cr[f.key] || "")}" placeholder="https://www.google.com/" data-notr></label>`).join("")}
+          <label class="sf-chk"><input type="checkbox" id="sf-enabled" ${shop && shop.enabled ? "checked" : ""} ${c.ready ? "" : "disabled"}> 启用自动同步</label>
         </div>
-        <p class="small ${c.ready ? "muted" : "warn"}">${esc(c.note || "")}</p>
-        ${c.fields.length ? `<div class="form3">${c.fields.map((f) => `<label>${esc(f.label)}<input data-cred="${f.key}" ${f.secret ? 'type="password" autocomplete="new-password"' : ""} value="${esc(cr[f.key] || "")}" data-notr></label>`).join("")}</div>
-          <p class="muted small">保密项显示 ****** 表示已保存，不改就保持原样。</p>` : ""}
-        ${shop && c.ready ? `<div class="row gap wrap small"><button class="mini" data-authurl="${shop.id}">打开平台授权页</button>
-          <input id="sf-code" placeholder="授权后地址栏的整个网址（或 code= 后面的内容）" style="width:360px" data-notr><button class="mini" data-authcode="${shop.id}">用授权码换 token</button></div>` : ""}
-        ${shop && c.ready && p === "lazada" ? [["im", "聊天应用", "In-house IM Chat"], ["data", "数据应用", "财务 / 评价 / 退货 / 店铺指标"], ["ads", "广告应用", "Sponsored Solutions"]].map(([k, nm, what]) => `<div class="row gap wrap small" style="margin-top:6px"><b>${nm}授权</b>
-          <span class="muted">（${what}：在 Lazada 单独建了应用才用。填上面的「${nm} App Key / Secret」并保存后，用卖家账号给它单独授权一次）</span>
-          ${cr[k + "_access_token"] ? `<span class="pill ok-pill">${nm}已授权</span>` : cr[k + "_app_key"] ? `<span class="pill warn-pill">${nm}还没授权</span>` : ""}
-          <button class="mini" data-authurl="${shop.id}" data-app="${k}">打开${nm}授权页</button>
-          <input id="sf-code-${k}" placeholder="授权后地址栏的整个网址" style="width:300px" data-notr><button class="mini" data-authcode="${shop.id}" data-app="${k}">换${nm} token</button></div>`).join("") : ""}
-        <button class="primary" data-shopsave="${shop ? shop.id : ""}">保存</button>`;
+        ${c.ready ? "" : `<p class="small warn">${esc(c.note || "")}</p>`}
+        ${groups.map((g) => appCard(shop, c, g, cr)).join("")}
+        ${more.length ? `<details class="sf-more"><summary>其他单独应用（一般不用）${moreFilled ? ` <span class="muted small">· 已填 ${moreFilled}</span>` : ""}</summary>
+          ${more.map((g) => appCard(shop, c, g, cr)).join("")}</details>` : ""}
+        <div class="sf-foot"><button class="primary" data-shopsave>保存</button><button data-shopcancel>取消</button>
+          ${c.fields.some((f) => f.secret) ? `<span class="muted small">保密项显示 ****** 表示已保存${tip("不改就保持原样；要换掉就清空后填新的。")}</span>` : ""}</div>`;
+      if (window.I18N) I18N.translate(box);
     };
     render(plat);
     box.classList.remove("hidden");
     box.onchange = (e) => { if (e.target.id === "sf-platform") render(e.target.value); };
+  }
+  // 保存表单（授权前也会自动保存一次，新店铺就有了编号）；返回店铺编号
+  async function saveForm() {
+    const box = $("#shop-form"), creds = {};
+    $$("#shop-form [data-cred]").forEach((i) => (creds[i.dataset.cred] = i.value));
+    const sid = box.dataset.sid ? +box.dataset.sid : null;
+    const shop = sid && INTG.shops.find((x) => x.id === sid);
+    const r = await api("/api/shops", { json: { id: sid, platform: shop ? shop.platform : $("#sf-platform").value, name: $("#sf-name").value,
+      interval_min: $("#sf-interval").value, enabled: $("#sf-enabled").checked, creds } });
+    box.dataset.sid = r.id || sid;
+    return +box.dataset.sid;
+  }
+  async function reopen(sid) {
+    await OPS.loadIntegrations();
+    const s = INTG.shops.find((x) => x.id === sid);
+    if (s) shopForm(s);
   }
   document.addEventListener("click", async (e) => {
     if (!e.target.closest || !e.target.closest("#intg-shopcard")) return;
@@ -121,24 +180,38 @@
         return OPS.loadIntegrations();
       }
       if (d.shopsave !== undefined) {
-        const creds = {};
-        $$("#shop-form [data-cred]").forEach((i) => (creds[i.dataset.cred] = i.value));
-        await api("/api/shops", { json: { id: d.shopsave ? +d.shopsave : null, platform: $("#sf-platform").value, name: $("#sf-name").value,
-          interval_min: $("#sf-interval").value, enabled: $("#sf-enabled").checked, creds } });
+        if (!(await busy(t, saveForm))) return;          // busy() 出错时已经提示，返回空
         $("#shop-form").classList.add("hidden");
         toast("已保存");
         return OPS.loadIntegrations();
       }
-      if (d.authurl) {
-        const r = await api(`/api/shops/${d.authurl}/auth-url`, { json: { redirect: location.origin + "/", app: d.app || "" } });
-        window.open(r.url, "_blank");
+      if (d.authurl !== undefined) {
+        const w = window.open("about:blank", "_blank");      // 先开窗口（不被拦截），保存好再跳到授权页
+        const sid = await busy(t, async () => {
+          const id = await saveForm();
+          const r = await api(`/api/shops/${id}/auth-url`, { json: { redirect: location.origin + "/", app: d.app || "" } });
+          if (w) w.location = r.url; else window.open(r.url, "_blank");
+          return id;
+        });
+        if (!sid) { if (w) w.close(); return; }
+        const code = $("#shop-form").querySelector(`[data-slot="${d.app || ""}"] input[id^="sf-code-"]`);
+        const keep = code ? code.value : "";
+        await reopen(sid);
+        const c2 = $("#shop-form").querySelector(`[data-slot="${d.app || ""}"] input[id^="sf-code-"]`);
+        if (c2) { c2.value = keep; c2.focus(); }
         return;
       }
-      if (d.authcode) {
-        await api(`/api/shops/${d.authcode}/auth-code`, { json: { code: $(d.app ? "#sf-code-" + d.app : "#sf-code").value, app: d.app || "" } });
+      if (d.authcode !== undefined) {
+        const inp = $("#shop-form").querySelector(`[data-slot="${d.app || ""}"] input[id^="sf-code-"]`);
+        if (!inp || !inp.value.trim()) { toast("先把授权后地址栏的整个网址贴到框里", true); if (inp) inp.focus(); return; }
+        const sid = await busy(t, async () => {
+          const id = await saveForm();
+          await api(`/api/shops/${id}/auth-code`, { json: { code: inp.value, app: d.app || "" } });
+          return id;
+        });
+        if (!sid) return;
         toast("授权成功");
-        $("#shop-form").classList.add("hidden");
-        return OPS.loadIntegrations();
+        return reopen(sid);
       }
     } catch (err) { toast(err.message, true); }
   });

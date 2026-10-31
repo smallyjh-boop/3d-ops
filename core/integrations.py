@@ -84,7 +84,7 @@ def check_key(raw):
     return dict(r) if r else None
 
 
-EXT_LATEST = "3.0.1"     # 当前随系统发的浏览器扩展版本（extension/manifest.json）
+EXT_LATEST = "3.0.2"     # 当前随系统发的浏览器扩展版本（extension/manifest.json）
 EXT_SEEN = {}            # 密钥名 → 最近一次用扩展时的扩展版本（旧扩展不带版本号，记 "旧版"）
 
 
@@ -124,6 +124,8 @@ def _shop_out(r):
     d["creds"] = {k: ("******" if k in sk and v else v) for k, v in creds.items()
                   if not k.endswith(("token_expire", "refresh_expire"))}
     d["token_expire"] = creds.get("token_expire")
+    # v2.49 每个应用的授权到期时间（界面显示 已授权 / 授权过期）：{"token_expire", "refresh_expire", "im_token_expire", …}
+    d["expires"] = {k: v for k, v in creds.items() if k.endswith(("token_expire", "refresh_expire")) and v}
     cls = connectors.REGISTRY.get(d["platform"])
     d["ready"] = bool(cls and cls.READY)
     return d

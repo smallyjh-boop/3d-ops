@@ -77,6 +77,18 @@ class LazadaConnector(Connector):
               ("ads_access_token", "广告应用 Access Token", True), ("ads_refresh_token", "广告应用 Refresh Token", True)]
     OPTIONAL = ("callback_url",) + tuple(f"{a}_{k}" for a in ("im", "data", "ads")
                                           for k in ("app_key", "app_secret", "access_token", "refresh_token"))
+    # v2.49 设置页表单：一个应用一张卡片（键名前缀 → 卡片）；数据 / 广告应用一般不用，收在最下面
+    COMMON_FIELDS = ("callback_url",)
+    FORM_GROUPS = [
+        {"slot": "", "prefix": "", "title": "主应用", "for": "订单、面单、上架推送、财务、退货、店铺指标、广告",
+         "help": "Lazada 开放平台里的 Seller In-house APP。权限组里的 Product Review（评价）这个应用类目可能开不了，不影响其他功能。"},
+        {"slot": "im", "prefix": "im_", "title": "聊天应用", "for": "In-house IM Chat：客服读买家消息、发回复",
+         "help": "聊天接口要在 Lazada 单独建一个 In-house IM Chat 类目的应用，并用卖家账号单独授权一次。没有就空着（聊天走主应用）。"},
+        {"slot": "data", "prefix": "data_", "title": "数据应用", "for": "财务流水、评价、退货、店铺指标（单独建了应用才填）",
+         "help": "只有这些接口在 Lazada 单独建了应用时才填；空着就用主应用。", "more": True},
+        {"slot": "ads", "prefix": "ads_", "title": "广告应用", "for": "Sponsored Solutions 广告（单独建了应用才填）",
+         "help": "只有广告接口在 Lazada 单独建了应用时才填；空着就用主应用。", "more": True},
+    ]
     # 哪些接口走哪个单独的应用（按接口地址开头）
     APP_SLOTS = {"im": ("聊天应用", ("/im/",)),
                  "data": ("数据应用", ("/finance/", "/review/", "/reverse/", "/seller/performance", "/seller/metrics", "/datamoat/", "/dataset")),

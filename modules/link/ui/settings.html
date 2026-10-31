@@ -1,4 +1,29 @@
 <!-- 设置 → AI 与对接：店铺对接 + 3D选品工具对接（v2.30 从 index.html 搬过来；由 settings.js 放进设置页） -->
+<style>
+/* v2.49 店铺设置表单：基本信息一行 + 一个应用一张卡片 */
+#shop-form .sf-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+#shop-form .sf-head h4{margin:0;font-size:15px}
+#shop-form .sf-basic{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0 14px;align-items:end}
+#shop-form .sf-basic label>span{display:inline-flex;align-items:center;gap:2px}
+#shop-form label.sf-chk{flex-direction:row;align-items:center;gap:6px;padding-bottom:8px;white-space:nowrap}
+#shop-form label.sf-chk input{width:auto;margin:0}
+#shop-form .sf-app{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px 6px;margin:10px 0}
+#shop-form .sf-app-h{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+#shop-form .sf-app-h h4{margin:0;font-size:14px}
+#shop-form .sf-app-h .ux-dot{font-size:12px;padding:1px 9px 1px 7px;border-radius:10px;background:#f3f4f6;color:#4b5563}
+#shop-form .sf-app-h .ux-dot.ux-ok{background:#dcfce7;color:#166534}#shop-form .sf-app-h .ux-dot.ux-warn{background:#fef3c7;color:#92400e}#shop-form .sf-app-h .ux-dot.ux-bad{background:#fee2e2;color:#991b1b}
+#shop-form .sf-app-for{color:var(--muted);font-size:12.5px;margin:-6px 0 10px}
+#shop-form .sf-keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 14px}
+#shop-form .sf-auth{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#f5f8fc;border:1px dashed #d5deea;border-radius:8px;padding:8px 10px;margin:0 0 8px}
+#shop-form .sf-auth input{flex:1 1 260px;width:auto;min-width:0;padding:5px 8px}
+#shop-form .sf-auth button{white-space:nowrap;padding:5px 12px}
+#shop-form details.sf-adv{margin:0 0 6px}
+#shop-form details summary{cursor:pointer;color:var(--accent);font-size:12.5px;padding:2px 0 6px}
+#shop-form details.sf-adv[open]>summary{margin-bottom:4px}
+#shop-form details.sf-more{margin:14px 0 4px;border-top:1px dashed var(--line);padding-top:8px}
+#shop-form details.sf-more>summary{color:var(--muted);font-size:13px}
+#shop-form .sf-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+</style>
 <div class="card" id="intg-shopcard">
     <div class="row between"><h3>店铺对接（自动导入订单）</h3><a class="btn" href="/api-docs" target="_blank">接口说明</a></div>
     <p class="muted small">现在用表格导入订单就可以。以后接上平台开放接口后，订单会自动进来（和表格导入效果一样：对上 SKU、生成生产任务、算利润）。</p>
