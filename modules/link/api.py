@@ -184,7 +184,7 @@ def shop_sync(sid):
 def shop_auth_url(sid):
     b = request.get_json(force=True) or {}
     try:
-        return jsonify({"url": integrations.authorize_url(sid, b.get("redirect") or request.host_url)})
+        return jsonify({"url": integrations.authorize_url(sid, b.get("redirect") or request.host_url, b.get("app") or "")})
     except Exception as e:  # 缺 App Key 等
         return err(str(e))
 
@@ -193,7 +193,7 @@ def shop_auth_url(sid):
 def shop_auth_code(sid):
     b = request.get_json(force=True) or {}
     try:
-        integrations.exchange_code(sid, b.get("code") or "")
+        integrations.exchange_code(sid, b.get("code") or "", b.get("app") or "")
     except Exception as e:  # 授权失败
         return err(f"授权失败：{e}")
     return jsonify({"ok": True, "shops": integrations.list_shops()})

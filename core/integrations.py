@@ -122,7 +122,7 @@ def _shop_out(r):
     creds = json.loads(d.pop("creds") or "{}")
     sk = _secret_keys(d["platform"])
     d["creds"] = {k: ("******" if k in sk and v else v) for k, v in creds.items()
-                  if k not in ("token_expire", "refresh_expire")}
+                  if k not in ("token_expire", "refresh_expire", "im_token_expire", "im_refresh_expire")}
     d["token_expire"] = creds.get("token_expire")
     cls = connectors.REGISTRY.get(d["platform"])
     d["ready"] = bool(cls and cls.READY)
@@ -180,9 +180,14 @@ def _store_creds(sid, conn):
         conn.creds_changed = False
 
 
-def authorize_url(sid, redirect_uri):
+def authorize_url(sid, redirect_uri, app=""):
+    """app="im"：给单独的聊天应用授权（v2.47.2，Lazada In-house IM Chat）。"""
     s = get_shop_raw(sid)
     conn = connectors.make(s["platform"], s["creds"])
+    if app == "im" and hasattr(conn, "im_view"):
+        if not conn.has_im_app():
+            raise ValueError("先填聊天应用的 App Key / App Secret 并保存")
+        conn = conn.im_view()
     if not hasattr(conn, "authorize_url"):
         raise ValueError("这个平台还不支持在线授权")
     return conn.authorize_url(redirect_uri)
@@ -197,12 +202,17 @@ def _auth_code(text):
     return (urllib.parse.parse_qs(q).get("code") or [text])[0].strip()
 
 
-def exchange_code(sid, code):
+def exchange_code(sid, code, app=""):
     s = get_shop_raw(sid)
     conn = connectors.make(s["platform"], s["creds"])
     if not hasattr(conn, "exchange_code"):
         raise ValueError("这个平台还不支持在线授权")
-    conn.exchange_code(_auth_code(code))
+    if app == "im" and hasattr(conn, "im_view"):
+        if not conn.has_im_app():
+            raise ValueError("先填聊天应用的 App Key / App Secret 并保存")
+        conn.im_view().exchange_code(_auth_code(code))     # token 写回 conn 的 im_* 字段
+    else:
+        conn.exchange_code(_auth_code(code))
     _store_creds(sid, conn)
 
 

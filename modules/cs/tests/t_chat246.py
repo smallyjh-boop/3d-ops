@@ -186,6 +186,28 @@ LZ.LazadaConnector._call = bad
 r = jobs.poll_all(force=True)
 ok("Permission" in r["LZ-TH"] and "Permission" in data.cursor_get(sid)["last_error"], "permission error shown")
 ok(jobs.poll_all() == {}, "backs off after error")
+# ---- v2.47.2：单独的聊天应用（In-house IM Chat）：聊天接口用它的 key / token；单独授权，token 存在 im_* ----
+LZ.LazadaConnector._call = fake
+integrations.save_shop({"id": sid, "platform": "lazada", "name": "LZ-TH", "enabled": True,
+                        "creds": {"im_app_key": "imk", "im_app_secret": "ims"}})
+WHO = []
+def fake2(self, path, params, base=LZ.API, token=True, method="GET", files=None):
+    WHO.append((path, self.creds.get("app_key"), self.creds.get("access_token")))
+    if path == "/auth/token/create":
+        return {"code": "0", "access_token": "imtok", "refresh_token": "imref", "expires_in": 86400}
+    return fake(self, path, params, base, token, method, files)
+LZ.LazadaConnector._call = fake2
+jobs._state["errors"].clear()
+r = jobs.poll_all(force=True)
+ok("没授权" in str(r.get("LZ-TH")), f"IM app not authorized yet → clear message {r}")
+ok("client_id=imk" in integrations.authorize_url(sid, "https://x/", "im"), "authorize url uses the chat app key")
+integrations.exchange_code(sid, "https://www.google.com/?code=abc", "im")
+cr = integrations.get_shop_raw(sid)["creds"]
+ok(cr["im_access_token"] == "imtok" and cr["access_token"] == "t" and cr["im_refresh_token"] == "imref", "chat token stored separately")
+WHO.clear(); jobs._state["errors"].clear()
+jobs.poll_all(force=True)
+ok(WHO and all(w[1] == "imk" and w[2] == "imtok" for w in WHO if w[0].startswith("/im/")), f"IM calls signed with the chat app {WHO[:2]}")
+ok(integrations.list_shops()[0]["creds"].get("im_access_token") == "******", "chat token hidden in the shop list")
 # ---- 解析 ----
 ok(lazada_im.parse({"message_id": "x", "from_account_type": "1", "content": json.dumps({"itemId": 5, "title": "Cat"}), "template_id": "10006"})["kind"] == "item", "item parsed")
 print("ERRORS", E_)

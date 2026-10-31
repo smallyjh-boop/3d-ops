@@ -660,6 +660,15 @@ AI 用哪家：文案、关键词、类目属性、打印建议都用设置页�
      - 每个财务页都可以「导出 Excel（给会计）」：损益表、按平台 / 店铺 / 产品 / SKU / 日、收支明细、现金流。
    · 对外财务接口（财务密钥，只读）：/api/v1/finance/pl、breakdown、cashflow、expenses、tax（对接规范 v2.1 第 11.1 条）。
 
+   v2.47.2：Lazada 聊天用单独的聊天应用（In-house IM Chat）
+   · Lazada 的聊天接口要单独建一个「In-house IM Chat」应用（和下订单、推商品用的 Seller In-house APP 不是同一个），店铺也要给它单独授权。
+     设置方法：系统 → 设置 → 店铺对接 → Lazada 店铺「设置」→
+       ① 填「聊天应用 App Key」「聊天应用 App Secret」（Lazada 开发者后台 → 应用管理 → 聊天应用 → 高级信息里看），保存；
+       ② 再点「设置」，最下面「聊天应用授权」→「打开聊天应用授权页」，用卖家账号登录确认；
+       ③ 授权后浏览器跳到回调地址（例如 google），把地址栏整个网址粘贴到旁边的框，点「换聊天应用 token」；
+       ④ 到 客服 → 客服工作台 点「⟳ 立即拉取新消息」，店铺那一行变成「● 接口正常」就好了。
+     订单、面单、推商品照旧用原来的应用，不受影响。
+
    v2.47.1：Lazada 聊天权限提示更清楚；扩展不再把「My Last Order」「Messages」当成买家
    · 客服工作台的店铺表报「InsufficientPermission」时，提示怎么做：① open.lazada.com → App Console → 你的应用 → API Permission
      确认「Instant Messaging」已开通；② 系统 → 设置 → 店铺对接，把 Lazada 店铺重新「授权」一次；③ 回到客服工作台点「⟳ 立即拉取新消息」。

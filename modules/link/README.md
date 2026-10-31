@@ -27,3 +27,4 @@ API 密钥管理和只读查询接口（/api/v1/orders、skus、cost-params、pr
 - 1.2（系统 v2.41.2）：Lazada 店铺授权：店铺设置加「Callback URL（回调地址）」（可不填），授权页按它跳转（Lazada 只认 https）；换 token 时可以粘贴授权后地址栏的整个网址；Lazada 取面单（core/connectors/lazada.fetch_label：现取包裹号 → /order/package/document/get 取 PDF）；订单带付款方式、代收货款、快递。测试 tests/t_lazada2412.py。
 - 1.3（系统 v2.44.1）：Lazada 打包（connectors lazada.pack，取面单时没打包先打包）、安排发货（events.py：ERP 里标已发货 → /order/package/rts，lazada_auto_rts）；/api/shops/sync-all。测试 tests/t_lazada2412.py。
 - 1.4（系统 v2.45.0）：安排发货成功后后台重新同步订单，失败打「⚠ Lazada 未安排发货」标签。
+- （系统 v2.47.2）：店铺设置里 Lazada 多了「聊天应用授权」（/api/shops/<id>/auth-url、auth-code 带 app=im）。

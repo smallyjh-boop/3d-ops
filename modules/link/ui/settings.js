@@ -94,6 +94,11 @@
           <p class="muted small">保密项显示 ****** 表示已保存，不改就保持原样。</p>` : ""}
         ${shop && c.ready ? `<div class="row gap wrap small"><button class="mini" data-authurl="${shop.id}">打开平台授权页</button>
           <input id="sf-code" placeholder="授权后地址栏的整个网址（或 code= 后面的内容）" style="width:360px" data-notr><button class="mini" data-authcode="${shop.id}">用授权码换 token</button></div>` : ""}
+        ${shop && c.ready && p === "lazada" ? `<div class="row gap wrap small" style="margin-top:6px"><b>聊天应用授权</b>
+          <span class="muted">（填了上面的「聊天应用 App Key / Secret」并保存后：用卖家账号给聊天应用单独授权一次）</span>
+          ${cr.im_access_token ? '<span class="pill ok-pill">聊天应用已授权</span>' : cr.im_app_key ? '<span class="pill warn-pill">聊天应用还没授权</span>' : ""}
+          <button class="mini" data-authurl="${shop.id}" data-app="im">打开聊天应用授权页</button>
+          <input id="sf-code-im" placeholder="授权后地址栏的整个网址" style="width:300px" data-notr><button class="mini" data-authcode="${shop.id}" data-app="im">换聊天应用 token</button></div>` : ""}
         <button class="primary" data-shopsave="${shop ? shop.id : ""}">保存</button>`;
     };
     render(plat);
@@ -125,12 +130,12 @@
         return OPS.loadIntegrations();
       }
       if (d.authurl) {
-        const r = await api(`/api/shops/${d.authurl}/auth-url`, { json: { redirect: location.origin + "/" } });
+        const r = await api(`/api/shops/${d.authurl}/auth-url`, { json: { redirect: location.origin + "/", app: d.app || "" } });
         window.open(r.url, "_blank");
         return;
       }
       if (d.authcode) {
-        await api(`/api/shops/${d.authcode}/auth-code`, { json: { code: $("#sf-code").value } });
+        await api(`/api/shops/${d.authcode}/auth-code`, { json: { code: $(d.app === "im" ? "#sf-code-im" : "#sf-code").value, app: d.app || "" } });
         toast("授权成功");
         $("#shop-form").classList.add("hidden");
         return OPS.loadIntegrations();
