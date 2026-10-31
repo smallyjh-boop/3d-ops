@@ -1,0 +1,171 @@
+{
+  "id": "makerworld",
+  "name": "MakerWorld",
+  "version": 1,
+  "enabled": true,
+  "key_prefix": "mw",
+  "domains": [
+    "makerworld.com",
+    "makerworld.com.cn"
+  ],
+  "image_hosts": [
+    "makerworld.com",
+    "www.makerworld.com",
+    "makerworld.com.cn",
+    "www.makerworld.com.cn",
+    "makerworld.bblmw.com",
+    "makerworld.bblmw.cn",
+    "public-cdn.bblmw.cn",
+    "public-cdn.bblmw.com"
+  ],
+  "related_hosts": [
+    "bblmw.com",
+    "bblmw.cn"
+  ],
+  "referer": "https://makerworld.com/",
+  "detail": {
+    "path": "(/(?:[a-z]{2}(?:-[a-z]{2})?/)?models/(\\d+)[^/?#]*)",
+    "id_group": 2
+  },
+  "search": [
+    {
+      "id": "mw",
+      "label": "MakerWorld",
+      "url": "https://makerworld.com/en/search/models?keyword={q}"
+    },
+    {
+      "id": "mwcn",
+      "label": "MakerWorld 中国",
+      "url": "https://makerworld.com.cn/zh/search/models?keyword={q}"
+    }
+  ],
+  "image_rules": [
+    {
+      "host": "bblmw\\.(?:com|cn)$",
+      "strip_query": true
+    }
+  ],
+  "extract": {
+    "settle_ms": 2000,
+    "sources": [
+      {
+        "type": "next_data",
+        "find": {
+          "any_of": [
+            [
+              "designExtension"
+            ],
+            [
+              "instances",
+              "title"
+            ],
+            [
+              "instances",
+              "titleTranslated"
+            ]
+          ],
+          "id_field": "id"
+        },
+        "fields": {
+          "title": {
+            "path": "title|titleTranslated",
+            "max": 500
+          },
+          "description": {
+            "path": "summary|summaryTranslated|description",
+            "html": true
+          },
+          "images": {
+            "list": [
+              {
+                "path": "coverUrl"
+              },
+              {
+                "path": "designExtension.design_pictures|designExtension.designPictures|pictures",
+                "each": "url|pictureUrl|src|."
+              }
+            ]
+          },
+          "profiles": {
+            "path": "instances",
+            "each": {
+              "name": {
+                "path": "title|name|titleTranslated",
+                "max": 120
+              },
+              "minutes": {
+                "path": "prediction",
+                "div": 60,
+                "round": 0
+              },
+              "grams": {
+                "path": "weight",
+                "round": 1
+              }
+            },
+            "filter": [
+              "minutes",
+              "grams"
+            ]
+          },
+          "tags": {
+            "path": "tags",
+            "each": "name|."
+          },
+          "files": {
+            "path": "instances",
+            "require": "id",
+            "each": {
+              "name": {
+                "template": "{title|name|=profile}.3mf",
+                "max": 104
+              },
+              "url": {
+                "template": "{$origin}/api/v1/design-service/instance/{id}/f3mf?type=download"
+              },
+              "size": {
+                "path": "fileSize",
+                "mb": true
+              },
+              "kind": "=3mf"
+            }
+          },
+          "license": {
+            "path": "license.name|license",
+            "max": 200
+          },
+          "category": {
+            "join": " > ",
+            "max": 120,
+            "list": [
+              {
+                "path": "categoryName"
+              },
+              {
+                "path": "category.name"
+              },
+              {
+                "path": "categories",
+                "each": "name|."
+              }
+            ]
+          },
+          "author": {
+            "path": "designCreator.name|designCreator.handle|creator.name",
+            "max": 300
+          }
+        }
+      }
+    ]
+  },
+  "examples": {
+    "detail": [
+      "https://makerworld.com/en/models/123456-cable-clip?from=search#profileId-1",
+      "https://makerworld.com.cn/zh/models/99"
+    ],
+    "not_detail": [
+      "https://makerworld.com/en/search/models?keyword=hook",
+      "https://makerworld.com/en/@maker"
+    ]
+  }
+}

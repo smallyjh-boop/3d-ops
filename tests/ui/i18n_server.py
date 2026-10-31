@@ -70,6 +70,12 @@ if not os.path.exists(SEED):
         print("exp", c.post("/api/fin/expenses", json={"date": time.strftime("%Y-%m-%d"), "category": "房租", "amount": 5000, "note": "rent"}).status_code)
     except Exception as e:  # noqa: BLE001
         print("exp seed", e)
+    try:   # v2.50 选品：候选、选品库、关注巡逻
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import curate_seed
+        curate_seed.seed()
+    except Exception as e:  # noqa: BLE001
+        print("curate seed", e)
     open(SEED, "w").write("1")
 db.release()
 A.main()

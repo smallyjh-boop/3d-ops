@@ -2,7 +2,8 @@
 // v2.8：两个地址——局域网地址 + 外网地址（Tailscale）。哪个通用哪个，记住上次能用的那个。
 // v2.9：面单 PDF 转交在 labels.js（下载面单时问一下，点「发送」才发到系统）。
 // v3.0：运营采集（capture.js、巡逻 patrol.html）也通过这里的 "api" 消息访问 /api/v1/ops/ext/…（同一把员工密钥）。
-importScripts("labels.js");
+// v3.1：选品（模型网站上的推荐分 / ＋采集、后台读详情页、下载模型文件、关注巡逻）在 cur_bg.js，走 /api/v1/curate/ext/…
+importScripts("labels.js", "cur_sites_builtin.js", "cur_sites.js", "cur_bg.js");   // v3.1：选品（模型网站采集、下载、巡逻）在 cur_bg.js
 async function cfg() {
   const d = await chrome.storage.sync.get({ server: "", server2: "", key: "", lang: "zh" });
   const norm = (x) => (x || "").trim().replace(/\/+$/, "");
@@ -32,7 +33,7 @@ async function callApi(path, body, method) {
   for (let i = 0; i < c.servers.length; i++) {
     try {
       // 有备用地址时：第一个地址 8 秒连不上就换下一个（AI 生成回复可能要几十秒，所以只有一个地址时不限时）
-      r = c.servers.length > 1 && i === 0 ? await fetchT(c.servers[i] + path, opt, path.includes("/draft") || path.includes("/capture") || path.startsWith("/api/v1/ops/ext/") ? 90000 : 8000)
+      r = c.servers.length > 1 && i === 0 ? await fetchT(c.servers[i] + path, opt, path.includes("/draft") || path.includes("/capture") || path.startsWith("/api/v1/ops/ext/") || path.startsWith("/api/v1/curate/ext/") ? 90000 : 8000)
                                           : await fetch(c.servers[i] + path, opt);
       if (i > 0 || c.servers.length > 1) chrome.storage.local.set({ active: c.servers[i] });
       break;
@@ -71,6 +72,7 @@ chrome.notifications.onClicked.addListener((nid) => {
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg && typeof msg.type === "string" && msg.type.startsWith("label-")) return false;   // 面单转交：labels.js 处理
+  if (msg && typeof msg.type === "string" && msg.type.startsWith("cur-")) return false;     // 选品：cur_bg.js 处理
   const tabId = sender.tab && sender.tab.id;
   if (msg.type === "whoami") { reply({ ok: true, data: { tab: tabId } }); return false; }
   if (msg.type === "focus-tab") {

@@ -20,7 +20,13 @@ function renderSource() {
   const specs = (P.variants || []).filter((v) => v.model_file !== undefined && v.opt2_zh);
   const seen = new Set();
   const specRows = specs.filter((v) => !seen.has(v.opt2_zh) && seen.add(v.opt2_zh)).map((v) => `<div class="small">规格 <b data-notr>${esc(v.opt2_zh)}</b>：${v.model_file ? `模型 <a href="/files/${encodeURIComponent(P.id)}/source_files/${encodeURIComponent(v.model_file)}" data-notr>${esc(v.model_file)}</a>` : esc(v.model_note || "用产品的 3D 模型")}${v.grams ? ` · ${v.grams} g` : ' · <span class="warn">克数待补</span>'}${v.hours ? ` · ${v.hours} h` : ' · <span class="warn">时长待补</span>'}</div>`).join("");
-  $("#ed-source").innerHTML = `<div class="card src-card">${P.draft ? `<p class="warn"><b>草稿·待完善</b>：这个产品是 3D选品工具推过来的。请在「变体」里填好颜色（会自动生成 SKU 和售价），核对类目属性后再导出上架。</p>${(P.variants || []).some((v) => !v.grams || !v.hours) ? '<p class="warn small">有规格还没有克数 / 打印时长：在「变体」里按模型估算或切片后补上，成本和售价才准。</p>' : ""}` : ""}
+  const lc = P.license_check;          // v2.50：从「商品 → 选品」采用的草稿：许可要人工核验，核验前不能导出 / 推送
+  const lic = !lc ? "" : lc.status === "pending"
+    ? `<div class="warnbox lic-box" data-lic-box><b>⚠ 许可待核验</b>：打开<a href="${esc(s.source_url || "#")}" target="_blank" rel="noopener">原站页面</a>看许可证，确认可以商用（CC BY 要署名、CC0、或另外买了商用授权）后点「核验通过」。核验前这个产品不能导出、不能推送到平台。
+        <div class="small">原站许可：<b data-notr>${esc(lc.name || "（没写）")}</b>${lc.auto ? ` · 系统初判：<span class="${lc.auto === "禁止商用" ? "bad" : ""}">${esc(lc.auto)}</span>` : ""}${lc.note ? ` <span class="muted">（${esc(lc.note)}）</span>` : ""}</div>
+        <div class="row gap" style="margin-top:6px"><button class="mini primary-lite" data-lic="ok">✔ 核验通过（可以商用）</button>${lc.auto === "禁止商用" ? '<button class="mini" data-lic="force">仍然核验通过（已买授权）</button>' : ""}</div></div>`
+    : `<div class="small ok">✔ 许可已核验可商用${lc.by ? `（<span data-notr>${esc(lc.by)}</span>）` : ""} <button class="mini" data-lic="undo">撤销</button></div>`;
+  $("#ed-source").innerHTML = `<div class="card src-card">${lic}${P.draft ? `<p class="warn"><b>草稿·待完善</b>：${s.source === "curate" ? "这个产品是在「选品」里采用的。" : "这个产品是 3D选品工具推过来的。"}请在「变体」里填好颜色（会自动生成 SKU 和售价），核对类目属性后再导出上架。</p>${(P.variants || []).some((v) => !v.grams || !v.hours) ? '<p class="warn small">有规格还没有克数 / 打印时长：在「变体」里按模型估算或切片后补上，成本和售价才准。</p>' : ""}` : ""}
     <div class="small">来源：<b data-notr>${esc(s.platform || s.source || "")}</b>${s.source_id ? ` <span class="muted" data-notr>#${esc(s.source_id)}</span>` : ""}${s.linked_manually ? ' <span class="muted">（手动建档，补传文件时对上）</span>' : ""}${s.author ? ` · 作者 <span data-notr>${esc(s.author)}</span>` : ""}
       ${s.source_url ? ` · <a href="${esc(s.source_url)}" target="_blank" rel="noopener">原站页面</a>` : ""}
       ${s.license_name ? `· 许可 <span data-notr>${esc(s.license_name)}</span>` : ""}${s.license_verified ? ' <span class="ok">✔ 已核验可商用</span>' : ""}
@@ -413,6 +419,15 @@ function addColorRows(zh) {
 }
 function randomColorName() { return Object.keys(COLORS).find((z) => COLORS[z].code === "RND") || ""; }
 function isRandomColor(zh) { const c = COLORS[String(zh || "").trim()]; return !!(c && c.code === "RND"); }
+
+$("#ed-source").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-lic]"); if (!b || !P) return;
+  await busy(b, async () => {
+    if (dirty) await saveProduct(true);
+    const r = await api(`/api/products/${P.id}/license`, { json: { verified: b.dataset.lic !== "undo", force: b.dataset.lic === "force" } });
+    P = r.product; dirty = false; renderSource(); runCheck();
+  });
+});
 
 // 选品工具整理好的商品文案（选品工具 2.2）+ 侵权提示
 function renderCuratorCopy() {

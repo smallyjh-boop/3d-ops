@@ -699,6 +699,8 @@
     "默认库存": "สต็อกเริ่มต้น",
     "店铺名称（可空）": "ชื่อร้าน (เว้นว่างได้)",
     "接口类型": "ประเภท API",
+    "接口类型（deepseek = DeepSeek；openai_compatible = 其他 OpenAI 兼容接口，例如通义、OpenAI，要填接口地址）": "ประเภท API (deepseek = DeepSeek; openai_compatible = API อื่นที่เข้ากันได้กับ OpenAI เช่น Qwen, OpenAI ต้องกรอกที่อยู่ API)",
+    "接口类型选了 DeepSeek：请在「模型名称」里填 DeepSeek 的模型名（DeepSeek 开放平台的模型列表里有）": "เลือก DeepSeek แล้ว: กรุณากรอกชื่อโมเดลของ DeepSeek ใน「ชื่อโมเดล」(ดูได้จากรายการโมเดลของ DeepSeek)",
     "模型名称": "ชื่อโมเดล",
     "接口密钥": "API Key",
     "接口地址（openai_compatible 用）": "URL ของ API (สำหรับ openai_compatible)",

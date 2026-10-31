@@ -1,0 +1,61 @@
+/* 选品（v2.50） */
+#tab-curate .cur-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
+#tab-curate .cur-grid2 > .card { margin: 0 0 12px }
+#tab-curate .cur-fbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px }
+#tab-curate .cur-fbar select, #tab-curate .cur-fbar input { width: auto }
+#tab-curate .cur-fbar input[type=search] { width: 200px }
+#tab-curate .cur-fbar label { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; margin: 0 }
+#tab-curate .cur-fbar label.chk input { margin: 0 }
+#tab-curate .cur-fbar .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden }
+#tab-curate .cur-fbar .seg button { border: 0; border-radius: 0; background: #fff; padding: 5px 12px; color: #4b5563 }
+#tab-curate .cur-fbar .seg button.on { background: var(--accent); color: #fff }
+.cur-sp { flex: 1 }
+.cur-wrap { overflow-x: auto; max-width: 100% }
+#tab-curate table.cur-tbl { width: 100%; min-width: 760px }
+#tab-curate .cur-tbl td { vertical-align: top }
+#tab-curate .cur-tbl tr.cur-ex { background: #fef2f2 }
+#tab-curate .cur-tbl tr.cur-click { cursor: pointer }
+#tab-curate .cur-tbl tr.cur-click:hover { background: #f8fafc }
+.cur-pic { display: flex; gap: 10px; align-items: flex-start; min-width: 240px }
+.cur-pic > div { min-width: 0 }
+.cur-pic a { font-weight: 600 }
+.cur-thumb { object-fit: cover; border-radius: 8px; border: 1px solid #e5e7eb; flex: none; background: #f3f4f6; display: inline-block }
+.cur-reason { max-width: 280px }
+.cur-sc { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 26px; border-radius: 13px; background: #e5e7eb; color: #374151; font-weight: 700; font-size: 13px; padding: 0 6px }
+.cur-sc.ok { background: #dcfce7; color: #166534 } .cur-sc.warn { background: #fef3c7; color: #92400e } .cur-sc.bad { background: #fee2e2; color: #991b1b }
+.cur-pill { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 11px; background: #f1f5f9; color: #374151; white-space: nowrap; line-height: 1.6 }
+.cur-pill.ok { background: #dcfce7; color: #166534 } .cur-pill.warn { background: #fef3c7; color: #92400e }
+.cur-pill.bad { background: #fee2e2; color: #991b1b } .cur-pill.info { background: #dbeafe; color: #1e40af }
+.warn-t { color: #b45309 }
+button.mini.ghost, button.ghost { background: transparent; border-color: transparent; color: #6b7280 }
+button.mini.ghost:hover, button.ghost:hover { color: #b91c1c; border-color: #fecaca }
+/* 详情弹窗 */
+.cur-det h3 { font-size: 18px }
+.cur-steps { display: flex; gap: 4px; flex-wrap: wrap; margin: 8px 0 10px }
+.cur-dgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
+.cur-dgrid > div > .card { margin: 0 0 12px }
+.cur-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px }
+.cur-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #4b5563; margin: 0 }
+.cur-lst { background: #f8fafc; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 8px; font-size: 13px }
+.cur-lst ul { margin: 4px 0 0 18px; padding: 0 }
+.cur-imgs { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px }
+.cur-img { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: #6b7280; margin: 0; cursor: pointer }
+.cur-img img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 2px solid transparent; background: #f3f4f6 }
+.cur-img.cover img { border-color: var(--accent) }
+.cur-img.bad img { opacity: .4 }
+.cur-img span { display: flex; align-items: center; gap: 4px }
+.cur-img input { width: auto; margin: 0 }
+.cur-vt input { width: 100%; min-width: 60px }
+.cur-qi { padding: 3px 0; font-size: 13px }
+.cur-actbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 4px; position: sticky; bottom: -1px; background: #fff }
+@media (max-width: 1100px) { .cur-dgrid, #tab-curate .cur-grid2 { grid-template-columns: 1fr } }
+@media (max-width: 700px) { .cur-form { grid-template-columns: 1fr } }
+/* 勾选框和标签一行；上传按钮做成和 mini 按钮一样 */
+#tab-curate label.chk, .cur-det label.chk { flex-direction: row; align-items: center; gap: 6px; margin: 6px 0 }
+#tab-curate .cur-fbar label { flex-direction: row; margin: 0 }
+#tab-curate input[type=checkbox], .cur-det input[type=checkbox] { width: auto; margin: 0 }
+.cur-det label.cur-up { display: inline-flex; flex-direction: row; padding: 1px 8px; font-size: 11px; border-radius: 9px; border: 1px solid #86efac;
+  color: #166534; background: #f0fdf4; margin: 0 0 0 4px; cursor: pointer }
+.cur-det .cur-up input { display: none }
+#tab-curate .cur-fbar select { max-width: 200px }
+#tab-curate .cur-tbl th:first-child, #tab-curate .cur-tbl td:first-child:has(input[type=checkbox]) { width: 28px }

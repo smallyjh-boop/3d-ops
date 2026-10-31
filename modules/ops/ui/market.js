@@ -241,6 +241,7 @@
   // ======================= 爆款雷达 =======================
   let RAD = null, RDET = null;
   const KST = () => ({ new: Z("新", "ใหม่"), watch: Z("观察", "เฝ้าดู"), want: Z("要做", "จะทำ"), skip: Z("不做", "ไม่ทำ"), done: Z("已做", "ทำแล้ว") });
+  const curOn = () => !!(window.MODKIT && MODKIT.enabled("curate"));       // v2.50 选品模块开着才有「去模型站找」
   const searchUrl = (p, k) => (p === "shopee" ? "https://shopee.co.th/search?keyword=" : "https://www.lazada.co.th/catalog/?q=") + encodeURIComponent(k);
   async function radarPage(box) {
     RAD = await api("/api/oa/radar");
@@ -267,7 +268,7 @@
           <td class="small mono" data-notr>${esc((r.products || []).join(", ")) || "—"}</td>
           <td><select data-r-st="${r.id}">${Object.entries(KST()).map(([k, l]) => `<option value="${k}" ${k === r.status ? "selected" : ""}>${l}</option>`).join("")}</select>
             <label class="small"><input type="checkbox" data-r-act="${r.id}" ${r.active ? "checked" : ""}> ${Z("巡逻", "ตระเวน")}</label></td>
-          <td class="nowrap"><button class="mini" data-r-det="${r.id}">${Z("详情", "รายละเอียด")}</button> <button class="mini" data-r-ai="${r.id}">${Z("AI 评估", "AI ประเมิน")}</button> <button class="mini" data-r-del="${r.id}">${Z("删", "ลบ")}</button></td></tr>`; }),
+          <td class="nowrap"><button class="mini" data-r-det="${r.id}">${Z("详情", "รายละเอียด")}</button> <button class="mini" data-r-ai="${r.id}">${Z("AI 评估", "AI ประเมิน")}</button> ${curOn() ? `<button class="mini" data-r-cur="${r.id}" title="${Z("在模型网站上按这个词建关注巡逻，新模型进「商品 → 选品」的候选池", "สร้างการตระเวนบนเว็บโมเดลด้วยคำนี้ โมเดลใหม่เข้าคลังผู้สมัครใน「สินค้า → คัดเลือกสินค้า」")}">${Z("去模型站找", "ไปหาในเว็บโมเดล")}</button> ` : ""}<button class="mini" data-r-del="${r.id}">${Z("删", "ลบ")}</button></td></tr>`; }),
         Z("还没有关键词：在上面加，或者用浏览器扩展在搜索结果页点「🔭 采集搜索结果」。", "ยังไม่มีคีย์เวิร์ด: เพิ่มด้านบน หรือกด「🔭 เก็บผลการค้นหา」ในหน้าค้นหาด้วยส่วนขยาย"))}
       <p class="small muted">${Z("机会分 = 需求（前 10 名日销、关键词搜索量）+ 竞争少（结果数、前 3 家占比）+ 能打印（AI）+ 利润（到手价中位 − 平台费 − ERP 成本）+ 小爆潜力（AI）；AI 判断有侵权风险（品牌 / 角色 / 外观设计）直接 0 分。权重在「设置 → 运营分析」。",
         "คะแนนโอกาส = ความต้องการ + การแข่งขันน้อย + พิมพ์ได้ (AI) + กำไร (ราคากลาง − ค่าธรรมเนียม − ต้นทุน ERP) + ศักยภาพ (AI) ถ้า AI เห็นว่าเสี่ยงละเมิดลิขสิทธิ์ = 0 คะแนน น้ำหนักตั้งที่「ตั้งค่า → วิเคราะห์การขาย」")}</p>
@@ -308,6 +309,12 @@
     if ((b = t("[data-r-report]"))) return busy(b, async () => { const r = await api("/api/oa/radar/report", { json: {} }); toast(r.text ? Z("日报发出去了", "ส่งรายงานแล้ว") : Z("现在没有够分的机会", "ตอนนี้ไม่มีโอกาสที่คะแนนถึง"), !r.text); });
     if (t("[data-r-detclose]")) { RDET = null; $("#or-det").innerHTML = ""; return; }
     if ((b = t("[data-r-det]"))) return radarDetail(+b.dataset.rDet);
+    // v2.50：高分关键词 → 选品模块的关注巡逻（每个模型网站一个关键词搜索），然后打开「商品 → 选品 → 关注巡逻」
+    if ((b = t("[data-r-cur]"))) return busy(b, async () => {
+      const r = await api("/api/cur/from-radar", { json: { kid: +b.dataset.rCur } });
+      toast(Z(`已建 ${r.added.length} 个关注（搜索「${r.term}」）`, `สร้างการติดตาม ${r.added.length} รายการ (ค้นหา「${r.term}」)`) + (r.existing ? Z(`，${r.existing} 个已经有了`, ` มีอยู่แล้ว ${r.existing}`) : ""));
+      goTab("cur_watch");
+    });
     if ((b = t("[data-r-ai]"))) return busy(b, async () => { await apiJob(`/api/oa/radar/keywords/${b.dataset.rAi}/ai`, { json: {} }); RDET = +b.dataset.rAi; show("ops_radar"); });
     if ((b = t("[data-r-del]"))) { if (!confirm(Z("删掉这个关键词和它的搜索记录？", "ลบคีย์เวิร์ดนี้และประวัติ?"))) return; await api(`/api/oa/radar/keywords/${b.dataset.rDel}`, { json: { delete: true } }); return show("ops_radar"); }
   }

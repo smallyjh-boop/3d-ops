@@ -13,6 +13,10 @@ const TH = {
   cs: "AI แชทลูกค้า (แผงมุมขวาล่างของหน้าแชท)", csauto: "เปิดหน้าแชทแล้วเปิด AI แชทลูกค้าทันที",
   cspatrol: "มีข้อความยังไม่อ่านและฉันไม่ได้ใช้งานอยู่ ให้สลับไปหาลูกค้าคนนั้นเอง", cssync: "ใส่คำตอบในช่องพิมพ์ของแพลตฟอร์มด้วย",
   cshelp: "เป็นการตั้งค่าเดียวกับสวิตช์ในแผงหน้าแชท แก้แล้วรีเฟรชหน้าแชทถึงจะมีผล โหมดของแต่ละหน้า (ปิด / กึ่งอัตโนมัติ / อัตโนมัติ) เลือกในแผง",
+  cur: "คัดเลือกสินค้า (เว็บโมเดล)", cursub: "คัดเลือกสินค้า (เว็บโมเดล)", curopen: "เปิดคัดเลือก",
+  curhelp: "ในหน้ารายการของ MakerWorld / Printables / Thingiverse แต่ละโมเดลจะมีคะแนนและปุ่ม「＋เก็บ」(= ใช้ใน ERP สร้างสินค้าฉบับร่างทันที) ส่วนขยายจะอ่านหน้ารายละเอียด ดาวน์โหลดไฟล์ด้วยการล็อกอินเว็บต้นทางในเบราว์เซอร์นี้ และตระเวนตามรายการติดตามตามจังหวะที่ ERP กำหนด ถ้าเจอแคปช่าหรือถูกจำกัดจะหยุดเว็บนั้นอัตโนมัติ ดูผลที่ ERP「สินค้า → คัดเลือกสินค้า」",
+  curpick: "แสดงคะแนนและปุ่ม「＋เก็บ」บนเว็บโมเดล", curauto: "เก็บรายละเอียด ดาวน์โหลดไฟล์ และตระเวนเบื้องหลังอัตโนมัติ",
+  curautohelp: "ถาม ERP ทุกนาทีว่ามีงานไหม เปิดแท็บเบื้องหลังทีละแท็บ อ่านเสร็จแล้วปิด ต้องเปิดคอมและ Chrome ไว้ ต้องล็อกอินเว็บต้นทางก่อนจึงจะดาวน์โหลดไฟล์ที่ต้องล็อกอินได้ ปิดแล้วจะไม่ทำอัตโนมัติ (คะแนนในหน้ารายการยังแสดง)",
 };
 const $ = (id) => document.getElementById(id);
 let LANG = "zh";
@@ -139,3 +143,21 @@ $("oa-run").onclick = async () => {
     }
   });
 };
+
+// ---------- 选品（v3.1）：状态一行 + 打开 ERP 的选品页；设置里两个开关 ----------
+chrome.storage.local.get({ curPicker: true, curAuto: true }, (d) => { $("cur_picker").checked = d.curPicker !== false; $("cur_auto").checked = d.curAuto !== false; });
+$("cur_picker").onchange = () => chrome.storage.local.set({ curPicker: $("cur_picker").checked });
+$("cur_auto").onchange = () => { chrome.storage.local.set({ curAuto: $("cur_auto").checked }); if ($("cur_auto").checked) send({ type: "cur-kick" }); };
+$("cur-open").onclick = () => send({ type: "open", path: "/#cur_cand" });
+(async function curStatus() {
+  const r = await send({ type: "cur-ping" });
+  const el = $("cur-st");
+  if (!r || !r.ok) { el.textContent = Z("没连上（先在上面填好连接设置）", "ยังไม่เชื่อมต่อ (กรอกการเชื่อมต่อด้านบนก่อน)"); return; }
+  const d = r.data || {};
+  const parts = [Z(`今日新品 ${d.new_today || 0}`, `ใหม่วันนี้ ${d.new_today || 0}`), Z(`待采集 ${d.queue || 0}`, `รอเก็บ ${d.queue || 0}`), Z(`待下载 ${d.files || 0}`, `รอดาวน์โหลด ${d.files || 0}`),
+    Z(`关注 ${d.watches || 0}`, `ติดตาม ${d.watches || 0}`)];
+  el.textContent = parts.join(" · ") + ((d.paused || []).length ? Z(" · 暂停：", " · หยุด: ") + d.paused.join(", ") : "");
+  el.className = (d.paused || []).length ? "bad" : "";
+  el.title = el.textContent;
+  if ((d.queue || d.files) && $("cur_auto").checked) send({ type: "cur-kick" });
+})();

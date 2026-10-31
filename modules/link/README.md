@@ -30,3 +30,4 @@ API 密钥管理和只读查询接口（/api/v1/orders、skus、cost-params、pr
 - （系统 v2.47.2）：店铺设置里 Lazada 多了「聊天应用授权」（/api/shops/<id>/auth-url、auth-code 带 app=im）。
 - （系统 v2.47.3）：Lazada 店铺可以另外填「数据应用」（财务 / 评价 / 退货 / 店铺指标 / 数据导出）和「广告应用」（Sponsored Solutions），各自单独授权；连接器按接口地址自动用对应应用签名（APP_SLOTS、app_view、_call 里分流），没填就用主应用。
 - 1.5（系统 v2.49.0）：「商品 → 运营改动」页面搬到「运营 → 商品表现 → 待确认的建议」（运营分析模块画页面，接口 /api/ops/changes、/api/v1/ops/… 和 ops_changes 表不变）；删掉 ui/opschg.js。
+- （系统 v2.50.0）：选品搬进 ERP（商品 → 选品，modules/curate），设置里旧的「3D选品工具对接」卡片默认收起（legacy）；/api/v1/catalog/* 接口和代码照旧。

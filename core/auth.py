@@ -307,7 +307,7 @@ def _api_guard(path):
     scope = k.get("scope") or "full"
     g.user = {"id": -1, "username": f"api:{k['name']}", "display_name": k["name"], "role": "api", "lang": "zh",
               "scope": scope}
-    if path.startswith(("/api/v1/cs/", "/api/v1/labels/", "/api/v1/ops/ext/")):
+    if path.startswith(("/api/v1/cs/", "/api/v1/labels/", "/api/v1/ops/ext/", "/api/v1/curate/ext/")):
         integrations.note_ext(k["name"], request.headers.get("X-Ext-Version", "").strip()[:12])
     if path.startswith("/api/v1/accel/") and scope not in ("worker", "full"):
         return jsonify({"ok": False, "error": "电脑加速要用「电脑加速」权限的密钥（scope = worker）"}), 403
@@ -317,7 +317,8 @@ def _api_guard(path):
             return jsonify({"ok": False, "error": "这个密钥只能给电脑加速用（/api/v1/accel/）"}), 403
     elif scope == "read":
         # 只读密钥：只能 GET，不能碰客服接口（里面有买家聊天内容），也不能调写回接口
-        if request.method not in ("GET", "HEAD") or path.startswith(("/api/v1/cs/", "/api/v1/ops/")):
+        # v2.50：选品扩展接口（/api/v1/curate/）只给员工的扩展密钥（完整权限），只读密钥连 GET 也不行
+        if request.method not in ("GET", "HEAD") or path.startswith(("/api/v1/cs/", "/api/v1/ops/", "/api/v1/curate/")):
             return jsonify({"ok": False, "error": "这个密钥是只读的，只能查询，不能修改或推送"}), 403
     elif scope == "ops":
         # 运营写回密钥（规范 v1.1 第 6 条）：只能调 /api/v1/ops/...（和 ping）
