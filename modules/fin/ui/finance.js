@@ -90,11 +90,14 @@
     return `<table class="grid fin-pl"><tbody>${lines.map((l) => `<tr class="lv${l.level}"><td>${esc(TH() ? l.th : l.zh)}${l.est ? ` <span class="warn small">${Z("估", "ประมาณ")}</span>` : ""}</td>
       <td class="num ${cls(l.amount)}">${m(l.amount)}</td><td class="muted small">${esc(TH() ? (l.note_th || "") : (l.note || ""))}</td></tr>`).join("")}</tbody></table>`;
   }
+  // 「平台 · 店铺」：平台代码换成名字，没写店铺的按界面语言
+  const shopLabel = (k) => { const [p, ...r] = String(k || "").split(" · "); const sh = r.join(" · "); return `${PLAT[p] || p}${sh ? " · " + (sh === "（没写店铺）" ? Z("（没写店铺）", "(ไม่ระบุร้าน)") : sh) : ""}`; };
   const DIMS = { platform: ["平台", "แพลตฟอร์ม"], shop: ["店铺", "ร้านค้า"], product: ["产品", "สินค้า"], sku: ["SKU", "SKU"], month: ["按月", "รายเดือน"] };
   function profitBars(rows, by) {
     const top = rows.slice().sort((a, b) => b.profit - a.profit);
     const show = top.length > 14 ? top.slice(0, 10).concat(top.slice(-4)) : top;
-    return UX.bars(show.map((r) => ({ label: by === "platform" ? (PLAT[r.key] || r.key) : (r.name && by !== "shop" && by !== "month" ? `${r.key} ${r.name}` : r.key),
+    return UX.bars(show.map((r) => ({ label: by === "platform" ? (PLAT[r.key] || r.key) : by === "shop" ? shopLabel(r.key) : (r.name && by !== "month" ? `${r.key} ${r.name}` : r.key),
+      raw: (by === "product" || by === "sku") && !/^（/.test(r.key),
       value: r.profit, text: `${m(r.profit)} · ${pct(r.margin)}`, tone: r.profit < 0 ? "bad" : r.margin != null && r.margin < 15 ? "warn" : "ok" })),
     { empty: Z("这段时间没有订单", "ไม่มีคำสั่งซื้อในช่วงนี้") });
   }
@@ -294,5 +297,5 @@
     }
   });
 
-  window.FIN = { show, reload, PLAT, m, mk, n0, pct, cls, Z, TH, q, period, exportBtn, head, meta: () => META, today };
+  window.FIN = { show, reload, PLAT, shopLabel, m, mk, n0, pct, cls, Z, TH, q, period, exportBtn, head, meta: () => META, today };
 })();

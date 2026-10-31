@@ -896,7 +896,7 @@
   function kbEdit(k, pending) {
     k = k || { q: "", a: "", a_zh: "", tags: "", active: 1 };
     const el = MODAL.open(`<div class="row between"><h3>${k.id ? Z("编辑常见问答", "แก้ไขคำถามที่พบบ่อย") : Z("添加常见问答", "เพิ่มคำถามที่พบบ่อย")}</h3><button class="mini" data-mclose>${Z("关闭", "ปิด")}</button></div>
-      <label>${Z("买家常问的问题（可以写几种问法；「中文 | ไทย」）", "คำถามของลูกค้า (เขียนได้หลายแบบ)")}<textarea id="kb-q" rows="3" data-notr>${esc(k.q)}</textarea></label>
+      <label><span data-i18n-ok>${Z("买家常问的问题（可以写几种问法；「中文 | ไทย」）", "คำถามของลูกค้า (เขียนได้หลายแบบ)")}</span><textarea id="kb-q" rows="3" data-notr>${esc(k.q)}</textarea></label>
       <label>${Z("标准回答（泰语，发给买家的；不要提生产 / 打印）", "คำตอบมาตรฐาน (ภาษาไทย ห้ามพูดเรื่องการผลิต / พิมพ์)")}<textarea id="kb-a" rows="4" data-notr>${esc(k.a)}</textarea></label>
       ${TH() ? `<input type="hidden" id="kb-azh" value="${esc(k.a_zh || "")}">` : `<label>中文意思（给自己看）<textarea id="kb-azh" rows="2" data-notr>${esc(k.a_zh || "")}</textarea></label>`}
       <label>${Z("标签（可空）", "แท็ก (ไม่ใส่ก็ได้)")}<input id="kb-tags" value="${esc(k.tags || "")}" data-notr></label>

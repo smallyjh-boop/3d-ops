@@ -67,12 +67,12 @@
   }
 
   async function renderGroup(box, top) {
-    const { m, n0, pct, PLAT, q } = window.FIN;
+    const { m, n0, pct, PLAT, q, shopLabel } = window.FIN;
     const by = GROUP;
     const r = await api(`/api/fin/breakdown?by=${by}&${q()}`);
     const t = r.total;
     const rows = r.rows || [];
-    const name = (x) => (by === "platform" ? (PLAT[x.key] || x.key) : x.key);
+    const name = (x) => (by === "platform" ? (PLAT[x.key] || x.key) : by === "shop" ? shopLabel(x.key) : x.key);
     const sorted = rows.slice().sort((a, b) => b.profit - a.profit);
     const chartRows = by === "day" ? null : (sorted.length > 14 ? sorted.slice(0, 10).concat(sorted.slice(-4)) : sorted);
     box.innerHTML = top +
@@ -85,7 +85,7 @@
       UX.card({ title: by === "day" ? Z("每天利润", "กำไรรายวัน") : Z("谁赚钱、谁亏钱", "อะไรได้กำไร อะไรขาดทุน"),
         help: Z("绿 = 利润率 15% 以上，黄 = 低于 15%，红 = 亏本。产品 / SKU 按商品金额比例分摊订单的扣费和成本。", "เขียว = อัตรากำไร ≥ 15% เหลือง = ต่ำกว่า 15% แดง = ขาดทุน"),
         body: by === "day" ? UX.columns(rows.map((x) => ({ label: x.key, value: x.profit, text: m(x.profit), tone: x.profit < 0 ? "bad" : "ok" })), { h: 100, from: rows.length ? rows[0].key : "", to: rows.length ? rows[rows.length - 1].key : "" })
-          : UX.bars(chartRows.map((x) => ({ label: by === "sku" && x.name ? `${x.key} ${x.name}` : name(x), value: x.profit, text: `${m(x.profit)} · ${pct(x.margin)}`,
+          : UX.bars(chartRows.map((x) => ({ label: by === "sku" && x.name ? `${x.key} ${x.name}` : name(x), raw: (by === "product" || by === "sku") && !/^（/.test(x.key), value: x.profit, text: `${m(x.profit)} · ${pct(x.margin)}`,
             tone: x.profit < 0 ? "bad" : x.margin != null && x.margin < 15 ? "warn" : "ok" })), { empty: Z("这段时间没有订单", "ไม่มีคำสั่งซื้อในช่วงนี้") }) }) +
       UX.card({ body: rows.length ? `<div class="fin-scroll"><table class="grid small"><thead><tr><th>${Z(GROUPS[by][0].replace("按", "").trim(), GROUPS[by][1])}</th>${by === "sku" ? `<th>${Z("名称", "ชื่อ")}</th>` : ""}
         <th class="num">${Z("订单", "คำสั่งซื้อ")}</th><th class="num">${Z("件数", "ชิ้น")}</th><th class="num">${Z("收入", "รายได้")}</th><th>${Z("占比", "สัดส่วน")}</th><th class="num">${Z("平台扣费", "ค่าธรรมเนียม")}</th>

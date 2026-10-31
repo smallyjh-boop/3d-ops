@@ -44,7 +44,7 @@
 <!-- 编辑产品 -->
 <section id="tab-edit" class="panel hidden">
   <div class="sticky-bar row between">
-    <div><button id="btn-ed-back" class="mini">← 返回产品库</button> <strong id="ed-title" data-notr>未选择产品</strong> <span id="ed-dirty" class="muted"></span></div>
+    <div><button id="btn-ed-back" class="mini">← 返回产品库</button> <strong id="ed-title" data-notr></strong> <span id="ed-dirty" class="muted"></span></div>
     <div class="row gap"><span id="ed-status"></span><button id="btn-ed-edit" class="primary">✏ 修改产品</button>
       <button id="btn-save" class="primary hidden">💾 保存</button><button id="btn-ed-cancel" class="hidden">取消</button></div>
   </div>
@@ -59,7 +59,7 @@
       <label>发货天数（下单后几天内发货，定制商品可以长一点）<input data-f="lead_days" type="number" min="0" placeholder="空 = 用设置里的默认"></label>
       <label>打包时怎么核对这个产品<select data-f="pack_check"><option value="">跟设置里的默认</option><option value="tap">点一下确认（看图和数量）</option><option value="scan">扫商品码 / 内部标签</option><option value="none">不用核对（扫到订单就行）</option></select></label>
       <label>产品尺寸<input data-f="size_text" placeholder="例：长10 × 宽8 × 高12 cm"></label>
-      <label>关键词（中文或泰文，逗号分隔）<input data-f="keywords" placeholder="手机支架, ที่วางมือถือ"></label>
+      <label>关键词（中文或泰文，逗号分隔）<input data-f="keywords" placeholder="手机支架, ที่วางมือถือ" data-i18n-ok></label>
       <label class="span2">用途 / 卖点 / 说明<textarea data-f="features_zh" rows="4" placeholder="给谁用、解决什么问题、优点、可定制内容等。写得越具体，AI 文案和类目匹配越准"></textarea></label>
     </div>
     <div class="form4" id="pkg-box">
@@ -282,7 +282,7 @@
       <div class="form2">
         <div>
           <label>搜索 Shopee 类目（中文、泰文、英文或类目ID都可以，回车搜索，点结果选择）
-            <input id="sp-search" autocomplete="off" placeholder="例如 排水管 / ท่อ / figurine / 101188"></label>
+            <input id="sp-search" autocomplete="off" placeholder="例如 排水管 / ท่อ / figurine / 101188" data-i18n-ok></label>
           <div id="sp-results" class="sp-results"></div>
           <div class="small" style="margin-top:6px">或者逐级选择：</div>
           <div id="sp-cascade" class="row gap wrap"></div>

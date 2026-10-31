@@ -22,7 +22,7 @@
     const rvHtml = rv ? `<div class="seo-ai"><div class="row between wrap gap"><div><b>🤖 ${Z("AI 评分", "คะแนนจาก AI")}</b> <span class="seo-score ${rv.score >= 80 ? "" : rv.score >= 60 ? "warn" : "bad"}">${rv.score ?? "—"}</span>
           <span class="small">${esc(TH() ? rv.summary_th || rv.summary_zh : rv.summary_zh)}</span></div><span class="small muted">${fmtTime(rv.at).slice(5, 16)}</span></div>
         ${(rv.items || []).map((x, i) => `<div class="seo-sug small"><span class="${LVC[x.level] || ""}">●</span> <b>${esc(x.label)}</b>：${esc(TH() ? x.problem_th || x.problem_zh : x.problem_zh)}
-          ${x.suggestion_zh ? `<div class="muted">→ ${esc(x.suggestion_zh)}</div>` : ""}
+          ${(TH() ? x.suggestion_th : x.suggestion_zh) ? `<div class="muted">→ ${esc(TH() ? x.suggestion_th : x.suggestion_zh)}</div>` : ""}
           ${x.new_value ? `<div class="seo-nv" data-notr>${esc(String(x.new_value).replace(/<[^>]+>/g, " ").slice(0, 300))}</div><button class="mini primary" data-seo-use="${i}">${Z("采用这条", "ใช้ข้อนี้")}</button>` : ""}</div>`).join("")}</div>` : "";
     box.innerHTML = `<div class="row between wrap gap">
         <div><b>${Z("搜索分", "คะแนนการค้นหา")}</b> <span class="seo-score ${LV[r.level]}">${r.score}</span>

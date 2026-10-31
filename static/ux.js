@@ -17,14 +17,14 @@
       </div>`).join("")}</div>`;
   }
 
-  /** 横向条形图：rows = [{label, value, text?, tone?}]，max 自动；opts.unit 显示单位 */
+  /** 横向条形图：rows = [{label, value, text?, tone?, raw?}]（raw = 标签是原始数据，例如产品名，不翻译），max 自动；opts.unit 显示单位 */
   function bars(rows, opts) {
     opts = opts || {};
     rows = (rows || []).filter((r) => r && r.value != null);
     if (!rows.length) return empty(opts.empty);
     const max = Math.max(...rows.map((r) => Math.abs(+r.value) || 0), 1e-9);
     return `<div class="ux-bars">${rows.map((r) => `<div class="ux-bar-row ${r.go ? "ux-go" : ""}" ${r.go ? `data-ux-go="${E(r.go)}"` : ""}>
-        <span class="ux-bar-l" title="${E(r.label)}">${E(r.label)}</span>
+        <span class="ux-bar-l" title="${E(r.label)}"${r.raw ? " data-notr" : ""}>${E(r.label)}</span>
         <span class="ux-bar-t"><i class="${TONES[r.tone || ""] || ""}" style="width:${Math.max(2, Math.round(100 * Math.abs(+r.value) / max))}%"></i></span>
         <span class="ux-bar-v">${E(r.text != null ? r.text : r.value)}${opts.unit ? E(opts.unit) : ""}</span></div>`).join("")}</div>`;
   }

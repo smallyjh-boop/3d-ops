@@ -105,7 +105,7 @@
     if (!rows.length) return `<p class="muted small">${Z("这段时间没有咨询", "ไม่มีการสอบถาม")}</p>`;
     return `<table class="grid small"><thead><tr><th>${Z("店铺", "ร้าน")}</th><th>${Z("咨询会话", "แชท")}</th><th>${Z("买家消息", "ข้อความลูกค้า")}</th><th>${Z("回复", "ตอบ")}</th>
       <th>${Z("新客户 / 老客户", "ลูกค้าใหม่ / เก่า")}</th><th>${Z("关联订单", "มีออเดอร์")}</th><th>${Z("新线索", "โอกาสขายใหม่")}</th><th>${Z("平均响应", "เวลาตอบเฉลี่ย")}</th><th>${Z("还没回复", "ยังไม่ตอบ")}</th></tr></thead><tbody>
-      ${rows.map((s) => `<tr><td data-notr><b>${esc(s.shop)}</b> <span class="muted">${esc(s.platforms.join("、"))}</span></td><td>${s.convs}</td><td>${s.buyer_msgs}</td><td>${s.sent}</td>
+      ${rows.map((s) => `<tr><td data-notr><b>${esc(s.shop === "（未填店铺）" ? Z("（未填店铺）", "(ไม่ระบุร้าน)") : s.shop)}</b> <span class="muted">${esc(s.platforms.join("、"))}</span></td><td>${s.convs}</td><td>${s.buyer_msgs}</td><td>${s.sent}</td>
         <td>${s.new_customers} / ${s.returning}</td><td>${s.with_order}</td><td>${s.leads}</td><td>${mins(s.avg_reply_min)}</td><td class="${s.unanswered ? "bad" : ""}">${s.unanswered}</td></tr>`).join("")}</tbody></table>`;
   }
   async function loadRep() {

@@ -351,7 +351,10 @@ function swatch(name, cls = "") {
 }
 function colorLabel(zh) {
   const c = COLORS[zh] || {};
-  return (window.I18N && window.I18N.lang === "th" && c.th) ? c.th : zh;
+  if (!(window.I18N && window.I18N.lang === "th")) return zh;
+  if (c.th) return c.th;
+  const t = I18N.t(zh);              // 颜色表里没有的常用颜色名（i18n.js 里有泰文，例如 荧光绿）
+  return /[\u3400-\u9fff]/.test(t) ? zh : t;
 }
 function renderColorChips() {
   const used = new Set(colorList());
