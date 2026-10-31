@@ -26,3 +26,4 @@
 - 1.4（系统 v2.42.0）：直接推送到 Lazada（lazada_push.py：图片搬到 Lazada、表格字段代码 → 接口属性按 id 对、/product/create 或 /product/update、推完状态「平台审核中」并锁 SKU）；库存待同步「推到 Lazada」和定时自动推（lazada_stock_sync_min）。测试 tests/t_lzpush2412.py。
 - 1.5（系统 v2.43.0）：「导出上架表格」页改成上架工作台（平台切换、流程条、分组栏、分页、底部操作条、批次 / 库存同步分页）；缺什么原地展开修（workbench.py：/api/listing/issues、/api/listing/fix、/api/listing/ai-fill）；推送走后台任务（?async=1）；Lazada 审核结果自动同步（lazada_push.sync_status，每 30 分钟，/api/listing/lazada/status-sync）。测试 tests/t_lw243.py。
 - 1.6（系统 v2.43.1）：推送按 Lazada 官方文档改格式（值用字符串、variation1/2、saleProp、hasImage 规则、标准 color_family 或自定义变体、ASCII JSON）；图片直接传本地文件（/image/upload，不用图床）；记下最后一次推送内容（/api/listing/lazada/last/<产品>）；工作台「上传图床」修复按钮。测试 tests/t_lzpush2412.py。
+- 1.7（系统 v2.43.2）：属性 / 变体选项发英文选项名（_opt_out：en_name），按选项 id 或泰文 / 英文名对；选项 id 是 0 时按名字对。

@@ -660,6 +660,10 @@ AI 用哪家：文案、关键词、类目属性、打印建议都用设置页�
      - 每个财务页都可以「导出 Excel（给会计）」：损益表、按平台 / 店铺 / 产品 / SKU / 日、收支明细、现金流。
    · 对外财务接口（财务密钥，只读）：/api/v1/finance/pl、breakdown、cashflow、expenses、tax（对接规范 v2.1 第 11.1 条）。
 
+   v2.43.2：推送到 Lazada 的属性值改发英文选项名
+   · 推送报「C011: Attribute value ... not included in the dropdown list（ไม่）」：类目属性的选项（是 / 否、材质、颜色、Hazmat……）
+     以前发的是泰文选项名，Lazada 校验只认英文选项名。现在按选项编号或泰文 / 英文名对上后，一律发英文选项名（ไม่ → No、สีดำ → Black）。
+
    v2.43.1：推送到 Lazada 按官方文档修正；图床上传修好
    · 推送到 Lazada
      - 第一次推送报「1001 The parameters are not in JSON format」：按 Lazada 官方文档（Create a product、变体说明）改了发送格式——

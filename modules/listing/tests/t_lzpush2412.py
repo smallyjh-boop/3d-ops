@@ -31,7 +31,7 @@ for f in cat["fields"]:
         aid = f["key"].split("p-", 1)[1]
         attrs.append({"id": int(aid), "name": f"attr_{aid}", "attribute_type": "sku" if f["key"].startswith("saleProp") else "normal",
                       "input_type": "multiSelect" if f.get("multi") else "singleSelect",
-                      "options": [{"id": int(i), "name": "TH:" + o} for o, i in zip(f["options"], f["option_ids"])]})
+                      "options": [{"id": int(i), "name": "TH:" + o, "en_name": f"EN{i} "} for o, i in zip(f["options"], f["option_ids"])]})
 calls = []
 
 
@@ -64,7 +64,9 @@ ok(create["Attributes"]["name"] == p["copy"]["title_th"] and create["Attributes"
 pa = {k: a.get("value") for k, a in p["attributes"].items()}
 sel = [(k, v) for k, v in pa.items() if k.startswith("catProperty.p-") and isinstance(v, str)
        and v in next((f for f in cat["fields"] if f["key"] == k), {}).get("options", [])]
-ok(all(create["Attributes"].get("attr_" + k.split("p-")[1]) == "TH:" + v for k, v in sel), f"option by id {sel[:2]} {create['Attributes']}")
+# v2.43.2：按选项 id 对上后发英文选项名（Lazada 校验认 en_name，发泰文被拒）
+oid_of = lambda k, v: next(f for f in cat["fields"] if f["key"] == k)["option_ids"][next(f for f in cat["fields"] if f["key"] == k)["options"].index(v)]
+ok(sel and all(create["Attributes"].get("attr_" + k.split("p-")[1]) == f"EN{oid_of(k, v)}" for k, v in sel), f"option by id → en_name {sel[:2]} {create['Attributes']}")
 skus = create["Skus"]["Sku"]
 ok([s["SellerSku"] for s in skus] == [v["sku"] for v in p["variants"]] and all(float(s["price"]) > 0 and "quantity" in s and s["package_length"] for s in skus),
    f"skus {skus[:1]}")
@@ -118,5 +120,9 @@ ok(not [x for x in stockcalc.pending("lazada") if x["product_id"] == PID], "noth
 # 复制产品：不带 Lazada 编号
 d = C.post(f"/api/products/{PID}/duplicate").get_json()
 ok(not store.load(d["id"]).get("lazada_api"), "duplicate drops lazada_api")
+# 选项 id 是 0（接口有时不给真 id）：按泰文名对上，也发英文名
+from modules.listing import lazada_push as LP2
+a_ = {"name": "zal", "input_type": "singleSelect", "options": [{"id": "0", "name": "ใช่", "en_name": "Yes"}, {"id": "0", "name": "ไม่", "en_name": "No "}]}
+ok(LP2._value(None, "ไม่", a_) == "No" and LP2._value(None, "yes", a_) == "Yes" and LP2._value(None, "อื่น", a_) == "อื่น", "match by Thai / English name")
 print("ERRORS", E_)
 sys.exit(1 if E_ else 0)

@@ -57,21 +57,31 @@ def _num(v):
         return None
 
 
+def _opt_out(o):
+    """选项要发的值：Lazada 校验认英文选项名（en_name），没有才用 name（v2.43.2：发泰文「ไม่」被拒）。"""
+    return (str(o.get("en_name") or "").strip() or str(o.get("name") or "").strip())
+
+
 def _value(field, val, attr):
-    """表格里的值（选项文字）→ 接口要的值：按选项 id 对，再按名字对，都对不上原样发。"""
+    """表格里的值（选项文字）→ 接口要的值：按选项 id 对，再按名字（泰文 / 英文）对，对上了发英文选项名；都对不上原样发。"""
     if val in (None, ""):
         return None
     opts = attr.get("options") or []
     if not opts or not isinstance(val, str):
         return val
-    by_id = {str(o.get("id")): o.get("name") for o in opts}
-    by_name = {str(o.get("name") or "").strip().lower(): o.get("name") for o in opts}
+    by_id = {str(o.get("id")): o for o in opts if str(o.get("id") or "") not in ("", "0")}
+    by_name = {}
+    for o in opts:
+        for k in (o.get("name"), o.get("en_name")):
+            if str(k or "").strip():
+                by_name.setdefault(str(k).strip().lower(), o)
     out = []
-    for part in ([x.strip() for x in val.split(",")] if attr.get("input_type") == "multiSelect" else [val.strip()]):
+    for part in ([x.strip() for x in val.split(",")] if attr.get("input_type") in ("multiSelect", "multiEnumInput") else [val.strip()]):
         oid = None
         if field and field.get("option_ids") and part in field.get("options", []):
             oid = field["option_ids"][field["options"].index(part)]
-        out.append(by_id.get(str(oid)) or by_name.get(part.lower()) or part)
+        o = by_id.get(str(oid)) or by_name.get(part.lower())
+        out.append(_opt_out(o) if o else part)
     return ",".join(out)
 
 
