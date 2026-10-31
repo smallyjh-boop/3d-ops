@@ -99,12 +99,13 @@ def _own_breakdown(rows, by):
     return sorted(out, key=lambda x: -x["revenue"])
 
 
-def breakdowns(rows):
-    """按平台、按 SKU（30 天）。财务模块开着就用它的 breakdown（同一个口径，只是不再自己算一遍）。"""
+def breakdowns(rows, start=None, end=None, filtered=False):
+    """按平台、按 SKU（默认 30 天；v2.49 可以给 start / end 日期，end 不含）。财务模块开着、没按平台 / 店铺筛选时
+    用它的 breakdown（同一个口径，只是不再自己算一遍）；筛选了就自己按同一个利润函数算（rows 已经筛好）。"""
     from core import modules
-    fin = modules.public("fin")
+    fin = None if filtered else modules.public("fin")
     if fin:
-        s, e = dt.date.today() - dt.timedelta(days=29), dt.date.today() + dt.timedelta(days=1)
+        s, e = start or dt.date.today() - dt.timedelta(days=29), end or dt.date.today() + dt.timedelta(days=1)
         try:
             return fin.breakdown(s, e, "platform")["rows"], fin.breakdown(s, e, "sku")["rows"], "fin"
         except Exception:  # noqa: BLE001  财务模块出错：自己算（同一个利润函数）
@@ -291,13 +292,92 @@ def materials_low():
         return []
 
 
-def dashboard():
+RANGES = ("today", "7", "30", "month", "90", "custom")
+
+
+def period(args=None):
+    """v2.49 页面顶部的时间筛选：today / 7 / 30 / month（本月）/ 90 / custom（from、to：YYYY-MM-DD）。
+    返回 (开始日期, 结束日期)，两头都含，结束不晚于今天，最长 366 天。"""
+    args = args or {}
+    today = dt.date.today()
+    rng = str(args.get("range") or "30")
+    s = e = today
+    if rng == "today":
+        pass
+    elif rng == "month":
+        s = today.replace(day=1)
+    elif rng == "custom":
+        try:
+            s = dt.date.fromisoformat(str(args.get("from") or "")[:10])
+            e = dt.date.fromisoformat(str(args.get("to") or "")[:10]) if args.get("to") else today
+        except ValueError:
+            s = today - dt.timedelta(days=29)
+    else:
+        try:
+            n = max(1, min(366, int(rng)))
+        except ValueError:
+            n = 30
+        s = today - dt.timedelta(days=n - 1)
+    e = min(e, today)
+    s = min(s, e)
+    s = max(s, e - dt.timedelta(days=365))
+    return s, e
+
+
+def _ts(d):
+    return dt.datetime.combine(d, dt.time()).timestamp()
+
+
+def daily_range(rows, s, e):
+    """s ~ e（含）每天的订单数、销售额、利润。"""
+    out, d = {}, s
+    while d <= e:
+        k = d.isoformat()
+        out[k] = {"day": k, "orders": 0, "revenue": 0.0, "profit": 0.0}
+        d += dt.timedelta(days=1)
+    for o, _i, p in rows:
+        x = out.get(day_of(o["order_time"] or 0))
+        if x:
+            x["orders"] += 1
+            x["revenue"] += p["revenue"]
+            x["profit"] += p["profit"]
+    return [{**v, "revenue": round(v["revenue"], 2), "profit": round(v["profit"], 2)} for v in out.values()]
+
+
+def filters():
+    """筛选条的选项：有订单的平台、店铺（近 180 天）。"""
+    c = db.conn()
+    rows = c.execute("SELECT COALESCE(platform,'') p, COALESCE(shop,'') s, COUNT(*) n FROM orders WHERE order_time>=? "
+                     "GROUP BY 1, 2 ORDER BY n DESC", (day_start(179),)).fetchall()
+    plats, shops_ = [], []
+    for r in rows:
+        if r["p"] and r["p"] not in plats:
+            plats.append(r["p"])
+        if r["s"] and not any(x["shop"] == r["s"] and x["platform"] == r["p"] for x in shops_):
+            shops_.append({"platform": r["p"], "shop": r["s"]})
+    return {"platforms": plats, "shops": shops_[:40]}
+
+
+def dashboard(args=None):
+    """运营看板 / 经营概况（v2.49：args 里可以给 range / from / to / platform / shop，见 period()）。
+    summary（今天 / 昨天 / 7 天 / 30 天）照旧；kpi / kpi_prev / daily 是选的时间段（daily 至少 7 天，画走势用）。"""
+    args = args or {}
     cfg = load_config()
-    rows = profits(day_start(29), cfg=cfg)
-    plats, skus, src = breakdowns(rows)
+    s, e = period(args)
+    days = (e - s).days + 1
+    plat, shop = str(args.get("platform") or ""), str(args.get("shop") or "")
+    since, until = _ts(s), _ts(e + dt.timedelta(days=1))
+    prev_since = since - days * 86400
+    chart_s = min(s, e - dt.timedelta(days=6))
+    rows = profits(min(prev_since, day_start(29), _ts(chart_s)), cfg=cfg)
+    filtered = bool(plat or shop)
+    if filtered:
+        rows = [r for r in rows if (not plat or (r[0]["platform"] or "") == plat) and (not shop or (r[0]["shop"] or "") == shop)]
+    in_period = [r for r in rows if since <= (r[0]["order_time"] or 0) < until]
+    plats, skus, src = breakdowns(in_period, s, e + dt.timedelta(days=1), filtered)
     imgs = {r["sku"]: r["product_id"] for r in price_rows(cfg)}
-    for s in skus:
-        s["product_id"] = imgs.get(str(s.get("key") or "").upper())
+    for x in skus:
+        x["product_id"] = imgs.get(str(x.get("key") or "").upper())
     summ = summary(rows)
     af = aftersales(30)
     summ["d30"]["aftersales"] = af["loss"]
@@ -307,10 +387,20 @@ def dashboard():
         warn_h = float(cfg.get("oa_ship_warn_hours") or 12)
     except (TypeError, ValueError):
         warn_h = 12
-    return {"summary": summ, "daily": daily(rows), "platforms": plats, "skus": sorted(skus, key=lambda x: -x["profit"])[:20],
-            "breakdown_source": src, "fin_net": fin_net_30d(), "loss_orders": loss_orders(rows), "shipping": shipping(warn_h),
-            "cod": cod_stats(30), "aftersales": af, "pricing": pricing_issues(cfg)[:50], "health": data_health(rows, cfg),
-            "production": production(), "materials": materials_low(), "lazada": lazada.summary(),
+    lz = lazada.summary(max(1, (dt.date.today() - s).days + 1))
+    lz["performance"] = lazada.performance()
+    lz["status"] = lazada.status()
+    lz["reviews_recent"] = lazada.reviews_list(max(1, (dt.date.today() - s).days + 1), limit=5)
+    lz["reverse_recent"] = lazada.reverse_list(max(1, (dt.date.today() - s).days + 1), limit=5)
+    period_af = aftersales(max(1, (dt.date.today() - s).days + 1))
+    return {"period": {"from": s.isoformat(), "to": e.isoformat(), "days": days, "platform": plat, "shop": shop},
+            "kpi": _sum(rows, since, until), "kpi_prev": _sum(rows, prev_since, since),
+            "daily": daily_range(rows, chart_s, e), "filters": filters(),
+            "summary": summ, "platforms": plats, "skus": sorted(skus, key=lambda x: -x["profit"])[:20],
+            "breakdown_source": src, "fin_net": fin_net_30d(), "loss_orders": loss_orders(in_period), "shipping": shipping(warn_h),
+            "cod": cod_stats(30), "aftersales": af, "aftersales_period": period_af, "pricing": pricing_issues(cfg)[:50],
+            "health": data_health([r for r in rows if (r[0]["order_time"] or 0) >= day_start(29)], cfg),
+            "production": production(), "materials": materials_low(), "lazada": lz,
             "fee_rate_setting": cfg.get("platform_fee_rate"), "market": market_summary(cfg)}
 
 

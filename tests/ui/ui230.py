@@ -19,7 +19,7 @@ async def main():
         print(" v230 boot:", top)
         if not all(top): ERR.append("v230 boot js")
         PAGES = [("cs","#cs-items"),("csrec","#rec-kind"),("csrep",None),("cskb",None),("fin_overview","#fin-ov"),("fin_book","#fin-bk"),
-                 ("purchase","#tab-purchase"),("po_suggest","#tab-purchase"),("po_suppliers","#tab-purchase"),("opschg","#tab-opschg")]
+                 ("purchase","#tab-purchase"),("po_suggest","#tab-purchase"),("po_suppliers","#tab-purchase"),("opschg","#tab-ops_goods")]
         for tab, sel in PAGES:
             await pg.evaluate(f"goTab('{tab}')"); await pg.wait_for_timeout(1500)
             panel = await pg.evaluate(f"(()=>{{const t='{tab}';const id=(typeof PANEL_OF!=='undefined'&&PANEL_OF[t])||t;const el=document.querySelector('#tab-'+id);return el?[!el.classList.contains('hidden'),el.dataset.ready||'',el.innerText.length]:null}})()")

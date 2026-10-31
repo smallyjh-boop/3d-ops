@@ -33,3 +33,28 @@
 .oa-tasks label { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; margin: 0; font-weight: normal }
 .oa-tasks li.warn { color: inherit } .oa-tasks li.warn .small { color: #b45309; font-weight: 600 }
 #ops-radar label.small { display: inline-flex; align-items: center; gap: 2px; margin: 2px 0 0 }
+/* v2.49 运营大菜单：4 个页面（hub.js）、图形化的经营概况 / 商品表现 */
+.ops-sub .ux-kpis + .ux-kpis { margin-top: -4px }
+.oa-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; margin-bottom: 14px }
+.oa-grid2 > .card { margin-bottom: 0; min-width: 0 }
+@media (max-width: 1000px) { .oa-grid2 { grid-template-columns: 1fr } }
+.oa-li { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px }
+.oa-li:last-child { border-bottom: 0 }
+.oa-li-t { flex: 1; min-width: 0; display: flex; flex-direction: column }
+.oa-li-t > * { overflow: hidden; text-overflow: ellipsis }
+.oa-li .mini { flex: none }
+.oa-stage { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #f1f5f9; color: #475569; white-space: nowrap }
+.oa-stage.ux-ok { background: var(--ux-ok-bg); color: var(--ux-ok) } .oa-stage.ux-warn { background: var(--ux-warn-bg); color: var(--ux-warn) }
+.oa-stage.ux-bad { background: var(--ux-bad-bg); color: var(--ux-bad) } .oa-stage.ux-info { background: var(--ux-info-bg); color: var(--ux-info) }
+.oa-det > summary { cursor: pointer; display: flex; gap: 8px; align-items: center }
+.oa-det[open] > summary { margin-bottom: 10px }
+.oa-fhide { display: none !important }
+#ops-dash .ux-col i.ux-info { background: #cbd5e1 }
+.ux-meter.ux-meter-h { padding: 0; font-size: 11px }
+.oa-sugg { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px }
+.oa-sg { margin: 0; padding: 12px }
+.oa-sg-h { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px }
+.oa-diff { font-size: 13px; margin: 2px 0 } .oa-diff .oc-old { color: #9ca3af; text-decoration: line-through } .oa-diff .oc-new { color: var(--ux-ok); font-weight: 600 }
+#ops-life table.grid td { vertical-align: middle }
+[data-p360] { cursor: pointer }
+.oa-grid2 .ux-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)) }

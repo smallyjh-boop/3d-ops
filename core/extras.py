@@ -682,9 +682,31 @@ def dashboard(owner=False):
            "fails_today": fails_today, "alerts": alerts, "aftersales_open": as_open,
            "aftersales_overdue": asc["overdue"] + asc["due_soon"], "review": review, "urgent": urgent,
            "material_alerts": mat_alerts[:12]}
+    # v2.49 工作台按角色：上架客服看「待上架」「待确认的建议」
+    try:
+        from . import search
+        prods = search._products()
+        out["to_list"] = sum(1 for p in prods if p["active"] and not p["draft"] and not p.get("exported"))
+        out["drafts"] = sum(1 for p in prods if p["draft"])
+    except Exception:  # noqa: BLE001
+        out["to_list"] = out["drafts"] = None
+    from . import modules
+    link = modules.public("link")
+    try:
+        out["sugg_pending"] = (link.opsapi.counts().get("pending") or 0) if link else None
+    except Exception:  # noqa: BLE001
+        out["sugg_pending"] = None
     if owner:
         rep = finance.report(1)
         out["today"] = {"revenue": rep["total"]["revenue"], "profit": rep["total"]["profit"], "orders": rep["total"]["orders"]}
         rep7 = finance.report(7)
         out["week"] = {"revenue": rep7["total"]["revenue"], "profit": rep7["total"]["profit"], "orders": rep7["total"]["orders"]}
+        # v2.49：最近 7 天每天（工作台数字卡片下面的走势小图；今天 = 最后一个）
+        byday = {r["day"]: r for r in rep7["days"]}
+        out["trend"] = []
+        for i in range(6, -1, -1):
+            k = (dt.date.today() - dt.timedelta(days=i)).isoformat()
+            r = byday.get(k) or {}
+            out["trend"].append({"day": k, "orders": r.get("orders", 0), "revenue": round(r.get("revenue", 0), 2), "profit": round(r.get("profit", 0), 2)})
+        out["today_cal"] = out["trend"][-1]
     return out

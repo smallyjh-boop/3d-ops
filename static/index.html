@@ -6,6 +6,7 @@
 <title>3D 运营管理系统</title>
 <link rel="stylesheet" href="/fonts/thai.css">
 <link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/shell.css">
 </head>
 <body>
 <header class="top">
@@ -15,6 +16,7 @@
     <button class="mod" data-mod="goods">商品</button>
     <button class="mod" data-mod="orders">订单</button>
     <button class="mod" data-mod="cs">客服</button>
+    <button class="mod" data-mod="ops" data-notr data-zh="运营" data-th="การตลาด">运营</button>
     <button class="mod" data-mod="prod">生产</button>
     <button class="mod" data-mod="inv">库存</button>
     <button class="mod" data-mod="pur">采购</button>
@@ -22,6 +24,9 @@
     <button class="mod" data-mod="sys">系统</button>
   </nav>
   <span id="me-box" class="me-box small"></span>
+  <!-- v2.49：全局搜索（Ctrl+K）、待办 🔔（static/shell.js） -->
+  <button id="gs-btn" class="top-ic" title="搜索 订单 / 快递单号 / SKU / 产品 / 买家 / 客服会话（Ctrl+K）">🔍</button>
+  <button id="bell-btn" class="top-ic bell-btn" title="待办">🔔 <b id="bell-n" class="hidden">0</b></button>
   <button id="task-btn" class="task-btn" title="任务中心">⏱ <span>任务</span> <b id="task-n" class="hidden">0</b></button>
   <div id="task-panel" class="task-panel hidden"></div>
   <select id="lang-select" class="lang" data-notr>
@@ -184,6 +189,7 @@
 <script src="/static/datepick.js"></script>
 <script src="/static/rte.js"></script>
 <script src="/static/ux.js"></script>
+<script src="/static/shell.js"></script>
 <!--MODULE_SCRIPTS-->
 <script src="/static/home.js"></script>
 <script src="/static/system.js"></script>

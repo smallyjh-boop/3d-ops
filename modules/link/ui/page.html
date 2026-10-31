@@ -1,11 +1,1 @@
-<!-- 对接模块的页面（v2.30 从 index.html 搬过来）：商品 → 运营改动 -->
-<section id="tab-opschg" class="panel hidden">
-  <div class="row between"><h2>运营改动（运营分析系统写回）</h2><button id="oc-reload">刷新</button></div>
-  <p class="muted small">运营分析系统通过接口改的泰文标题、属性、售价、上下架都记在这里：改前 → 改后、原因。可以一键撤回。
-    硬性限制：售价不能低于最低价；每个 SKU 每天最多改 1 次价；只能下架不能删除。改过的产品在「导出上架表格」里显示「有修改待同步」，重新导出上传到平台才会生效。
-    设置 → AI 与对接「运营分析系统写回」可以切换为「只做建议，人工确认后生效」。</p>
-  <div id="oc-mode" class="small"></div>
-  <div class="row gap wrap"><label class="small">状态<select id="oc-status"><option value="">全部</option><option value="pending">待确认</option><option value="applied">已生效</option><option value="reverted">已撤回</option><option value="rejected">已拒绝</option></select></label>
-    <input id="oc-q" placeholder="产品编号 / SKU" style="width:180px" data-notr></div>
-  <table class="grid small" id="oc-table"><thead><tr><th>时间</th><th>产品 / SKU</th><th>改了什么（改前 → 改后）</th><th>原因</th><th>来源</th><th>状态</th><th></th></tr></thead><tbody></tbody></table>
-</section>
+<!-- 对接模块的页面：v2.49 起「运营改动」搬到「运营 → 商品表现 → 待确认的建议」（运营分析模块），这里没有页面了；设置卡片在 settings.html -->

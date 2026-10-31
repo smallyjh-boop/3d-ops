@@ -126,7 +126,7 @@ def flush(cfg=None):
         return 0
     text = "【3D 运营管理系统】\n" + "\n".join(r["text"] for r in pending[:30])
     if len(pending) > 30:
-        text += f"\n……还有 {len(pending) - 30} 条，打开「今日待办」查看"
+        text += f"\n……还有 {len(pending) - 30} 条，打开系统右上角 🔔 待办查看"
     ok, e = send(text, cfg)
     now = time.time()
     c.executemany("UPDATE oa_alerts SET sent=?, send_error=?, sent_at=? WHERE key=?",

@@ -142,7 +142,9 @@ ok(g["comp_count"] == 1 and abs(g["my_daily"] - 0.2) < 0.01 and g["comp_daily_to
 ok(any(x["id"] == C2 for x in L["radar"]) and not any(x["id"] == CID for x in L["radar"]), "selection radar = unlinked")
 LS = CL.get("/api/oa/comp").get_json()
 ok(LS["ok"] and LS["rows"] and not any(k for x in LS["rows"] for k in x if "cost" in k or "profit" in k), "listing staff sees competitors without cost / profit (v2.48.0)")
-ok(CL.post(f"/api/oa/comp/{C2}/ai-cost").status_code == 403 and CL.get("/api/oa/traffic").status_code == 403, "AI cost and traffic stay owner-only")
+ok(CL.post(f"/api/oa/comp/{C2}/ai-cost").status_code == 403, "AI cost stays owner-only")
+TR = CL.get("/api/oa/traffic").get_json()       # v2.49：流量并进「商品表现」，上架客服也能看（没有销售额）
+ok(TR["ok"] and not any("revenue" in k for x in TR["rows"] for k in x), "listing staff sees traffic without revenue")
 r = C.post(f"/api/oa/comp/{C2}/ai-cost").get_json()
 ok(r["ok"] and r["grams"] == 40, "ai cost endpoint")
 
@@ -321,7 +323,7 @@ ok(radar.daily_report(load_config()) is None, "only once a day")
 for f in ("market.js", "plan.js", "page.css"):
     ok(C.get(f"/m/ops/{f}").status_code == 200, f"ui {f}")
 html = C.get("/m/ops/page.html").get_data(as_text=True)
-ok(all(f'id="tab-{t_}"' in html for t_ in ("ops_plans", "ops_cal", "ops_traffic", "ops_comp", "ops_radar", "ops_shops")), "page sections")
+ok(all(f'id="ops-{b}"' in html for b in ("plans", "cal", "comp", "radar", "shops")) and 'id="tab-ops_market"' in html and 'id="tab-ops_plan"' in html, "page sections")
 th = json.load(open(os.path.join(APP, "modules", "ops", "i18n", "th.json"), encoding="utf-8"))
 ok(all(k in th for k in ("竞品", "爆款雷达", "竞店", "营销日历", "流量数据", "爆款 / 上量计划")), "Thai menu names")
 sch = next(m for m in C.get("/api/settings/schema").get_json()["modules"] if m["id"] == "ops")

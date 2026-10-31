@@ -13,6 +13,7 @@
   th      (泰文标题, 泰文说明)，不给就用中文（前台再按翻译表翻）
 
 对外：register(source, fn)  collect(role=None, include_done=False)  set_state(key, state, user)  sources()
+      counts(role)：右上角 🔔 的数字（v2.49，每页每分钟问一次：按角色缓存 45 秒，点了完成 / 忽略马上清掉）
 """
 import threading
 import time
@@ -115,6 +116,27 @@ def collect(role=None, include_done=False):
     return {"items": items, "groups": [{"zh": g, "th": GROUP_TH.get(g, g)} for g in groups], "hidden": hidden, "errors": errors}
 
 
+_cache = {}            # 角色 → (时间, 结果)
+CACHE_SEC = 45
+
+
+def counts(role=None):
+    """🔔 用：{n 未处理条数, bad 紧急条数, warn, by_source}。同一个角色 45 秒内只真正算一次。"""
+    key = (db.DB_PATH, role or "owner")
+    hit = _cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_SEC:
+        return hit[1]
+    d = collect(role)
+    items = d["items"]
+    by = {}
+    for i in items:
+        by[i["source"]] = by.get(i["source"], 0) + 1
+    out = {"n": len(items), "bad": sum(1 for i in items if i["level"] == "bad"), "warn": sum(1 for i in items if i["level"] == "warn"),
+           "by_source": by}
+    _cache[key] = (time.time(), out)
+    return out
+
+
 def states():
     _ensure()
     return {r["key"]: r["state"] for r in db.conn().execute("SELECT key, state FROM todo_state")}
@@ -135,6 +157,7 @@ def set_state(key, state, user=""):
         raise ValueError("状态不对")
     c.execute("DELETE FROM todo_state WHERE ts < ?", (time.time() - 120 * 86400,))
     c.commit()
+    _cache.clear()
 
 
 # ---------------- 内核自己的待办：订单、售后、耗材 ----------------

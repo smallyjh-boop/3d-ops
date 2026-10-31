@@ -207,14 +207,17 @@ const TAB_ALIAS = { users: "accounts", csext: "accounts" };
 function showTab(name) {
   if (name === "edit" && !P) name = "library";
   if (TAB_ALIAS[name]) { CFG_MOD = TAB_ALIAS[name]; name = "settings"; }
+  // v2.49：「今日待办」页面没有了，改成右上角 🔔（旧链接打开工作台 + 待办抽屉）
+  if (name === "ops_todo") { name = "dashboard"; setTimeout(() => window.SHELL && SHELL.openTodo(), 0); }
   const btn = $(`#subnav .tab[data-tab="${name}"]`);
+  const hl = (btn && btn.dataset.parent) || name;          // v2.49：页面里的页签（ghost）高亮它所在的菜单
   const mod = btn ? btn.dataset.mod : "goods";
   LAST_TAB[mod] = name;
   CUR_TAB = name;
   $$("#modnav .mod").forEach((b) => b.classList.toggle("active", b.dataset.mod === mod));
   $$("#subnav .tab").forEach((b) => {
     b.classList.toggle("hidden", b.dataset.mod !== mod || b.classList.contains("role-hidden") || b.classList.contains("ghost"));
-    b.classList.toggle("active", b.dataset.tab === name || (name === "edit" && b.dataset.tab === "library"));
+    b.classList.toggle("active", b.dataset.tab === hl || (name === "edit" && b.dataset.tab === "library"));
   });
   $("#subnav").classList.toggle("single", visibleTabs(mod).length <= 1);
   const panel = PANEL_OF[name] || name;      // 采购的几个页面共用一个页面（v2.21）
@@ -224,7 +227,7 @@ function showTab(name) {
   if (name === "settings") renderSettings();
   if (name === "logs") loadAudit();
   // 各页面脚本自己处理「打开了哪个页面」（v2.34：原来写在 ops.js 里，现在内核统一通知）
-  ["OPS", "PROD", "HOME", "FILES", "SYS", "AS", "SHIP", "PACK", "INV"].forEach((k) => { if (window[k] && window[k].show) window[k].show(name); });
+  ["OPS", "PROD", "HOME", "FILES", "SYS", "AS", "SHIP", "PACK", "INV", "SHELL"].forEach((k) => { if (window[k] && window[k].show) window[k].show(name); });
   if (name === "materials" && window.MATERIALS) MATERIALS.load();   // v2.31：耗材料卷在生产模块
   if (window.MODKIT) window.MODKIT.show(name);       // v2.29：模块的页面（第一次打开时才加载）
   try { history.replaceState(null, "", "#" + name); } catch { /* 忽略 */ }
@@ -243,7 +246,9 @@ $$("#subnav .tab").forEach((b) => b.addEventListener("click", () => goTab(b.data
 $$("#modnav .mod").forEach((b) => b.addEventListener("click", () => {
   const tabs = visibleTabs(b.dataset.mod);
   const last = LAST_TAB[b.dataset.mod];
-  goTab(tabs.some((t) => t.dataset.tab === last) ? last : (tabs[0] || {}).dataset.tab);
+  const lastBtn = last && $(`#subnav .tab[data-tab="${last}"]`);
+  const par = lastBtn && lastBtn.dataset.parent;        // v2.49：上次看的是页面里的页签
+  goTab(tabs.some((t) => t.dataset.tab === last || (par && t.dataset.tab === par)) ? last : (tabs[0] || {}).dataset.tab);
 }));
 
 function statusBadge(errors, warnings) {

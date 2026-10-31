@@ -1,0 +1,80 @@
+/* v2.49 外壳：顶部 🔍 / 🔔、待办抽屉、全局搜索、运营页面的筛选条（static/shell.js、modules/ops/ui/hub.js） */
+.top-ic{background:#1f2937;color:#e5e7eb;border:1px solid #374151;border-radius:14px;padding:3px 9px;font-size:13px;cursor:pointer;line-height:1.4;white-space:nowrap;margin-right:6px}
+.top-ic:hover{border-color:#60a5fa}
+.bell-btn b{background:#4b5563;color:#fff;border-radius:9px;padding:0 6px;margin-left:2px;font-size:11px}
+.bell-btn b.bell-bad{background:#dc2626}
+.top{gap:16px}
+#modnav .mod{padding:7px 11px}
+/* 顶栏 10 个大菜单 + 🔍 🔔：窄一点的屏幕（和泰文）一行放得下 */
+#modnav{flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:none}#modnav::-webkit-scrollbar{display:none}
+#modnav .mod{white-space:nowrap;flex:none}
+.brand{white-space:nowrap;flex:none}.me-box{white-space:nowrap}
+@media (max-width:1600px){.top{gap:12px}#modnav .mod{padding:7px 8px}.task-btn span{display:none}#desk-dl{font-size:0;padding:2px 6px}#desk-dl::before{content:"💻";font-size:14px}.me-box>span:nth-child(-n+2){display:none}.brand{font-size:14px}}
+@media (max-width:1450px){.brand{font-size:14px}.top{gap:10px}}
+@media (max-width:1180px){.top{gap:10px;padding:8px 12px}.brand{font-size:14px}#modnav .mod{padding:7px 8px;font-size:13px}.task-btn span{display:none}}
+@media (max-width:1060px){.brand #ver{display:none}}
+
+/* 待办抽屉（右边） */
+.sh-drawer{position:fixed;inset:0;z-index:60}
+.sh-mask{position:absolute;inset:0;background:#0f172a40}
+.sh-panel{position:absolute;top:0;right:0;bottom:0;width:min(460px,100vw);background:#fff;box-shadow:-8px 0 30px #0002;display:flex;flex-direction:column}
+.sh-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 8px;border-bottom:1px solid var(--line)}
+.sh-head h3{margin:0;font-size:16px}
+.sh-filter{padding:8px 16px 0}.sh-filter .chips{display:flex;gap:6px;flex-wrap:wrap}
+.sh-body{flex:1;overflow:auto;padding:8px 16px}
+.sh-foot{border-top:1px solid var(--line);padding:8px 16px;display:flex;flex-direction:column;gap:6px}
+.sh-cb{display:inline-flex;flex-direction:row;align-items:center;gap:6px;margin:0}.sh-cb input{width:auto;margin:0}
+.sh-grp h4{margin:12px 0 6px;font-size:13px;color:#374151}
+.sh-grp.sh-bad h4{color:var(--ux-bad)}.sh-grp.sh-warn h4{color:var(--ux-warn)}
+.sh-it{display:flex;gap:10px;justify-content:space-between;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-left:3px solid #cbd5e1;border-radius:8px;margin-bottom:6px;background:#fff}
+.sh-it.lv-bad{border-left-color:var(--ux-bad)}.sh-it.lv-warn{border-left-color:#f59e0b}.sh-it.is-done{opacity:.6}
+.sh-it-t{min-width:0;flex:1}.sh-it-t b{font-weight:600;font-size:13px;word-break:break-word}
+.sh-it-b{display:flex;flex-direction:column;gap:4px;align-items:stretch;flex:none}.sh-it-b .mini{white-space:nowrap}
+.sh-it-m{margin-top:3px}.sh-chip{display:inline-block;font-size:11px;background:#f1f5f9;color:#475569;border-radius:8px;padding:0 6px}
+.sh-alerts summary{cursor:pointer;font-size:13px;font-weight:600}
+.sh-al-box{padding:6px 0;max-height:40vh;overflow:auto}
+.sh-sub{font-weight:600;margin:8px 0 4px;color:#374151}
+.sh-rec{font-size:12px;padding:2px 0;border-bottom:1px dashed #eef0f3}
+body.sh-open{overflow:hidden}
+
+/* 全局搜索 */
+.gs{position:fixed;inset:0;z-index:70}
+.gs-mask{position:absolute;inset:0;background:#0f172a55}
+.gs-box{position:relative;margin:8vh auto 0;width:min(680px,calc(100vw - 24px));background:#fff;border-radius:14px;box-shadow:0 20px 60px #0004;overflow:hidden}
+.gs-in{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.gs-in input{flex:1;border:0;outline:0;font-size:17px;padding:4px 0;box-shadow:none}
+.gs-in kbd{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.gs-res{max-height:62vh;overflow:auto;padding:6px 8px 10px}
+.gs-hint{color:#9ca3af;font-size:13px;padding:10px 8px;margin:0}
+.gs-grp h4{margin:10px 8px 4px;font-size:12px;color:var(--muted);text-transform:uppercase}
+.gs-it{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;color:inherit;text-decoration:none}
+.gs-it:hover,.gs-it.on{background:#eff6ff}
+.gs-ic{width:32px;text-align:center;font-size:18px;flex:none}
+.gs-th{width:32px;height:32px;object-fit:cover;border-radius:6px;flex:none;background:#f3f4f6}
+.gs-main{flex:1;min-width:0;display:flex;flex-direction:column}.gs-main>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gs-side{text-align:right;flex:none}
+
+/* 运营页面：页面头 + 筛选条 + 页签（modules/ops/ui/hub.js） */
+.ops-fbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:0 0 12px}
+.ops-fbar .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.ops-fbar .seg button{border:0;border-radius:0;background:#fff;padding:5px 10px;font-size:13px;color:#374151}
+.ops-fbar .seg button+button{border-left:1px solid var(--line)}
+.ops-fbar .seg button.on{background:var(--accent);color:#fff}
+.ops-fbar select,.ops-fbar input{width:auto;margin:0;padding:5px 8px;font-size:13px}
+.ops-fbar .ops-fsp{flex:1}
+.ops-fbar .ops-cust{display:inline-flex;gap:4px;align-items:center}
+.ops-fbar .ops-cust input{width:140px}
+
+/* 工作台（static/home.js） */
+.home-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:start}
+.home-grid>.card{margin-bottom:0}
+@media (max-width:900px){.home-grid{grid-template-columns:1fr}}
+.home-todo .sh-it{margin-bottom:6px}
+.home-more{display:flex;justify-content:flex-end;margin-top:6px}
+.home-prs{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.home-prs .dp{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#fff}
+.home-list .small{padding:2px 0}
+.home-todo .sh-it-b{flex-direction:row;align-items:center}
+.ux-kpi-s:has(+ .ux-spark){padding-right:96px}
+@media (max-width:1100px){.top{gap:6px}#modnav{gap:0}#modnav .mod{padding:6px 6px;font-size:12.5px}.top-ic{padding:3px 7px;margin-right:2px}.top .lang{width:auto;max-width:96px}}
+.home-grid{margin-bottom:14px}.home-grid.one{grid-template-columns:1fr}

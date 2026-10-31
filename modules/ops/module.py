@@ -1,7 +1,8 @@
 """运营分析（v2.46，把原来单独的「运营分析系统」并进来）：运营看板、商品生命周期、今日待办与手机提醒、Lazada 运营数据
 （财务流水 → 真实扣点 / 财务对账、评价、退货退款、店铺表现）。数据直接读 ERP，不再通过 /api/v1 同步一份。
-第二期（v2.48）：竞品、爆款雷达、竞店（菜单在「商品」下面），计划、营销日历、流量数据（菜单在「工作台」下面），
-浏览器扩展的采集和巡逻（/api/v1/ops/ext/…，和 AI 客服同一个扩展、同一把员工密钥）。"""
+第二期（v2.48）：竞品、爆款雷达、竞店，计划、营销日历、流量数据，
+浏览器扩展的采集和巡逻（/api/v1/ops/ext/…，和 AI 客服同一个扩展、同一把员工密钥）。
+v2.49：顶部大菜单「运营」4 个页面（经营概况 / 商品表现 / 市场与竞争 / 计划与活动），页面里用页签；今日待办变成右上角 🔔。"""
 from . import public
 
 
@@ -20,7 +21,7 @@ MODULE = {
     "id": "ops",
     "name_zh": "运营分析",
     "name_th": "วิเคราะห์การขาย",
-    "version": "2.1",
+    "version": "3.0",
     "desc_zh": "运营看板、商品生命周期、今日待办与 LINE / Telegram 提醒、Lazada 财务流水 / 评价 / 退货退款 / 店铺表现；"
                "竞品、爆款雷达、竞店、爆款 / 上量计划、营销日历、卖家后台流量数据（浏览器扩展采集）。",
     "desc_th": "แดชบอร์ดการขาย วงจรชีวิตสินค้า งานวันนี้และแจ้งเตือน LINE / Telegram ข้อมูลการเงิน รีวิว คืนสินค้า และประสิทธิภาพร้านจาก Lazada "
@@ -28,26 +29,33 @@ MODULE = {
     "depends": [],
     "order": 45,
     "public": public,
+    # v2.49：顶部新大菜单「运营」只有 4 个页面，每个页面里用页签切换；页签和旧页面 id 是不显示的菜单（ghost），
+    # panel = 放在哪个页面，旧链接（待办、提醒里的 ops_comp 等）照样能打开。「今日待办」改成右上角 🔔（static/shell.js）。
     "menus": [
-        {"tab": "ops_todo", "mod": "home", "zh": "今日待办", "th": "งานวันนี้", "roles": "owner,listing,production", "after": "dashboard"},
-        {"tab": "ops_dash", "mod": "home", "zh": "运营看板", "th": "แดชบอร์ดการขาย", "roles": "owner", "after": "ops_todo"},
-        {"tab": "ops_life", "mod": "home", "zh": "商品生命周期", "th": "วงจรชีวิตสินค้า", "roles": "owner", "after": "ops_dash"},
-        {"tab": "ops_lazada", "mod": "home", "zh": "Lazada 数据", "th": "ข้อมูล Lazada", "roles": "owner,listing", "after": "ops_life"},
-        {"tab": "ops_plans", "mod": "home", "zh": "爆款 / 上量计划", "th": "แผนสินค้าขายดี", "roles": "owner,listing", "after": "ops_lazada"},
-        {"tab": "ops_cal", "mod": "home", "zh": "营销日历", "th": "ปฏิทินการตลาด", "roles": "owner,listing", "after": "ops_plans"},
-        {"tab": "ops_traffic", "mod": "home", "zh": "流量数据", "th": "ข้อมูลทราฟฟิก", "roles": "owner", "after": "ops_cal"},
-        {"tab": "ops_comp", "mod": "goods", "zh": "竞品", "th": "สินค้าคู่แข่ง", "roles": "owner,listing"},
-        {"tab": "ops_radar", "mod": "goods", "zh": "爆款雷达", "th": "เรดาร์สินค้าขายดี", "roles": "owner,listing", "after": "ops_comp"},
-        {"tab": "ops_shops", "mod": "goods", "zh": "竞店", "th": "ร้านคู่แข่ง", "roles": "owner,listing", "after": "ops_radar"},
+        {"tab": "ops_overview", "mod": "ops", "zh": "经营概况", "th": "ภาพรวมธุรกิจ", "roles": "owner"},
+        {"tab": "ops_dash", "mod": "ops", "zh": "总览", "th": "ภาพรวม", "roles": "owner", "ghost": True, "panel": "ops_overview"},
+        {"tab": "ops_lazada", "mod": "ops", "zh": "店铺与评价", "th": "ร้านและรีวิว", "roles": "owner,listing", "ghost": True, "panel": "ops_overview"},
+        {"tab": "ops_goods", "mod": "ops", "zh": "商品表现", "th": "ผลงานสินค้า", "roles": "owner,listing", "after": "ops_overview"},
+        {"tab": "ops_life", "mod": "ops", "zh": "商品表现", "th": "ผลงานสินค้า", "roles": "owner,listing", "ghost": True, "panel": "ops_goods"},
+        {"tab": "ops_sugg", "mod": "ops", "zh": "待确认的建议", "th": "คำแนะนำรอยืนยัน", "roles": "owner,listing", "ghost": True, "panel": "ops_goods"},
+        {"tab": "ops_traffic", "mod": "ops", "zh": "流量数据", "th": "ข้อมูลทราฟฟิก", "roles": "owner,listing", "ghost": True, "panel": "ops_goods"},
+        {"tab": "opschg", "mod": "ops", "zh": "运营改动", "th": "การแก้ไขจากระบบวิเคราะห์", "roles": "owner,listing", "ghost": True, "panel": "ops_goods"},
+        {"tab": "ops_market", "mod": "ops", "zh": "市场与竞争", "th": "ตลาดและคู่แข่ง", "roles": "owner,listing", "after": "ops_goods"},
+        {"tab": "ops_comp", "mod": "ops", "zh": "竞品", "th": "สินค้าคู่แข่ง", "roles": "owner,listing", "ghost": True, "panel": "ops_market"},
+        {"tab": "ops_shops", "mod": "ops", "zh": "竞店", "th": "ร้านคู่แข่ง", "roles": "owner,listing", "ghost": True, "panel": "ops_market"},
+        {"tab": "ops_radar", "mod": "ops", "zh": "找新品（爆款雷达）", "th": "หาสินค้าใหม่ (เรดาร์สินค้าขายดี)", "roles": "owner,listing", "ghost": True, "panel": "ops_market"},
+        {"tab": "ops_plan", "mod": "ops", "zh": "计划与活动", "th": "แผนและแคมเปญ", "roles": "owner,listing", "after": "ops_market"},
+        {"tab": "ops_plans", "mod": "ops", "zh": "爆款 / 上量计划", "th": "แผนสินค้าขายดี", "roles": "owner,listing", "ghost": True, "panel": "ops_plan"},
+        {"tab": "ops_cal", "mod": "ops", "zh": "营销日历", "th": "ปฏิทินการตลาด", "roles": "owner,listing", "ghost": True, "panel": "ops_plan"},
     ],
-    "owner_only": [("GET", r"^/api/oa/(dashboard|lifecycle|alerts)$"), ("POST", r"^/api/oa/(lazada/sync|alerts/)"),
-                   ("*", r"^/api/oa/traffic(/|$)"),                            # 流量只给老板
+    # v2.49：商品表现（生命周期 + 流量）也给上架客服看，成本利润在接口里去掉（mkt_api._strip）
+    "owner_only": [("GET", r"^/api/oa/(dashboard|alerts)$"), ("POST", r"^/api/oa/(lazada/sync|alerts/)"),
                    # v2.48.0：竞品、雷达、竞店也给上架客服看（成本、利润在接口里去掉，见 mkt_api._strip）；估成本只给老板
                    ("POST", r"^/api/oa/comp/\d+/ai-cost$"),
                    ("POST", r"^/api/oa/plans(/\d+)?$"), ("POST", r"^/api/oa/plans/\d+/ai$"), ("POST", r"^/api/oa/campaigns")],
     "settings_module": "ops",
     "settings": [
-        ("手机提醒（今日待办里重要的事推到手机，同一件事只推一次）", [
+        ("手机提醒（🔔 待办里重要的事推到手机，同一件事只推一次）", [
             ("oa_alert_on", "开启手机提醒", "bool"),
             ("oa_alert_every_min", "每隔几分钟检查一次"),
             ("oa_line_token", "LINE 官方账号 Channel access token（LINE Developers → Messaging API）", "password"),
@@ -95,5 +103,5 @@ MODULE = {
     "secrets": ["oa_line_token"],
     "todo": _todo,
     "startup": _start,
-    "ui": {"html": "page.html", "page_js": ["ops.js", "market.js", "plan.js", "page.js"], "css": ["page.css"], "boot_js": []},
+    "ui": {"html": "page.html", "page_js": ["ops.js", "market.js", "plan.js", "hub.js", "page.js"], "css": ["page.css"], "boot_js": []},
 }

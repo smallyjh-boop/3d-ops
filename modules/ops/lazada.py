@@ -12,6 +12,7 @@
 """
 import datetime as dt
 import json
+import re
 import threading
 import time
 
@@ -500,6 +501,48 @@ def _metrics(d):
     return [{"name": m["name"], "type": "", "value": m["value"], "target": m["target"], "ok": None} for m in _flat(d)]
 
 
+# v2.49：店铺表现的指标名（接口给的是英文 / 代码）→ 中文、泰文；better = 越高越好 high / 越低越好 low
+PERF_NAMES = [
+    (r"cancel|ยกเลิก", "取消率", "อัตราการยกเลิก", "low"),
+    (r"late|lsr|ล่าช้า", "迟发率", "อัตราส่งล่าช้า", "low"),
+    (r"ship.?on.?time|on.?time|\bsot\b|ส่งตรงเวลา|ตรงเวลา", "准时发货率", "อัตราส่งตรงเวลา", "high"),
+    (r"response.?time|reply.?time|เวลาตอบ", "聊天回复时间", "เวลาตอบแชท", "low"),
+    (r"response|chat|reply|ตอบแชท|อัตราการตอบ", "聊天回复率", "อัตราการตอบแชท", "high"),
+    (r"positive|seller.?rating|\bpsr\b|shop.?rating|store.?rating|คะแนนร้าน", "店铺好评率", "คะแนนร้านเชิงบวก", "high"),
+    (r"product.?rating|review|rating|คะแนนสินค้า|รีวิว", "商品评分", "คะแนนสินค้า", "high"),
+    (r"return|refund|คืนสินค้า|คืนเงิน", "退货退款率", "อัตราคืนสินค้า/คืนเงิน", "low"),
+    (r"fake|counterfeit|ipr|violat|penalt|point|ละเมิด|คะแนนโทษ", "违规扣分", "คะแนนโทษ", "low"),
+    (r"fail|ndr|non.?deliver|ส่งไม่สำเร็จ", "派送失败率", "อัตราส่งไม่สำเร็จ", "low"),
+    (r"fulfil|ffr|จัดส่งสำเร็จ", "履约率", "อัตราการจัดส่งสำเร็จ", "high"),
+    (r"listing|sku|สินค้าที่ลง", "在售商品数", "จำนวนสินค้าที่ขาย", "high"),
+]
+
+
+def _numv(v):
+    m = re.search(r"-?\d+(?:[.,]\d+)?", str(v or "").replace(",", ""))
+    return float(m.group(0)) if m else None
+
+
+def perf_label(m):
+    """一个指标：加上 zh / th 名字、数值 v、要求 t、better（high / low）、ok。"""
+    raw = f"{m.get('type') or ''} {m.get('name') or ''}".lower()
+    zh, th, better = m.get("name") or "", m.get("name") or "", None
+    for pat, z, t, b in PERF_NAMES:
+        if re.search(pat, raw):
+            zh, th, better = z, t, b
+            break
+    tg = str(m.get("target") or "")
+    if re.search(r"[<≤]|max|below|ไม่เกิน|น้อยกว่า", tg, re.I):
+        better = "low"
+    elif re.search(r"[>≥]|min|above|อย่างน้อย|มากกว่า", tg, re.I):
+        better = "high"
+    v, t = _numv(m.get("value")), _numv(tg)
+    ok = m.get("ok")
+    if ok is None and v is not None and t is not None and better:
+        ok = v <= t if better == "low" else v >= t
+    return {**m, "zh": zh, "th": th, "better": better or "high", "v": v, "t": t, "ok": ok}
+
+
 def sync_performance(conn, shop, user="系统"):
     d = conn.seller_performance()
     c = db.conn()
@@ -517,7 +560,7 @@ def performance():
             d = json.loads(r["data"] or "{}")
         except ValueError:
             d = {}
-        out.append({"shop_id": r["shop_id"], "shop": names.get(r["shop_id"], ""), "at": r["at"], "metrics": _metrics(d), "category": d.get("main_category_name") if isinstance(d, dict) else ""})
+        out.append({"shop_id": r["shop_id"], "shop": names.get(r["shop_id"], ""), "at": r["at"], "metrics": [perf_label(m) for m in _metrics(d)], "category": d.get("main_category_name") if isinstance(d, dict) else ""})
     return out
 
 

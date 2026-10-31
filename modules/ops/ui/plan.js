@@ -1,10 +1,10 @@
 "use strict";
-// 运营分析第二期（v2.48）：爆款 / 上量计划、营销日历、流量数据（菜单在「工作台」下面）。公共小函数在 market.js 的 window.OPSU。
+// 运营分析第二期（v2.48）：爆款 / 上量计划、营销日历（v2.49 起在「运营 → 计划与活动」的页签里；流量数据并进了「商品表现」，见 ops.js）。公共小函数在 market.js 的 window.OPSU。
 (function () {
   const U = window.OPSU;
   const { $, Z, m, n1, PLAT, day, card, tbl, link } = U;
   const own = () => typeof ME === "undefined" || !ME || ME.role === "owner";
-  const BOX = { ops_plans: "ops-plans", ops_cal: "ops-cal", ops_traffic: "ops-traffic" };
+  const BOX = { ops_plans: "ops-plans", ops_cal: "ops-cal" };
   async function show(tab) {
     const box = $("#" + BOX[tab]);
     if (!box) return;
@@ -12,7 +12,6 @@
     try {
       if (tab === "ops_plans") return await plansPage(box);
       if (tab === "ops_cal") return await calPage(box);
-      if (tab === "ops_traffic") return await trafficPage(box);
     } catch (e) { box.innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
   }
 
@@ -45,7 +44,7 @@
       ${p.tips.length ? `<h4>${Z("现在该做什么", "ตอนนี้ควรทำอะไร")}</h4><ul class="small">${Z(p.tips, p.tips_th).map((x) => `<li data-notr>${esc(x)}</li>`).join("")}</ul>` : ""}
       ${b ? `<p class="small muted">${Z("竞品", "คู่แข่ง")}：${b.comp_count} · ${Z("中位价", "ราคากลาง")} ${m(b.comp_price_median)} · ${Z("最高日销", "ขายสูงสุด/วัน")} ${n1(b.comp_daily_top)}</p>` : ""}
       ${p.ai_note ? `<div class="oa-note small" data-notr>${esc(p.ai_note)}</div>` : ""}
-      <h4>${Z("分阶段任务（到日子的会进今日待办）", "งานแต่ละช่วง (ถึงวันจะขึ้นในงานวันนี้)")}</h4><ul class="oa-tasks">${tasks}</ul>
+      <h4>${Z("分阶段任务（到日子的会进 🔔 待办）", "งานแต่ละช่วง (ถึงวันจะขึ้นใน 🔔 งานที่ต้องทำ)")}</h4><ul class="oa-tasks">${tasks}</ul>
       <div class="row gap wrap"><input data-p-newtask="${p.id}" placeholder="${Z("加一个任务", "เพิ่มงาน")}" style="flex:1;min-width:200px"><input data-p-newoff="${p.id}" type="number" min="0" value="${Math.max(0, pr.elapsed - 1)}" style="width:70px" title="${Z("第几天（从 0 开始）", "วันที่ (เริ่ม 0)")}">
         <button class="mini" data-p-addtask="${p.id}">${Z("加任务", "เพิ่มงาน")}</button></div>
       ${own() ? `<div class="row gap wrap" style="margin-top:8px"><button data-p-ai="${p.id}">${Z("AI 更新计划", "AI อัปเดตแผน")}</button>
@@ -144,22 +143,6 @@
       if ((b = t("[data-cal-hide]"))) return busy(b, async () => { await api("/api/oa/campaigns/remove", { json: { key: b.dataset.calHide } }); show("ops_cal"); });
       if ((b = t("[data-cal-restore]"))) return busy(b, async () => { await api("/api/oa/campaigns/remove", { json: { restore: true } }); show("ops_cal"); });
     };
-  }
-
-  // ======================= 流量数据 =======================
-  async function trafficPage(box) {
-    const d = await api("/api/oa/traffic");
-    box.innerHTML = `<p class="small">${Z("员工用浏览器扩展打开卖家中心的「商品表现 / 流量 / 关键词」这类带表格的页面，扩展会自动采集（同一页 12 小时一次，也可以点「📥 采集本页数据」），AI 识别成每个商品的曝光、访客、加购、订单、转化率，按卖家 SKU 对上 ERP 的 SKU。商品生命周期和计划诊断会用到；关键词页的搜索量进爆款雷达。不保存平台密码、cookie 和买家信息。",
-        "พนักงานเปิดหน้า「ประสิทธิภาพสินค้า / ทราฟฟิก / คีย์เวิร์ด」ในหลังร้านด้วยส่วนขยาย ระบบจะเก็บอัตโนมัติ (หน้าเดิม 12 ชม. ครั้ง หรือกด「📥 เก็บข้อมูลหน้านี้」) AI อ่านเป็นผู้เข้าชม หยิบใส่ตะกร้า ออเดอร์ อัตราซื้อ ของแต่ละสินค้า แล้วจับคู่กับ SKU ใน ERP ไม่เก็บรหัสผ่าน คุกกี้ หรือข้อมูลผู้ซื้อ")}</p>`
-      + card(Z("每个商品最新的数据", "ข้อมูลล่าสุดของแต่ละสินค้า"), tbl([Z("商品", "สินค้า"), Z("平台", "แพลตฟอร์ม"), Z("周期", "ช่วงเวลา"), Z("曝光", "การแสดงผล"), Z("访客", "ผู้เข้าชม"), Z("浏览", "การดู"), Z("加购", "ใส่ตะกร้า"),
-        Z("订单", "ออเดอร์"), Z("转化率", "อัตราซื้อ"), Z("采集时间", "เวลาเก็บ")], d.rows.map((r) => `<tr><td>${r.sku ? `<span class="mono" data-notr>${esc(r.sku)}</span>` : `<span class="warn small">${Z("没对上 SKU", "จับคู่ SKU ไม่ได้")}</span>`}
-          <div class="small muted" data-notr>${esc((r.name || "").slice(0, 60))}${r.seller_sku && r.seller_sku !== r.sku ? " · " + esc(r.seller_sku) : ""}</div></td><td>${esc(PLAT(r.platform))}</td><td class="small" data-notr>${esc(r.period_text || "")}</td>
-        <td class="num">${n1(r.impressions, 0)}</td><td class="num">${n1(r.visitors, 0)}</td><td class="num">${n1(r.views, 0)}</td><td class="num">${n1(r.add_to_cart, 0)}</td><td class="num">${n1(r.orders, 0)}</td>
-        <td class="num ${r.conversion != null && r.conversion < 1.5 && (r.visitors || 0) >= 50 ? "warn" : ""}">${r.conversion != null ? n1(r.conversion, 2) + "%" : "—"}</td><td class="small nowrap">${day(r.ts)}</td></tr>`),
-        Z("还没有采集过卖家后台数据", "ยังไม่เคยเก็บข้อมูลหลังร้าน")))
-      + `<p class="small muted">${Z("对不上 SKU 的：在平台后台把「卖家 SKU」填成 ERP 的 SKU（例如 3DP0001-WH）。", "ที่จับคู่ไม่ได้: ตั้ง「Seller SKU」ในหลังร้านให้ตรงกับ SKU ใน ERP (เช่น 3DP0001-WH)")}</p>`
-      + card(Z("最近采集的页面", "หน้าที่เก็บล่าสุด"), tbl([Z("时间", "เวลา"), Z("平台", "แพลตฟอร์ม"), Z("页面", "หน้า"), Z("类型", "ประเภท"), Z("商品行数", "จำนวนสินค้า")],
-        d.pages.map((p) => `<tr><td class="small nowrap">${day(p.ts)}</td><td>${esc(PLAT(p.platform))}</td><td class="small oa-url">${link(p.url, (p.title || p.url || "").slice(0, 80))}</td><td class="small">${esc(p.kind || "")}</td><td class="num">${p.n_rows}</td></tr>`)));
   }
 
   window.OPSB = Object.assign(window.OPSB || {}, { plan: { tabs: Object.keys(BOX), show } });

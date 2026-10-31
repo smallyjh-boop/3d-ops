@@ -108,6 +108,8 @@
   });
   ["#ol-shop", "#ol-unlinked", "#ol-stock0", "#ol-pending"].forEach((k) => document.addEventListener("change", (e) => { if (e.target.matches && e.target.matches(k)) load(); }));
   { let tm = null; document.addEventListener("input", (e) => { if (e.target.id === "ol-q") { clearTimeout(tm); tm = setTimeout(load, 300); } }); }
+  // v2.49：上架工作台 / 在线商品 两个页签
+  document.addEventListener("click", (e) => { const t = e.target.closest("[data-lst-tab]"); if (t && !t.classList.contains("on")) goTab(t.dataset.lstTab); });
   window.MODS = window.MODS || {};
   const prev = window.MODS.listing || {};
   window.MODS.listing = { ...prev, show(tab, p) { if (prev.show) prev.show(tab, p); if (tab === "online") load(); } };

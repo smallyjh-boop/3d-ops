@@ -24,7 +24,7 @@ CASES = os.path.join(HERE, "cases")
 # 顺序有关系（有几个测试共用同一份数据）；数字 = 预期的 ERR 行数（故意测错误情况的）
 ORDER = [("t_modellib", 0), ("t_perm2131", 0), ("t_imgtools", 0), ("t_catalog", 0), ("t_spool", 0), ("t_lst2111", 0),
          ("t_v211", 0), ("api_test", 0), ("t_up", 0), ("ops_test", 0), ("t_fleet", 0), ("t_v27", 0),
-         ("t_resin", 0), ("t_listing", 0), ("t_v1", 0), ("t_ops", 0), ("t_v2141", 0), ("t_calib", 0), ("t_preview", 0), ("t_v216", 0), ("t_inv217", 0), ("t_v218", 0), ("t_lang219", 0), ("t_accel220", 0), ("t_v222", 0), ("t_cat225", 0), ("t_up226", 0), ("t_menu227", 0), ("t_desk228", 0), ("t_mod229", 0), ("t_mod230", 0), ("t_chain231", 0), ("t_ws236", 0), ("t_chat238", 0), ("t_v239", 0), ("t_v240", 0), ("t_v241", 0), ("t_slice2433", 0), ("t_cats245", 0), ("v20_test", 3)]
+         ("t_resin", 0), ("t_listing", 0), ("t_v1", 0), ("t_ops", 0), ("t_v2141", 0), ("t_calib", 0), ("t_preview", 0), ("t_v216", 0), ("t_inv217", 0), ("t_v218", 0), ("t_lang219", 0), ("t_accel220", 0), ("t_v222", 0), ("t_cat225", 0), ("t_up226", 0), ("t_menu227", 0), ("t_desk228", 0), ("t_mod229", 0), ("t_mod230", 0), ("t_chain231", 0), ("t_ws236", 0), ("t_chat238", 0), ("t_v239", 0), ("t_v240", 0), ("t_v241", 0), ("t_slice2433", 0), ("t_cats245", 0), ("t_shell249", 0), ("v20_test", 3)]
 
 
 def module_tests():

@@ -13,8 +13,9 @@
 MODULE 字段：
     id, name_zh, name_th, version, desc_zh, desc_th
     depends: ["其它模块 id"]            core: 不能关（默认 False）     default_on: 默认开（默认 True）
-    menus: [{"tab": "页面 id", "mod": "放在哪个大菜单（goods / orders / cs / prod / inv / pur / biz / sys / home）",
-             "zh": "菜单名", "th": "ชื่อเมนู", "roles": "owner,listing"（可选）}]
+    menus: [{"tab": "页面 id", "mod": "放在哪个大菜单（home / goods / orders / cs / ops / prod / inv / pur / biz / sys）",
+             "zh": "菜单名", "th": "ชื่อเมนู", "roles": "owner,listing"（可选）,
+             "ghost": True（不在菜单里显示：页面里的页签 / 旧页面 id）, "panel": "共用哪个页面", "parent": "高亮哪个菜单"（v2.49，可选）}]
     owner_only: [("GET|POST|*", r"正则")]  只有老板能用的接口      production_allow: [...] 生产角色也能用的接口
     settings: [("分组标题", [("配置键", "说明", 类型?), ...])]   settings_module: 放在设置的哪个大分类（默认 "addons"）
     config_defaults: {"配置键": 默认值}     secrets: ["配置键"]（密钥：不发回浏览器）
@@ -380,7 +381,7 @@ def listing(user=None, all_=False):
                 continue
             menus.append({"tab": m["tab"], "mod": m.get("mod") or "sys", "zh": m.get("zh") or m["tab"], "th": m.get("th") or m.get("zh") or m["tab"],
                           "roles": ",".join(roles), "after": m.get("after") or "", "before": m.get("before") or "", "panel": m.get("panel") or m["tab"],
-                          "ghost": bool(m.get("ghost"))})
+                          "ghost": bool(m.get("ghost")), "parent": m.get("parent") or (m.get("panel") if m.get("ghost") and m.get("panel") else "")})
         out.append({"id": mid, "name_zh": meta.get("name_zh") or mid, "name_th": meta.get("name_th") or meta.get("name_zh") or mid,
                     "desc_zh": meta.get("desc_zh") or "", "desc_th": meta.get("desc_th") or "", "version": meta.get("version"),
                     "depends": meta.get("depends") or [], "core": bool(meta.get("core")), "enabled": on_, "error": rec["error"],

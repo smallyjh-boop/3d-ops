@@ -1,5 +1,5 @@
 "use strict";
-// 运营分析第二期（v2.48）：竞品、爆款雷达、竞店（菜单在「商品」下面）。界面文字 Z(中文, 泰文)。
+// 运营分析第二期（v2.48）：竞品、爆款雷达、竞店（v2.49 起在「运营 → 市场与竞争」的页签里，页面框架见 hub.js）。界面文字 Z(中文, 泰文)。
 // 公共小函数放在 window.OPSU，plan.js（计划、营销日历、流量数据）也用。
 (function () {
   const $ = (s, r = document) => r.querySelector(s);
@@ -33,7 +33,7 @@
     root.querySelectorAll("button").forEach((b) => { if (/AI 估成本|AI ประเมินต้นทุน/.test(b.textContent)) b.remove(); });
   };
   if (window.MutationObserver) {
-    new MutationObserver(() => { if (!OWN()) ["#tab-ops_comp", "#tab-ops_radar", "#tab-ops_shops"].forEach((sel) => scrub(document.querySelector(sel))); })
+    new MutationObserver(() => { if (!OWN()) ["#tab-ops_market"].forEach((sel) => scrub(document.querySelector(sel))); })
       .observe(document.body, { childList: true, subtree: true });
   }
   const img = (u, s = 40) => (u ? `<img class="oa-thumb" src="${esc(u)}" referrerpolicy="no-referrer" loading="lazy" style="width:${s}px;height:${s}px" alt="">` : "");

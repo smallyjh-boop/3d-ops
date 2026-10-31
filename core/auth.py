@@ -98,7 +98,8 @@ PRODUCTION_ALLOW = [
     ("GET", r"^/print/jobs$"),
     ("GET", r"^/api/colors$"),                            # v2.41：颜色表（泰文颜色名，生产员工用泰文界面）
     ("GET", r"^/fonts/"),                                 # v2.41：泰文字体
-    ("GET", r"^/api/todo$"), ("POST", r"^/api/todo/state$"),   # v2.46：今日待办（只给这个角色能看的）
+    ("GET", r"^/api/todo(/count)?$"), ("POST", r"^/api/todo/state$"),   # v2.46：今日待办（只给这个角色能看的）；v2.49 🔔 数字
+    ("GET", r"^/api/search$"),                            # v2.49：全局搜索（按角色给结果，没有客服会话）
 ]
 SECRET_KEYS = ("ai_api_key", "imgbb_api_key", "image_api_key", "curator_api_key", "update_token")
 COST_KEYS = ("filament_price_cny_per_kg", "cny_to_thb", "material_loss_rate", "electricity_thb_per_kwh",

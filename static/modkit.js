@@ -26,6 +26,7 @@
       if (!$(`#subnav .tab[data-tab="${mn.tab}"]`)) {
         const b = document.createElement("button");
         b.className = "tab" + (mn.ghost ? " ghost" : ""); b.dataset.mod = mn.mod; b.dataset.tab = mn.tab; b.dataset.roles = mn.roles; b.dataset.module = m.id;
+        if (mn.parent) b.dataset.parent = mn.parent;          // v2.49：页面里的页签 / 旧页面 id：菜单高亮 parent
         b.textContent = th() ? mn.th : mn.zh;
         b.setAttribute("data-notr", "");
         const after = mn.after && $(`#subnav .tab[data-tab="${mn.after}"]`);
@@ -35,7 +36,9 @@
         if (before && !after) before.before(b); else if (anchor) anchor.after(b); else $("#subnav").appendChild(b);
         if (typeof ME !== "undefined" && ME) {
           if (!mn.roles.split(",").includes(ME.role) && ME.role !== "owner") b.classList.add("role-hidden");
-          if (ME.role !== "owner" && ME.tabs && ME.tabs.length && !ME.tabs.includes(mn.tab)) b.classList.add("role-hidden");
+          // 账号里勾的页面（只影响菜单）：页签（ghost）跟着它的页面走；页面里任何一个页签勾了，页面就显示（v2.49 旧页面 id 并进新页面）
+          const kids = LIST.flatMap((x) => x.menus || []).filter((k) => k.parent === mn.tab).map((k) => k.tab);
+          if (ME.role !== "owner" && ME.tabs && ME.tabs.length && !mn.parent && !ME.tabs.includes(mn.tab) && !kids.some((k) => ME.tabs.includes(k))) b.classList.add("role-hidden");
         }
         b.addEventListener("click", () => goTab(mn.tab));
       }
