@@ -58,15 +58,19 @@ class LazadaConnector(Connector):
     LABEL = "Lazada"
     READY = True
     NOTE = "需要 Lazada 开放平台的 App Key / App Secret 和店铺授权（access_token）。" \
-           "按官方文档编写，拿到正式 App Key 后需要联调确认。"
+           "回调地址必须是 https，和 Lazada 后台应用里填的 Callback URL 一字不差（例如 https://www.google.com/）；" \
+           "授权后把浏览器地址栏的整个网址粘贴到下面的框里换 token。按官方文档编写，拿到正式 App Key 后需要联调确认。"
     FIELDS = [("app_key", "App Key", False), ("app_secret", "App Secret", True),
+              ("callback_url", "Callback URL（回调地址）", False),
               ("access_token", "Access Token", True), ("refresh_token", "Refresh Token", True)]
+    OPTIONAL = ("callback_url",)   # v2.41.2：Lazada 只认 https 回调；不填就用系统自己的地址
     # v2.34 面单：等联调。订单先「打包 / 准备发货」拿到包裹号和运单号 → 用取面单（document）接口按包裹取 PDF → fetch_label 返回
     LABEL_NOTE = "未接入：接通后打印时自动从 Lazada 取面单（订单要先打包 / 准备发货）"
     LABEL_NOTE_TH = "ยังไม่เชื่อมต่อ: เชื่อมแล้วจะดึงใบปะหน้าจาก Lazada อัตโนมัติ (ต้องแพ็ก / พร้อมส่งก่อน)"
 
     # ---------- 授权 ----------
     def authorize_url(self, redirect_uri):
+        redirect_uri = str(self.creds.get("callback_url") or "").strip() or redirect_uri
         q = {"response_type": "code", "force_auth": "true", "redirect_uri": redirect_uri, "client_id": self.creds.get("app_key", "")}
         return "https://auth.lazada.com/oauth/authorize?" + urllib.parse.urlencode(q)
 

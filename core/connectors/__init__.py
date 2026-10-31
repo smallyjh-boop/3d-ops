@@ -19,6 +19,7 @@ class Connector:
     NOTE = ""              # 界面上的说明
     # 需要填写的授权信息：(键, 显示名, 是否保密)
     FIELDS = []
+    OPTIONAL = ()          # FIELDS 里可以不填的键（v2.41.2）
     # v2.34 取平台面单（modules/orders/waybill）：接通后改 True，实现 fetch_label()
     LABEL_READY = False
     LABEL_NOTE = ""
@@ -29,7 +30,8 @@ class Connector:
         self.creds_changed = False     # 刷新了 token 等需要保存回数据库
 
     def check(self):
-        missing = [label for k, label, _s in self.FIELDS if not str(self.creds.get(k) or "").strip()]
+        missing = [label for k, label, _s in self.FIELDS
+                   if k not in self.OPTIONAL and not str(self.creds.get(k) or "").strip()]
         if missing:
             raise NotReady("缺少：" + "、".join(missing))
 

@@ -93,7 +93,7 @@
         ${c.fields.length ? `<div class="form3">${c.fields.map((f) => `<label>${esc(f.label)}<input data-cred="${f.key}" ${f.secret ? 'type="password" autocomplete="new-password"' : ""} value="${esc(cr[f.key] || "")}" data-notr></label>`).join("")}</div>
           <p class="muted small">保密项显示 ****** 表示已保存，不改就保持原样。</p>` : ""}
         ${shop && c.ready ? `<div class="row gap wrap small"><button class="mini" data-authurl="${shop.id}">打开平台授权页</button>
-          <input id="sf-code" placeholder="授权后地址栏里 code= 后面的内容" style="width:300px" data-notr><button class="mini" data-authcode="${shop.id}">用授权码换 token</button></div>` : ""}
+          <input id="sf-code" placeholder="授权后地址栏的整个网址（或 code= 后面的内容）" style="width:360px" data-notr><button class="mini" data-authcode="${shop.id}">用授权码换 token</button></div>` : ""}
         <button class="primary" data-shopsave="${shop ? shop.id : ""}">保存</button>`;
     };
     render(plat);

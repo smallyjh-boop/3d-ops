@@ -12,6 +12,7 @@ import secrets
 import threading
 import time
 import traceback
+import urllib.parse
 
 from . import connectors, db
 
@@ -187,12 +188,21 @@ def authorize_url(sid, redirect_uri):
     return conn.authorize_url(redirect_uri)
 
 
+def _auth_code(text):
+    """授权码：可以只填 code，也可以粘贴授权后地址栏的整个网址（v2.41.2）。"""
+    text = str(text or "").strip()
+    if "code=" not in text:
+        return text
+    q = text.split("?", 1)[-1].split("#", 1)[0]
+    return (urllib.parse.parse_qs(q).get("code") or [text])[0].strip()
+
+
 def exchange_code(sid, code):
     s = get_shop_raw(sid)
     conn = connectors.make(s["platform"], s["creds"])
     if not hasattr(conn, "exchange_code"):
         raise ValueError("这个平台还不支持在线授权")
-    conn.exchange_code(code.strip())
+    conn.exchange_code(_auth_code(code))
     _store_creds(sid, conn)
 
 
