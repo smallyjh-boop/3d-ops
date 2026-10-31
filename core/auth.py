@@ -59,7 +59,7 @@ PRODUCTION_ALLOW = [
     ("POST", r"^/api/slicer/test$"),
     ("POST", r"^/api/pricing$"),
     ("GET", r"^/api/(orders|orders/\d+|production|materials|materials/log|skus)$"),
-    ("POST", r"^/api/(jobs/\d+|production/schedule|materials)$"),
+    ("POST", r"^/api/(jobs/\d+|jobs/bulk|production/schedule|materials)$"),      # v2.43：订单页批量处理生产任务
     ("POST", r"^/api/orders/\d+$"),
     ("GET", r"^/print/(orders|labels|handover|spools)$"),
     ("GET", r"^/api/spools$"),

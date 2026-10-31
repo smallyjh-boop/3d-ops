@@ -18,3 +18,6 @@
 .wb-fr { width: 300px; height: 525px; overflow: hidden; background: #ddd; border-radius: 6px }
 .wb-fr iframe { width: 400px; height: 700px; border: 0; transform: scale(.75); transform-origin: 0 0 }
 .wb-src td, .wb-src th { padding: 3px 6px }
+/* v2.43：订单详情里生产任务的操作按钮（单独一行） */
+.od-jobs tr.od-job-acts td { border-top: 0; padding-top: 0 }
+.od-jobs tr.od-job-acts .mini { margin: 0 }

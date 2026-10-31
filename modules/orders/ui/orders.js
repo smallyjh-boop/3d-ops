@@ -70,6 +70,39 @@
     $('#ord-bulk [data-bulk="delete"]').classList.toggle("hidden", !CAN("orders.delete"));
     updSel();
   }
+  // v2.43：订单详情里的生产任务按钮（和生产看板一样的操作）
+  let OD_CUR = null;
+  function jobActs(j) {
+    const prs = (CFG && CFG.printers) || [];
+    const mv = j.status === "todo" && !j.run_id && prs.length > 1 ? `<select class="mini" data-jmv="${j.id}"><option value="">换打印机…</option>${prs.map((p, i) => i === j.printer || p.enabled === false ? "" :
+      `<option value="${i}" data-notr>${esc((p.code ? p.code + " · " : "") + p.name)}</option>`).join("")}</select>` : "";
+    return ({
+      todo: j.run_id ? "" : (j.stock_free > 0 && j.remaining > 0 ? `<button class="mini" data-juse="${j.id}" data-n="${Math.min(j.stock_free, j.remaining)}" title="先占住，发货出库时才扣库存">📦 用库存（可用 ${j.stock_free}）</button>` : "") +
+        `<button class="mini" data-js="post" data-jid="${j.id}" title="不用在系统里点开始打印，已经打好了：扣耗材，进入待打包">✔ 已打好</button>${mv}`,
+      post: `<button class="mini primary-lite" data-js="packed" data-jid="${j.id}">📦 已打包</button><button class="mini" data-js="todo" data-jid="${j.id}">退回重打</button>`,
+      packed: `<button class="mini" data-js="post" data-jid="${j.id}">退回待打包</button>`,
+    })[j.status] || "";
+  }
+  document.addEventListener("click", async (e) => {
+    const t = e.target.closest(".od-jobs button"); if (!t) return;
+    const oid = OD_CUR;
+    try {
+      if (t.dataset.juse) {
+        const n = prompt("用成品库存出几个？", t.dataset.n); if (!n) return;
+        await api(`/api/jobs/${t.dataset.juse}/use-stock`, { json: { n: +n } }); toast("已用库存（先占住，发货出库时扣库存）");
+      } else if (t.dataset.js) {
+        if (t.dataset.js === "post" && !confirm("这个任务已经打好了？（会按打印方案扣耗材）")) return;
+        if (t.dataset.js === "todo" && !confirm("退回重打？已打好的件作废，重新排单。")) return;
+        await busy(t, () => api(`/api/jobs/${t.dataset.jid}`, { json: { status: t.dataset.js } }));
+      } else return;
+      if (oid) openOrder(oid); loadOrders();
+    } catch (err) { toast(err.message, true); }
+  });
+  document.addEventListener("change", async (e) => {
+    const s = e.target.closest(".od-jobs select[data-jmv]"); if (!s || s.value === "") return;
+    try { await api(`/api/jobs/${s.dataset.jmv}`, { json: { printer: s.value } }); toast("已换打印机"); if (OD_CUR) openOrder(OD_CUR); }
+    catch (err) { toast(err.message, true); }
+  });
   async function printLabels(ids) {
     const r = await api("/api/labels/check", { json: { ids } });
     if ((r.blocked || []).length) alert(`这些订单已取消 / 退货，不打面单、不要发货：\n${r.blocked.map((b) => `${b.order_no}（${b.status_zh}）`).join("\n")}`);
@@ -267,6 +300,16 @@
     if (!ids.length) { toast("请先勾选订单", true); return; }
     if (act === "pick" || act === "pack") { window.open(`/print/orders?type=${act}&ids=${ids.join(",")}`, "_blank"); return; }
     if (act === "label") { printLabels(ids); return; }
+    if (act === "jobs") {             // v2.43：订单页直接处理生产任务
+      const zh = { use_stock: "用成品库存发", printed: "标记已打好（扣耗材）", packed: "标记已打包" }[val];
+      if (!confirm(`这 ${ids.length} 个订单的生产任务：${zh}？`)) return;
+      await busy(b, async () => {
+        const r = await api("/api/jobs/bulk", { json: { order_ids: ids, action: val } });
+        toast(`${zh}：${r.done} 个任务` + (r.skipped.length ? `；${r.skipped.length} 个没做成：${r.skipped.slice(0, 3).join("；")}` : ""), !!r.skipped.length);
+        await loadOrders();
+      });
+      return;
+    }
     let value = val;
     if (act === "hold") {
       value = prompt("挂起原因（例如：等买家确认颜色 / 疑似重复下单）", "等买家确认");
@@ -469,6 +512,7 @@
   });
 
   async function openOrder(oid) {
+    OD_CUR = oid;
     let o;
     try { o = await api(`/api/orders/${oid}`); } catch (err) { toast(err.message, true); return; }
     if (window.PACKBOX) await PACKBOX.load();
@@ -527,10 +571,12 @@
         ${CAN("orders.delete") ? '<button class="danger" id="od-del">删除订单</button>' : ""}
       </div>
       <h4>生产任务</h4>
-      ${o.jobs.length ? `<table class="grid small"><thead><tr><th>#</th><th>SKU</th><th>颜色</th><th>数量</th><th>已打盘数</th><th>打印机</th><th>状态</th><th>预计完成</th></tr></thead><tbody>
+      ${o.jobs.length ? `<table class="grid small od-jobs"><thead><tr><th>#</th><th>SKU</th><th>颜色</th><th>数量</th><th>已打盘数</th><th>打印机</th><th>状态</th><th>预计完成</th></tr></thead><tbody>
         ${o.jobs.map((j) => `<tr><td>${j.id}</td><td class="mono" data-notr>${esc(j.sku)}</td><td>${colorTxt(j.color)}</td><td>${j.qty}</td><td>${j.plates_done || 0}</td>
           <td data-notr>${esc(printerName(j.printer))}</td><td><span class="jst jst-${j.status}">${esc(JOB_ZH[j.status] || j.status)}</span>${j.fails ? ` <span class="bad small">失败 ${j.fails} 次</span>` : ""}${j.stock_n ? ` <span class="pill tag-pill">📦 ${(window.I18N && I18N.lang === "th") ? "ใช้สต็อก" : "用库存"} ×${j.stock_n}</span>` : ""}</td>
-          <td class="small">${j.status === "todo" || j.status === "printing" ? short(j.planned_end) : ""}</td></tr>`).join("")}</tbody></table>`
+          <td class="small">${j.status === "todo" || j.status === "printing" ? short(j.planned_end) : ""}</td></tr>` +
+          (jobActs(j) ? `<tr class="od-job-acts"><td></td><td colspan="7"><div class="row gap wrap">${jobActs(j)}</div></td></tr>` : "")).join("")}</tbody></table>
+        <p class="small muted">开始打印、打印中的那一盘请在「生产」页操作。</p>`
         : '<p class="muted small">没有生产任务（订单不是待发货状态，或商品没对上产品）。</p>'}
       ${outBox(o)}
       ${pr ? `<h4>利润</h4><div class="summary small">

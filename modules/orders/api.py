@@ -53,6 +53,8 @@ def order_get(oid):
     if not o:
         return err("订单不存在", 404)
     o["jobs"] = production.list_jobs(order_id=oid)
+    for j in o["jobs"]:                                  # v2.43：订单详情里能「用库存发」：现在可用的成品
+        j["stock_free"] = production.free_stock(j["sku"]) if j.get("sku") else 0
     o["log"] = orders_mod.get_log(oid, hide_money=not auth.is_owner())
     from core import extras as _ex
     o["aftersales"] = _ex.as_list(oid, days=3650)

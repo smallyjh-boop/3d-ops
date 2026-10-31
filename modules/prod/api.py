@@ -710,6 +710,37 @@ def job_use_stock(jid):
         return err(str(e))
 
 
+@bp.post("/api/jobs/bulk")
+def jobs_bulk():
+    """v2.43：订单页批量处理这些订单的生产任务。action：
+    use_stock 还没开始打的任务用成品库存发（能用多少用多少）/ printed 还没开始打的标「已打好」（扣耗材）/ packed 打好的标「已打包」。"""
+    b = request.get_json(force=True) or {}
+    act, oids = b.get("action"), [int(x) for x in b.get("order_ids") or []]
+    if act not in ("use_stock", "printed", "packed"):
+        return err("不支持的操作")
+    done, skipped = 0, []
+    for oid in oids:
+        for j in production.list_jobs(order_id=oid):
+            tag = f"{j.get('order_no') or oid} · {j['sku']}"
+            try:
+                if act == "use_stock":
+                    if j["status"] != "todo" or j.get("run_id") or j["remaining"] <= 0:
+                        continue
+                    production.use_stock(j["id"], j["remaining"], _uname())
+                elif act == "printed":
+                    if j["status"] != "todo" or j.get("run_id"):
+                        continue
+                    production.set_status(j["id"], "post", _uname())
+                else:
+                    if j["status"] != "post":
+                        continue
+                    production.set_status(j["id"], "packed", _uname())
+                done += 1
+            except ValueError as e:
+                skipped.append(f"{tag}：{e}")
+    return jsonify({"done": done, "skipped": skipped})
+
+
 @bp.post("/api/stock")
 def stock_post():
     b = request.get_json(force=True) or {}
