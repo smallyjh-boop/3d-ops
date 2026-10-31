@@ -15,6 +15,7 @@ from core.config import DATA_DIR
 from core.labels import code128_svg
 
 from . import template as T
+from ..labeltext import Texts
 
 CACHE = os.path.join(DATA_DIR, "cache", "waybill")
 DPI = 300
@@ -109,8 +110,12 @@ def _items(o, tpl, where, sort_key):
     return items
 
 
-def info_html(o, tpl, n_print, where, sort_key, full=False, now=None):
-    """信息区：订单号 · 店铺 · 共 N 件 · 第 N 次打印；商品一行一个（□ SKU ×数量 名称 规格 [货位]）；留言 / 定制要求 / 备注；自定义文字。"""
+def info_html(o, tpl, n_print, where, sort_key, full=False, now=None, tx=None, info_h=None):
+    """信息区：订单号 · 店铺 · 共 N 件 · 第 N 次打印；商品一行一个（□ SKU ×数量 名称 规格 [货位]）；留言 / 定制要求 / 备注；自定义文字。
+    v2.42：印出来的只有泰文 / 英文（商品名、规格是中文时换成产品的泰文，见 labeltext）。"""
+    if tx is None:
+        from core.config import load_config
+        tx = Texts(load_config())
     f = set(tpl["fields"])
     items = _items(o, tpl, where, sort_key)
     total = sum(int(it.get("qty") or 1) for it in items)
@@ -120,44 +125,47 @@ def info_html(o, tpl, n_print, where, sort_key, full=False, now=None):
     if "shop" in f and (o.get("shop") or o.get("platform")):
         head.append(f'<span>{h(o.get("shop") or o.get("platform") or "")}</span>')
     if "total" in f:
-        head.append(f'<span>共 {total} 件 / {total} ชิ้น</span>')
+        head.append(f'<span>รวม {total} ชิ้น/pcs</span>')
     if "time" in f:
         head.append(f'<span>{time.strftime("%m-%d %H:%M", time.localtime(now or time.time()))}</span>')
     if "count" in f:
-        head.append(f'<span class="reprint">补打 第{n_print}次 / พิมพ์ซ้ำ</span>' if n_print > 1 else f'<span class="pc">#{n_print}</span>')
+        head.append(f'<span class="reprint">พิมพ์ซ้ำ/Reprint #{n_print}</span>' if n_print > 1 else f'<span class="pc">#{n_print}</span>')
     lines = []
     for it in items:
         bits = ['<span class="bx"></span>']
         if "items" in f:
             bits.append(f'<b>{h(it.get("sku") or "")}</b><span class="q">×{int(it.get("qty") or 1)}</span>')
-        if "name" in f and it.get("name"):
-            bits.append(f'<span class="nm">{h(it.get("name"))}</span>')
-        if "spec" in f and (it.get("variation") or it.get("color")):
-            bits.append(f'<span class="sp">{h(it.get("variation") or it.get("color"))}</span>')
+        nm = tx.name(it) if "name" in f else ""
+        if nm:
+            bits.append(f'<span class="nm">{h(nm)}</span>')
+        sp = tx.spec(it) if "spec" in f else ""
+        if sp:
+            bits.append(f'<span class="sp">{h(sp)}</span>')
         if "loc" in f and it["_loc"]:
             bits.append(f'<span class="lc">{h(" ".join(c for c, _q in it["_loc"][:2]))}</span>')
         if len(bits) > 1:
             lines.append(f'<div class="it">{"".join(bits)}</div>')
     notes = []
-    for k, tag in (("buyer_note", "留言 ข้อความ"), ("custom_note", "定制 สั่งทำ"), ("seller_note", "备注 หมายเหตุ")):
+    for k, tag in (("buyer_note", "ข้อความ Note"), ("custom_note", "สั่งทำ Custom"), ("seller_note", "หมายเหตุ Remark")):
         if k in f and o.get(k):
             notes.append(f'<div class="nt"><b>{tag}</b> {h(o.get(k))}</div>')
     # 估计信息区放得下几行商品；放不下的合成「还有 N 项」（一行都放不下就加在第一行后面）
     line_mm = tpl["font"] * 0.3528 * 1.3
-    room = (T.PAPERS[tpl["paper"]][1] - 6 if full else tpl["info_mm"] - 2)
+    room = (T.PAPERS[tpl["paper"]][1] - 6 if full else (info_h or tpl["info_mm"]) - 2)
     room -= line_mm * (1 + len(notes) + (1.1 if tpl["text"] else 0)) + (6.5 if "order_bc" in f else 0)
     cap = max(1, int(room / line_mm + 0.15))
     if len(lines) > cap:
         if cap == 1:
             rest = len(lines) - 1
-            lines = [lines[0].replace('<div class="it">', '<div class="it"><span class="more1">' + f'+{rest} รายการ/项</span>', 1)]
+            lines = [lines[0].replace('<div class="it">', '<div class="it"><span class="more1">' + f'+{rest} รายการ / items</span>', 1)]
         else:
             rest = len(lines) - (cap - 1)
-            lines = lines[:cap - 1] + [f'<div class="it more">…还有 {rest} 项（见拣货单）/ อีก {rest} รายการ</div>']
+            lines = lines[:cap - 1] + [f'<div class="it more">…อีก {rest} รายการ (ดูใบหยิบสินค้า) / +{rest} more (see pick list)</div>']
     bc = (f'<div class="obc">{code128_svg(o.get("order_no") or "", height=30, module=1)}</div>'
           if "order_bc" in f and o.get("order_no") else "")
     txt = f'<div class="txt">{h(tpl["text"])}</div>' if tpl["text"] else ""
-    return (f'<div class="info{" full" if full else ""}"><div class="ihd">{"".join(head)}</div>{bc}'
+    st = f' style="flex-basis:{info_h:.1f}mm"' if info_h and not full else ""
+    return (f'<div class="info{" full" if full else ""}"{st}><div class="ihd">{"".join(head)}</div>{bc}'
             f'{"".join(lines)}{"".join(notes)}{txt}</div>')
 
 
@@ -167,9 +175,9 @@ def _css(tpl):
 * {{ box-sizing: border-box }}
 body {{ margin: 0; font-family: 'Leelawadee UI', Tahoma, 'Microsoft YaHei', 'PingFang SC', sans-serif; color: #000 }}
 .wb {{ width: {w}mm; height: {hh}mm; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; position: relative }}
-.awb {{ flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 1mm }}
+.awb {{ flex: 1 1 auto; min-height: 0; flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 1mm }}
 .awb img {{ width: 100%; height: 100%; object-fit: contain; image-rendering: crisp-edges }}
-.info {{ flex: 0 0 {tpl['info_mm']}mm; border-top: .5mm dashed #000; padding: 1mm 2mm; font-size: {tpl['font']}pt; line-height: 1.3; overflow: hidden }}
+.info {{ flex: 0 0 {tpl['info_mm']}mm; flex-grow: 0; border-top: .5mm dashed #000; padding: 1mm 2mm; font-size: {tpl['font']}pt; line-height: 1.3; overflow: hidden }}
 .info.full {{ flex: 1 1 auto; border-top: 0; padding: 3mm }}
 .ihd {{ display: flex; flex-wrap: wrap; gap: 0 2.5mm; align-items: center; font-weight: 700 }}
 .ihd .ono {{ font-size: 1.1em }}
@@ -210,8 +218,19 @@ def _sample_awb():
 SAMPLE_AWB = _sample_awb()
 
 
-def compose(entries, tpl, where, sort_key, missing=(), title="平台面单", autoprint=True):
-    """entries: [(订单, [面单图片地址...], 第几次打印)]。missing: [(订单号, 原因)] 显示在页面上方（不打印）。"""
+def split_mm(tpl, aspect):
+    """v2.42：面单下面加信息时，(面单区高度, 信息区高度) 毫米。面单宽度占满纸（左右各留 1 毫米），高度按面单比例（高 / 宽）；
+    剩下的都给信息区；面单太长、信息区不够 info_mm 时才把面单缩小。不知道比例时按信息区 = info_mm。"""
+    w, hh = T.PAPERS[tpl["paper"]]
+    if not aspect:
+        return hh - tpl["info_mm"], tpl["info_mm"]
+    awb = min((w - 2) * aspect + 2, hh - tpl["info_mm"])
+    return awb, hh - awb
+
+
+def compose(entries, tpl, where, sort_key, missing=(), title="Waybill", autoprint=True, aspects=None):
+    """entries: [(订单, [面单图片地址...], 第几次打印)]。missing: [(订单号, 原因)] 显示在页面上方（不打印）。
+    aspects: {订单 id: 面单第一页的 高 / 宽}（v2.42，用来让面单宽度占满纸）。"""
     out = [f"<!doctype html><html><head><meta charset='utf-8'><title>{h(title)} ใบปะหน้า</title><style>{_css(tpl)}</style></head><body>",
            "<div class='noprint'><button onclick='print()' style='font-size:16px;padding:6px 20px'>打印 / พิมพ์</button> "
            f"打印机选 {h(T.PAPER_ZH[tpl['paper']])}，缩放 100% / ขนาดจริง 100%"]
@@ -220,17 +239,20 @@ def compose(entries, tpl, where, sort_key, missing=(), title="平台面单", aut
                    "<br>".join(f"{h(no)}：{h(why)}" for no, why in missing) + "</div>")
     out.append("</div>")
     now = time.time()
+    from core.config import load_config
+    tx = Texts(load_config())
     for o, imgs, n in entries:
         imgs = imgs or [SAMPLE_AWB]
         for i, src in enumerate(imgs):
             more = f'<div class="pg2">{i + 1}/{len(imgs)}</div>' if len(imgs) > 1 else ""
-            if tpl["layout"] == "below":
-                inf = info_html(o, tpl, n, where, sort_key, now=now) if i == 0 else ""
-                out.append(f'<div class="wb"><div class="awb"><img src="{h(src)}" alt=""></div>{inf}{more}</div>')
+            if tpl["layout"] == "below" and i == 0:
+                awb_h, inf_h = split_mm(tpl, (aspects or {}).get(o.get("id")))
+                inf = info_html(o, tpl, n, where, sort_key, now=now, tx=tx, info_h=inf_h)
+                out.append(f'<div class="wb"><div class="awb" style="flex-basis:{awb_h:.1f}mm"><img src="{h(src)}" alt=""></div>{inf}{more}</div>')
             else:
                 out.append(f'<div class="wb"><div class="awb"><img src="{h(src)}" alt=""></div>{more}</div>')
         if tpl["layout"] == "page":
-            out.append(f'<div class="wb">{info_html(o, tpl, n, where, sort_key, full=True, now=now)}</div>')
+            out.append(f'<div class="wb">{info_html(o, tpl, n, where, sort_key, full=True, now=now, tx=tx)}</div>')
     if autoprint:                                     # 面单图片都加载好再弹打印
         out.append("<script>(function(){var im=[].slice.call(document.images),left=im.length;"
                    "function go(){if(--left<=0)setTimeout(function(){print()},200)}"
@@ -240,13 +262,14 @@ def compose(entries, tpl, where, sort_key, missing=(), title="平台面单", aut
 
 
 SAMPLE_ORDER = {"id": 0, "order_no": "2610090001ABCD", "platform": "shopee", "shop": "3D Shop TH", "tracking_no": "TH0123456789A",
-                "buyer_note": "ขอสีชมพูนะคะ", "custom_note": "刻字：MALI", "seller_note": "",
-                "items": [{"sku": "3DP0001-PK", "name": "猫咪小夜灯 โคมไฟแมว", "variation": "粉色 ชมพู", "qty": 2},
-                          {"sku": "3DP0007-WH", "name": "手机支架", "variation": "白色", "qty": 1},
-                          {"sku": "3DP0012-BK-L", "name": "收纳盒", "variation": "黑色 L", "qty": 1}]}
+                "buyer_note": "ขอสีชมพูนะคะ", "custom_note": "สลักชื่อ: MALI", "seller_note": "",
+                "items": [{"sku": "3DP0001-PK", "name": "โคมไฟแมว Cat night light", "variation": "ชมพู Pink", "qty": 2},
+                          {"sku": "3DP0007-WH", "name": "ที่วางมือถือ Phone stand", "variation": "ขาว White", "qty": 1},
+                          {"sku": "3DP0012-BK-L", "name": "กล่องเก็บของ Storage box", "variation": "ดำ Black L", "qty": 1}]}
 SAMPLE_WHERE = {"3DP0001-PK": [("A1-02-03", 5)], "3DP0007-WH": [("A1-01-01", 2)], "3DP0012-BK-L": [("B2-03-04", 1)]}
 
 
 def preview_html(tpl, sort_key):
     """设置页预览：示例订单 + 示例面单（第 2 次打印，看补打提示）。"""
-    return compose([(SAMPLE_ORDER, [SAMPLE_AWB], 2)], tpl, SAMPLE_WHERE, sort_key, title="预览", autoprint=False)
+    return compose([(SAMPLE_ORDER, [SAMPLE_AWB], 2)], tpl, SAMPLE_WHERE, sort_key, title="Preview", autoprint=False,
+                   aspects={SAMPLE_ORDER["id"]: 1.5})

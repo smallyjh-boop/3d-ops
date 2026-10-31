@@ -7,7 +7,8 @@
   enabled   打印平台面单时按模板排（关掉 = 原样打印平台的 PDF）
   layout    below 面单下面加信息区（同一张纸，面单自动缩小）/ page 面单原样，后面另起一张打信息
   paper     纸张：100x150（默认）/ 100x180 / a6
-  info_mm   信息区高度（毫米，below 用）
+  info_mm   信息区最少留多高（毫米，below 用）。v2.42：面单宽度占满纸、高度按比例，剩下的都给信息区；
+            面单太长时才把面单缩小，给信息区留够这个高度
   font      信息区字号（pt）
   fields    显示哪些信息（见 FIELDS）
   sort      商品排序：loc 按货位（拣货走一趟）/ sku 按 SKU
@@ -38,7 +39,7 @@ LAYOUTS = {"below": ("面单下面加信息（同一张纸，面单自动缩小�
 PAPERS = {"100x150": (100, 150), "100x180": (100, 180), "a6": (105, 148)}
 PAPER_ZH = {"100x150": "100×150 毫米（热敏 4×6 寸）", "100x180": "100×180 毫米（加长热敏纸）", "a6": "A6 105×148 毫米"}
 PAPER_TH = {"100x150": "100×150 มม. (กระดาษความร้อน 4×6 นิ้ว)", "100x180": "100×180 มม. (กระดาษความร้อนแบบยาว)", "a6": "A6 105×148 มม."}
-DEFAULT = {"enabled": False, "layout": "below", "paper": "100x150", "info_mm": 34, "font": 9,
+DEFAULT = {"enabled": False, "layout": "below", "paper": "100x150", "info_mm": 12, "font": 9,
            "fields": ["order_no", "items", "spec", "loc", "total", "buyer_note", "custom_note", "count"],
            "sort": "loc", "text": "", "crop": True, "rotate": True}
 
@@ -56,7 +57,10 @@ def clean(d):
     t["enabled"] = d.get("enabled") in (True, 1, "1", "true", "on")
     t["layout"] = d.get("layout") if d.get("layout") in LAYOUTS else DEFAULT["layout"]
     t["paper"] = d.get("paper") if d.get("paper") in PAPERS else DEFAULT["paper"]
-    t["info_mm"] = _int(d.get("info_mm"), 16, 70, DEFAULT["info_mm"])
+    mm = d.get("info_mm")
+    if mm in (34, "34"):                       # v2.42：以前的默认 34 是固定高度（面单缩得太小），改成最少留 12
+        mm = DEFAULT["info_mm"]
+    t["info_mm"] = _int(mm, 8, 70, DEFAULT["info_mm"])
     t["info_mm"] = min(t["info_mm"], PAPERS[t["paper"]][1] - 60)       # 面单区至少留 60 毫米
     t["font"] = _int(d.get("font"), 7, 14, DEFAULT["font"])
     f = d.get("fields")

@@ -47,10 +47,10 @@ def _postcode_boxes(pc):
     return "".join(f'<span class="pcb">{h(ch)}</span>' for ch in pc.ljust(5)) if pc else ""
 
 
-def _ship_zh(m):
-    """v2.41：订单里只有 ship_method 代码（pickup / dropoff / self），面单上印中文。"""
-    from core.orders import SHIP_METHOD_ZH
-    return SHIP_METHOD_ZH.get(m or "", "")
+def _ship_th(m):
+    """v2.42：订单里只有 ship_method 代码（pickup / dropoff / self），面单上印泰文 / 英文（不印中文）。"""
+    from .labeltext import SHIP_METHOD_TH
+    return SHIP_METHOD_TH.get(m or "", "")
 
 
 def _label(o, cfg, key, size):
@@ -60,28 +60,28 @@ def _label(o, cfg, key, size):
     sender, s_addr = _sender(cfg)
     track = o.get("tracking_no") or ""
     cod = o.get("cod")
-    items = "，".join(f"{i.get('sku')}×{i.get('qty') or 1}" for i in o.get("items") or [])
+    items = ", ".join(f"{i.get('sku')}×{i.get('qty') or 1}" for i in o.get("items") or [])
     name = c["name"] or (o.get("carrier") or "")
-    cod_html = (f'<span class="cod">COD ฿{cod_txt(cod)}</span>' if cod else '<span class="nocod">ไม่เก็บเงินปลายทาง<br>非货到付款</span>')
+    cod_html = (f'<span class="cod">COD ฿{cod_txt(cod)}</span>' if cod else '<span class="nocod">ไม่เก็บเงินปลายทาง<br>NO COD</span>')
     head = (f'<div class="hd" style="background:{c["color"]};color:{c["ink"]}"><span class="brand">{h(name) or "&nbsp;"}</span>'
-            f'<span class="sv">{h(o.get("ship_method_zh") or _ship_zh(o.get("ship_method")))}</span></div>')
+            f'<span class="sv">{h(_ship_th(o.get("ship_method")))}</span></div>')
     tb = (f'<div class="bc">{code128_svg(track, 18 if small else 22, 2)}<div class="tn">{h(track)}</div></div>' if track
-          else '<div class="bc notrk">（还没有运单号 ยังไม่มีเลขพัสดุ）</div>')
-    recv = (f'<div class="box rc"><div class="lab">ผู้รับ / 收件人</div>'
+          else '<div class="bc notrk">ยังไม่มีเลขพัสดุ / No tracking number</div>')
+    recv = (f'<div class="box rc"><div class="lab">ผู้รับ / To</div>'
             f'<div class="big">{h(o.get("receiver") or o.get("buyer") or "")}　{h(o.get("phone") or "")}</div>'
-            f'<div class="addr">{h(o.get("address") or "（没有地址，请在订单详情里填写）")}</div></div>')
-    send = f'<div class="box sd"><span class="lab">ผู้ส่ง / 寄件人：</span>{h(sender)}<div>{h(s_addr)}</div></div>'
+            f'<div class="addr">{h(o.get("address") or "ไม่มีที่อยู่ / No address")}</div></div>')
+    send = f'<div class="box sd"><span class="lab">ผู้ส่ง / From: </span>{h(sender)}<div>{h(s_addr)}</div></div>'
     if c["layout"] == "post":
         body = (f'{head}<div class="row">{send}{cod_html}</div>{tb}'
-                f'<div class="box rc post"><div class="lab">กรุณาส่ง / 收件人</div>'
+                f'<div class="box rc post"><div class="lab">กรุณาส่ง / To</div>'
                 f'<div class="big">{h(o.get("receiver") or o.get("buyer") or "")}</div><div>โทร {h(o.get("phone") or "")}</div>'
                 f'<div class="addr">{h(o.get("address") or "")}</div><div class="pcs">{_postcode_boxes(o.get("postcode"))}</div></div>')
     else:
-        body = (f'{head}<div class="row"><div class="sort"><div class="lab">ปลายทาง / 目的地</div><div class="pc">{h(o.get("postcode") or "—")}</div></div>'
+        body = (f'{head}<div class="row"><div class="sort"><div class="lab">ปลายทาง / Dest.</div><div class="pc">{h(o.get("postcode") or "—")}</div></div>'
                 f'{cod_html}</div>{tb}{recv}{send}')
     if not small:
         body += (f'<div class="bc ob">{code128_svg(o.get("order_no") or "", 14, 1)}<div>{h(o.get("platform") or "")} {h(o.get("order_no") or "")}</div></div>'
-                 f'<div class="items">สินค้า：{h(items)}</div>')
+                 f'<div class="items">สินค้า / Items: {h(items)}</div>')
         if o.get("custom_note"):
             body += f'<div class="note">{h(o.get("custom_note"))}</div>'
     else:

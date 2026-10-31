@@ -21,7 +21,7 @@ MODULE = {
         {"tab": "export", "mod": "goods", "zh": "导出上架表格", "th": "ส่งออกไฟล์ลงสินค้า", "roles": "owner,listing", "after": "edit"},
     ],
     "settings_module": "goods",
-    "settings": [("Lazada 接口推送（v2.41.2）", [
+    "settings": [("Lazada 接口推送", [
         ("lazada_stock_sync_min", "库存自动推到 Lazada：每隔几分钟把「库存待同步」里用接口推送过的 SKU 改掉（0 = 关，只手动点）",
          ["0", "15", "30", "60", "120"])])],
     "config_defaults": {"lazada_stock_sync_min": "30"},

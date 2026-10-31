@@ -72,10 +72,10 @@ production.stock_add(sku, 3, "备货打印", "t", sku.split("-")[0], "测试", "
 h = C.get(f"/print/labels?type=platform&ids={o1['id']},{o2['id']},{o3['id']}").get_data(as_text=True)
 ok(f"/api/waybill/awb/{o1['id']}/0.png" in h and f"/api/waybill/awb/{o2['id']}/0.png" in h, "composed page uses awb images")
 ok("WB-1001" in h and sku in h and "×2" in h and "C1-01-01" in h and "ขอกล่องสวยๆ" in h and "刻字 MALI" in h and "易碎品" in h, "info area content")
-ok("补打 第2次" in h and "#1" in h and "WB-1003" in h and "没有平台面单" in h, "raw print counted, second print warns; missing listed")
+ok("Reprint #2" in h and "#1" in h and "WB-1003" in h and "没有平台面单" in h, "raw print counted, second print warns; missing listed")
 ok(h.count('class="wb"') == 2 and "100mm 150mm" in h, "one label per order (below layout)")
 h = C.get(f"/print/labels?type=platform&ids={o1['id']}").get_data(as_text=True)
-ok("补打 第3次" in h, "reprint warning")
+ok("Reprint #3" in h, "reprint warning")
 ok(waybill.counts([o1["id"]])[o1["id"]] == 3, "print records")
 ok(C.get(f"/print/labels?type=platform&ids={o1['id']}&raw=1").mimetype == "application/pdf", "raw=1 -> original pdf")
 ok(C.get(f"/print/waybill?ids={o3['id']}").status_code == 404, "only missing -> 404")
@@ -91,7 +91,7 @@ ok(h.count('class="wb"') == 2 and 'class="info full"' in h and "100mm 180mm" in 
 # 预览（不记打印）
 n0 = waybill.counts([o1["id"]])[o1["id"]]
 h = C.get("/print/waybill-preview?tpl=" + json.dumps({"layout": "below", "fields": ["order_no", "items", "count"]})).get_data(as_text=True)
-ok("2610090001ABCD" in h and "补打 第2次" in h and "setTimeout" not in h and waybill.counts([o1["id"]])[o1["id"]] == n0, "preview")
+ok("2610090001ABCD" in h and "Reprint #2" in h and "setTimeout" not in h and waybill.counts([o1["id"]])[o1["id"]] == n0, "preview")
 # 平台接口取面单（模拟 Lazada 接通）
 png = io.BytesIO(); Image.new("L", (600, 900), 255).save(png, "PNG")
 integrations.save_shop({"platform": "lazada", "name": "Lazada TH", "enabled": True, "creds": {"app_key": "k"}})

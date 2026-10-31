@@ -40,7 +40,7 @@
       <div class="wb-grid"><div class="wb-form">
         <div class="wb-row"><span class="wb-k">版式</span><div>${r.layouts.map((x) => `<label class="wb-opt"><input type="radio" name="wb-layout" value="${x.id}" ${t.layout === x.id ? "checked" : ""}> <span data-notr>${L(x)}</span></label>`).join("")}</div></div>
         <div class="wb-row"><span class="wb-k">纸张</span><select id="wb-paper" data-notr>${r.papers.map((x) => `<option value="${x.id}" ${t.paper === x.id ? "selected" : ""}>${L(x)}</option>`).join("")}</select></div>
-        <div class="wb-row"><span class="wb-k">信息区高度</span><input id="wb-info" type="number" min="16" max="70" value="${t.info_mm}" style="width:70px"> <span class="small">毫米（「面单下面加信息」用；越高面单缩得越小）</span></div>
+        <div class="wb-row"><span class="wb-k">信息区最少留</span><input id="wb-info" type="number" min="8" max="70" value="${t.info_mm}" style="width:70px"> <span class="small">毫米（「面单下面加信息」用：面单宽度占满纸，剩下的高度都给信息区；面单太长时才缩小面单，给信息区留够这么高）</span></div>
         <div class="wb-row"><span class="wb-k">字号</span><input id="wb-font" type="number" min="7" max="14" value="${t.font}" style="width:70px"> <span>pt</span></div>
         <div class="wb-row"><span class="wb-k">显示</span><div class="wb-fields">${r.fields.map((x) => `<label class="wb-opt"><input type="checkbox" value="${x.id}" ${t.fields.includes(x.id) ? "checked" : ""}> <span data-notr>${L(x)}</span></label>`).join("")}</div></div>
         <div class="wb-row"><span class="wb-k">商品排序</span><select id="wb-sort"><option value="loc" ${t.sort === "loc" ? "selected" : ""}>按货位（拣货走一趟）</option><option value="sku" ${t.sort === "sku" ? "selected" : ""}>按 SKU</option></select></div>

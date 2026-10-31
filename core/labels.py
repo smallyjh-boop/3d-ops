@@ -187,20 +187,20 @@ def self_made_html(orders, cfg):
            "<div class='noprint'><button onclick='print()' style='font-size:16px;padding:6px 20px'>打印 / พิมพ์</button>"
            " <span class='small'>打印机选择 100×150mm 纸张，缩放 100%</span></div>"]
     for o in orders:
-        items = "，".join(f"{i.get('sku')}×{i.get('qty') or 1}" for i in o.get("items") or [])
+        items = ", ".join(f"{i.get('sku')}×{i.get('qty') or 1}" for i in o.get("items") or [])
         track = o.get("tracking_no") or ""
         cod = o.get("cod")
         out.append(f"""<div class="lb">
   <div class="row"><span class="big">{h(o.get('carrier') or '')}</span>
-    {f'<span class="cod">COD ฿{cod_txt(cod)}</span>' if cod else '<span class="small">ไม่เก็บเงินปลายทาง</span>'}</div>
+    {f'<span class="cod">COD ฿{cod_txt(cod)}</span>' if cod else '<span class="small">ไม่เก็บเงินปลายทาง / NO COD</span>'}</div>
   {f'<div class="bc">{code128_svg(track, 46)}<div>{h(track)}</div></div>' if track else ''}
-  <div class="box"><div class="small">ผู้รับ / 收件人</div>
+  <div class="box"><div class="small">ผู้รับ / To</div>
     <div class="big">{h(o.get('receiver') or o.get('buyer') or '')}　{h(o.get('phone') or '')}</div>
-    <div>{h(o.get('address') or '（没有地址，请在订单详情里填写）')}</div>
+    <div>{h(o.get('address') or 'ไม่มีที่อยู่ / No address')}</div>
     <div class="row"><span></span><span class="pc">{h(o.get('postcode') or '')}</span></div></div>
-  <div class="box small"><div>ผู้ส่ง / 寄件人：{h(sender)}</div><div>{h(s_addr)}</div></div>
+  <div class="box small"><div>ผู้ส่ง / From: {h(sender)}</div><div>{h(s_addr)}</div></div>
   <div class="bc">{code128_svg(o.get('order_no'), 34, 1)}<div>{h(o.get('platform') or '')} {h(o.get('order_no'))}</div></div>
-  <div class="small">สินค้า：{h(items)}</div>
+  <div class="small">สินค้า / Items: {h(items)}</div>
   {f'<div class="note small">{h(o.get("custom_note"))}</div>' if o.get('custom_note') else ''}
 </div>""")
     out.append("</body></html>")

@@ -102,9 +102,12 @@ def print_html(ids, user=""):
             for it in o.get("items") or []:
                 if it.get("sku") and it["sku"] not in where:
                     where[it["sku"]] = inv.where_is(it["sku"])
+    aspects = {}
     for o in have:
         path = sources.awb_path(o)
         n = render.page_count(path)
+        if tpl["layout"] == "below":
+            aspects[o["id"]] = _aspect(path, tpl)
         v = int(os.path.getmtime(path))                      # 换了面单文件，图片地址跟着变
         imgs = [f"/api/waybill/awb/{o['id']}/{p}.png?v={v}" for p in range(n)]
         entries.append((o, imgs, before.get(o["id"], 0) + 1))
@@ -112,8 +115,19 @@ def print_html(ids, user=""):
         ids_have = [o["id"] for o in have]
         record(ids_have, user, "平台面单（自定义）")
         core_labels.mark_printed(ids_have, user, "平台面单（自定义）")
-    html = render.compose(entries, tpl, where, _sort_key(), missing)
+    html = render.compose(entries, tpl, where, _sort_key(), missing, aspects=aspects)
     return html, [o["id"] for o in have], [o["order_no"] for o in orders if o not in have]
+
+
+def _aspect(path, tpl):
+    """面单第一页（裁白边、转向以后）的 高 / 宽。图片本来就要转（有缓存），这里顺便读尺寸。"""
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(render.awb_png(path, 0, tpl["crop"], tpl["rotate"])))
+        return img.height / img.width if img.width else None
+    except Exception:  # noqa: BLE001  读不了就按信息区最少高度排
+        return None
 
 
 def preview_html(tpl=None):

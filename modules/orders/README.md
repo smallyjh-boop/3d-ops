@@ -10,6 +10,7 @@
 - `api.py`
 - `carriers.py`      自制快递面单模板
 - `module.py`
+- `labeltext.py`    面单上印的字只用泰文 / 英文（商品名、规格换成产品的泰文）
 - `packbox.py`       订单用哪个纸箱（产品设的邮政纸箱里最大的，打包时可改）
 - `scanning.py`      打包核对 / 交接扫什么码
 - `waybill/`         平台面单框架（来源、模板、排版）
@@ -36,3 +37,4 @@
 - 1.7（系统 v2.41.0）：代收货款金额统一写法；改发货时限时校验格式、只记真正改了的字段；坏表格、乱填的商品明细、批量 id 报清楚的错；批量操作有失败时提示哪几单没成；改成「退货」也要取消订单权限；扫码框可以翻译；生产角色看不到用不了的按钮；字段名泰文翻译。测试 tests/cases/t_v241.py。
 - 1.8（系统 v2.41.2）：Lazada 面单接通：打印面单时自动从 Lazada 接口取（waybill/sources.fetch 把订单的平台原始编号 raw 带给连接器）。测试 modules/orders/tests/t_waybill.py、modules/link/tests/t_lazada2412.py。
 - 1.8 补充：上传平台面单 PDF 时，页面文字里找不到订单号就读条码（core/labels._page_barcodes，pypdfium2 + zxing-cpp），图片型 PDF（Lazada 卖家中心打印的）也能对上订单。测试 modules/orders/tests/t_label_barcode.py。
+- 1.9（系统 v2.42.0）：面单只印泰文 / 英文（labeltext.py；平台面单信息区、自制快递面单、旧版自制面单）；「面单下面加信息」面单宽度占满纸、剩下的给信息区（render.split_mm，info_mm 改成最少高度，旧的 34 迁移成 12）。测试 tests/t_label_th.py。
