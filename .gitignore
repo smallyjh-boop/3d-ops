@@ -5,3 +5,11 @@ __pycache__/
 *.part
 *.upg
 templates_lazada/lazada_auto_*.xlsx
+
+# 安卓 App 编译出来的东西
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/.kotlin/

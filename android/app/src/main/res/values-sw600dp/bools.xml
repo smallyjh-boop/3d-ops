@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 平板（最短边 ≥ 600dp）：默认打开完整网页版 -->
+<resources>
+    <bool name="is_tablet">true</bool>
+</resources>

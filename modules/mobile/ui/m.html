@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<meta name="mobile-web-app-capable" content="yes">
+<title>3D Ops · 手机</title>
+<link rel="stylesheet" href="/m/mobile/m.css?v={{V}}">
+</head>
+<body>
+<div id="cam" class="cam cam-off hidden">
+  <video id="cam-video" playsinline muted autoplay></video>
+  <div class="aim"></div>
+  <div id="cam-msg" class="cam-msg hidden"></div>
+  <div id="cam-last" class="cam-last" data-notr></div>
+</div>
+<header class="bar">
+  <button id="back" class="ic hidden" aria-label="back">‹</button>
+  <b id="title" class="title"></b>
+  <button id="qbadge" class="qbadge hidden"></button>
+  <button id="cam-toggle" class="ic" aria-label="camera">📷</button>
+  <button id="lang" class="ic lang" data-notr>ไทย</button>
+  <button id="app-set" class="ic hidden" aria-label="settings">⚙</button>
+</header>
+<main id="view"></main>
+<form id="scan-form" class="scanbar" autocomplete="off">
+  <input id="scan-in" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" data-notr>
+  <button type="submit" id="scan-go">↵</button>
+</form>
+<div id="flash"></div>
+<div id="toast" class="toast hidden"></div>
+<div id="sheet" class="sheet hidden"><div class="sheet-in" id="sheet-in"></div></div>
+<input type="file" id="photo-in" accept="image/*" capture="environment" hidden>
+<script src="/static/i18n.js?v={{VERSION}}"></script>
+<script src="/m/mobile/scan.js?v={{V}}"></script>
+<script src="/m/mobile/m.js?v={{V}}"></script>
+</body>
+</html>

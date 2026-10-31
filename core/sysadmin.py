@@ -288,7 +288,7 @@ def verify_backup(path):
 
 
 # ---------------- 在线升级 ----------------
-SKIP_TOP = {"data", ".venv", "__pycache__", ".git", ".github", "tests"}   # tests：GitHub 下载的源码包里有测试，NAS 上用不到
+SKIP_TOP = {"data", ".venv", "__pycache__", ".git", ".github", "tests", "android"}   # tests：GitHub 下载的源码包里有测试，NAS 上用不到；android：安卓 App 的源码（GitHub 编译好发 APK）
 
 
 def _members(z):
