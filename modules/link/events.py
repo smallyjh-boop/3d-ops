@@ -7,11 +7,18 @@ def on_order_status(oid, new, old=None, user=""):
     和卖家中心的「安排发货」一样，快递才会来揽收。平台同步回来的状态变化（user 为空 / 系统）不再调。失败只记日志，不影响发货。"""
     if new != "shipped" or old not in ("to_ship", "other") or not user or user in ("系统",) or str(user).startswith("api:"):
         return None
-    from core import config, connectors, db, integrations, orders
+    from core import config, db
     if not config.load_config().get("lazada_auto_rts", True):
         return None
     if not db.conn().execute("SELECT 1 FROM users WHERE username=?", (user,)).fetchone():
         return None                             # 不是员工在 ERP 里操作的（表格导入、平台同步传进来的是来源名）
+    return rts_now(oid, user)
+
+
+def rts_now(oid, user=""):
+    """v2.50：订单列表「发货 ▾ → 安排发货」/「安排发货失败」队列里重试：直接在 Lazada 上安排发货（不改 ERP 的状态）。
+    返回 None = 不是开了接口的 Lazada 订单；{rts: True/False, error?}。"""
+    from core import connectors, db, integrations, orders
     r = db.conn().execute("SELECT platform, shop, raw FROM orders WHERE id=?", (oid,)).fetchone()
     if not r or r["platform"] != "lazada":
         return None

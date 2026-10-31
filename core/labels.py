@@ -134,6 +134,7 @@ def mark_printed(order_ids, user="", kind="平台面单"):
         c.execute("UPDATE orders SET label_printed_at=? WHERE id=?", (now, oid))
         orders.log(oid, user, f"打印{kind}", "", commit=False)
     c.commit()
+    orders.mark_doc(order_ids, "label", user)         # v2.50：每种单据的打印次数
 
 
 # ---------------- Code 128 条形码（SVG）----------------

@@ -151,6 +151,25 @@ def create_quote(buyer, items, note="", user="", platform="manual"):
     return order_brief(o["id"])
 
 
+def create_order(buyer, items, kind="manual", platform="manual", shop="", note="", user="", ship=None):
+    """v2.50「从聊天建单」：手工订单（kind manual / custom / wholesale）或报价单（quote）。ship = 收件人 / 电话 / 地址 / 邮编（可空）。"""
+    if kind not in ("manual", "custom", "wholesale", "quote"):
+        raise ValueError("订单类型不对")
+    d = {"kind": kind, "buyer": buyer or "", "platform": platform or "manual", "shop": shop or "", "custom_note": note or "",
+         "items": [{"sku": i.get("sku"), "qty": i.get("qty") or 1, "unit_price": i.get("unit_price")} for i in items or []]}
+    for k in ("receiver", "phone", "address", "postcode"):
+        if (ship or {}).get(k):
+            d[k] = str(ship[k])[:300]
+    o = orders.create_manual(d, user=user)
+    if kind != "quote":
+        try:
+            from core import chain
+            chain.order_changed(user)            # 正式订单：马上排产
+        except Exception:  # noqa: BLE001
+            pass
+    return order_brief(o["id"])
+
+
 def capacity_hours_per_day():
     cfg = _cfg()
     n = len(cfg.get("printers") or []) or int(cfg.get("printer_count") or 1)
@@ -191,12 +210,13 @@ def buyer_history(platform, buyer, exclude_conv=None):
         for t in (cv["tags"] or "").split(","):
             if t and t not in tags:
                 tags.append(t)
-    level = ""
+    level, risk = "", {}
     try:
         r = c.execute("SELECT buyer_key FROM orders WHERE buyer=? AND buyer_key IS NOT NULL LIMIT 1", (buyer,)).fetchone()
         if r:
             b = c.execute("SELECT level FROM buyers WHERE key=?", (r["buyer_key"],)).fetchone()
             level = (b["level"] if b else "") or ""
+            risk = orders.buyer_risk_of(r["buyer_key"])          # v2.50：风险买家（黑名单 / 拒收 / 退货多）
     except Exception:  # noqa: BLE001
         pass
     if not rows and not convs:
@@ -207,6 +227,7 @@ def buyer_history(platform, buyer, exclude_conv=None):
                         "day": time.strftime("%Y-%m-%d", time.localtime(r["order_time"])) if r["order_time"] else "",
                         "total": r["order_total"], "items": items.get(r["id"], [])} for r in rows[:5]],
             "past_chats": len(convs), "tags": tags[:8], "level": orders.LEVEL_ZH.get(level, level) if level else "",
+            "risk": risk.get("reason") or "", "blacklist": level == "blacklist",
             "repeat": len(paid) >= 1}
 
 

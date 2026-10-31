@@ -8,68 +8,154 @@
   let IMP = null;          // 当前导入预览
 
   function show(name) {
-    if (name === "orders") loadOrders();
+    if (name === "orders") { if (PRESETS === null) loadPresets(); loadOrders(); }
     if (name === "profit") loadProfit();
   }
 
-  // ================= 订单（ERP 式）=================
-  const OF = { tab: "waiting", page: 1 };
+  // ================= 订单列表（v2.50：BigSeller 式）=================
+  // 左边工作流队列（带数字，一条聚合 SQL）· 常用筛选 + 「更多筛选」· 保存筛选 · 批量搜索 · 勾选后浮出的批量操作条
+  const Z = (zh, th) => (window.I18N && I18N.lang === "th" ? th : zh);
+  const ls = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch { return null; } return v; };
+  const OF = { tab: ls("ord_queue") || "to_produce", page: 1, nos: "", match: "exact" };
   let ORD_PAGE = null;
   const SEL = new Set();
   const STAGE_ZH = { none: "", waiting: "待生产", producing: "生产中", ready: "已打包待发", out: "已出库" };
+  const Q_TXT = {
+    all: ["全部", "ทั้งหมด"], review: ["待审核", "รอตรวจ"], to_produce: ["待生产", "รอผลิต"], producing: ["生产中", "กำลังผลิต"],
+    to_pack: ["待打包", "รอแพ็ก"], to_label: ["待打单", "รอพิมพ์ใบปะหน้า"], to_pickup: ["待揽收", "รอขนส่งรับ"], shipped: ["已交运", "ส่งแล้ว"],
+    completed: ["已完成", "สำเร็จ"], exception: ["异常", "ผิดปกติ"], urgent: ["即将超时", "ใกล้หมดเวลาส่ง"], shelf: ["搁置", "พักไว้"],
+    cancelled: ["取消", "ยกเลิก"], unpaid: ["未付款", "ยังไม่ชำระ"], aftersale: ["售后", "หลังการขาย"], rts_failed: ["安排发货失败", "แจ้งส่ง Lazada ไม่สำเร็จ"],
+    quote: ["报价", "ใบเสนอราคา"],
+    // 旧页签名（旧链接）
+    waiting: ["待生产", "รอผลิต"], ready: ["待发货", "รอส่ง"], returned: ["退货退款", "คืนสินค้า/คืนเงิน"], delivery_failed: ["拒收/派送失败", "ปฏิเสธรับ/ส่งไม่สำเร็จ"],
+  };
+  const Q_HELP = {
+    review: ["新订单命中审单规则（定制留言、风险买家货到付款、可能重复下单……），挂起等人工审核，不排产", "ออเดอร์ใหม่ที่ตรงกฎตรวจ (ข้อความสั่งทำ ลูกค้าเสี่ยง COD อาจสั่งซ้ำ) พักไว้รอคนตรวจ ยังไม่ผลิต"],
+    to_produce: ["审核通过，生产任务还没开始（或者 SKU 没对上产品，排不了产）", "ตรวจผ่านแล้ว งานผลิตยังไม่เริ่ม (หรือ SKU ไม่ตรงสินค้า)"],
+    producing: ["有生产任务在打印 / 后处理", "มีงานกำลังพิมพ์ / เก็บงาน"], to_pack: ["全部打印好了，等打包", "พิมพ์ครบแล้ว รอแพ็ก"],
+    to_label: ["打包好了（或者不用生产），还没打面单", "แพ็กแล้ว (หรือไม่ต้องผลิต) ยังไม่พิมพ์ใบปะหน้า"],
+    to_pickup: ["面单打好了，等快递揽收 / 交接", "พิมพ์ใบปะหน้าแล้ว รอขนส่งมารับ / ส่งมอบ"], shipped: ["已经交给快递", "ส่งให้ขนส่งแล้ว"],
+    completed: ["买家已签收", "ลูกค้าได้รับแล้ว"], exception: ["SKU 没对上、缺克数、快超时、排产来不及、打印失败……", "SKU ไม่ตรง ขาดน้ำหนัก ใกล้หมดเวลา ผลิตไม่ทัน พิมพ์ล้มเหลว"],
+    urgent: ["24 小时内要发货还没打包好（含已超时）", "ต้องส่งภายใน 24 ชม. แต่ยังแพ็กไม่เสร็จ (รวมเกินเวลา)"], shelf: ["人工搁置（暂时不处理，不排产）", "พักไว้ (ยังไม่ทำ ไม่ผลิต)"],
+    aftersale: ["退货退款、拒收 / 派送失败，或者有没处理完的售后", "คืนสินค้า/คืนเงิน ปฏิเสธรับ หรือมีงานหลังการขายค้าง"],
+    rts_failed: ["在 ERP 里发货了，Lazada 上「安排发货」没成功（原因在订单的操作记录里）。勾选后「发货 ▾ → 安排发货」重试", "ส่งใน ERP แล้ว แต่แจ้งพร้อมส่งใน Lazada ไม่สำเร็จ เลือกแล้วกด「จัดส่ง ▾ → แจ้งพร้อมส่ง」เพื่อลองใหม่"],
+  };
+  const QMAIN = ["review", "to_produce", "producing", "to_pack", "to_label", "to_pickup", "shipped", "completed"];
+  const QMORE = ["exception", "urgent", "shelf", "cancelled", "unpaid", "aftersale", "rts_failed", "quote"];
+  const QHOT = new Set(["review", "exception", "urgent", "rts_failed"]);
+  const PKG_TXT = { single: ["单品单件", "ชิ้นเดียว"], multi: ["单品多件", "สินค้าเดียวหลายชิ้น"], mixed: ["多品混装", "หลายสินค้า"] };
+  const FLAG_C = { red: "#ef4444", orange: "#f97316", yellow: "#eab308", green: "#22c55e", blue: "#3b82f6", purple: "#a855f7" };
+  const FLAG_TXT = { red: ["红", "แดง"], orange: ["橙", "ส้ม"], yellow: ["黄", "เหลือง"], green: ["绿", "เขียว"], blue: ["蓝", "น้ำเงิน"], purple: ["紫", "ม่วง"] };
+  const DOC_TXT = { label: ["面单", "ใบปะหน้า", "面", "ปะ"], pick: ["拣货单", "ใบหยิบสินค้า", "拣", "หยิบ"], pack: ["装箱单", "ใบแพ็กสินค้า", "装", "แพ็ก"],
+    invoice: ["发票", "ใบเสร็จ", "票", "ใบเสร็จ"] };
+  const qt = (k) => Z(...(Q_TXT[k] || [k, k]));
+  const MORE_IDS = ["#ord-kind", "#ord-printed", "#ord-pkg", "#ord-pay", "#ord-carrier", "#ord-tag", "#ord-flag"];
   function ordFilters() {
     return { tab: OF.tab, page: OF.page, q: $("#ord-q").value.trim(), platform: $("#ord-platform").value, shop: $("#ord-shop").value,
-      kind: $("#ord-kind").value, tag: $("#ord-tag").value, label: $("#ord-label").value, date_from: $("#ord-from").value, date_to: $("#ord-to").value,
-      pay: $("#ord-pay").value, carrier: $("#ord-carrier").value, buyer_key: OF.buyer_key || "",
-      sort: $("#ord-sort").value, page_size: 50 };
+      kind: $("#ord-kind").value, tag: $("#ord-tag").value, printed: $("#ord-printed").value, pkg: $("#ord-pkg").value, flag: $("#ord-flag").value,
+      date_from: $("#ord-from").value, date_to: $("#ord-to").value, pay: $("#ord-pay").value, carrier: $("#ord-carrier").value,
+      risk: $("#ord-risk").checked ? 1 : "", loss: isOwner() && $("#ord-loss").checked ? 1 : "",
+      nos: OF.nos, match: OF.nos ? OF.match : "", buyer_key: OF.buyer_key || "", sort: $("#ord-sort").value, page_size: 50 };
   }
   const qs = (o) => Object.entries(o).filter(([, v]) => v !== "" && v != null).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+
+  function queuesHtml(r) {
+    const c = r.counts || {};
+    const item = (k, i) => {
+      const n = c[k] || 0, h = Q_HELP[k];
+      return `<button class="oq ${k === OF.tab ? "on" : ""} ${QHOT.has(k) && n ? "hot" : ""} ${!n ? "zero" : ""}" data-otab="${k}" ${h ? `title="${esc(Z(...h))}"` : ""}>
+        ${i != null ? `<i class="oq-step">${i + 1}</i>` : ""}<span>${esc(qt(k))}</span><b>${n}</b></button>`;
+    };
+    return `<div class="oq-h"><span>${Z("订单队列", "คิวออเดอร์")}</span><button class="oq-fold" data-oqfold title="${Z("收起 / 展开", "ย่อ / ขยาย")}">«</button></div>
+      <button class="oq oq-all ${OF.tab === "all" ? "on" : ""}" data-otab="all"><span>${qt("all")}</span><b>${c.all || 0}</b></button>
+      <div class="oq-g">${QMAIN.map((k, i) => item(k, i)).join("")}</div>
+      <div class="oq-sep"></div><div class="oq-g oq-g2">${QMORE.map((k) => item(k)).join("")}</div>`;
+  }
+
+  function moreCount() {
+    return MORE_IDS.filter((k) => $(k).value).length + ($("#ord-risk").checked ? 1 : 0) + (isOwner() && $("#ord-loss").checked ? 1 : 0)
+      + ($("#ord-sort").value !== "auto" ? 1 : 0);
+  }
+
   async function loadOrders() {
-    const r = await api("/api/orders?" + qs(ordFilters()));
+    const f = ordFilters();
+    const r = await api("/api/orders?" + qs(f));
     ORD_PAGE = r;
     ORD_STATUS = r.status_zh || {};
-    $("#ord-tabs").innerHTML = (OF.buyer_key ? `<span class="pill tag-pill">只看这个买家的订单 <a class="link" id="ord-buyer-x">✕</a></span> ` : "") +
-      r.tabs.map(([k, v]) => `<button class="otab ${k === OF.tab ? "on" : ""} ${["exception", "review", "urgent", "delivery_failed"].includes(k) && r.counts[k] ? "warnt" : ""}" data-otab="${k}">${esc(v)}
-      <b>${r.counts[k] || 0}</b></button>`).join("");
+    if (!Q_TXT[OF.tab] && OF.tab !== "all") OF.tab = "all";
+    $("#ord-queues").innerHTML = queuesHtml(r);
+    const chips = [];
+    if (OF.buyer_key) chips.push(`<span class="pill tag-pill">${Z("只看这个买家的订单", "เฉพาะออเดอร์ของลูกค้านี้")} <a class="link" id="ord-buyer-x">✕</a></span>`);
+    if (OF.nos) chips.push(`<span class="pill tag-pill">${Z("批量搜索", "ค้นหาหลายเลข")} ${OF.nos.split(/[\s,，;；、]+/).filter(Boolean).length} · ${OF.match === "fuzzy" ? Z("模糊", "ใกล้เคียง") : Z("精确", "ตรงทุกตัว")} <a class="link" id="ord-nos-x">✕</a></span>`);
+    if (!["all"].includes(OF.tab) && Q_TXT[OF.tab]) chips.unshift(`<b class="ord-qname">${esc(qt(OF.tab))}</b>${Q_HELP[OF.tab] ? UX.help(Z(...Q_HELP[OF.tab])) : ""}`);
+    $("#ord-tabs").innerHTML = chips.join(" ");
+    $("#ord-nos-miss").innerHTML = (r.nos_missing || []).length ? `<span class="bad">${Z(`${r.nos_missing.length} 个没找到：`, `ไม่พบ ${r.nos_missing.length} รายการ: `)}<span class="mono" data-notr>${r.nos_missing.slice(0, 30).map(esc).join(", ")}</span></span>` : "";
     const fill = (sel, list, first) => { const cur = $(sel).value; $(sel).innerHTML = `<option value="">${first}</option>` +
       list.map((x) => `<option ${x === cur ? "selected" : ""} data-notr>${esc(x)}</option>`).join(""); };
     fill("#ord-shop", r.shops, "全部店铺");
     fill("#ord-tag", r.tags, "全部标签");
     fill("#ord-carrier", r.carriers || [], "全部物流");
-    $("#ord-table tbody").innerHTML = r.orders.map((o) => {
-      const items = o.items.map((i) => `<div class="${i.product_id ? "" : "bad"}"><span class="mono" data-notr${i.product_id ? ` data-p360="${esc(i.sku)}"` : ""}>${esc(i.sku || "?")}</span> ×${i.qty} ${colorTxt(i.color)}</div>`).join("");
-      const notes = (o.custom_note ? `<div class="note-flag" data-notr>✎ ${esc(o.custom_note)}</div>` : "") +
-        (o.buyer_note ? `<div class="small muted" data-notr>💬 ${esc(o.buyer_note)}</div>` : "");
-      const tags = (o.tags || "").split(",").filter(Boolean).map((t) => `<span class="pill tag-pill" data-notr>${esc(t)}</span>`).join(" ");
-      const exc = (o.exceptions || []).map((x) => `<div class="bad small">⚠ ${esc(x)}</div>`).join("");
-      const late = o.ship_by && o.ship_by < Date.now() / 1000 && ["waiting", "producing", "none"].includes(o.stage) && o.status === "to_ship";
-      const hold = o.hold && o.status === "to_ship" ? `<div class="hold-flag small">⏸ 待审核：<span>${esc(o.hold_reason || "")}</span></div>` : "";
-      return `<tr class="clickable ${SEL.has(o.id) ? "sel" : ""}" data-oid="${o.id}">
-        <td><input type="checkbox" data-sel="${o.id}" ${SEL.has(o.id) ? "checked" : ""}></td>
-        <td><b class="mono" data-notr>${esc(o.order_no)}</b>${o.priority ? ' <span class="pill bad-pill">加急</span>' : ""}
-          <div class="small muted">${esc(PLAT[o.platform] || o.platform)} <span data-notr>${esc(o.shop || "")}</span>${KIND_ZH[o.kind] ? " · " + KIND_ZH[o.kind] : ""}</div></td>
-        <td class="nowrap small">下单 ${short(o.order_time)}${o.ship_by ? `<div class="${late ? "bad" : "muted"}">最晚 ${short(o.ship_by)}</div>` : ""}
-          ${o.status === "to_ship" && !["ready", "out"].includes(o.stage) ? countdown(o.ship_by) : ""}
-          ${o.planned_done ? `<div class="muted">预计做完 ${short(o.planned_done)}</div>` : ""}</td>
-        <td><span data-notr>${esc(o.receiver || o.buyer || "")}</span>${buyerPills(o)}${o.tracking_no ? `<div class="small mono muted" data-notr>${esc(o.tracking_no)}</div>` : ""}
-          ${o.label_printed_at ? '<div class="small ok">🏷 已打面单</div>' : o.label_file ? '<div class="small">🏷 有平台面单</div>' : ""}</td>
-        <td>${items}${notes}</td>
-        <td class="c-cost nowrap">${money(o.order_total)}</td>
-        <td><span class="ost ost-${esc(o.status)}">${esc(o.status_zh)}</span>${STAGE_ZH[o.stage] && o.status === "to_ship" ? `<div class="small">${STAGE_ZH[o.stage]}</div>` : ""}
-          <div class="small">${progress(o.job_counts)}</div></td>
-        <td>${hold}${exc}${tags}</td>
-        <td class="nowrap">${role() !== "production" && CAN("orders.edit") ? `<button class="mini primary-lite" data-oedit="${o.id}">修改</button>` : ""}
-          ${CAN("orders.delete") ? `<button class="mini danger" data-odel="${o.id}">删除</button>` : ""}</td></tr>`;
-    }).join("") || '<tr><td colspan="9" class="muted">没有符合条件的订单。导入订单：点右上角「导入订单表格」。</td></tr>';
+    const mc = moreCount();
+    $("#ord-more-n").textContent = mc ? mc : "";
+    $("#ord-table tbody").innerHTML = r.orders.map(rowHtml).join("") ||
+      `<tr class="ord-empty"><td colspan="7">${UX.empty(Z("没有符合条件的订单", "ไม่มีออเดอร์ตามเงื่อนไข"))}</td></tr>`;
     const pages = Math.max(1, Math.ceil(r.total / r.page_size));
     $("#ord-pager").innerHTML = `<span class="small muted">共 ${r.total} 个订单</span>` + (pages > 1 ?
       `<button class="mini" data-pg="${r.page - 1}" ${r.page <= 1 ? "disabled" : ""}>上一页</button><span class="small">${r.page} / ${pages}</span>
        <button class="mini" data-pg="${r.page + 1}" ${r.page >= pages ? "disabled" : ""}>下一页</button>` : "") +
       (r.total > r.orders.length ? ` <button class="mini" id="ord-selall-filter">勾选全部 ${r.total} 个</button>` : "");
     $("#ord-all").checked = r.orders.length && r.orders.every((o) => SEL.has(o.id));
-    $('#ord-bulk [data-bulk="delete"]').classList.toggle("hidden", !CAN("orders.delete"));
     updSel();
   }
+
+  function itemsHtml(o) {
+    const its = o.items || [];
+    const show = its.slice(0, 3);
+    const one = (i) => `<div class="oi ${i.product_id ? "" : "bad"}">${i.img ? `<img class="oi-img" src="${esc(i.img)}" alt="" loading="lazy"${i.product_id ? ` data-p360="${esc(i.sku)}"` : ""}>` : `<span class="oi-img oi-noimg"></span>`}
+      <div class="oi-t"><span class="mono" data-notr${i.product_id ? ` data-p360="${esc(i.sku)}"` : ""}>${esc(i.sku || "?")}</span> <b class="oi-q ${(i.qty || 1) > 1 ? "multi" : ""}">×${i.qty || 1}</b>
+        <div class="small muted oi-n" data-notr>${esc((i.name || "").slice(0, 40))}${i.variation ? ` · ${esc(i.variation)}` : ""}</div></div></div>`;
+    const pk = PKG_TXT[o.pkg];
+    return show.map(one).join("") + (its.length > 3 ? `<div class="small muted">${Z(`还有 ${its.length - 3} 种商品…`, `อีก ${its.length - 3} รายการ…`)}</div>` : "") +
+      (pk ? `<span class="pkg pkg-${o.pkg}">${esc(Z(pk[0], pk[1]))}</span>` : "") +
+      (o.custom_note ? `<div class="note-flag" data-notr>✎ ${esc(o.custom_note)}</div>` : "") +
+      (o.buyer_note ? `<div class="small muted" data-notr>💬 ${esc(o.buyer_note)}</div>` : "");
+  }
+
+  function printsHtml(o) {
+    const p = o.prints || {};
+    return `<div class="pbs">${["label", "pick", "pack", "invoice"].map((k) => {
+      const t = DOC_TXT[k], n = p[k] || 0;
+      return `<span class="pb ${n ? "on" : ""}" title="${esc(Z(t[0], t[1]))}${n ? ` ×${n}` : ` · ${Z("未打印", "ยังไม่พิมพ์")}`}">${esc(Z(t[2], t[3]))}${n > 1 ? `<sup>${n}</sup>` : ""}</span>`;
+    }).join("")}</div>`;
+  }
+
+  function rowHtml(o) {
+    const tags = (o.tags || "").split(",").filter(Boolean).map((t) => `<span class="pill ${t.startsWith("⚠") ? "bad-pill" : "tag-pill"}" data-notr>${esc(t)}</span>`).join(" ");
+    const exc = (o.exceptions || []).map((x) => `<div class="bad small">⚠ ${esc(x)}</div>`).join("");
+    const active = o.status === "to_ship";
+    const late = o.ship_by && o.ship_by < Date.now() / 1000 && ["waiting", "producing", "none"].includes(o.stage) && active;
+    const hold = o.hold && active ? `<div class="hold-flag small">${o.queue === "shelf" ? "⏸ " + Z("搁置", "พักไว้") : "⏸ " + Z("待审核", "รอตรวจ")}：<span>${esc(o.hold_reason || "")}</span></div>` : "";
+    const fl = o.flag && FLAG_C[o.flag] ? `<i class="oflag" style="background:${FLAG_C[o.flag]}" title="${esc(Z(...FLAG_TXT[o.flag]))}${o.flag_note ? " · " + esc(o.flag_note) : ""}"></i>` : "";
+    const pst = o.status_raw && o.status_raw !== "手工" && String(o.status_raw).toLowerCase() !== o.status ? `<div class="small muted ord-pst" title="${Z("平台上的状态", "สถานะบนแพลตฟอร์ม")}">${esc(PLAT[o.platform] || o.platform || "")}: <span data-notr>${esc(o.status_raw)}</span></div>` : "";
+    const pr = o.est_profit;
+    return `<tr class="clickable ${SEL.has(o.id) ? "sel" : ""} ${o.flag ? "flag-" + esc(o.flag) : ""}" data-oid="${o.id}">
+      <td class="ck"><input type="checkbox" data-sel="${o.id}" ${SEL.has(o.id) ? "checked" : ""}></td>
+      <td class="oc-no">${fl}<b class="mono" data-notr>${esc(o.order_no)}</b>${o.priority ? ` <span class="pill bad-pill">${Z("加急", "ด่วน")}</span>` : ""}
+        <div class="small muted">${esc(PLAT[o.platform] || o.platform)} <span data-notr>${esc(o.shop || "")}</span>${KIND_ZH[o.kind] && o.kind !== "normal" ? " · " + KIND_ZH[o.kind] : ""}</div>
+        <div class="small muted">${Z("下单", "สั่ง")} ${short(o.order_time)}</div>
+        ${o.flag_note ? `<div class="small oflag-note" data-notr>${esc(o.flag_note)}</div>` : ""}
+        ${role() !== "production" && CAN("orders.edit") ? `<button class="mini primary-lite oc-edit" data-oedit="${o.id}">修改</button>` : ""}</td>
+      <td class="oc-items">${itemsHtml(o)}</td>
+      <td class="oc-buyer"><span data-notr>${esc(o.receiver || o.buyer || "")}</span>${buyerPills(o)}
+        ${o.tracking_no ? `<div class="small mono muted" data-notr>${esc(o.tracking_no)}</div>` : ""}${o.carrier ? `<div class="small muted" data-notr>${esc(o.carrier)}</div>` : ""}</td>
+      <td class="oc-time nowrap small">${active && !["ready", "out"].includes(o.stage) ? countdown(o.ship_by) : ""}
+        ${o.ship_by ? `<div class="${late ? "bad" : "muted"}">${Z("最晚", "ส่งภายใน")} ${short(o.ship_by)}</div>` : ""}
+        ${o.planned_done && active ? `<div class="muted">${Z("预计做完", "คาดว่าเสร็จ")} ${short(o.planned_done)}</div>` : ""}</td>
+      <td class="c-cost oc-money nowrap">${money(o.order_total)}${pr ? `<div class="small ${pr.profit < 0 ? "bad" : "ok"}" title="${Z("估算利润 = 收入 − 平台费 − 材料机时包材", "กำไรประมาณ")}">${Z("利润", "กำไร")} ${money(pr.profit)}${pr.est ? "*" : ""}</div>` : ""}</td>
+      <td class="oc-st"><span class="ost ost-${esc(o.status)}">${esc(o.status_zh)}</span>${active && Q_TXT[o.queue] ? ` <span class="oqs oqs-${esc(o.queue)}">${esc(qt(o.queue))}</span>` : ""}
+        ${pst}<div class="small">${progress(o.job_counts)}</div>${printsHtml(o)}${hold}${exc}${tags}</td></tr>`;
+  }
+
   // v2.43：订单详情里的生产任务按钮（和生产看板一样的操作）
   let OD_CUR = null;
   function jobActs(j) {
@@ -120,6 +206,7 @@
     const f = e.target.files[0];
     e.target.value = "";
     if (!f) return;
+    $("#ord-tools").open = false;
     const fd = new FormData();
     fd.append("file", f);
     try {
@@ -128,9 +215,37 @@
       loadOrders();
     } catch (err) { toast(err.message, true); }
   });
+
+  // ---- 勾选后浮出的批量操作条（没勾选时不出现）----
+  const dd = (label, items) => {
+    const its = items.filter(Boolean);
+    return its.length ? `<details class="odd odd-up"><summary>${label} ▾</summary><div class="odd-menu">${its.join("")}</div></details>` : "";
+  };
+  const bi = (act, zh, th, cls = "") => `<button data-bulk="${act}" class="${cls}">${Z(zh, th)}</button>`;
+  function bulkHtml() {
+    const prodOn = !window.MODKIT || MODKIT.enabled("prod");
+    const linkOn = !window.MODKIT || MODKIT.enabled("link");
+    const prodRole = role() === "production";
+    return `<span class="fb-n">${Z("已选", "เลือก")} <b>${SEL.size}</b> ${Z("个订单", "ออเดอร์")}</span>
+      <button class="mini" data-bulk="clear">✕ ${Z("清除", "ล้าง")}</button>
+      ${prodRole ? "" : bi("approve", "✔ 审核通过", "✔ ตรวจผ่าน", "primary-lite btn-edit-only")}
+      ${dd("🖨 " + Z("打印", "พิมพ์"), [bi("label", "面单", "ใบปะหน้า"), bi("pick", "拣货单", "ใบหยิบสินค้า"), bi("pack", "装箱单", "ใบแพ็กสินค้า"),
+        prodRole ? "" : bi("invoice", "发票 / 收据", "ใบเสร็จ / ใบแจ้งหนี้"), bi("itemlabels", "内部商品标签", "ป้ายสินค้าภายใน")])}
+      ${prodOn ? dd("🏭 " + Z("生产", "ผลิต"), [bi("jobs:use_stock", "用库存发", "ใช้สต็อก"), bi("jobs:printed", "标记已打好", "พิมพ์เสร็จแล้ว"), bi("jobs:packed", "标记已打包", "แพ็กแล้ว")]) : ""}
+      ${dd("🚚 " + Z("发货", "จัดส่ง"), [linkOn && !prodRole ? bi("rts", "安排发货（Lazada）", "แจ้งพร้อมส่ง (Lazada)") : "", bi("handover", "加入交接单", "เพิ่มในใบส่งมอบ"),
+        prodRole ? "" : bi("status:shipped", "标记已发货", "ทำเครื่องหมายส่งแล้ว"), prodRole ? "" : bi("status:completed", "标记已完成", "ทำเครื่องหมายสำเร็จ"),
+        prodRole ? "" : bi("ship_method:pickup", "上门揽收", "ขนส่งเข้ารับ"), prodRole ? "" : bi("ship_method:dropoff", "送到网点", "ส่งที่สาขา"),
+        prodRole ? "" : bi("status:delivery_failed", "标记拒收 / 派送失败", "ปฏิเสธรับ / ส่งไม่สำเร็จ", "danger")])}
+      ${prodRole ? "" : dd(Z("更多", "เพิ่มเติม"), [bi("flag", "🎨 颜色标记", "🎨 ทำสี"), bi("tag_add", "加标签", "เพิ่มแท็ก"), bi("tag_remove", "去标签", "ลบแท็ก"),
+        bi("priority:1", "加急", "ด่วน"), bi("priority:0", "取消加急", "ยกเลิกด่วน"), bi("shelve", "⏸ 搁置", "⏸ พักไว้"), bi("hold", "挂起到待审核", "พักรอตรวจ"),
+        bi("export", "导出 Excel", "ส่งออก Excel"), bi("status:cancelled", "取消订单", "ยกเลิกออเดอร์", "danger"),
+        CAN("orders.delete") ? bi("delete", "删除", "ลบ", "danger") : ""])}`;
+  }
   function updSel() {
-    $("#ord-selinfo").textContent = SEL.size ? `已勾选 ${SEL.size} 个订单` : "勾选订单后批量处理";
-    $("#ord-bulk").classList.toggle("on", SEL.size > 0);
+    const bar = $("#ord-bulk");
+    bar.classList.toggle("hidden", SEL.size === 0);
+    if (SEL.size) bar.innerHTML = bulkHtml();
+    $("#tab-orders").classList.toggle("has-sel", SEL.size > 0);
   }
   function progress(jc) {
     const n = Object.values(jc || {}).reduce((a, b) => a + b, 0);
@@ -150,30 +265,54 @@
   function buyerPills(o) {
     const out = [];
     if (o.is_cod) out.push('<span class="pill cod-pill">COD 货到付款</span>');
+    if (o.risk_reason && !(o.buyer_tags || []).includes("blacklist")) out.push(`<span class="pill bad-pill" title="${esc(o.risk_reason)}">⚠ ${Z("风险买家", "ลูกค้าความเสี่ยงสูง")}</span>`);
     (o.buyer_tags || []).forEach((t) => {
       const [k, n] = t.split(":");
       if (k === "refused") out.push(`<span class="pill bad-pill">拒收过 ${n} 次</span>`);
+      else if (k === "returned") out.push(`<span class="pill warn-pill">${Z(`退货 ${n} 次`, `คืนสินค้า ${n} ครั้ง`)}</span>`);
       else if (k === "repeat") out.push(`<span class="pill">回头客 ${n} 单</span>`);
+      else if (k === "blacklist") out.push(`<span class="pill bad-pill" title="${esc(o.risk_reason || "")}">${BT[k][0]}</span>`);
       else if (BT[k] && k !== "new") out.push(`<span class="pill ${BT[k][1]}">${BT[k][0]}</span>`);
       else if (k === "new" && o.is_cod) out.push('<span class="pill warn-pill">新客</span>');
     });
     return out.length ? `<div class="bpills">${out.join(" ")}</div>` : "";
   }
+
+  // ---- 筛选 ----
   let qTimer = null;
   const reload1 = () => { OF.page = 1; loadOrders(); };
   $("#ord-q").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(reload1, 300); });
-  ["#ord-platform", "#ord-shop", "#ord-kind", "#ord-tag", "#ord-label", "#ord-from", "#ord-to", "#ord-sort", "#ord-pay", "#ord-carrier"].forEach((k) => $(k).addEventListener("change", reload1));
-  $("#btn-ord-reset").addEventListener("click", () => {
-    OF.buyer_key = "";
-    ["#ord-q", "#ord-platform", "#ord-shop", "#ord-kind", "#ord-tag", "#ord-label", "#ord-from", "#ord-to", "#ord-pay", "#ord-carrier"].forEach((k) => ($(k).value = ""));
-    $("#ord-sort").value = "time_desc"; reload1();
+  ["#ord-platform", "#ord-shop", "#ord-from", "#ord-to", "#ord-sort", "#ord-risk", "#ord-loss", ...MORE_IDS].forEach((k) => $(k).addEventListener("change", reload1));
+  $("#ord-more-btn").addEventListener("click", () => { const m = $("#ord-more"); m.classList.toggle("hidden"); ls("ord_more", m.classList.contains("hidden") ? "0" : "1"); });
+  if (ls("ord_more") === "1") $("#ord-more").classList.remove("hidden");
+  $("#ord-nos-btn").addEventListener("click", () => { $("#ord-nos-box").classList.toggle("hidden"); if (!$("#ord-nos-box").classList.contains("hidden")) $("#ord-nos").focus(); });
+  $("#ord-match").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-m]"); if (!b) return;
+    $$("#ord-match button").forEach((x) => x.classList.toggle("on", x === b));
+    OF.match = b.dataset.m; if (OF.nos) reload1();
   });
+  $("#ord-nos-go").addEventListener("click", () => { OF.nos = $("#ord-nos").value.trim(); if (OF.nos) { OF.tab = "all"; SEL.clear(); } reload1(); });
+  $("#ord-nos-clear").addEventListener("click", () => { $("#ord-nos").value = ""; OF.nos = ""; reload1(); });
+  function resetFilters() {
+    OF.buyer_key = ""; OF.nos = ""; $("#ord-nos").value = "";
+    ["#ord-q", "#ord-platform", "#ord-shop", "#ord-from", "#ord-to", ...MORE_IDS].forEach((k) => ($(k).value = ""));
+    $("#ord-risk").checked = false; $("#ord-loss").checked = false;
+    $("#ord-sort").value = "auto";
+  }
+  $("#btn-ord-reset").addEventListener("click", () => { resetFilters(); reload1(); });
   $("#ord-tabs").addEventListener("click", (e) => {
-    if (e.target.id === "ord-buyer-x") { OF.buyer_key = ""; reload1(); return; }
+    if (e.target.id === "ord-buyer-x") { OF.buyer_key = ""; reload1(); }
+    if (e.target.id === "ord-nos-x") { OF.nos = ""; $("#ord-nos").value = ""; reload1(); }
+  });
+  $("#ord-queues").addEventListener("click", (e) => {
+    if (e.target.closest("[data-oqfold]")) { const w = $("#ord-wrap"); w.classList.toggle("oq-folded"); ls("ord_fold", w.classList.contains("oq-folded") ? "1" : "0"); return; }
     const b = e.target.closest("[data-otab]");
     if (!b) return;
-    OF.tab = b.dataset.otab; OF.page = 1; SEL.clear(); loadOrders();
+    OF.tab = b.dataset.otab; OF.page = 1; SEL.clear(); ls("ord_queue", OF.tab);
+    if ($("#ord-wrap").classList.contains("oq-folded") && window.innerWidth > 1200) $("#ord-wrap").classList.remove("oq-folded");
+    loadOrders();
   });
+  if (ls("ord_fold") === "1") $("#ord-wrap").classList.add("oq-folded");
   $("#ord-pager").addEventListener("click", (e) => {
     if (e.target.dataset.pg) { OF.page = +e.target.dataset.pg; loadOrders(); }
     if (e.target.id === "ord-selall-filter") { ORD_PAGE.ids_all.forEach((i) => SEL.add(i)); loadOrders(); }
@@ -191,7 +330,8 @@
       updSel();
       return;
     }
-    if (e.target.closest("td") && e.target.closest("td").cellIndex === 0) return;
+    if (e.target.closest("td.ck")) return;
+    if (e.target.closest("[data-p360]")) return;          // 点 SKU / 图片 = 产品 360（p360.js 处理）
     if (e.target.dataset.oedit) { editOrder(+e.target.dataset.oedit); return; }
     if (e.target.dataset.odel) {
       const id = +e.target.dataset.odel;
@@ -202,6 +342,53 @@
     const tr = e.target.closest("tr[data-oid]");
     if (tr) openOrder(+tr.dataset.oid);
   });
+  // 下拉菜单（<details>）：开一个关掉别的，点外面关
+  document.addEventListener("click", (e) => {
+    const d = e.target.closest && e.target.closest("details.odd");
+    $$("details.odd[open]").forEach((x) => { if (x !== d) x.open = false; });
+    if (d && e.target.closest(".odd-menu button, .odd-menu label")) setTimeout(() => { if (!e.target.closest("label.filebtn")) d.open = false; }, 0);
+  });
+  $("#ord-tools").addEventListener("click", (e) => {
+    if (e.target.closest('[data-tool="export"]')) location.href = "/api/orders/export?" + qs({ ...ordFilters(), page: "" });
+  });
+
+  // ---- 保存筛选（每个账号自己的，存在服务器上）----
+  let PRESETS = null;
+  const PRESET_EL = { q: "#ord-q", platform: "#ord-platform", shop: "#ord-shop", date_from: "#ord-from", date_to: "#ord-to", kind: "#ord-kind",
+    printed: "#ord-printed", pkg: "#ord-pkg", pay: "#ord-pay", carrier: "#ord-carrier", tag: "#ord-tag", flag: "#ord-flag", sort: "#ord-sort" };
+  function renderPresets() {
+    $("#ord-presets").innerHTML = `<span class="small muted">${Z("我的筛选", "ตัวกรองของฉัน")}</span>` +
+      PRESETS.map((p) => `<span class="ochip"><button class="ochip-b" data-preset="${p.id}" data-notr>${esc(p.name)}</button><button class="ochip-x" data-pdel="${p.id}" title="${Z("删除", "ลบ")}">✕</button></span>`).join("") +
+      `<button class="mini" id="ord-psave">＋ ${Z("保存筛选", "บันทึกตัวกรอง")}</button>`;
+  }
+  async function loadPresets() { PRESETS = []; try { PRESETS = (await api("/api/orders/presets")).items || []; } catch { PRESETS = []; } renderPresets(); }
+  $("#ord-presets").addEventListener("click", async (e) => {
+    try {
+      if (e.target.id === "ord-psave") {
+        const name = prompt(Z("给这个筛选起个名字（例如：Lazada 待打单 单品单件）", "ตั้งชื่อตัวกรองนี้"));
+        if (!name) return;
+        const f = ordFilters(); delete f.page; delete f.page_size; delete f.buyer_key;
+        PRESETS = (await api("/api/orders/presets", { json: { name, filters: f } })).items; renderPresets(); toast(Z("已保存筛选", "บันทึกตัวกรองแล้ว"));
+      } else if (e.target.dataset.pdel) {
+        if (!confirm(Z("删除这个筛选？", "ลบตัวกรองนี้?"))) return;
+        PRESETS = (await api(`/api/orders/presets/${e.target.dataset.pdel}/delete`, { json: {} })).items; renderPresets();
+      } else if (e.target.dataset.preset) {
+        const p = PRESETS.find((x) => x.id === +e.target.dataset.preset); if (!p) return;
+        const f = p.filters || {};
+        resetFilters();
+        Object.entries(PRESET_EL).forEach(([k, sel]) => { if (f[k] != null) { const el = $(sel); if (el.tagName === "SELECT" && ![...el.options].some((o) => o.value === String(f[k]))) el.insertAdjacentHTML("beforeend", `<option data-notr>${esc(f[k])}</option>`); el.value = f[k]; } });
+        if (!$("#ord-sort").value) $("#ord-sort").value = "auto";
+        $("#ord-risk").checked = !!f.risk; $("#ord-loss").checked = !!f.loss;
+        OF.nos = f.nos || ""; $("#ord-nos").value = OF.nos; OF.match = f.match || "exact";
+        $$("#ord-match button").forEach((x) => x.classList.toggle("on", x.dataset.m === OF.match));
+        if (f.tab) { OF.tab = f.tab; ls("ord_queue", OF.tab); }
+        if (MORE_IDS.some((k) => $(k).value) || f.risk || f.loss) $("#ord-more").classList.remove("hidden");
+        SEL.clear(); reload1();
+      }
+    } catch (err) { toast(err.message, true); }
+  });
+  $("#ord-help").outerHTML = UX.help(Z("从 BigSeller / Lazada / Shopee / TikTok 后台导出订单表格直接导入，或者开了接口的店铺自动同步。左边是订单的工作流：待审核 → 待生产 → 生产中 → 待打包 → 待打单 → 待揽收 → 已交运 → 已完成；下面一组是要特别处理的。勾选订单后下面会浮出批量操作条。",
+    "นำเข้าตารางออเดอร์จาก BigSeller / Lazada / Shopee / TikTok หรือซิงค์อัตโนมัติจากร้านที่เชื่อม API ด้านซ้ายคือขั้นตอนงาน: รอตรวจ → รอผลิต → กำลังผลิต → รอแพ็ก → รอพิมพ์ใบปะหน้า → รอขนส่งรับ → ส่งแล้ว → สำเร็จ เลือกออเดอร์แล้วจะมีแถบคำสั่งด้านล่าง"));
 
   const MONEY_ZH = { item_amount: "商品总额", buyer_shipping: "买家付的运费", platform_discount: "平台优惠", seller_discount: "卖家优惠",
     commission: "佣金", service_fee: "服务费", payment_fee: "支付手续费", settlement: "结算到账" };
@@ -298,9 +485,11 @@
     if (!b) return;
     const ids = [...SEL];
     const [act, val] = b.dataset.bulk.split(":");
+    if (act === "clear") { SEL.clear(); loadOrders(); return; }
     if (act === "export") { location.href = "/api/orders/export?" + (ids.length ? "ids=" + ids.join(",") : qs({ ...ordFilters(), page: "" })); return; }
     if (!ids.length) { toast("请先勾选订单", true); return; }
-    if (act === "pick" || act === "pack") { window.open(`/print/orders?type=${act}&ids=${ids.join(",")}`, "_blank"); return; }
+    if (act === "pick" || act === "pack" || act === "invoice") { window.open(`/print/orders?type=${act}&ids=${ids.join(",")}`, "_blank"); setTimeout(loadOrders, 1500); return; }
+    if (act === "itemlabels") { window.open(`/print/item-labels?ids=${ids.join(",")}`, "_blank"); return; }
     if (act === "label") { printLabels(ids); return; }
     if (act === "jobs") {             // v2.43：订单页直接处理生产任务
       const zh = { use_stock: "用成品库存发", printed: "标记已打好（扣耗材）", packed: "标记已打包" }[val];
@@ -312,9 +501,32 @@
       });
       return;
     }
+    if (act === "rts") {              // v2.50：Lazada「安排发货」（失败的进「安排发货失败」队列）
+      if (!confirm(Z(`在 Lazada 上给这 ${ids.length} 个订单「安排发货」？（只是通知平台可以来揽收，ERP 里的状态不变）`, `แจ้งพร้อมส่งใน Lazada สำหรับ ${ids.length} ออเดอร์?`))) return;
+      await busy(b, async () => {
+        const r = await api("/api/orders/rts", { json: { ids } });
+        toast(Z(`安排发货成功 ${r.done} 个`, `แจ้งพร้อมส่งสำเร็จ ${r.done}`) + (r.errors.length ? `；${r.errors.length} ✗：${r.errors.slice(0, 3).join("；")}` : ""), !!r.errors.length);
+        await loadOrders();
+      });
+      return;
+    }
+    if (act === "handover") {         // v2.50：放进交接单（按物流 + 发货方式）
+      await busy(b, async () => {
+        const r = await api("/api/orders/handover-add", { json: { ids } });
+        toast(Z(`已放进交接单 ${r.added} 个`, `เพิ่มในใบส่งมอบ ${r.added}`) + (r.errors.length ? `；${r.errors.length} ✗：${r.errors.slice(0, 3).join("；")}` : ""), !!r.errors.length);
+        if (r.added && confirm(Z("去「发货交接」页核对件数、交接完成？", "ไปหน้า「ส่งมอบพัสดุ」เลยไหม?"))) showTab("handover");
+        else await loadOrders();
+      });
+      return;
+    }
+    if (act === "flag") {             // v2.50：颜色标记
+      flagDialog(ids);
+      return;
+    }
     let value = val;
-    if (act === "hold") {
-      value = prompt("挂起原因（例如：等买家确认颜色 / 疑似重复下单）", "等买家确认");
+    if (act === "hold" || act === "shelve") {
+      value = prompt(act === "shelve" ? Z("搁置原因（例如：等买家补款 / 缺货等料）", "เหตุผลที่พักไว้") : "挂起原因（例如：等买家确认颜色 / 疑似重复下单）",
+        act === "shelve" ? Z("暂时不处理", "ยังไม่ทำ") : "等买家确认");
       if (value === null) return;
     }
     if (act === "status" && ["cancelled", "delivery_failed", "returned"].includes(val) && !CAN("orders.cancel")) { toast("你的账号没有「取消订单 / 标记退货、拒收」的权限，请老板在 系统 → 设置 → 账号与权限 里开通", true); return; }
@@ -332,6 +544,20 @@
       await loadOrders();
     });
   });
+  function flagDialog(ids, cur = "", note = "") {
+    const el = MODAL.open(`<div class="row between"><h3>${Z("颜色标记", "ทำสีออเดอร์")}</h3><button class="mini" data-mclose>${Z("关闭", "ปิด")}</button></div>
+      <p class="small muted">${Z(`给 ${ids.length} 个订单做个颜色记号（自己约定颜色的意思，例如红 = 要先打、蓝 = 等买家回复），可以按颜色筛选。`, `ทำสีให้ ${ids.length} ออเดอร์ (ตกลงความหมายเอง) แล้วกรองตามสีได้`)}</p>
+      <div class="row gap wrap ofl-pick">${Object.keys(FLAG_C).map((k) => `<button class="ofl ${k === cur ? "on" : ""}" data-fl="${k}"><i style="background:${FLAG_C[k]}"></i>${esc(Z(...FLAG_TXT[k]))}</button>`).join("")}
+        <button class="ofl" data-fl="">✕ ${Z("去掉", "ลบสี")}</button></div>
+      <label>${Z("备注（可空）", "หมายเหตุ (เว้นว่างได้)")}<input id="ofl-note" value="${esc(note)}" maxlength="200" data-notr></label>`);
+    el.onclick = async (e) => {
+      const b = e.target.closest("[data-fl]"); if (!b) return;
+      try {
+        await api("/api/orders/flag", { json: { ids, color: b.dataset.fl, note: $("#ofl-note", el).value } });
+        MODAL.close(); toast(Z("已标记", "ทำสีแล้ว")); loadOrders(); if (OD_CUR && ids.length === 1 && ids[0] === OD_CUR && !$("#ord-detail").classList.contains("hidden")) openOrder(OD_CUR);
+      } catch (err) { toast(err.message, true); }
+    };
+  }
   // ---- 批量填运单号 ----
   $("#btn-ord-track").addEventListener("click", () => {
     const el = MODAL.open(`<div class="row between"><h3>批量填运单号</h3><button class="mini" data-mclose>关闭</button></div>
@@ -513,6 +739,71 @@
     if (window.INV && INV.docView) INV.docView(+a.dataset.invdoc).catch((er) => toast(er.message, true));
   });
 
+  // v2.50：这单每种单据打了几次
+  function docPrints(o) {
+    const p = o.prints || {};
+    if (o.label_printed_at && !p.label) p.label = { n: 1, last_at: o.label_printed_at };
+    return `<div class="pbs od-pbs">${["label", "pick", "pack", "invoice"].map((k) => {
+      const t = DOC_TXT[k], x = p[k];
+      return `<span class="pb pb-wide ${x ? "on" : ""}">${esc(Z(t[0], t[1]))} ${x ? `×${x.n} <span class="muted">${short(x.last_at)}</span>` : `<span class="muted">${Z("未打", "ยังไม่พิมพ์")}</span>`}</span>`;
+    }).join("")}</div>`;
+  }
+
+  // v2.50：客服聊天「从聊天建单」（modules/cs/ui/cs.js 调用）：买家 / 平台 / 店铺从会话带过来，商品从「买家提到的商品」预填
+  async function orderFromChat(conv, sugg, submit) {
+    let skus = [];
+    try { const r = await api("/api/skus"); skus = Array.isArray(r) ? r : (r.skus || []); } catch { skus = []; }
+    const pre = (sugg || []).map((p) => skus.find((s) => s.pid === p.id)).filter(Boolean);
+    const row = (s) => `<tr><td><input data-k="sku" list="ofc-skus" value="${esc((s && s.sku) || "")}" data-notr style="width:150px"></td>
+      <td class="small" data-nm data-notr>${s ? esc(`${s.name} ${s.color || ""}`) : ""}</td>
+      <td><input data-k="qty" type="number" min="1" value="1" style="width:64px"></td>
+      <td class="c-final"><input data-k="unit_price" type="number" min="0" step="0.01" value="${s && s.price != null ? s.price : ""}" style="width:90px"></td>
+      <td><button class="mini danger" data-rm>✕</button></td></tr>`;
+    const el = MODAL.open(`<div class="row between"><h3>🧾 ${Z("从聊天建单", "สร้างออเดอร์จากแชท")}</h3><button class="mini" data-mclose>${Z("关闭", "ปิด")}</button></div>
+      <p class="small muted">${Z("买家、平台、店铺从这个会话带过来；商品按买家提到的产品预填，改一下数量和价格。建好后会话自动关联这个订单。", "ข้อมูลลูกค้า แพลตฟอร์ม ร้าน มาจากแชทนี้ สินค้าเติมจากที่ลูกค้าพูดถึง แก้จำนวนและราคาได้ สร้างแล้วจะผูกกับแชทอัตโนมัติ")}</p>
+      <datalist id="ofc-skus">${skus.map((x) => `<option value="${esc(x.sku)}">${esc((x.name || "") + " " + (x.color || ""))}</option>`).join("")}</datalist>
+      <div class="form3">
+        <label>${Z("类型", "ประเภท")}<select id="ofc-kind"><option value="manual">${Z("私下成交（正式订单，马上排产）", "ขายตรง (ออเดอร์จริง เริ่มผลิตเลย)")}</option>
+          <option value="custom">${Z("定制单", "งานสั่งทำ")}</option><option value="wholesale">${Z("批发/大单", "ขายส่ง/ล็อตใหญ่")}</option>
+          <option value="quote">${Z("报价单（先不排产，不算收入）", "ใบเสนอราคา (ยังไม่ผลิต)")}</option></select></label>
+        <label>${Z("买家", "ลูกค้า")}<input id="ofc-buyer" value="${esc(conv.buyer || "")}" data-notr></label>
+        <label>${Z("平台 · 店铺", "แพลตฟอร์ม · ร้าน")}<input value="${esc((PLAT[conv.platform] || conv.platform || "") + (conv.shop ? " · " + conv.shop : ""))}" readonly data-notr></label>
+        <label>${Z("收件人", "ผู้รับ")}<input id="ofc-receiver" data-notr></label>
+        <label>${Z("电话", "โทร")}<input id="ofc-phone" data-notr></label>
+        <label>${Z("邮编", "รหัสไปรษณีย์")}<input id="ofc-postcode" data-notr></label>
+        <label class="span2">${Z("地址", "ที่อยู่")}<input id="ofc-address" data-notr></label>
+      </div>
+      <table class="grid small" id="ofc-items"><thead><tr><th>SKU</th><th>${Z("商品", "สินค้า")}</th><th>${Z("数量", "จำนวน")}</th><th class="c-final">${Z("单价 ฿", "ราคา ฿")}</th><th></th></tr></thead>
+        <tbody>${(pre.length ? pre : [null]).map(row).join("")}</tbody></table>
+      <button class="mini" id="ofc-add">＋ ${Z("加一行", "เพิ่มแถว")}</button>
+      <label>${Z("定制要求 / 备注（生产任务上会显示）", "รายละเอียดสั่งทำ / หมายเหตุ (แสดงในงานผลิต)")}<textarea id="ofc-note" rows="2" data-notr></textarea></label>
+      <div class="row gap"><button class="primary" id="ofc-go">${Z("建单", "สร้างออเดอร์")}</button></div>`);
+    el.onchange = (e) => {
+      if (e.target.dataset.k !== "sku") return;
+      const x = skus.find((k) => k.sku.toUpperCase() === e.target.value.trim().toUpperCase());
+      const tr = e.target.closest("tr");
+      tr.querySelector("[data-nm]").textContent = x ? `${x.name} ${x.color || ""}` : "";
+      const up = tr.querySelector('[data-k="unit_price"]');
+      if (x && x.price != null && !up.value) up.value = x.price;
+    };
+    el.onclick = async (e) => {
+      if (e.target.id === "ofc-add") { $("#ofc-items tbody", el).insertAdjacentHTML("beforeend", row(null)); return; }
+      if (e.target.dataset.rm != null) { e.target.closest("tr").remove(); return; }
+      if (e.target.id !== "ofc-go") return;
+      const items = $$("#ofc-items tbody tr", el).map((tr) => {
+        const g = (k) => tr.querySelector(`[data-k="${k}"]`).value.trim();
+        return { sku: g("sku"), qty: +g("qty") || 1, unit_price: g("unit_price") === "" ? null : +g("unit_price") };
+      }).filter((x) => x.sku);
+      if (!items.length) { toast(Z("请至少填一个商品 SKU", "กรุณาใส่ SKU อย่างน้อยหนึ่งรายการ"), true); return; }
+      const v = (id) => $(id, el).value.trim();
+      await busy(e.target, async () => {
+        await submit({ kind: v("#ofc-kind"), buyer: v("#ofc-buyer"), items, note: v("#ofc-note"),
+          ship: { receiver: v("#ofc-receiver"), phone: v("#ofc-phone"), postcode: v("#ofc-postcode"), address: v("#ofc-address") } });
+        MODAL.close();
+      });
+    };
+  }
+
   async function openOrder(oid) {
     OD_CUR = oid;
     let o;
@@ -526,12 +817,17 @@
         <div class="row gap">${canEdit ? '<div class="lockbar" id="od-lockbar"></div>' : ""}<button class="mini" data-x>关闭</button></div></div>
       <p class="small">${esc(PLAT[o.platform] || o.platform)} ${KIND_ZH[o.kind] ? "· " + KIND_ZH[o.kind] : ""} · 下单 ${fmtTime(o.order_time)}
         ${o.ship_by ? " · 最晚发货 " + fmtTime(o.ship_by) : ""} · 买家 <span data-notr>${esc(o.buyer || "-")}</span>
-        ${o.tracking_no ? ` · 运单 <span class="mono" data-notr>${esc(o.tracking_no)}</span>` : ""}</p>
+        ${o.tracking_no ? ` · 运单 <span class="mono" data-notr>${esc(o.tracking_no)}</span>` : ""}
+        ${o.status_raw && o.status_raw !== "手工" && String(o.status_raw).toLowerCase() !== o.status ? ` · ${Z("平台状态", "สถานะบนแพลตฟอร์ม")} <span class="mono" data-notr>${esc(o.status_raw)}</span>` : ""}</p>
+      ${docPrints(o)}
       ${o.hold && o.status === "to_ship" ? `<div class="hold-box"><b>⏸ 待审核（挂起中，不会排产）</b><div class="small">${esc(o.hold_reason || "")}</div>
         ${canEdit ? '<div class="row gap"><button class="primary" id="od-approve">✔ 审核通过，开始排产</button></div>' : ""}</div>`
         : o.status === "to_ship" && canEdit ? `<div class="row gap small muted">${o.reviewed_by ? `已审核（${esc(o.reviewed_by)}）` : ""}
           ${(o.review_flags || []).length ? `<span class="warn">规则提示：${esc(o.review_flags.join("；"))}</span>` : ""}
           <button class="mini" id="od-hold">⏸ 挂起</button></div>` : ""}
+      ${o.risk && o.risk.risky ? `<div class="risk-box">⚠ <b>${Z("风险买家", "ลูกค้าความเสี่ยงสูง")}</b> <span>${esc(o.risk.reason)}</span>
+        ${o.is_cod ? `<span class="small">${Z("（货到付款，发货前最好先联系买家确认）", "(COD ควรติดต่อยืนยันกับลูกค้าก่อนส่ง)")}</span>` : ""}</div>` : ""}
+      ${o.flag && FLAG_C[o.flag] ? `<div class="small oflag-line"><i class="oflag" style="background:${FLAG_C[o.flag]}"></i>${esc(Z(...FLAG_TXT[o.flag]))}${o.flag_note ? ` · <span data-notr>${esc(o.flag_note)}</span>` : ""}</div>` : ""}
       ${buyerBox(o)}
       ${o.buyer_note ? `<p class="small">买家留言：<b data-notr>${esc(o.buyer_note)}</b></p>` : ""}
       ${o.seller_note ? `<p class="small">卖家备注：<span data-notr>${esc(o.seller_note)}</span></p>` : ""}
@@ -568,6 +864,8 @@
         <label>订单状态<select id="od-status" ${canEdit ? "" : "disabled"}>${Object.entries(ORD_STATUS).map(([k, v]) => `<option value="${k}" ${k === o.status ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
 
         <a class="btn" target="_blank" href="/print/orders?type=pack&ids=${o.id}">打印装箱单</a>
+        ${canEdit ? `<a class="btn" target="_blank" href="/print/orders?type=invoice&ids=${o.id}">${Z("打印发票", "พิมพ์ใบเสร็จ")}</a>
+          <button id="od-flag">🎨 ${Z("颜色标记", "ทำสี")}</button>` : ""}
         ${canEdit ? '<button id="od-as">登记售后</button>' : ""}
         ${canEdit && CAN("orders.edit") ? '<button id="od-edit">✏ 修改订单（商品 / 金额 / 买家…）</button>' : ""}
         ${CAN("orders.delete") ? '<button class="danger" id="od-del">删除订单</button>' : ""}
@@ -605,7 +903,7 @@
       }).catch(() => {});
     }
     if (canEdit) lockBox(d.querySelector(".drawer-in"), { id: "order-detail", bar: d.querySelector("#od-lockbar"), label: "✏ 修改",
-      keep: "[data-x], #od-as, #od-edit, #od-del, .log-box, details > summary, #od-approve, #od-hold, .buyer-box, [data-asopen], .pb-wrap, .pb-sel, [data-invdoc]",
+      keep: "[data-x], #od-as, #od-edit, #od-del, #od-flag, .log-box, details > summary, #od-approve, #od-hold, .buyer-box, [data-asopen], .pb-wrap, .pb-sel, [data-invdoc]",
       onCancel: () => openOrder(oid),
       onSave: async () => {
         const nst = $("#od-status").value;
@@ -619,6 +917,8 @@
         loadOrders();
         openOrder(oid);
       } });
+    const flb = d.querySelector("#od-flag");
+    if (flb) flb.onclick = () => flagDialog([o.id], o.flag || "", o.flag_note || "");
     const asb = d.querySelector("#od-as");
     if (asb) asb.onclick = () => window.AS && AS.dialog(o);
     d.querySelectorAll("[data-asopen]").forEach((a) => (a.onclick = () => window.AS && AS.open(+a.dataset.asopen)));
@@ -695,6 +995,6 @@
 
 
   const filterBuyer = (key) => { OF.buyer_key = key; OF.tab = "all"; OF.page = 1; showTab("orders"); };
-  window.OPS = { show, loadOrders, loadMaterials: () => window.MATERIALS && MATERIALS.load(), loadProfit, openOrder, loadSkus, filterBuyer,
+  window.OPS = { show, loadOrders, orderFromChat, loadMaterials: () => window.MATERIALS && MATERIALS.load(), loadProfit, openOrder, loadSkus, filterBuyer,
     loadIntegrations: () => window.INTG_UI && INTG_UI.load() };
 })();

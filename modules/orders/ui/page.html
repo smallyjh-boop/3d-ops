@@ -1,18 +1,21 @@
 <!-- 模块 orders 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上） -->
 <!-- 订单 -->
 <section id="tab-orders" class="panel hidden">
-  <div class="row between wrap gap">
-    <h2>订单</h2>
-    <div class="row gap wrap">
-      <label class="filebtn primary-file btn-edit-only">导入订单表格<input type="file" id="ord-file" accept=".xlsx,.xlsm,.csv" hidden></label>
-      <button id="btn-ord-manual" class="btn-edit-only">＋ 手工订单（批发/定制/报价）</button>
-      <button id="btn-ord-rematch" class="btn-edit-only" title="新建产品或改了 SKU 以后点这里">重新匹配 SKU</button>
+  <!-- v2.50：BigSeller 式订单页：左边工作流队列、常用筛选 + 更多筛选、保存筛选、勾选后浮出的批量操作条 -->
+  <div class="ux-head ord-head">
+    <h2>订单 <span id="ord-help"></span></h2>
+    <div class="ux-head-r">
       <button class="sync-orders" data-needmod="link" title="开了接口的店铺马上拉一次订单（平时按店铺设置的间隔自动拉）">🔄 同步订单</button>
-      <button id="btn-ord-track" class="btn-edit-only" title="从平台 / BigSeller 复制 订单号,运单号 粘贴进来">批量填运单号</button>
+      <label class="filebtn btn-edit-only" title="从 BigSeller / Lazada / Shopee / TikTok 后台导出的订单表格">⬆ 导入订单表格<input type="file" id="ord-file" accept=".xlsx,.xlsm,.csv" hidden></label>
+      <button id="btn-ord-manual" class="btn-edit-only primary">＋ 手工订单</button>
+      <details class="odd odd-r" id="ord-tools"><summary>更多 ▾</summary><div class="odd-menu">
+        <button id="btn-ord-rematch" class="btn-edit-only" title="新建产品或改了 SKU 以后点这里">重新匹配 SKU</button>
+        <button id="btn-ord-track" class="btn-edit-only" title="从平台 / BigSeller 复制 订单号,运单号 粘贴进来">批量填运单号</button>
+        <label class="filebtn" title="Lazada / Shopee / TikTok / BigSeller 批量下载的面单 PDF">⬆ 上传平台面单 PDF<input type="file" id="label-file" accept=".pdf" hidden></label>
+        <button data-tool="export">导出 Excel（当前筛选）</button>
+      </div></details>
     </div>
   </div>
-  <p class="muted small">从 BigSeller / Lazada / Shopee / TikTok 后台导出订单表格，直接导入。第一次导入时确认每一列是什么，以后同样格式的表格自动识别。
-    重复导入同一批订单不会重复，只会更新状态。待发货订单会自动生成生产任务。</p>
 
   <div id="ord-import" class="card hidden">
     <div class="row between"><h3>导入：<span id="imp-file" data-notr></span></h3><button class="mini" id="btn-imp-cancel">取消</button></div>
@@ -55,47 +58,44 @@
     <div class="row gap"><button id="btn-man-add">＋ 加一行</button><button id="btn-man-save" class="primary">保存订单</button></div>
   </div>
 
-  <div id="ord-tabs" class="ord-tabs"></div>
-  <div class="row gap wrap ord-filter">
-    <input id="ord-q" placeholder="搜索 订单号 / 买家 / SKU / 运单号 / 备注" style="width:260px">
-    <select id="ord-platform"><option value="">全部平台</option><option value="lazada">Lazada</option><option value="shopee">Shopee</option><option value="tiktok">TikTok</option><option value="manual">手工</option><option value="other">其他</option></select>
-    <select id="ord-shop"><option value="">全部店铺</option></select>
-    <select id="ord-kind"><option value="">全部类型</option><option value="normal">平台订单</option><option value="wholesale">批发/大单</option><option value="custom">定制单</option><option value="manual">私下成交</option><option value="quote">报价</option></select>
-    <select id="ord-tag"><option value="">全部标签</option></select>
-    <select id="ord-label"><option value="">面单：全部</option><option value="none">未打面单</option><option value="printed">已打面单</option></select>
-    <select id="ord-pay"><option value="">付款：全部</option><option value="cod">货到付款 COD</option><option value="prepaid">在线已付</option></select>
-    <select id="ord-carrier"><option value="">全部物流</option></select>
-    <label class="row small">下单<input id="ord-from" type="date" style="width:140px"></label>
-    <label class="row small">～<input id="ord-to" type="date" style="width:140px"></label>
-    <select id="ord-sort"><option value="time_desc">最新下单在前</option><option value="time_asc">最早下单在前</option><option value="ship_by">最晚发货时间</option><option value="amount" class="c-cost">金额从高到低</option></select>
-    <button id="btn-ord-reset" class="mini">清空筛选</button>
+  <div class="oq-wrap" id="ord-wrap">
+    <aside class="oq-side" id="ord-queues"></aside>
+    <div class="oq-main">
+      <div class="ord-fbox card">
+        <div class="ord-filter row gap wrap">
+          <div class="ord-search"><input id="ord-q" placeholder="搜索 订单号 / 买家 / SKU / 运单号 / 备注">
+            <button id="ord-nos-btn" class="mini" title="一次查很多个订单号 / 运单号">批量</button></div>
+          <select id="ord-platform"><option value="">全部平台</option><option value="lazada">Lazada</option><option value="shopee">Shopee</option><option value="tiktok">TikTok</option><option value="manual">手工</option><option value="other">其他</option></select>
+          <select id="ord-shop"><option value="">全部店铺</option></select>
+          <span class="ord-dates"><input id="ord-from" type="date" title="下单日期从"><span class="muted">～</span><input id="ord-to" type="date" title="下单日期到"></span>
+          <button id="ord-more-btn" class="ord-morebtn">更多筛选 ▾ <b id="ord-more-n"></b></button>
+          <button id="btn-ord-reset" class="mini">清空筛选</button>
+        </div>
+        <div id="ord-nos-box" class="ord-nos hidden">
+          <textarea id="ord-nos" rows="3" class="mono" placeholder="粘贴订单号或运单号，逗号 / 空格 / 换行分开，一次最多 500 个" data-notr></textarea>
+          <div class="row gap wrap"><span class="seg" id="ord-match"><button data-m="exact" class="on">精确</button><button data-m="fuzzy">模糊</button></span>
+            <button id="ord-nos-go" class="primary">查找</button><button id="ord-nos-clear" class="mini">清空</button><span id="ord-nos-miss" class="small"></span></div>
+        </div>
+        <div id="ord-more" class="ord-more hidden">
+          <select id="ord-kind"><option value="">全部类型</option><option value="normal">平台订单</option><option value="wholesale">批发/大单</option><option value="custom">定制单</option><option value="manual">私下成交</option><option value="quote">报价</option></select>
+          <select id="ord-printed"><option value="">打印：全部</option><option value="label:0">未打面单</option><option value="label:1">已打面单</option><option value="pick:0">未打拣货单</option><option value="pick:1">已打拣货单</option><option value="pack:0">未打装箱单</option><option value="pack:1">已打装箱单</option><option value="invoice:0">未打发票</option><option value="invoice:1">已打发票</option></select>
+          <select id="ord-pkg"><option value="">包裹：全部</option><option value="single">单品单件</option><option value="multi">单品多件</option><option value="mixed">多品混装</option></select>
+          <select id="ord-pay"><option value="">付款：全部</option><option value="cod">货到付款 COD</option><option value="prepaid">在线已付</option></select>
+          <select id="ord-carrier"><option value="">全部物流</option></select>
+          <select id="ord-tag"><option value="">全部标签</option></select>
+          <select id="ord-flag"><option value="">颜色标记：全部</option><option value="any">有颜色标记</option><option value="red">🔴 红</option><option value="orange">🟠 橙</option><option value="yellow">🟡 黄</option><option value="green">🟢 绿</option><option value="blue">🔵 蓝</option><option value="purple">🟣 紫</option></select>
+          <select id="ord-sort"><option value="auto">按最晚发货（最急的在前）</option><option value="time_desc">最新下单在前</option><option value="time_asc">最早下单在前</option><option value="amount" class="c-cost">金额从高到低</option></select>
+          <label class="ord-chk"><input type="checkbox" id="ord-risk"> 只看风险买家</label>
+          <label class="ord-chk c-cost"><input type="checkbox" id="ord-loss"> 只看亏本单</label>
+        </div>
+        <div class="ord-presets row gap wrap" id="ord-presets"></div>
+      </div>
+      <div id="ord-tabs" class="ord-chips"></div>
+      <div class="ord-tablewrap"><table class="grid ord-t" id="ord-table"><thead><tr><th class="ck"><input type="checkbox" id="ord-all"></th><th>订单</th><th>商品</th><th>买家</th><th>发货时限</th><th class="c-cost">金额 / 利润</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+      <div id="ord-pager" class="row gap pager"></div>
+    </div>
   </div>
-  <div id="ord-bulk" class="ord-bulk">
-    <span id="ord-selinfo" class="small muted">勾选订单后批量处理</span>
-    <button data-bulk="approve" class="btn-edit-only primary-lite">✔ 审核通过</button>
-    <button class="btn-edit-only" data-bulk="hold">⏸ 挂起</button>
-    <button data-bulk="label" class="primary-lite">🏷 打印面单</button>
-    <label class="filebtn mini-file" title="Lazada / Shopee / TikTok / BigSeller 批量下载的面单 PDF">⬆ 上传平台面单 PDF<input type="file" id="label-file" accept=".pdf" hidden></label>
-    <span class="bulk-prod" data-needmod="prod"><button data-bulk="jobs:use_stock" title="还没开始打的生产任务，用成品库存发（先占住，发货出库时扣）">📦 用库存发</button>
-    <button data-bulk="jobs:printed" title="还没开始打的生产任务，标记已经打好（扣耗材，进入待打包）">✔ 标记已打好</button>
-    <button data-bulk="jobs:packed" title="打好的生产任务，标记已打包（进入待发货）">📦 标记已打包</button></span>
-    <button data-bulk="pick">打印拣货单</button>
-    <button data-bulk="pack">打印装箱单</button>
-    <button class="btn-edit-only" data-bulk="status:shipped">标记已发货</button>
-    <button class="btn-edit-only" data-bulk="status:completed">标记已完成</button>
-    <button class="btn-edit-only" data-bulk="ship_method:pickup">上门揽收</button>
-    <button class="btn-edit-only" data-bulk="ship_method:dropoff">送到网点</button>
-    <button class="btn-edit-only" data-bulk="status:delivery_failed">标记拒收/派送失败</button>
-    <button class="btn-edit-only" data-bulk="priority:1">加急</button>
-    <button class="btn-edit-only" data-bulk="priority:0">取消加急</button>
-    <button class="btn-edit-only" data-bulk="tag_add">加标签</button>
-    <button class="btn-edit-only" data-bulk="tag_remove">去标签</button>
-    <button data-bulk="status:cancelled" class="btn-edit-only danger">取消订单</button>
-    <button class="btn-edit-only" data-bulk="export">导出 Excel</button>
-    <button data-bulk="delete" class="btn-edit-only danger">删除</button>
-  </div>
-  <table class="grid" id="ord-table"><thead><tr><th><input type="checkbox" id="ord-all"></th><th>订单</th><th>时间</th><th>买家</th><th>商品</th><th class="c-cost">金额</th><th>状态 / 生产</th><th>异常 / 标签</th><th></th></tr></thead><tbody></tbody></table>
-  <div id="ord-pager" class="row gap pager"></div>
+  <div id="ord-bulk" class="ord-fbar hidden"></div>
 
   <div id="ord-detail" class="drawer hidden"></div>
 </section>

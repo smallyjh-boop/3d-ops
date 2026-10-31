@@ -34,16 +34,135 @@ def orders_import_commit():
     return jsonify(st)
 
 
+LIST_KEYS = ("tab", "q", "platform", "shop", "kind", "tag", "label", "date_from", "date_to", "sort", "page", "page_size", "pay", "carrier",
+             "buyer_key", "nos", "match", "printed", "pkg", "flag", "risk", "loss")
+
+
+def _list_filters(args):
+    f = {k: args.get(k) for k in LIST_KEYS}
+    f["_owner"] = auth.is_owner()                # 「只看亏本单」只有老板能用
+    if not f["_owner"]:
+        f.pop("loss", None)
+    return f
+
+
 @bp.get("/api/orders")
 def orders_list():
-    f = {k: request.args.get(k) for k in ("tab", "q", "platform", "shop", "kind", "tag", "label", "date_from", "date_to", "sort",
-                                          "page", "page_size", "pay", "carrier", "buyer_key")}
-    r = orders_mod.search(f)
+    r = orders_mod.search(_list_filters(request.args))
+    owner = auth.is_owner()
+    if r["orders"]:
+        from modules.orders.labeltext import Texts       # v2.50：商品缩略图（和面单商品清单同一个取图方法）
+        cfg = load_config()
+        tx = Texts(cfg)
+        for o in r["orders"]:
+            for it in o["items"]:
+                it["img"] = tx.image(it) if it.get("product_id") else ""
+            if owner and o["status"] not in ("cancelled", "unpaid", "quote", "returned", "delivery_failed"):   # v2.50：老板看每单估算利润；员工永远看不到成本 / 利润
+                try:
+                    p = finance.order_profit(cfg, o, o["items"])
+                    o["est_profit"] = {"profit": p["profit"], "revenue": p["revenue"], "cost": round(p["cost"], 2), "fee": p["fee"],
+                                       "est": p["fee_estimated"] or p["missing_data"]}
+                except Exception:  # noqa: BLE001
+                    o["est_profit"] = None
     r["orders"] = [_strip_order(o) for o in r["orders"]]
     r["status_zh"] = orders_mod.STATUS_ZH
     r["kind_zh"] = orders_mod.KIND_ZH
     r["ship_method_zh"] = orders_mod.SHIP_METHOD_ZH
     r["level_zh"] = orders_mod.LEVEL_ZH
+    return jsonify(r)
+
+
+@bp.get("/api/orders/queues")
+def orders_queues():
+    """v2.50：只要左边队列的数字（一条聚合 SQL，页面定时刷新用）。"""
+    f = _list_filters(request.args)
+    return jsonify({"counts": orders_mod.queue_counts(f), "queues": orders_mod.QUEUES, "queues2": orders_mod.QUEUES2})
+
+
+@bp.get("/api/orders/presets")
+def order_presets_get():
+    return jsonify({"items": orders_mod.presets(_uname())})
+
+
+@bp.post("/api/orders/presets")
+def order_presets_save():
+    b = request.get_json(force=True) or {}
+    try:
+        return jsonify({"items": orders_mod.preset_save(_uname(), b.get("name"), b.get("filters") or {})})
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/orders/presets/<int:pid>/delete")
+def order_presets_del(pid):
+    return jsonify({"items": orders_mod.preset_delete(_uname(), pid)})
+
+
+def _ids_of(b):
+    try:
+        return [int(x) for x in b.get("ids") or []]
+    except (TypeError, ValueError):
+        raise ValueError("订单编号不对")
+
+
+@bp.post("/api/orders/flag")
+def orders_flag():
+    """v2.50：颜色标记（ids, color 空 = 去掉, note）。"""
+    b = request.get_json(force=True) or {}
+    try:
+        ids = _ids_of(b)
+        if not ids:
+            return err("请先勾选订单")
+        return jsonify({"done": orders_mod.set_flag(ids, b.get("color") or "", b.get("note") or "", _uname())})
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/orders/rts")
+def orders_rts():
+    """v2.50：勾选的 Lazada 订单在 Lazada 上「安排发货」（不改 ERP 状态；失败的进「安排发货失败」队列）。"""
+    from core import modules as _mods
+    b = request.get_json(force=True) or {}
+    try:
+        ids = _ids_of(b)
+    except ValueError as e:
+        return err(str(e))
+    lk = _mods.public("link")
+    if lk is None or not hasattr(lk, "events"):
+        return err("「店铺与系统对接」模块没开，不能在平台上安排发货")
+    done, errors, skipped = 0, [], 0
+    for oid in ids:
+        o = orders_mod.get_order(oid)
+        if not o:
+            continue
+        if o["status"] in orders_mod.BLOCK_SHIP:
+            errors.append(f"{o['order_no']}：{orders_mod.STATUS_ZH.get(o['status'])}，不能发货")
+            continue
+        r = lk.events.rts_now(oid, _uname())
+        if r is None:
+            skipped += 1
+        elif r.get("rts"):
+            done += 1
+        else:
+            errors.append(f"{o['order_no']}：{r.get('error') or 'Lazada 上还没打包（先打印面单）'}")
+    if not done and not errors and skipped:
+        return err("选中的订单都不是开了接口的 Lazada 店铺的订单")
+    return jsonify({"done": done, "skipped": skipped, "errors": errors[:20]})
+
+
+@bp.post("/api/orders/handover-add")
+def orders_handover_add():
+    """v2.50：勾选的订单放进交接单（按物流 + 发货方式，没有就新开）。"""
+    b = request.get_json(force=True) or {}
+    try:
+        ids = _ids_of(b)
+    except ValueError as e:
+        return err(str(e))
+    if not ids:
+        return err("请先勾选订单")
+    r = orders_mod.handover_add_orders(ids, _uname())
+    if not r["added"] and r["errors"]:
+        return err(r["errors"][0])
     return jsonify(r)
 
 
@@ -61,6 +180,8 @@ def order_get(oid):
     o["buyer_profile"] = orders_mod.buyer_profile(o.get("buyer_key"), exclude_id=None) if o.get("buyer_key") else None
     o["is_cod"] = orders_mod.is_cod(o)
     o["review_flags"] = orders_mod.review_flags(o) if o["status"] == "to_ship" else []
+    o["prints"] = orders_mod.doc_prints(oid)                        # v2.50：每种单据打了几次
+    o["risk"] = orders_mod.buyer_risk_of(o.get("buyer_key"))        # v2.50：风险买家
     if auth.is_owner():
         o["profit"] = finance.order_profit(load_config(), o, [dict(i) for i in o["items"]])
     _add_pack_info(o)
@@ -144,7 +265,7 @@ def orders_export():
     """导出订单（每个商品一行）。ids=1,2,3 或按当前筛选条件。"""
     import io as _io
     import openpyxl
-    f = {k: request.args.get(k) for k in ("tab", "q", "platform", "shop", "kind", "tag", "label", "date_from", "date_to", "sort")}
+    f = _list_filters(request.args)
     f["page_size"] = 500
     ids = [int(x) for x in (request.args.get("ids") or "").split(",") if x.strip().isdigit()]
     rows = []
@@ -575,6 +696,14 @@ def orders_print():
     ids = [int(x) for x in (request.args.get("ids") or "").split(",") if x.strip().isdigit()]
     kind = request.args.get("type") or "pack"
     orders = [o for o in (orders_mod.get_order(i) for i in ids) if o]
+    if kind == "invoice":                       # v2.50：发票 / 收据（给买家的，带售价；生产角色看不到价格，不能打）
+        if auth.current_user()["role"] == "production":
+            return err("没有权限", 403)
+        from modules.orders import invoice
+        orders_mod.mark_doc([o["id"] for o in orders], "invoice", _uname())
+        for o in orders:
+            orders_mod.log(o["id"], _uname(), "打印发票")
+        return app.response_class(invoice.html(orders, load_config()), mimetype="text/html")
     from html import escape as h
     fmt = (lambda t: dt.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M") if t else "")
     css = ("body{font:13px 'Microsoft YaHei','Leelawadee UI',sans-serif;margin:16px;color:#111}"
@@ -628,6 +757,7 @@ def orders_print():
     out.append("</body></html>")
     for o in orders:
         orders_mod.log(o["id"], _uname(), "打印拣货单" if kind == "pick" else "打印装箱单")
+    orders_mod.mark_doc([o["id"] for o in orders], "pick" if kind == "pick" else "pack", _uname())     # v2.50
     return app.response_class("".join(out), mimetype="text/html")
 
 

@@ -548,11 +548,60 @@ def reconcile(start, end, platform=""):
     tot["issues"] = len({x["id"] for x in diff + unpaid + unsettled if not x["checked"]}) + sum(1 for x in unknown if not x["checked"])
     tot["issue_counts"] = {"diff": sum(1 for x in diff if not x["checked"]), "unpaid": sum(1 for x in unpaid if not x["checked"]),
                            "unsettled": sum(1 for x in unsettled if not x["checked"]), "unknown": sum(1 for x in unknown if not x["checked"])}
+    ship = ship_check(orders, chk, st["ship_tolerance"])                       # v2.50：运费核对
+    tot["ship_issues"] = sum(1 for x in ship if not x["checked"])      # 单独一个数（issue_counts 还是原来四类）
+    tot["issues"] += tot["ship_issues"]
     settled = [x for x in rows if x["net"] is not None]
-    return {"total": tot, "counts": counts, "rows": rows[:800], "settled": settled[:500], "diff": diff[:300], "unpaid": unpaid[:300],
+    return {"ship": ship[:300], "total": tot, "counts": counts, "rows": rows[:800], "settled": settled[:500], "diff": diff[:300], "unpaid": unpaid[:300],
             "unsettled": unsettled[:300], "unknown": unknown[:300], "platform": platform or "",
-            "settings": {"days": st["settle_days"], "tolerance": st["tolerance"]}, "state_zh": STATE_ZH, "state_th": STATE_TH,
+            "settings": {"days": st["settle_days"], "tolerance": st["tolerance"], "ship_tolerance": st["ship_tolerance"]}, "state_zh": STATE_ZH, "state_th": STATE_TH,
             "source_zh": SOURCE_ZH}
+
+
+def ship_check(orders, chk=None, tol=5.0):
+    """v2.50 运费核对：平台结算明细里扣的运费（运费类、负数的行）和订单的运费比。
+    订单的运费 = 订单表的「运费」，没有就用「买家付的运费」，再没有就用结算明细里买家付的运费（运费类、正数的行）；都没有不比。
+    差额（扣的 − 订单运费）绝对值超过 tol 铢的列出来（正 = 平台多扣了）。"""
+    from .settle import key
+    c = db.conn()
+    chk = chk if chk is not None else _checked()
+    orders = [o for o in orders if (o["platform"] or "") not in ("", "manual")]
+    keys = {}
+    for o in orders:
+        keys.setdefault(o["platform"], set()).add(key(o["order_no"]))
+    lines = _lines_by_key(c, keys)
+    fees = {}
+    ids = [o["id"] for o in orders]
+    for i in range(0, len(ids), 500):
+        part = ids[i:i + 500]
+        for r in c.execute(f"SELECT id, shipping_fee, buyer_shipping FROM orders WHERE id IN ({','.join('?' * len(part))})", part):
+            fees[r["id"]] = r
+    out = []
+    for o in orders:
+        k = key(o["order_no"])
+        ls = [x for x in lines.get((o["platform"], k), []) if fee_cat(x["fee_name"], x["is_item"]) == "shipping"]
+        charged = -sum(x["amount"] or 0 for x in ls if (x["amount"] or 0) < 0)
+        if not charged:
+            continue
+        fr = fees.get(o["id"])
+        if fr is not None and fr["shipping_fee"] is not None:
+            exp, src = abs(float(fr["shipping_fee"])), "order"
+        elif fr is not None and fr["buyer_shipping"] is not None:
+            exp, src = abs(float(fr["buyer_shipping"])), "buyer"
+        else:
+            paid = sum(x["amount"] or 0 for x in ls if (x["amount"] or 0) > 0)
+            if not paid:
+                continue
+            exp, src = paid, "platform"
+        diff = charged - exp
+        if abs(diff) <= tol:
+            continue
+        out.append({"id": o["id"], "platform": o["platform"], "shop": o["shop"] or "", "order_no": o["order_no"], "key": k,
+                    "day": day_of(o["order_time"]) if o["order_time"] else "", "charged": r2(charged), "expected": r2(exp),
+                    "diff": r2(diff), "exp_source": src, "lines": [{"fee_name": x["fee_name"], "amount": r2(x["amount"]), "day": x["day"]} for x in ls][:20],
+                    "checked": chk.get((o["platform"], k))})
+    out.sort(key=lambda x: (bool(x["checked"]), -abs(x["diff"])))
+    return out
 
 
 # ---------------- 后台：每小时拉一次结算单 ----------------

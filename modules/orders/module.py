@@ -6,7 +6,7 @@ MODULE = {
     "id": "orders",
     "name_zh": "订单",
     "name_th": "ออเดอร์",
-    "version": "2.3",
+    "version": "2.4",
     "desc_zh": "订单、审单、打包核对、发货交接、售后、买家档案、每单利润。",
     "desc_th": "ออเดอร์ ตรวจออเดอร์ ตรวจแพ็ก ส่งมอบพัสดุ หลังการขาย ข้อมูลผู้ซื้อ กำไรต่อคำสั่งซื้อ",
     "core": True,
@@ -22,7 +22,9 @@ MODULE = {
     ],
     "public": packbox,            # 别的模块用：box_for(订单) 这个订单用哪个纸箱（库存模块发货出库扣纸箱）
     "production_allow": [("GET", r"^/print/(item-labels|waybill|waybill-preview)$"), ("GET", r"^/api/(waybill/(status|awb/\d+/\d+\.png)|pack-boxes)$"),
-                         ("POST", r"^/api/orders/\d+/pack-box$")],
+                         ("POST", r"^/api/orders/\d+/pack-box$"),
+                         # v2.50：订单页左边队列数字、自己保存的筛选、勾选订单放进交接单
+                         ("GET", r"^/api/orders/(queues|presets)$"), ("POST", r"^/api/orders/(presets|presets/\d+/delete|handover-add)$")],
     "owner_only": [("POST", r"^/api/waybill/template$")],
     "settings_module": "orders",
     "settings": [("打包核对与发货交接（扫什么码）", [
@@ -31,8 +33,12 @@ MODULE = {
         ("item_label_size", "内部商品标签尺寸（毫米，热敏标签纸）", ["50x30", "40x30", "60x40"])]),
         ("自制面单模板", [
             ("label_carrier", "用哪家快递的版式：auto = 按订单的「物流」自动认（认不出用通用版）", ["auto", "flash", "kerry", "jt", "spx", "lex", "best", "ninja", "dhl", "thpost", "generic"]),
-            ("label_size", "面单尺寸：100x150 热敏 4×6 寸 / 100x100 小标签 / a6 普通打印机 A6 纸", ["100x150", "100x100", "a6"])])],
+            ("label_size", "面单尺寸：100x150 热敏 4×6 寸 / 100x100 小标签 / a6 普通打印机 A6 纸", ["100x150", "100x100", "a6"])]),
+        ("风险买家（订单列表、客服聊天里提醒）", [
+            ("buyer_risk_refused", "拒收 / 派送失败（含货到付款拒收）几次算风险买家"),
+            ("buyer_risk_returned", "退货退款几次算风险买家")])],
     "settings_cards": ["orders"],
-    "config_defaults": {"scan_order_key": "both", "pack_item_mode": "tap", "item_label_size": "50x30", "label_carrier": "auto", "label_size": "100x150"},
+    "config_defaults": {"scan_order_key": "both", "pack_item_mode": "tap", "item_label_size": "50x30", "label_carrier": "auto", "label_size": "100x150",
+                        "buyer_risk_refused": 2, "buyer_risk_returned": 3},
     "ui": {"inline": True, "html": "page.html", "eager_js": ["packbox.js", "orders.js", "aftersales.js", "shipping.js", "pack.js", "labels.js"], "css": ["page.css"], "page_js": [], "boot_js": []},
 }

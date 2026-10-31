@@ -487,7 +487,7 @@ def _uname():
 def _strip_order(o):
     if auth.is_owner():
         return o
-    for k in ("order_total", "platform_fee", "shipping_fee", "profit") + orders_mod.MONEY_FIELDS:
+    for k in ("order_total", "platform_fee", "shipping_fee", "profit", "est_profit") + orders_mod.MONEY_FIELDS:
         o.pop(k, None)
     if isinstance(o.get("buyer_profile"), dict):
         o["buyer_profile"].pop("spent", None)

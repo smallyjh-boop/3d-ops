@@ -290,6 +290,7 @@
     return `${orderBox(c)}
       <div class="cs-sidebox" id="cs-orders"><div class="cs-sh">📦 ${Z("这个买家的订单", "คำสั่งซื้อของลูกค้า")}</div><p class="muted small">${Z("加载中…", "กำลังโหลด…")}</p></div>
       <div class="cs-sidebox hidden" id="cs-sugg"></div>
+      ${window.OPS && OPS.orderFromChat ? `<div class="cs-sideact"><button class="mini primary-lite" data-cs="mkorder">🧾 ${Z("从聊天建单", "สร้างออเดอร์จากแชท")}</button></div>` : ""}
       ${infoBox(c)}${custBox(c)}
       ${a.quote && a.quote.lines && a.quote.lines.length ? quoteHtml(a.quote) : ""}
       <div class="cs-sideact small">${c.messages.some((m) => m.role === "seller") ? `<button class="linkbtn" data-cs="kb">${Z("把这次的问答存为常见问答", "บันทึกเป็นคำถามที่พบบ่อย")}</button> · ` : ""}
@@ -366,6 +367,7 @@
     const due = c.next_follow_at && c.next_follow_at * 1000 <= Date.now();
     const tags = (c.tag_list || []).map(tagName).filter(Boolean);
     return `<div class="cs-info small">
+      ${h && h.risk ? `<div class="cs-risk bad">⚠ <b>${Z("风险买家", "ลูกค้าความเสี่ยงสูง")}</b> <span>${esc(h.risk)}</span></div>` : ""}
       ${h ? `<div>👤 ${h.repeat ? `<b class="ok">${Z("老顾客", "ลูกค้าเก่า")}</b> · ` : ""}${Z(`买过 ${h.orders} 单，共 ฿${Math.round(h.spent)}`, `ซื้อ ${h.orders} ครั้ง รวม ฿${Math.round(h.spent)}`)}${h.last_order ? ` · ${Z("上次", "ล่าสุด")} ${h.last_order}` : ""}${h.level ? ` · ${esc(h.level)}` : ""}${h.past_chats ? ` · ${Z(`以前聊过 ${h.past_chats} 次`, `เคยคุย ${h.past_chats} ครั้ง`)}` : ""}</div>` : ""}
       <div class="row gap wrap">🏷 ${tags.map((t) => `<span class="pill" data-notr>${esc(t)}</span>`).join("") || `<span class="muted">${Z("没有标签", "ไม่มีแท็ก")}</span>`}
         <button class="linkbtn" data-cs="tags">${Z("改标签", "แก้แท็ก")}</button></div>
@@ -600,6 +602,7 @@
       if (act === "ai-pop") { const pop = $("#cs-aipop"); pop.classList.toggle("hidden"); if (!pop.classList.contains("hidden")) $("#cs-instr").focus(); return; }
       if (act === "flow-exit") return flowExit();
       if (act === "side-toggle") { $("#cs-side").classList.toggle("open"); return; }
+      if (act === "mkorder") { OPS.orderFromChat(CONV, (SIDE[CUR] || {}).sugg || [], async (body) => { const cid = CUR; const r = await api(`/api/cs/convs/${cid}/action`, { json: { type: "make_order", ...body } }); if (CUR === cid) { CONV = r; render(); } toast(r.message); }); return; }
       if (act === "send-order") { if (CONV.can_send) await doSend({ kind: "order", order_id: +b.dataset.oid }, b); return; }
       if (act === "send-item") { await doSend({ kind: "item", product_id: b.dataset.pid }, b); return; }
       if (act === "ins-item") { const ta = $("#cs-reply"); if (ta) { ta.value += (ta.value ? " " : "") + b.dataset.name; ta.focus(); } return; }

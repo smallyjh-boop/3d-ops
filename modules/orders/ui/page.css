@@ -29,3 +29,118 @@
 .wb-col { display: flex; align-items: center; gap: 4px } .wb-col .wb-opt { min-width: 110px } .wb-col .mini { margin: 0; padding: 0 6px }
 .wb-dim { opacity: .45; pointer-events: none }
 .wb-dim #wb-save { pointer-events: auto }
+/* ===== v2.50 订单列表（BigSeller 式）：左边队列、筛选、缩略图、浮动批量操作条 ===== */
+.ord-head h2 { display: flex; align-items: center; gap: 6px }
+.oq-wrap { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: 14px; align-items: start }
+.oq-side { position: sticky; top: 64px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px; max-height: calc(100vh - 80px); overflow: auto }
+.oq-h { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); padding: 2px 4px 6px }
+.oq-fold { border: 0; background: transparent; padding: 0 6px; color: var(--muted); font-size: 14px }
+.oq { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; border-radius: 7px; background: transparent; padding: 6px 8px; margin: 1px 0; text-align: left; color: #374151; font-size: 13px }
+.oq span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.oq b { font-weight: 600; font-size: 12px; color: #6b7280; background: #f3f4f6; border-radius: 9px; padding: 0 7px; min-width: 22px; text-align: center }
+.oq:hover { background: #f3f4f6; border-color: transparent }
+.oq.on { background: #eff6ff; color: var(--accent); font-weight: 600 } .oq.on b { background: #dbeafe; color: var(--accent) }
+.oq.zero { color: #9ca3af } .oq.zero b { background: transparent; color: #cbd5e1 }
+.oq.hot b { background: #fee2e2; color: #b91c1c }
+.oq-step { font-style: normal; width: 17px; height: 17px; border-radius: 50%; background: #e5e7eb; color: #6b7280; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto }
+.oq.on .oq-step { background: var(--accent); color: #fff }
+.oq-all { font-weight: 600 }
+.oq-sep { border-top: 1px dashed var(--line); margin: 6px 4px }
+.oq-folded { grid-template-columns: 46px minmax(0, 1fr) }
+.oq-folded .oq-side { padding: 6px 4px } .oq-folded .oq span, .oq-folded .oq-h span { display: none }
+.oq-folded .oq { justify-content: center; padding: 6px 2px; flex-direction: column; gap: 2px } .oq-folded .oq b { min-width: 0; padding: 0 4px; font-size: 11px }
+.oq-folded .oq-fold { transform: rotate(180deg) } .oq-folded .oq-h { justify-content: center }
+.oq-main { min-width: 0 }
+.ord-fbox { padding: 10px 12px; margin-bottom: 8px }
+.ord-filter { gap: 8px }
+.ord-filter select, .ord-more select { width: auto; max-width: 190px; padding: 6px 8px }
+.ord-search { display: flex; align-items: center; flex: 1 1 260px; min-width: 200px; max-width: 380px; position: relative }
+.ord-search input { padding-right: 56px } .ord-search .mini { position: absolute; right: 4px; margin: 0 }
+.ord-dates { display: inline-flex; align-items: center; gap: 4px } .ord-dates input { width: 138px; padding: 6px }
+.ord-morebtn { padding: 6px 10px } .ord-morebtn b { background: var(--accent); color: #fff; border-radius: 9px; font-size: 11px; padding: 0 6px; margin-left: 4px }
+.ord-morebtn b:empty { display: none }
+.ord-more { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line) }
+.ord-chk { flex-direction: row; align-items: center; gap: 4px; margin: 0; white-space: nowrap } .ord-chk input { width: auto }
+.ord-nos { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line) } .ord-nos textarea { margin-bottom: 6px }
+.seg { display: inline-flex; border: 1px solid #cfd4dc; border-radius: 7px; overflow: hidden }
+.seg button { border: 0; border-radius: 0; padding: 4px 12px; background: #fff } .seg button + button { border-left: 1px solid #cfd4dc }
+.seg button.on { background: var(--accent); color: #fff }
+.ord-presets { margin-top: 8px; gap: 6px } .ord-presets .mini { margin: 0 }
+.ochip { display: inline-flex; align-items: center; border: 1px solid #d0d5dd; border-radius: 14px; background: #fff; overflow: hidden }
+.ochip-b { border: 0; background: transparent; padding: 2px 4px 2px 10px; font-size: 12px } .ochip-x { border: 0; background: transparent; padding: 2px 8px 2px 4px; font-size: 11px; color: #9ca3af }
+.ochip:hover { border-color: var(--accent) } .ochip-x:hover { color: var(--bad) }
+.ord-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 2px 8px; min-height: 4px }
+.ord-qname { font-size: 15px }
+.ord-tablewrap { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto }
+.ord-t { margin: 0 } .ord-t td { vertical-align: top; padding: 8px 6px } .ord-t th.ck, .ord-t td.ck { width: 28px; text-align: center }
+.ord-t td.ck input { width: auto; margin-top: 2px }
+.oc-no { min-width: 140px } .oc-items { min-width: 200px } .oc-buyer { min-width: 120px; max-width: 170px } .oc-st { min-width: 150px }
+.oflag { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; box-shadow: 0 0 0 2px #fff, 0 0 0 3px #0001 }
+.oflag-note { color: #6b21a8 } .oflag-line { margin: 4px 0 }
+#ord-table tr.flag-red td:first-child { box-shadow: inset 3px 0 #ef4444 } #ord-table tr.flag-orange td:first-child { box-shadow: inset 3px 0 #f97316 }
+#ord-table tr.flag-yellow td:first-child { box-shadow: inset 3px 0 #eab308 } #ord-table tr.flag-green td:first-child { box-shadow: inset 3px 0 #22c55e }
+#ord-table tr.flag-blue td:first-child { box-shadow: inset 3px 0 #3b82f6 } #ord-table tr.flag-purple td:first-child { box-shadow: inset 3px 0 #a855f7 }
+.oi { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 5px }
+.oi-img { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: #f3f4f6; flex: 0 0 auto; border: 1px solid var(--line); cursor: zoom-in }
+.oi-noimg { display: inline-block; cursor: default; background: repeating-linear-gradient(45deg, #f3f4f6 0 6px, #e5e7eb 6px 12px) }
+.oi-t { min-width: 0; line-height: 1.35 } .oi-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px }
+.oi-q { font-size: 12px } .oi-q.multi { color: #fff; background: #f97316; border-radius: 8px; padding: 0 6px }
+.oi.bad .mono { color: var(--bad) }
+.pkg { display: inline-block; font-size: 11px; border-radius: 8px; padding: 0 7px; margin: 2px 0; background: #f3f4f6; color: #374151 }
+.pkg-multi { background: #ffedd5; color: #9a3412 } .pkg-mixed { background: #ede9fe; color: #5b21b6 }
+.oqs { display: inline-block; font-size: 11px; border-radius: 8px; padding: 0 7px; background: #f1f5f9; color: #334155; white-space: nowrap }
+.oqs-review, .oqs-shelf { background: #fef3c7; color: #92400e } .oqs-to_pack, .oqs-to_label { background: #e0f2fe; color: #075985 } .oqs-to_pickup { background: #dcfce7; color: #166534 }
+.ord-pst { margin-top: 2px }
+.pbs { display: flex; gap: 3px; margin: 4px 0 2px; flex-wrap: wrap }
+.pb { font-size: 10px; line-height: 16px; min-width: 18px; text-align: center; border-radius: 4px; border: 1px dashed #cbd5e1; color: #94a3b8; padding: 0 3px; white-space: nowrap }
+.pb.on { border: 1px solid #86efac; background: #f0fdf4; color: #166534 } .pb sup { font-size: 8px; margin-left: 1px }
+.od-pbs { margin: 0 0 8px } .pb-wide { font-size: 12px; line-height: 20px; padding: 0 8px }
+.oc-edit { margin: 4px 0 0 0 !important }
+.risk-box { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 8px; padding: 8px 10px; margin: 6px 0 }
+/* 下拉菜单（<details>） */
+.odd { position: relative; display: inline-block }
+.odd > summary { list-style: none; cursor: pointer; padding: 7px 12px; border: 1px solid #cfd4dc; border-radius: 6px; background: #fff; white-space: nowrap; user-select: none }
+.odd > summary::-webkit-details-marker { display: none }
+.odd[open] > summary { border-color: var(--accent); color: var(--accent) }
+.odd-menu { position: absolute; z-index: 60; min-width: 190px; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px #0002; padding: 4px; display: flex; flex-direction: column }
+.odd-r .odd-menu { right: 0; top: calc(100% + 4px) } .odd-up .odd-menu { bottom: calc(100% + 6px); left: 0 }
+.odd-menu button, .odd-menu .filebtn { border: 0; background: transparent; text-align: left; padding: 7px 10px; border-radius: 6px; width: 100%; justify-content: flex-start; font-size: 13px; margin: 0; color: var(--ink) }
+.odd-menu button:hover, .odd-menu .filebtn:hover { background: #f3f4f6 } .odd-menu button.danger { color: var(--bad) }
+/* 浮动批量操作条（勾选了订单才出现） */
+.ord-fbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 39; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #111827; color: #fff; border-radius: 12px; padding: 8px 12px; box-shadow: 0 12px 40px #0004; max-width: calc(100vw - 24px) }
+.ord-fbar .fb-n b { font-size: 15px } .ord-fbar > .mini { background: transparent; color: #d1d5db; border-color: #4b5563 }
+.ord-fbar > button:not(.mini), .ord-fbar .odd > summary { background: #1f2937; color: #fff; border-color: #374151; padding: 6px 12px }
+.ord-fbar > button.primary-lite { background: var(--accent); border-color: var(--accent) }
+#tab-orders.has-sel .ord-tablewrap { margin-bottom: 70px }
+.ofl-pick .ofl { gap: 6px } .ofl i { width: 12px; height: 12px; border-radius: 50% } .ofl.on { border-color: var(--accent); background: #eff6ff }
+/* 平板：队列变成上面一条横向滚动 */
+@media (max-width: 1200px) {
+  .oq-wrap, .oq-folded { grid-template-columns: minmax(0, 1fr); gap: 8px }
+  .oq-side, .oq-folded .oq-side { position: static; max-height: none; display: flex; gap: 4px; overflow-x: auto; padding: 6px; scrollbar-width: thin; -webkit-overflow-scrolling: touch }
+  .oq-h, .oq-sep { display: none } .oq-g { display: contents }
+  .oq, .oq-folded .oq { width: auto; flex: 0 0 auto; flex-direction: row; padding: 6px 10px; white-space: nowrap }
+  .oq span, .oq-folded .oq span { display: inline } .oq.zero { display: none } .oq.on.zero { display: flex }
+  .oq-step { display: none }
+  .ord-tablewrap { overflow-x: auto }
+}
+/* 手机：表格变成卡片 */
+@media (max-width: 700px) {
+  .ord-head .ux-head-r { width: 100%; gap: 6px } .ord-head .ux-head-r > * { flex: 1 1 auto; justify-content: center; padding-left: 8px; padding-right: 8px; white-space: nowrap; font-size: 13px }
+  .ord-head .ux-head-r > .odd { flex: 0 0 auto; padding: 0 } .ord-head .odd > summary { padding: 7px 10px }
+  .ord-search { max-width: none; flex-basis: 100% } .ord-filter select { flex: 1 1 40%; max-width: none; min-width: 0 }
+  .ord-dates { flex: 1 1 100%; min-width: 0 } .ord-dates input { flex: 1 1 0; width: 0; min-width: 0 }
+  .ord-t td.ck { padding: 0; display: flex; justify-content: center; align-items: flex-start }
+  .ord-t .oc-time { grid-row: 1 }
+  .ord-t thead { display: none } .ord-tablewrap { border: 0; background: transparent; overflow: visible }
+  .ord-t, .ord-t tbody { display: block; background: transparent }
+  .ord-t tr { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 2px 8px; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin-bottom: 8px }
+  .ord-t td { display: block; border: 0; padding: 2px 0; min-width: 0 !important; max-width: none !important }
+  .ord-t td.ck { grid-row: 1 / span 2 } .ord-t .oc-no { grid-column: 2 } .ord-t .oc-time { grid-column: 3; text-align: right }
+  .ord-t .oc-items, .ord-t .oc-buyer, .ord-t .oc-st, .ord-t .oc-money { grid-column: 2 / span 2 }
+  .ord-t tr.ord-empty { display: block }
+  #ord-table tr.sel { background: #eff6ff; border-color: #93c5fd } #ord-table tr.sel td { background: transparent }
+  .oi-n { max-width: 60vw }
+  .ord-fbar { left: 8px; right: 8px; transform: none; bottom: 8px; justify-content: center }
+  .ord-fbar .odd-up .odd-menu { position: fixed; left: 8px; right: 8px; bottom: 70px; max-height: 60vh; overflow: auto }
+}

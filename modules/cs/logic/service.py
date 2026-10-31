@@ -359,6 +359,19 @@ def do_action(cid, act, user=""):
         data.update_conv(cid, lead_stage="quoted", lead_value=o.get("total") or c.get("lead_value"),
                          next_follow_at=time.time() + hours * 3600, lead_at=c.get("lead_at") or time.time())
         return conv_full(cid), f"已生成报价单 {o['order_no']}"
+    if t == "make_order":                    # v2.50「从聊天建单」：手工订单 / 报价单，买家、平台、店铺从会话带过来
+        items = [i for i in act.get("items") or [] if str(i.get("sku") or "").strip()]
+        if not items:
+            raise ValueError("请至少填一个商品 SKU")
+        kind = act.get("kind") or "manual"
+        plat = c.get("platform") if c.get("platform") in ("lazada", "shopee", "tiktok") else "manual"
+        o = erp_link.create_order(act.get("buyer") or c.get("buyer") or "", items, kind, plat, c.get("shop") or "",
+                                  act.get("note") or "", user, act.get("ship") or {})
+        data.add_msg(cid, "note", f"从聊天建了{'报价单' if kind == 'quote' else '订单'} {o['order_no']}", "system", user)
+        data.update_conv(cid, order_id=o["id"], order_no=o["order_no"])
+        if kind == "quote":
+            data.update_conv(cid, lead_stage="quoted", lead_value=o.get("total") or c.get("lead_value"), lead_at=c.get("lead_at") or time.time())
+        return conv_full(cid), f"已建{'报价单' if kind == 'quote' else '订单'} {o['order_no']}"
     if t == "quote_confirm":
         o = erp_link.confirm_quote(int(act.get("order_id") or (c.get("order") or {}).get("id") or 0), user)
         data.add_msg(cid, "note", f"报价单 {o['order_no']} 已转成正式订单，开始排产", "system", user)

@@ -128,6 +128,21 @@
         <td class="mono" data-notr>${esc(x.order_no)}</td>${moneyCell(x.amount)}<td>${srcTag(x.source)}</td><td class="nowrap">${checkBtn(x)}</td></tr>`).join("") + "</tbody></table></div>";
   }
 
+  // v2.50 运费核对
+  function shipTable(rows) {
+    const { m, PLAT } = window.FIN;
+    if (!rows.length) return UX.empty(Z("没有运费对不上的订单", "ไม่มีออเดอร์ที่ค่าส่งไม่ตรง"));
+    const SRC = { order: ["订单运费", "ค่าส่งในออเดอร์"], buyer: ["买家付的运费", "ค่าส่งที่ลูกค้าจ่าย"], platform: ["平台明细", "ข้อมูลแพลตฟอร์ม"] };
+    return `<div class="fin-scroll"><table class="grid small"><thead><tr><th>${Z("下单日", "วันสั่งซื้อ")}</th><th>${Z("平台 · 店铺", "แพลตฟอร์ม · ร้าน")}</th><th>${Z("订单号", "เลขคำสั่งซื้อ")}</th>
+      <th class="num">${Z("平台扣的运费", "ค่าส่งที่ถูกหัก")}</th><th class="num">${Z("订单运费", "ค่าส่งในออเดอร์")}</th><th class="num">${Z("差额", "ส่วนต่าง")}</th><th>${Z("明细", "รายละเอียด")}</th><th></th></tr></thead><tbody>` +
+      rows.map((x) => `<tr class="${x.checked ? "fin-done" : ""}"><td class="nowrap">${esc(x.day)}</td><td>${esc(PLAT[x.platform] || x.platform)} <span class="muted" data-notr>${esc(x.shop || "")}</span></td>
+        <td class="mono" data-notr>${window.OPS && OPS.openOrder ? `<button class="linkbtn mono" data-st-order="${x.id}">${esc(x.order_no)}</button>` : esc(x.order_no)}</td>
+        <td class="num">${m(x.charged)}</td><td class="num">${m(x.expected)} <span class="muted">${esc(Z(...(SRC[x.exp_source] || ["", ""])))}</span></td>
+        <td class="num ${x.diff > 0 ? "bad" : "warn"}">${x.diff > 0 ? "+" : ""}${m(x.diff)}</td>
+        <td class="small" data-notr>${(x.lines || []).map((l) => `${esc(l.fee_name || "")} ${m(l.amount)}`).join("<br>")}</td>
+        <td class="nowrap">${checkBtn({ ...x, issue: "ship" })}</td></tr>`).join("") + "</tbody></table></div>";
+  }
+
   function history(bs) {
     const { m, PLAT } = window.FIN;
     if (!bs.length) return "";
@@ -147,6 +162,7 @@
     const t = r.total, ic = t.issue_counts;
     const views = [["diff", Z("扣费比预计多", "หักมากกว่าที่คาด"), ic.diff], ["unpaid", Z("超时未回款", "ค้างรับเงินเกินกำหนด"), ic.unpaid],
       ["unknown", Z("平台有但系统没有", "มีในแพลตฟอร์มแต่ไม่มีในระบบ"), ic.unknown], ["unsettled", Z("系统有但平台没结算", "มีในระบบแต่แพลตฟอร์มไม่สรุปยอด"), ic.unsettled],
+      ["ship", Z("运费核对", "ตรวจค่าส่ง"), t.ship_issues || 0],
       ["all", Z("全部订单", "ทุกคำสั่งซื้อ"), r.rows.length]];
     if (!VIEW || !views.some((v) => v[0] === VIEW)) VIEW = (views.find((v) => v[2]) || ["all"])[0];
     const byState = {};
@@ -172,14 +188,15 @@
         { label: Z("待回款", "รอรับเงิน"), value: m(t.pending), sub: t.settled_amount ? Z(`其中已结算 ${m(t.settled_amount)}`, `สรุปยอดแล้ว ${m(t.settled_amount)}`) : "",
           help: Z("还没到账的钱：平台结算了的按结算金额，没结算的按扣点估算。", "เงินที่ยังไม่เข้า: สรุปยอดแล้วใช้ยอดจริง ยังไม่สรุปใช้ค่าประมาณ") },
         { label: Z("异常单数", "รายการผิดปกติ"), value: n0(t.issues), tone: t.issues ? "bad" : "ok", sub: t.unpaid_amount ? Z(`超时 ${m(t.unpaid_amount)}`, `ค้าง ${m(t.unpaid_amount)}`) : "",
-          help: Z("下面四个页签加起来（标了「已核对」的不算）。", "รวมสี่แท็บด้านล่าง (ไม่นับที่ตรวจแล้ว)") },
+          help: Z("下面几个问题页签加起来（标了「已核对」的不算）。", "รวมแท็บปัญหาด้านล่าง (ไม่นับที่ตรวจแล้ว)") },
       ]) +
       UX.card({ title: Z("回款进度", "ความคืบหน้าการรับเงิน"), help: Z("条的长度 = 订单数；右边是金额（到账了的按到账，没到账的按订单金额）。", "ความยาว = จำนวนคำสั่งซื้อ ด้านขวาคือยอดเงิน"),
         right: t.adjustments ? `<span class="small muted">${Z("没有订单号的调整", "รายการปรับที่ไม่มีเลขคำสั่งซื้อ")} ${m(t.adjustments)}</span>` : "",
         body: UX.bars(order.filter((s) => byState[s]).map((s) => ({ label: stateName(r, s), value: byState[s].n, text: `${byState[s].n} · ${m(Math.round(byState[s].amt))}`, tone: tone[s] })),
           { empty: Z("这段时间没有已发货的平台订单", "ไม่มีคำสั่งซื้อที่ส่งแล้วในช่วงนี้") }) }) +
       `<div class="card">${UX.tabs(views.map(([k, l, n]) => [k, l, n]), VIEW, "fin-st-view")}
-        ${VIEW === "unknown" ? unknownTable(list) + (list.length ? `<p class="muted small">${Z("这些订单号系统里找不到（订单还没导入？），导入订单后会自动对上；确实不是我们的单可以标「已核对」。", "เลขคำสั่งซื้อเหล่านี้ไม่มีในระบบ นำเข้าคำสั่งซื้อแล้วจะจับคู่อัตโนมัติ")}</p>` : "")
+        ${VIEW === "ship" ? shipTable(list) + (list.length ? `<p class="muted small">${Z(`平台结算明细里扣的运费，和订单的运费（订单表的运费 → 买家付的运费 → 平台明细里买家付的运费）差 ${r.settings.ship_tolerance} 铢以上的订单。正数 = 平台多扣了，可以拿去找平台申诉（重量 / 尺寸算错）。`, `ค่าส่งที่แพลตฟอร์มหัก ต่างจากค่าส่งในออเดอร์เกิน ${r.settings.ship_tolerance} บาท ค่าบวก = หักเกิน`)}</p>` : "")
+        : VIEW === "unknown" ? unknownTable(list) + (list.length ? `<p class="muted small">${Z("这些订单号系统里找不到（订单还没导入？），导入订单后会自动对上；确实不是我们的单可以标「已核对」。", "เลขคำสั่งซื้อเหล่านี้ไม่มีในระบบ นำเข้าคำสั่งซื้อแล้วจะจับคู่อัตโนมัติ")}</p>` : "")
           : orderTable(r, list, VIEW) + (VIEW === "unsettled" && list.length ? `<p class="muted small">${Z("平台的结算数据已经覆盖到这些订单之后的日子，偏偏没有它们：可能被平台取消 / 退货了，去平台后台查一下。", "ข้อมูลของแพลตฟอร์มครอบคลุมถึงหลังวันที่เหล่านี้แล้วแต่ไม่มีคำสั่งซื้อนี้: อาจถูกยกเลิก/คืนสินค้า")}</p>` : "")
           + (VIEW === "unpaid" && list.length ? `<p class="muted small">${Z("没有结算记录的：Shopee / TikTok 导入最新的报表；Lazada 点「立即同步」。结算了没打款的：等平台打款，或者问平台。", "ไม่มีข้อมูลสรุปยอด: นำเข้ารายงานล่าสุดหรือกดซิงค์")}</p>` : "")}
       </div>` + history(r.batches || []);

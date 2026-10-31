@@ -87,6 +87,7 @@ MODULES = [
         ("对账与报表", [
             ("fin_settle_days", "发货 / 完成多少天还没回款算「超时未回款」"),
             ("fin_settle_tolerance", "平台实际扣费比按扣点估算多出多少铢才提醒"),
+            ("fin_ship_tolerance", "运费核对：平台扣的运费和订单运费差多少铢以上才列出来"),
             ("fin_import_remind_days", "Shopee / TikTok（没有接口的平台）多少天没导入结算报表就进今日待办"),
             ("fin_fixed_cats", "算「固定费用」的支出分类（逗号分隔；这期间没记账就按「成本与定价」里的房租、人工、折旧估算）", "list"),
             ("fin_expense_cats", "自己加的支出分类（逗号分隔）", "list")]),

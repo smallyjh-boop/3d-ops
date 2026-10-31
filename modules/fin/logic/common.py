@@ -14,7 +14,7 @@ def settings(cfg=None):
             return d
     return {"vat_on": bool(cfg.get("fin_vat_on", False)), "vat_rate": f("fin_vat_rate", 0.07),
             "incl_vat": bool(cfg.get("fin_prices_incl_vat", True)), "settle_days": int(f("fin_settle_days", 14)),
-            "tolerance": f("fin_settle_tolerance", 5), "fixed_cats": list(cfg.get("fin_fixed_cats") or ["房租", "人工工资", "设备折旧"])}
+            "tolerance": f("fin_settle_tolerance", 5), "ship_tolerance": f("fin_ship_tolerance", 5), "fixed_cats": list(cfg.get("fin_fixed_cats") or ["房租", "人工工资", "设备折旧"])}
 
 
 def month_range(month):

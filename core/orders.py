@@ -55,6 +55,12 @@ CREATE TABLE IF NOT EXISTS handovers (
   id INTEGER PRIMARY KEY AUTOINCREMENT, carrier TEXT, method TEXT, note TEXT, created_at REAL, username TEXT,
   closed_at REAL, closed_by TEXT
 );
+CREATE TABLE IF NOT EXISTS order_doc_prints (
+  order_id INTEGER, doc TEXT, n INTEGER DEFAULT 0, first_at REAL, last_at REAL, username TEXT, PRIMARY KEY(order_id, doc)
+);
+CREATE TABLE IF NOT EXISTS order_presets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, name TEXT, data TEXT, created_at REAL
+);
 """
 
 # 字段 → 表头里可能出现的词（中文 / 英文 / 泰文，小写匹配，越靠前越优先）
@@ -170,6 +176,8 @@ def init():
                      ("hold", "INTEGER DEFAULT 0"), ("hold_reason", "TEXT"), ("reviewed_at", "REAL"), ("reviewed_by", "TEXT"),
                      ("buyer_key", "TEXT"), ("payment", "TEXT"), ("ship_method", "TEXT"), ("handover_id", "INTEGER"),
                      ("pack_box", "TEXT"),          # v2.35：打包用的纸箱（空 = 按产品自动选；none = 不用纸箱）
+                     # v2.50：挂起的种类（review 待审核 / shelf 人工搁置）、颜色标记 + 备注
+                     ("hold_kind", "TEXT"), ("flag", "TEXT"), ("flag_note", "TEXT"),
                      *((k, "REAL") for k in MONEY_FIELDS)):
         if col not in cols:
             c.execute(f"ALTER TABLE orders ADD COLUMN {col} {typ}")
@@ -917,117 +925,412 @@ def is_urgent(o, now=None):
                 and o["ship_by"] < now + URGENT_HOURS * 3600)
 
 
-def search(f):
-    """f: tab, q, platform, shop, kind, tag, date_from, date_to, sort, page, page_size"""
-    c = db.conn()
+# ---------------- v2.50 订单工作流队列（左边一列，像 BigSeller）----------------
+# 主流程：待审核 → 待生产 → 生产中 → 待打包 → 待打单 → 待揽收 → 已交运 → 已完成；
+# 第二组：异常 · 搁置 · 取消 · 未付款 · 售后 · 安排发货失败（另外还有 即将超时、报价）。
+# 一个订单在主流程里只在一个队列（q 列）；异常 / 售后 / 安排发货失败 / 即将超时 是额外标记（同时也在主流程里）。
+QUEUES = [("review", "待审核"), ("to_produce", "待生产"), ("producing", "生产中"), ("to_pack", "待打包"), ("to_label", "待打单"),
+          ("to_pickup", "待揽收"), ("shipped", "已交运"), ("completed", "已完成")]
+QUEUES2 = [("exception", "异常"), ("urgent", "即将超时"), ("shelf", "搁置"), ("cancelled", "取消"), ("unpaid", "未付款"),
+           ("aftersale", "售后"), ("rts_failed", "安排发货失败"), ("quote", "报价")]
+QUEUE_HELP = {"review": "新订单命中审单规则（定制留言、风险买家货到付款、可能重复下单……），挂起等人工审核，不排产",
+              "to_produce": "审核通过，生产任务还没开始（或者 SKU 没对上产品，排不了产）",
+              "producing": "有生产任务在打印 / 后处理", "to_pack": "全部打印好了，等打包",
+              "to_label": "打包好了（或者不用生产），还没打面单", "to_pickup": "面单打好了，等快递揽收 / 交接",
+              "shipped": "已经交给快递", "completed": "买家已签收",
+              "exception": "SKU 没对上、缺克数、快超时、排产来不及、打印失败……", "urgent": "24 小时内要发货还没打包好（含已超时）",
+              "shelf": "人工搁置（暂时不处理，不排产）", "cancelled": "已取消", "unpaid": "买家还没付款",
+              "aftersale": "退货退款、拒收 / 派送失败，或者有没处理完的售后",
+              "rts_failed": "在 ERP 里发货了，Lazada 上「安排发货」没成功（原因在订单的操作记录里）", "quote": "报价 / 预订单，不算收入"}
+DOCS = {"label": "面单", "pick": "拣货单", "pack": "装箱单", "invoice": "发票"}
+PKG_ZH = {"single": "单品单件", "multi": "单品多件", "mixed": "多品混装"}
+FLAGS = {"red": "红", "orange": "橙", "yellow": "黄", "green": "绿", "blue": "蓝", "purple": "紫"}
+RTS_FAIL_TAG = "⚠ Lazada 未安排发货"          # modules/link/events.py 安排发货失败时打的标签
+_ACTIVE_Q = ("review", "to_produce", "producing", "to_pack", "to_label", "to_pickup", "exception", "urgent", "shelf", "rts_failed",
+             "unpaid", "quote", "waiting", "ready")
+_LEGACY = {"waiting": "q='to_produce'", "ready": "q IN ('to_label','to_pickup')", "returned": "status='returned'",
+           "delivery_failed": "status='delivery_failed'", "exception": "exc=1", "urgent": "urg=1", "aftersale": "aft=1",
+           "rts_failed": "rtsf=1"}
+PRESET_KEYS = ("tab", "q", "nos", "match", "platform", "shop", "kind", "tag", "label", "printed", "pkg", "flag", "risk", "loss", "pay",
+               "carrier", "date_from", "date_to", "sort")
+
+
+def risk_th(cfg=None):
+    """风险买家门槛（设置）：拒收 / 派送失败 N 次、退货退款 N 次。"""
+    if cfg is None:
+        from .config import load_config
+        cfg = load_config()
+
+    def _i(k, d):
+        try:
+            return max(1, int(cfg.get(k) or d))
+        except (TypeError, ValueError):
+            return d
+    return _i("buyer_risk_refused", 2), _i("buyer_risk_returned", 3)
+
+
+def _table(c, name):
+    return bool(c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone())
+
+
+def split_nos(text):
+    """批量搜索：逗号 / 空格 / 换行 / 分号分开的订单号、运单号（最多 500 个）。"""
+    return [x for x in dict.fromkeys(t.strip() for t in re.split(r"[\s,，;；、]+", str(text or ""))) if x][:500]
+
+
+def _filters(f):
+    """不含队列的筛选条件 → (conds, args)。o. = orders 表。"""
     conds, args = [], []
-    if f.get("platform"):
-        conds.append("platform=?"); args.append(f["platform"])
-    if f.get("shop"):
-        conds.append("shop=?"); args.append(f["shop"])
-    if f.get("kind"):
-        conds.append("kind=?"); args.append(f["kind"])
+    for k in ("platform", "shop", "kind", "carrier", "buyer_key"):
+        if f.get(k):
+            conds.append(f"o.{k}=?"); args.append(f[k])
     if f.get("label") == "none":
-        conds.append("COALESCE(label_printed_at,0)=0")
+        conds.append("COALESCE(o.label_printed_at,0)=0")
     elif f.get("label") == "printed":
-        conds.append("label_printed_at>0")
+        conds.append("o.label_printed_at>0")
     if f.get("tag"):
-        conds.append("(','||COALESCE(tags,'')||',') LIKE ?"); args.append(f"%,{f['tag']},%")
+        conds.append("(','||COALESCE(o.tags,'')||',') LIKE ?"); args.append(f"%,{f['tag']},%")
     if f.get("pay") == "cod":
-        conds.append("(COALESCE(cod,0)>0 OR payment='cod')")
+        conds.append("(COALESCE(o.cod,0)>0 OR o.payment='cod')")
     elif f.get("pay") == "prepaid":
-        conds.append("NOT (COALESCE(cod,0)>0 OR payment='cod')")
-    if f.get("carrier"):
-        conds.append("carrier=?"); args.append(f["carrier"])
-    if f.get("buyer_key"):
-        conds.append("buyer_key=?"); args.append(f["buyer_key"])
+        conds.append("NOT (COALESCE(o.cod,0)>0 OR o.payment='cod')")
     if f.get("date_from"):
         t = _time(f["date_from"])
         if t:
-            conds.append("order_time>=?"); args.append(t)
+            conds.append("o.order_time>=?"); args.append(t)
     if f.get("date_to"):
         t = _time(f["date_to"])
         if t:
-            conds.append("order_time<?"); args.append(t + 86400)
+            conds.append("o.order_time<?"); args.append(t + 86400)
+    if f.get("flag") == "any":
+        conds.append("COALESCE(o.flag,'')!=''")
+    elif f.get("flag") in FLAGS:
+        conds.append("o.flag=?"); args.append(f["flag"])
     if f.get("q"):
-        q = f"%{f['q'].strip()}%"
-        conds.append("(order_no LIKE ? OR buyer LIKE ? OR tracking_no LIKE ? OR custom_note LIKE ? OR buyer_note LIKE ? "
-                     "OR receiver LIKE ? OR phone LIKE ? "
-                     "OR id IN (SELECT order_id FROM order_items WHERE sku LIKE ? OR name LIKE ?))")
+        q = f"%{str(f['q']).strip()}%"
+        conds.append("(o.order_no LIKE ? OR o.buyer LIKE ? OR o.tracking_no LIKE ? OR o.custom_note LIKE ? OR o.buyer_note LIKE ? "
+                     "OR o.receiver LIKE ? OR o.phone LIKE ? "
+                     "OR o.id IN (SELECT order_id FROM order_items WHERE sku LIKE ? OR name LIKE ?))")
         args += [q] * 9
-    rows = c.execute("SELECT * FROM orders" + (" WHERE " + " AND ".join(conds) if conds else ""), args).fetchall()
-    ids = [r["id"] for r in rows]
-    items, jcs = {}, {}
-    if ids:
-        ph = ",".join("?" * len(ids))
-        for it in c.execute(f"SELECT * FROM order_items WHERE order_id IN ({ph})", ids):
-            items.setdefault(it["order_id"], []).append(dict(it))
-        if _has_jobs_table(c):
-            for j in c.execute(f"SELECT order_id, status, COALESCE(qty_done,0) AS pd, fails, alert, planned_end "
-                               f"FROM jobs WHERE order_id IN ({ph})", ids):
-                d = jcs.setdefault(j["order_id"], {})
-                d[j["status"]] = d.get(j["status"], 0) + 1
-                d["_plates"] = d.get("_plates", 0) + j["pd"]
-                d["_fails"] = d.get("_fails", 0) + (j["fails"] or 0)
-                if j["alert"]:
-                    d["_alert"] = 1
-                if j["status"] in ("todo", "printing"):
-                    d["_end"] = max(d.get("_end", 0), j["planned_end"] or 0)
+    nos = split_nos(f.get("nos"))
+    if nos:
+        if (f.get("match") or "exact") == "fuzzy":
+            conds.append("(" + " OR ".join(["o.order_no LIKE ? OR o.tracking_no LIKE ?"] * len(nos)) + ")")
+            for n in nos:
+                args += [f"%{n}%", f"%{n}%"]
+        else:
+            ph = ",".join("?" * len(nos))
+            conds.append(f"(UPPER(o.order_no) IN ({ph}) OR UPPER(o.tracking_no) IN ({ph}))")
+            args += [n.upper() for n in nos] * 2
+    return conds, args
+
+
+def _cte(c, f, now):
+    """一条 SQL 算出每单的生产进度、队列、异常、包裹类型、打印状态、风险买家（v2.50：列表和左边计数都用它，不再整表读进 Python）。"""
+    conds, args = _filters(f)
+    rf_n, rt_n = risk_th(f.get("_cfg"))
+    jobs = ("SELECT order_id, COUNT(*) n, SUM(status='todo') todo, SUM(status='post') post, SUM(status='packed') packed, "
+            "SUM(status='done') done, SUM(COALESCE(qty_done,0)) plates, SUM(COALESCE(fails,0)) fails, "
+            "MAX(CASE WHEN COALESCE(alert,'') NOT IN ('','0') THEN 1 ELSE 0 END) alert, "
+            "MAX(CASE WHEN status IN ('todo','printing') THEN planned_end END) pend FROM jobs GROUP BY order_id") if _has_jobs_table(c) else \
+        "SELECT 0 order_id, 0 n, 0 todo, 0 post, 0 packed, 0 done, 0 plates, 0 fails, 0 alert, NULL pend WHERE 0"
+    aft = "OR o.id IN (SELECT order_id FROM aftersales WHERE status='open')" if _table(c, "aftersales") else ""
+    stage = ("CASE WHEN COALESCE(jb.n,0)=0 THEN 'none' WHEN jb.done=jb.n THEN 'out' WHEN jb.packed+jb.done=jb.n THEN 'ready' "
+             "WHEN jb.todo=jb.n AND jb.plates=0 THEN 'waiting' ELSE 'producing' END")
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
+    sql = f"""WITH jb AS ({jobs}),
+      it AS (SELECT order_id, COUNT(*) lines, COUNT(DISTINCT UPPER(COALESCE(NULLIF(TRIM(sku),''), name, ''))) kinds,
+             SUM(MAX(COALESCE(qty,1),1)) units, SUM(product_id IS NULL) unmatched,
+             SUM(product_id IS NOT NULL AND COALESCE(grams,0)=0) nogram FROM order_items GROUP BY order_id),
+      dp AS (SELECT order_id, MAX(CASE WHEN doc='pick' THEN n END) pick_n, MAX(CASE WHEN doc='pack' THEN n END) pack_n,
+             MAX(CASE WHEN doc='invoice' THEN n END) invoice_n, MAX(CASE WHEN doc='label' THEN n END) label_n
+             FROM order_doc_prints GROUP BY order_id),
+      bs AS (SELECT buyer_key, SUM(status='delivery_failed') rf, SUM(status='returned') rt FROM orders
+             WHERE COALESCE(buyer_key,'')!='' GROUP BY buyer_key),
+      s1 AS (SELECT o.id, o.status, o.order_time, o.ship_by, o.order_total, o.order_no, o.tracking_no, o.label_printed_at,
+             COALESCE(o.hold,0) hold, COALESCE(o.hold_kind,'') hold_kind, o.tags,
+             {stage} stage, COALESCE(jb.n,0) jn, COALESCE(jb.post,0) jpost, COALESCE(jb.packed,0) jpacked, COALESCE(jb.done,0) jdone,
+             COALESCE(jb.fails,0) jfails, COALESCE(jb.alert,0) jalert, jb.pend,
+             COALESCE(it.lines,0) ilines, COALESCE(it.kinds,0) kinds, COALESCE(it.units,0) units, COALESCE(it.unmatched,0) unmatched,
+             COALESCE(it.nogram,0) nogram, COALESCE(dp.pick_n,0) pick_n, COALESCE(dp.pack_n,0) pack_n,
+             COALESCE(dp.invoice_n,0) invoice_n, COALESCE(dp.label_n,0) label_n,
+             CASE WHEN COALESCE(o.buyer_key,'')!='' AND (COALESCE(bu.level,'') IN ('blacklist','watch') OR COALESCE(bs.rf,0)>=?
+                  OR COALESCE(bs.rt,0)>=?) THEN 1 ELSE 0 END risky,
+             CASE WHEN o.status IN ('returned','delivery_failed') {aft} THEN 1 ELSE 0 END aft
+             FROM orders o LEFT JOIN jb ON jb.order_id=o.id LEFT JOIN it ON it.order_id=o.id LEFT JOIN dp ON dp.order_id=o.id
+             LEFT JOIN bs ON bs.buyer_key=o.buyer_key LEFT JOIN buyers bu ON bu.key=o.buyer_key {where}),
+      s2 AS (SELECT *,
+             CASE WHEN status='to_ship' AND hold=1 THEN (CASE WHEN hold_kind='shelf' THEN 'shelf' ELSE 'review' END)
+                  WHEN status='to_ship' AND (stage='waiting' OR (stage='none' AND (ilines=0 OR unmatched>0))) THEN 'to_produce'
+                  WHEN status='to_ship' AND stage='producing' AND jpost>0 AND jpost+jpacked+jdone=jn THEN 'to_pack'
+                  WHEN status='to_ship' AND stage='producing' THEN 'producing'
+                  WHEN status='to_ship' AND COALESCE(label_printed_at,0)=0 THEN 'to_label'
+                  WHEN status='to_ship' THEN 'to_pickup'
+                  WHEN status IN ('shipped','completed','cancelled','unpaid','quote') THEN status
+                  WHEN status IN ('returned','delivery_failed') THEN 'aftersale'
+                  ELSE 'other' END q,
+             CASE WHEN status IN ('to_ship','quote') AND (ilines=0 OR unmatched>0 OR nogram>0
+                  OR (COALESCE(ship_by,0)>0 AND stage NOT IN ('ready','out') AND ship_by<?)
+                  OR (COALESCE(pend,0)>0 AND COALESCE(ship_by,0)>0 AND pend>ship_by) OR jalert=1 OR jfails>0) THEN 1 ELSE 0 END exc,
+             CASE WHEN status='to_ship' AND COALESCE(ship_by,0)>0 AND stage NOT IN ('ready','out') AND ship_by<? THEN 1 ELSE 0 END urg,
+             CASE WHEN (','||COALESCE(tags,'')||',') LIKE ? THEN 1 ELSE 0 END rtsf,
+             CASE WHEN ilines=0 THEN '' WHEN kinds<=1 AND units<=1 THEN 'single' WHEN kinds<=1 THEN 'multi' ELSE 'mixed' END pkg
+             FROM s1)"""
+    return sql, [rf_n, rt_n, *args, now + 12 * 3600, now + URGENT_HOURS * 3600, f"%,{RTS_FAIL_TAG},%"]
+
+
+def queue_counts(f=None, now=None):
+    """左边队列的数字：一条聚合 SQL（按普通筛选条件，不按当前队列）。"""
+    c = db.conn()
+    f = dict(f or {})
+    now = now or time.time()
+    sql, args = _cte(c, f, now)
+    counts = {k: 0 for k, _ in QUEUES + QUEUES2 + TABS}
+    for r in c.execute(sql + " SELECT q, COUNT(*) n, SUM(exc) e, SUM(urg) u, SUM(aft) a, SUM(rtsf) r, SUM(status='returned') rt, "
+                             "SUM(status='delivery_failed') df FROM s2 GROUP BY q", args):
+        if r["q"] not in ("exception", "urgent", "aftersale", "rts_failed"):
+            counts[r["q"]] = counts.get(r["q"], 0) + r["n"]
+        counts["all"] += r["n"]
+        counts["exception"] += r["e"] or 0
+        counts["urgent"] += r["u"] or 0
+        counts["aftersale"] += r["a"] or 0
+        counts["rts_failed"] += r["r"] or 0
+        counts["returned"] += r["rt"] or 0
+        counts["delivery_failed"] += r["df"] or 0
+    counts["waiting"] = counts.get("to_produce", 0)                 # 旧页签名（旧链接、别的页面还在用）
+    counts["ready"] = counts.get("to_label", 0) + counts.get("to_pickup", 0)
+    return counts
+
+
+def _qcond(tab):
+    if not tab or tab == "all":
+        return "", []
+    if tab in _LEGACY:
+        return _LEGACY[tab], []
+    return "q=?", [tab]
+
+
+def search(f):
+    """订单列表。f: tab（队列；旧页签名也认）, q, nos（批量订单号 / 运单号）+ match exact|fuzzy, platform, shop, kind, tag, label,
+    printed（label:0 / pick:1 …）, pkg（single / multi / mixed）, flag, risk, loss（只看亏本单，要 _owner）, pay, carrier, buyer_key,
+    date_from, date_to, sort（auto = 进行中的队列按最晚发货时间、其他按下单时间）, page, page_size"""
+    c = db.conn()
     now = time.time()
-    # 买家：下单次数、拒收次数、分类（列表上显示风险标签）
+    tab = f.get("tab") or "all"
+    sql, args = _cte(c, f, now)
+    qc, qa = _qcond(tab)
+    extra, eargs = ([qc] if qc else []), list(qa)
+    pr = str(f.get("printed") or "")
+    if ":" in pr:
+        doc, v = pr.split(":", 1)
+        if doc in DOCS:
+            col = "COALESCE(label_printed_at,0)>0" if doc == "label" else f"{doc}_n>0"
+            extra.append(col if v == "1" else f"NOT ({col})")
+    if f.get("pkg") in PKG_ZH:
+        extra.append("pkg=?"); eargs.append(f["pkg"])
+    if str(f.get("risk") or "") in ("1", "true"):
+        extra.append("risky=1")
+    sort = f.get("sort") or "auto"
+    if sort == "auto":
+        sort = "ship_by" if tab in _ACTIVE_Q else "time_desc"
+    order = {"time_desc": "order_time DESC, id DESC", "time_asc": "order_time ASC, id ASC",
+             "ship_by": "(COALESCE(ship_by,0)=0), ship_by ASC, order_time ASC",
+             "amount": "COALESCE(order_total,0) DESC, id DESC"}.get(sort, "order_time DESC, id DESC")
+    where = (" WHERE " + " AND ".join(extra)) if extra else ""
+    rows = c.execute(sql + f" SELECT id, q, exc, urg, aft, rtsf, pkg, risky, pick_n, pack_n, invoice_n, label_n, order_no, tracking_no "
+                           f"FROM s2{where} ORDER BY {order}", args + eargs).fetchall()
+    meta = {r["id"]: r for r in rows}
+    ids_all = [r["id"] for r in rows]
+    if str(f.get("loss") or "") in ("1", "true") and f.get("_owner"):
+        loss = set(_loss_ids(c, ids_all))
+        ids_all = [i for i in ids_all if i in loss]
+    nos_missing = []
+    nos = split_nos(f.get("nos"))
+    if nos and (f.get("match") or "exact") != "fuzzy":
+        got = {str(r["order_no"] or "").upper() for r in rows} | {str(r["tracking_no"] or "").upper() for r in rows}
+        nos_missing = [n for n in nos if n.upper() not in got]
+    size = max(10, min(500, int(f.get("page_size") or 50)))
+    page = max(1, int(f.get("page") or 1))
+    out = _enrich(c, ids_all[(page - 1) * size: page * size], now)
+    for o in out:
+        m = meta[o["id"]]
+        o["queue"] = o["tab"] = m["q"]
+        o["pkg"] = m["pkg"]
+        o["risky"] = bool(m["risky"])
+        o["rts_failed"] = bool(m["rtsf"])
+        o["prints"] = {"label": m["label_n"] or (1 if o.get("label_printed_at") else 0), "pick": m["pick_n"], "pack": m["pack_n"],
+                       "invoice": m["invoice_n"]}
+    shops = [r[0] for r in c.execute("SELECT DISTINCT shop FROM orders WHERE COALESCE(shop,'')!='' ORDER BY shop")]
+    tags = sorted({t for r in c.execute("SELECT tags FROM orders WHERE COALESCE(tags,'')!=''") for t in r[0].split(",") if t})
+    carriers = [r[0] for r in c.execute("SELECT DISTINCT carrier FROM orders WHERE COALESCE(carrier,'')!='' ORDER BY carrier")]
+    return {"orders": out, "total": len(ids_all), "page": page, "page_size": size,
+            "counts": queue_counts(f, now), "tabs": TABS, "queues": QUEUES, "queues2": QUEUES2, "queue_help": QUEUE_HELP,
+            "shops": shops, "tags": tags, "carriers": carriers, "ids_all": ids_all, "nos_missing": nos_missing,
+            "pkg_zh": PKG_ZH, "docs": DOCS, "flags": FLAGS, "sort": sort}
+
+
+def _enrich(c, ids, now):
+    """一页订单：商品、生产任务计数、异常、买家标签（只读这一页）。"""
+    if not ids:
+        return []
+    ph = ",".join("?" * len(ids))
+    rows = {r["id"]: r for r in c.execute(f"SELECT * FROM orders WHERE id IN ({ph})", ids)}
+    items, jcs = {}, {}
+    for it in c.execute(f"SELECT * FROM order_items WHERE order_id IN ({ph}) ORDER BY id", ids):
+        items.setdefault(it["order_id"], []).append(dict(it))
+    if _has_jobs_table(c):
+        for j in c.execute(f"SELECT order_id, status, COALESCE(qty_done,0) AS pd, fails, alert, planned_end "
+                           f"FROM jobs WHERE order_id IN ({ph})", ids):
+            d = jcs.setdefault(j["order_id"], {})
+            d[j["status"]] = d.get(j["status"], 0) + 1
+            d["_plates"] = d.get("_plates", 0) + j["pd"]
+            d["_fails"] = d.get("_fails", 0) + (j["fails"] or 0)
+            if j["alert"]:
+                d["_alert"] = 1
+            if j["status"] in ("todo", "printing"):
+                d["_end"] = max(d.get("_end", 0), j["planned_end"] or 0)
     bstat, levels = {}, {}
-    keys = list({r["buyer_key"] for r in rows if r["buyer_key"]})
-    for i in range(0, len(keys), 500):
-        part = keys[i:i + 500]
-        ph = ",".join("?" * len(part))
-        for b in c.execute(f"SELECT buyer_key, COUNT(*) n, SUM(status='delivery_failed') rf FROM orders WHERE buyer_key IN ({ph}) "
-                           f"GROUP BY buyer_key", part):
-            bstat[b["buyer_key"]] = (b["n"], b["rf"] or 0)
-        for b in c.execute(f"SELECT key, level FROM buyers WHERE key IN ({ph})", part):
-            levels[b["key"]] = b["level"] or ""
+    keys = list({r["buyer_key"] for r in rows.values() if r["buyer_key"]})
+    if keys:
+        kp = ",".join("?" * len(keys))
+        for b in c.execute(f"SELECT buyer_key, COUNT(*) n, SUM(status='delivery_failed') rf, SUM(status='returned') rt FROM orders "
+                           f"WHERE buyer_key IN ({kp}) GROUP BY buyer_key", keys):
+            bstat[b["buyer_key"]] = (b["n"], b["rf"] or 0, b["rt"] or 0)
+        for b in c.execute(f"SELECT key, level, note FROM buyers WHERE key IN ({kp})", keys):
+            levels[b["key"]] = (b["level"] or "", b["note"] or "")
+    th = risk_th()
     out = []
-    for r in rows:
-        o = _order_dict(r, items.get(r["id"], []))
-        n, rf = bstat.get(r["buyer_key"], (0, 0))
-        o["buyer_tags"] = buyer_risk({"level": levels.get(r["buyer_key"], ""), "refused": rf, "orders": n}) if r["buyer_key"] else []
+    for oid in ids:
+        r = rows.get(oid)
+        if r is None:
+            continue
+        o = _order_dict(r, items.get(oid, []))
+        n, rf, rt = bstat.get(r["buyer_key"], (0, 0, 0))
+        lv, note = levels.get(r["buyer_key"], ("", ""))
+        o["buyer_tags"] = buyer_risk({"level": lv, "refused": rf, "orders": n, "returned": rt}, th=th) if r["buyer_key"] else []
+        o["risk_reason"] = risk_reason(lv, note, rf, rt, th) if r["buyer_key"] else ""
         o["is_cod"] = is_cod(o)
-        jc = jcs.get(r["id"], {})
+        jc = jcs.get(oid, {})
         o["job_counts"] = {k: v for k, v in jc.items() if not k.startswith("_")}
         o["stage"] = _stage(o, jc)
         o["_plan_late"] = bool(o.get("ship_by") and jc.get("_end") and jc["_end"] > o["ship_by"])
         o["planned_done"] = jc.get("_end") or None
         o["exceptions"] = exceptions(o, jc, now)
-        o["tab"] = _tab_of(o)
         o.pop("_plan_late", None)
         out.append(o)
-    counts = {k: 0 for k, _ in TABS}
-    for o in out:
-        counts["all"] += 1
-        counts[o["tab"]] = counts.get(o["tab"], 0) + 1
-        if o["exceptions"]:
-            counts["exception"] += 1
-        if is_urgent(o, now):
-            counts["urgent"] += 1
-    tab = f.get("tab") or "all"
-    if tab == "exception":
-        out = [o for o in out if o["exceptions"]]
-    elif tab == "urgent":
-        out = [o for o in out if is_urgent(o, now)]
-    elif tab != "all":
-        out = [o for o in out if o["tab"] == tab]
-    sort = f.get("sort") or "time_desc"
-    keyf = {"time_desc": lambda o: -(o["order_time"] or 0), "time_asc": lambda o: o["order_time"] or 0,
-            "ship_by": lambda o: o["ship_by"] or 9e12, "amount": lambda o: -(o.get("order_total") or 0)}.get(sort)
-    out.sort(key=keyf or (lambda o: -(o["order_time"] or 0)))
-    size = max(10, min(500, int(f.get("page_size") or 50)))
-    page = max(1, int(f.get("page") or 1))
-    total = len(out)
-    shops = [r[0] for r in c.execute("SELECT DISTINCT shop FROM orders WHERE COALESCE(shop,'')!='' ORDER BY shop")]
-    tags = sorted({t for r in c.execute("SELECT tags FROM orders WHERE COALESCE(tags,'')!=''") for t in r[0].split(",") if t})
-    carriers = [r[0] for r in c.execute("SELECT DISTINCT carrier FROM orders WHERE COALESCE(carrier,'')!='' ORDER BY carrier")]
-    return {"orders": out[(page - 1) * size: page * size], "total": total, "page": page, "page_size": size,
-            "counts": counts, "tabs": TABS, "shops": shops, "tags": tags, "carriers": carriers,
-            "ids_all": [o["id"] for o in out]}
+    return out
+
+
+def _loss_ids(c, ids):
+    """只看亏本单（老板）：按每单利润估算（core.finance.order_profit），利润 < 0。"""
+    from .config import load_config
+    from .finance import order_profit
+    cfg = load_config()
+    out = []
+    for i in range(0, len(ids), 400):
+        part = ids[i:i + 400]
+        ph = ",".join("?" * len(part))
+        its = {}
+        for it in c.execute(f"SELECT * FROM order_items WHERE order_id IN ({ph})", part):
+            its.setdefault(it["order_id"], []).append(it)
+        for r in c.execute(f"SELECT * FROM orders WHERE id IN ({ph}) AND status NOT IN ('cancelled','unpaid','quote')", part):
+            try:
+                if order_profit(cfg, r, its.get(r["id"], []))["profit"] < 0:
+                    out.append(r["id"])
+            except Exception:  # noqa: BLE001
+                continue
+    return out
+
+
+def risk_reason(level, note, refused, returned, th=None):
+    """风险买家的原因（订单上、客服聊天里显示）。空 = 不是风险买家。"""
+    rf_n, rt_n = th or risk_th()
+    why = []
+    if level == "blacklist":
+        why.append("黑名单" + (f"：{note}" if note else ""))
+    elif level == "watch":
+        why.append("需留意" + (f"：{note}" if note else ""))
+    if refused >= rf_n:
+        why.append(f"拒收 / 派送失败 {refused} 次")
+    if returned >= rt_n:
+        why.append(f"退货退款 {returned} 次")
+    return "；".join(why)
+
+
+def buyer_risk_of(key):
+    """一个买家是不是风险买家：{risky, reason, level, refused, returned}（订单详情、客服用）。"""
+    if not key:
+        return {"risky": False, "reason": ""}
+    c = db.conn()
+    r = c.execute("SELECT SUM(status='delivery_failed') rf, SUM(status='returned') rt FROM orders WHERE buyer_key=?", (key,)).fetchone()
+    b = c.execute("SELECT level, note FROM buyers WHERE key=?", (key,)).fetchone()
+    lv, note = ((b["level"] or "", b["note"] or "") if b else ("", ""))
+    why = risk_reason(lv, note, r["rf"] or 0, r["rt"] or 0)
+    return {"risky": bool(why), "reason": why, "level": lv, "refused": r["rf"] or 0, "returned": r["rt"] or 0}
+
+
+def mark_doc(ids, doc, user=""):
+    """v2.50：记一次打印（面单 / 拣货单 / 装箱单 / 发票）：次数 + 第一次、最后一次时间。"""
+    if doc not in DOCS:
+        return
+    c = db.conn()
+    now = time.time()
+    for oid in ids or []:
+        c.execute("INSERT INTO order_doc_prints(order_id, doc, n, first_at, last_at, username) VALUES(?,?,1,?,?,?) "
+                  "ON CONFLICT(order_id, doc) DO UPDATE SET n=n+1, last_at=excluded.last_at, username=excluded.username",
+                  (int(oid), doc, now, now, user or ""))
+    c.commit()
+
+
+def doc_prints(oid):
+    return {r["doc"]: {"n": r["n"], "last_at": r["last_at"], "by": r["username"]}
+            for r in db.conn().execute("SELECT * FROM order_doc_prints WHERE order_id=?", (oid,))}
+
+
+def set_flag(ids, color, note="", user=""):
+    """订单颜色标记（几种颜色 + 一句备注）。color 空 = 去掉。"""
+    color = str(color or "").strip()
+    if color and color not in FLAGS:
+        raise ValueError("颜色不对")
+    c = db.conn()
+    n = 0
+    for oid in ids:
+        if c.execute("UPDATE orders SET flag=?, flag_note=? WHERE id=?", (color, str(note or "")[:200] if color else "", int(oid))).rowcount:
+            log(int(oid), user, "颜色标记", f"{FLAGS.get(color, '去掉')} {note or ''}".strip(), commit=False)
+            n += 1
+    c.commit()
+    return n
+
+
+# ---------------- 保存的筛选（每个账号自己的）----------------
+def presets(user):
+    return [{"id": r["id"], "name": r["name"], "filters": json.loads(r["data"] or "{}")}
+            for r in db.conn().execute("SELECT * FROM order_presets WHERE username=? ORDER BY id", (user or "",))]
+
+
+def preset_save(user, name, filters):
+    name = str(name or "").strip()[:40]
+    if not name:
+        raise ValueError("请填筛选的名字")
+    keep = {k: v for k, v in (filters or {}).items() if k in PRESET_KEYS and v not in (None, "")}
+    c = db.conn()
+    old = c.execute("SELECT id FROM order_presets WHERE username=? AND name=?", (user or "", name)).fetchone()
+    if old:
+        c.execute("UPDATE order_presets SET data=? WHERE id=?", (json.dumps(keep, ensure_ascii=False), old["id"]))
+    else:
+        if c.execute("SELECT COUNT(*) FROM order_presets WHERE username=?", (user or "",)).fetchone()[0] >= 30:
+            raise ValueError("最多保存 30 个筛选")
+        c.execute("INSERT INTO order_presets(username, name, data, created_at) VALUES(?,?,?,?)",
+                  (user or "", name, json.dumps(keep, ensure_ascii=False), time.time()))
+    c.commit()
+    return presets(user)
+
+
+def preset_delete(user, pid):
+    c = db.conn()
+    c.execute("DELETE FROM order_presets WHERE id=? AND username=?", (int(pid), user or ""))
+    c.commit()
+    return presets(user)
 
 
 def batch(ids, action, value=None, user="", errors=None):
@@ -1059,6 +1362,11 @@ def _batch(ids, action, value=None, user="", errors=None):
                 set_hold(oid, False, "", user)
             elif action == "hold":
                 set_hold(oid, True, str(value or "人工挂起"), user)
+            elif action == "shelve":           # v2.50：人工搁置
+                set_hold(oid, True, str(value or "人工搁置"), user, kind="shelf")
+            elif action == "flag":             # v2.50：颜色标记 value = "red" 或 "red|备注"
+                col, _, note = str(value or "").partition("|")
+                set_flag([oid], col, note, user)
             elif action == "ship_method":
                 update_order(oid, user, ship_method=value)
             elif action == "carrier":
@@ -1191,8 +1499,14 @@ def create_manual(order, user=""):
         raise ValueError("请至少填一个商品 SKU")
     c = db.conn()
     now = time.time()
-    no = (order.get("order_no") or "").strip() or f"M{dt.datetime.now().strftime('%y%m%d%H%M%S')}"
+    no = (order.get("order_no") or "").strip()
     plat = order.get("platform") or "manual"
+    if not no:                       # v2.50：自动编号同一秒建两单（客服从聊天连着建）不撞号
+        base = f"M{dt.datetime.now().strftime('%y%m%d%H%M%S')}"
+        no, k = base, 1
+        while c.execute("SELECT 1 FROM orders WHERE platform=? AND order_no=?", (plat, no)).fetchone():
+            k += 1
+            no = f"{base}-{k}"
     if c.execute("SELECT 1 FROM orders WHERE platform=? AND order_no=?", (plat, no)).fetchone():
         raise ValueError("这个订单号已经存在")
     kind = order.get("kind") or "manual"
@@ -1317,14 +1631,16 @@ def auto_review(oid):
     return bool(flags)
 
 
-def set_hold(oid, hold, reason="", user=""):
+def set_hold(oid, hold, reason="", user="", kind="review"):
+    """kind（v2.50）：review = 挂起到「待审核」；shelf = 人工搁置（左边「搁置」队列）。都不排产，审核通过 / 取消搁置都用 hold=0。"""
     c = db.conn()
     o = c.execute("SELECT hold FROM orders WHERE id=?", (oid,)).fetchone()
     if not o:
         raise ValueError("订单不存在")
     if hold:
-        c.execute("UPDATE orders SET hold=1, hold_reason=?, updated_at=? WHERE id=?", ((reason or "人工挂起")[:300], time.time(), oid))
-        log(oid, user, "挂起", reason or "", commit=False)
+        c.execute("UPDATE orders SET hold=1, hold_kind=?, hold_reason=?, updated_at=? WHERE id=?",
+                  ("shelf" if kind == "shelf" else "review", (reason or ("人工搁置" if kind == "shelf" else "人工挂起"))[:300], time.time(), oid))
+        log(oid, user, "搁置" if kind == "shelf" else "挂起", reason or "", commit=False)
     else:
         c.execute("UPDATE orders SET hold=0, reviewed_at=?, reviewed_by=?, updated_at=? WHERE id=?", (time.time(), user, time.time(), oid))
         log(oid, user, "审核通过", reason or "", commit=False)
@@ -1413,15 +1729,20 @@ def buyer_profile(key, c=None, exclude_id=None):
             "platforms": sorted({r["platform"] for r in rows if r["platform"]})}
 
 
-def buyer_risk(p, cod=False):
-    """订单列表上显示的小标签。"""
+def buyer_risk(p, cod=False, th=None):
+    """订单列表上显示的小标签。v2.50：拒收 / 退货次数到了设置的门槛 → risk（风险买家）。"""
     if not p:
         return []
     out = []
     if p["level"] in ("vip", "wholesale", "blacklist", "watch"):
         out.append(p["level"])
+    rf_n, rt_n = th or risk_th()
+    if p["level"] != "blacklist" and (p.get("refused", 0) >= rf_n or p.get("returned", 0) >= rt_n):
+        out.append("risk")
     if p["refused"]:
         out.append(f"refused:{p['refused']}")
+    if p.get("returned"):
+        out.append(f"returned:{p['returned']}")
     if p["orders"] <= 1:
         out.append("new")
     elif p["orders"] > 1:
@@ -1603,6 +1924,36 @@ def handover_scan(hid, code, user=""):
         raise ValueError(scanning.not_found_msg(code))
     if _refresh_one(r):                          # v2.42：先从平台拉一次最新状态（买家刚取消的单也拦住）
         r = scanning.find_order(code) or r
+    return _handover_put(c, h, hid, r, user)
+
+
+def handover_add_orders(ids, user=""):
+    """v2.50：订单列表勾选 →「加入交接单」：按物流 + 发货方式放进还没交接的单（没有就新开）。返回 {added, errors, handovers}。"""
+    c = db.conn()
+    added, errors, hids = 0, [], set()
+    for oid in ids:
+        r = c.execute("SELECT * FROM orders WHERE id=?", (int(oid),)).fetchone()
+        if not r:
+            continue
+        if r["status"] in ("shipped", "completed"):
+            errors.append(f"订单 {r['order_no']} 已经发货了")
+            continue
+        hid = handover_open(r["carrier"] or "", r["ship_method"] or "pickup", user)
+        h = c.execute("SELECT * FROM handovers WHERE id=?", (hid,)).fetchone()
+        try:
+            _handover_put(c, h, hid, r, user)
+            added += 1
+            hids.add(hid)
+        except ValueError as e:
+            errors.append(str(e))
+    for r in c.execute("SELECT id FROM handovers WHERE closed_at IS NULL AND id NOT IN "
+                       "(SELECT DISTINCT COALESCE(handover_id,0) FROM orders)").fetchall():
+        c.execute("DELETE FROM handovers WHERE id=?", (r["id"],))        # 一单都没放进去的空交接单（刚才新开的）不留
+    c.commit()
+    return {"added": added, "errors": errors[:20], "handovers": sorted(hids)}
+
+
+def _handover_put(c, h, hid, r, user=""):
     if r["status"] in ("cancelled", "returned", "delivery_failed"):
         raise ValueError(f"订单 {r['order_no']} 是「{STATUS_ZH.get(r['status'])}」状态，不能发货！")
     if r["hold"]:

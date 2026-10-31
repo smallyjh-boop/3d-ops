@@ -786,7 +786,7 @@ def skus_list():
                         price = pricing.price_variant(cfg, v, p.get("markup"), p.get("material"))["final_price"]
                     except Exception:  # 缺数据时不给价格
                         price = None
-                out.append({"sku": v["sku"], "name": p.get("name_zh", ""), "color": v.get("opt1_zh", ""), "price": price})
+                out.append({"sku": v["sku"], "name": p.get("name_zh", ""), "color": v.get("opt1_zh", ""), "price": price, "pid": p.get("id") or item["id"]})
     return jsonify(out)
 
 
