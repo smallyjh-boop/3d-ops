@@ -328,5 +328,6 @@ def overview(month=None, start=None, end=None):
             "change": {k: chg(cur["summary"][k] or 0, prev["summary"][k] or 0) for k in keys},
             "cash": cf["total"], "has_settlements": cf["has_settlements"], "reconcile": rc["total"],
             "unpaid_count": len(rc["unpaid"]), "diff_count": len(rc["diff"]), "unknown_count": len(rc["unknown"]),
+            "unsettled_count": len(rc["unsettled"]), "issues": rc["total"]["issues"],
             "days": [{"day": d["key"], "revenue": d["revenue"], "profit": d["profit"], "orders": d["orders"]} for d in days["rows"]],
             "top_products": top, "platforms": plat, "vat_on": cur["vat_on"]}
