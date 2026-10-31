@@ -28,3 +28,4 @@ API 密钥管理和只读查询接口（/api/v1/orders、skus、cost-params、pr
 - 1.3（系统 v2.44.1）：Lazada 打包（connectors lazada.pack，取面单时没打包先打包）、安排发货（events.py：ERP 里标已发货 → /order/package/rts，lazada_auto_rts）；/api/shops/sync-all。测试 tests/t_lazada2412.py。
 - 1.4（系统 v2.45.0）：安排发货成功后后台重新同步订单，失败打「⚠ Lazada 未安排发货」标签。
 - （系统 v2.47.2）：店铺设置里 Lazada 多了「聊天应用授权」（/api/shops/<id>/auth-url、auth-code 带 app=im）。
+- （系统 v2.47.3）：Lazada 店铺可以另外填「数据应用」（财务 / 评价 / 退货 / 店铺指标 / 数据导出）和「广告应用」（Sponsored Solutions），各自单独授权；连接器按接口地址自动用对应应用签名（APP_SLOTS、app_view、_call 里分流），没填就用主应用。

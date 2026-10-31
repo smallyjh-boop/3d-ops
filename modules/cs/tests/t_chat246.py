@@ -12,6 +12,7 @@ def ok(b, m):
 import app as A
 from core import db, integrations, ai_copy, orders as orders_mod, store
 from core.connectors import lazada as LZ
+REAL_CALL = LZ.LazadaConnector._call
 from modules.cs.logic import data, chat, jobs, shopcfg, brain, service
 from modules.cs.logic.channels import lazada_im
 db.create_user("boss", "secret123", "owner", "Boss")
@@ -208,6 +209,25 @@ WHO.clear(); jobs._state["errors"].clear()
 jobs.poll_all(force=True)
 ok(WHO and all(w[1] == "imk" and w[2] == "imtok" for w in WHO if w[0].startswith("/im/")), f"IM calls signed with the chat app {WHO[:2]}")
 ok(integrations.list_shops()[0]["creds"].get("im_access_token") == "******", "chat token hidden in the shop list")
+# ---- v2.47.3：数据应用（财务 / 评价 / 退货 / 店铺指标）走单独的应用；没授权给清楚的提示；主应用的接口不受影响 ----
+LZ.LazadaConnector._call = REAL_CALL
+SEEN = []
+class _Resp:
+    def __init__(self, d): self.d = d
+    def json(self): return self.d
+def fake_get(url, params=None, timeout=None, **k):
+    SEEN.append((url.split("/rest", 1)[1], params.get("app_key"), params.get("access_token")))
+    return _Resp({"code": "0", "data": {}})
+LZ.requests.get = fake_get
+cn = LZ.LazadaConnector({"app_key": "k", "app_secret": "s", "access_token": "t", "data_app_key": "dk", "data_app_secret": "ds"})
+try:
+    cn._call("/finance/transaction/details/get", {})
+    ok(False, "data app not authorized should raise")
+except RuntimeError as e:
+    ok("数据应用还没授权" in str(e), f"data app hint {e}")
+cn.creds.update(data_access_token="dt", data_token_expire=time.time() + 99999)
+cn._call("/finance/transaction/details/get", {}); cn._call("/orders/get", {})
+ok(SEEN == [("/finance/transaction/details/get", "dk", "dt"), ("/orders/get", "k", "t")], f"routing {SEEN}")
 # ---- 解析 ----
 ok(lazada_im.parse({"message_id": "x", "from_account_type": "1", "content": json.dumps({"itemId": 5, "title": "Cat"}), "template_id": "10006"})["kind"] == "item", "item parsed")
 print("ERRORS", E_)

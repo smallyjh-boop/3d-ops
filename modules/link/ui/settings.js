@@ -94,11 +94,11 @@
           <p class="muted small">保密项显示 ****** 表示已保存，不改就保持原样。</p>` : ""}
         ${shop && c.ready ? `<div class="row gap wrap small"><button class="mini" data-authurl="${shop.id}">打开平台授权页</button>
           <input id="sf-code" placeholder="授权后地址栏的整个网址（或 code= 后面的内容）" style="width:360px" data-notr><button class="mini" data-authcode="${shop.id}">用授权码换 token</button></div>` : ""}
-        ${shop && c.ready && p === "lazada" ? `<div class="row gap wrap small" style="margin-top:6px"><b>聊天应用授权</b>
-          <span class="muted">（填了上面的「聊天应用 App Key / Secret」并保存后：用卖家账号给聊天应用单独授权一次）</span>
-          ${cr.im_access_token ? '<span class="pill ok-pill">聊天应用已授权</span>' : cr.im_app_key ? '<span class="pill warn-pill">聊天应用还没授权</span>' : ""}
-          <button class="mini" data-authurl="${shop.id}" data-app="im">打开聊天应用授权页</button>
-          <input id="sf-code-im" placeholder="授权后地址栏的整个网址" style="width:300px" data-notr><button class="mini" data-authcode="${shop.id}" data-app="im">换聊天应用 token</button></div>` : ""}
+        ${shop && c.ready && p === "lazada" ? [["im", "聊天应用", "In-house IM Chat"], ["data", "数据应用", "财务 / 评价 / 退货 / 店铺指标"], ["ads", "广告应用", "Sponsored Solutions"]].map(([k, nm, what]) => `<div class="row gap wrap small" style="margin-top:6px"><b>${nm}授权</b>
+          <span class="muted">（${what}：在 Lazada 单独建了应用才用。填上面的「${nm} App Key / Secret」并保存后，用卖家账号给它单独授权一次）</span>
+          ${cr[k + "_access_token"] ? `<span class="pill ok-pill">${nm}已授权</span>` : cr[k + "_app_key"] ? `<span class="pill warn-pill">${nm}还没授权</span>` : ""}
+          <button class="mini" data-authurl="${shop.id}" data-app="${k}">打开${nm}授权页</button>
+          <input id="sf-code-${k}" placeholder="授权后地址栏的整个网址" style="width:300px" data-notr><button class="mini" data-authcode="${shop.id}" data-app="${k}">换${nm} token</button></div>`).join("") : ""}
         <button class="primary" data-shopsave="${shop ? shop.id : ""}">保存</button>`;
     };
     render(plat);
@@ -135,7 +135,7 @@
         return;
       }
       if (d.authcode) {
-        await api(`/api/shops/${d.authcode}/auth-code`, { json: { code: $(d.app === "im" ? "#sf-code-im" : "#sf-code").value, app: d.app || "" } });
+        await api(`/api/shops/${d.authcode}/auth-code`, { json: { code: $(d.app ? "#sf-code-" + d.app : "#sf-code").value, app: d.app || "" } });
         toast("授权成功");
         $("#shop-form").classList.add("hidden");
         return OPS.loadIntegrations();

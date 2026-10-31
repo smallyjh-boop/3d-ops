@@ -68,8 +68,19 @@ class LazadaConnector(Connector):
               # v2.47.2：聊天接口要在 Lazada 单独建一个「In-house IM Chat」类目的应用（和上面的 Seller In-house APP 不是同一个），
               # 店铺还要给这个聊天应用单独授权一次。没有单独的聊天应用就空着（聊天也用上面的应用）。
               ("im_app_key", "聊天应用 App Key（In-house IM Chat，没有就空着）", False), ("im_app_secret", "聊天应用 App Secret", True),
-              ("im_access_token", "聊天应用 Access Token", True), ("im_refresh_token", "聊天应用 Refresh Token", True)]
-    OPTIONAL = ("callback_url", "im_app_key", "im_app_secret", "im_access_token", "im_refresh_token")   # v2.41.2：Lazada 只认 https 回调；不填就用系统自己的地址
+              ("im_access_token", "聊天应用 Access Token", True), ("im_refresh_token", "聊天应用 Refresh Token", True),
+              # v2.47.3：数据类接口（财务流水、评价、退货退款、店铺指标、数据导出）和广告接口（Sponsored Solutions）
+              # 如果在 Lazada 也是单独建的应用、单独授权，就填在这里；没有就空着（用上面的主应用）
+              ("data_app_key", "数据应用 App Key（财务 / 评价 / 退货 / 店铺指标，没有就空着）", False), ("data_app_secret", "数据应用 App Secret", True),
+              ("data_access_token", "数据应用 Access Token", True), ("data_refresh_token", "数据应用 Refresh Token", True),
+              ("ads_app_key", "广告应用 App Key（Sponsored Solutions，没有就空着）", False), ("ads_app_secret", "广告应用 App Secret", True),
+              ("ads_access_token", "广告应用 Access Token", True), ("ads_refresh_token", "广告应用 Refresh Token", True)]
+    OPTIONAL = ("callback_url",) + tuple(f"{a}_{k}" for a in ("im", "data", "ads")
+                                          for k in ("app_key", "app_secret", "access_token", "refresh_token"))
+    # 哪些接口走哪个单独的应用（按接口地址开头）
+    APP_SLOTS = {"im": ("聊天应用", ("/im/",)),
+                 "data": ("数据应用", ("/finance/", "/review/", "/reverse/", "/seller/performance", "/seller/metrics", "/datamoat/", "/dataset")),
+                 "ads": ("广告应用", ("/sponsor/", "/sponsored/", "/marketing/solution"))}   # v2.41.2：Lazada 只认 https 回调；不填就用系统自己的地址
     # v2.41.2 面单：订单在 Lazada 打包后有包裹号（package_id）→ /order/package/document/get 按包裹取 PDF
     LABEL_READY = True
     LABEL_NOTE = "打印时自动从 Lazada 取面单（订单要先在 Lazada 打包）"
@@ -96,10 +107,10 @@ class LazadaConnector(Connector):
         self.creds["refresh_expire"] = time.time() + float(r.get("refresh_expires_in") or 0)
         self.creds_changed = True
         parent = getattr(self, "_im_parent", None)
-        if parent is not None:                  # 聊天应用的 token：写回店铺的 im_* 字段
-            for k, dst in self.IM_KEYS.items():
+        if parent is not None:                  # 单独应用（聊天 / 数据 / 广告）的 token：写回店铺的 <应用>_* 字段
+            for k in self.APP_KEYS:
                 if k in self.creds:
-                    parent.creds[dst] = self.creds[k]
+                    parent.creds[f"{self._slot}_{k}"] = self.creds[k]
             parent.creds_changed = True
 
     def refresh(self):
@@ -108,6 +119,14 @@ class LazadaConnector(Connector):
 
     # ---------- 请求 ----------
     def _call(self, path, params, base=API, token=True, method="GET", files=None):
+        if token and base == API and getattr(self, "_slot", None) is None:
+            slot = self.slot_of(path)
+            if slot and self.has_app(slot):          # v2.47.3：这个接口属于单独的应用 → 用那个应用签名
+                v = self.app_view(slot)
+                if not v.creds.get("access_token"):
+                    raise RuntimeError(f"Lazada {path}：{self.APP_SLOTS[slot][0]}还没授权（设置 → 店铺对接 → 这个店铺 →「{self.APP_SLOTS[slot][0]}授权」）")
+                v._ensure_token()
+                return v._call(path, params, base, token, method, files)
         p = {"app_key": self.creds.get("app_key", ""), "timestamp": str(int(time.time() * 1000)), "sign_method": "sha256"}
         if token:
             p["access_token"] = self.creds.get("access_token", "")
@@ -349,22 +368,33 @@ class LazadaConnector(Connector):
         body = f"<Request><Product><ItemId>{int(item_id)}</ItemId></Product></Request>"
         return self._call("/product/deactivate", {"apiRequestBody": body}, method="POST")
 
-    # ---------- 聊天应用（v2.47.2）----------
-    IM_KEYS = {"app_key": "im_app_key", "app_secret": "im_app_secret", "access_token": "im_access_token",
-               "refresh_token": "im_refresh_token", "token_expire": "im_token_expire", "refresh_expire": "im_refresh_expire"}
+    # ---------- 单独的应用（v2.47.2 聊天，v2.47.3 数据 / 广告）----------
+    APP_KEYS = ("app_key", "app_secret", "access_token", "refresh_token", "token_expire", "refresh_expire")
+
+    def has_app(self, slot):
+        return bool(str(self.creds.get(f"{slot}_app_key") or "").strip())
 
     def has_im_app(self):
-        return bool(str(self.creds.get("im_app_key") or "").strip())
+        return self.has_app("im")
+
+    def app_view(self, slot):
+        """slot（im / data / ads）用的连接：填了单独的应用就用它的 key / secret / token（刷新后写回本连接的 <slot>_* 字段，
+        _store_creds 会存回店铺）；没填就是自己。"""
+        if not self.has_app(slot):
+            return self
+        v = LazadaConnector({k: self.creds.get(f"{slot}_{k}") for k in self.APP_KEYS if self.creds.get(f"{slot}_{k}") not in (None, "")}
+                            | {"callback_url": self.creds.get("callback_url") or ""})
+        v._im_parent, v._slot = self, slot
+        return v
 
     def im_view(self):
-        """聊天接口用的连接：填了单独的聊天应用（In-house IM Chat）就用它的 key / secret / token，
-        token 刷新后写回本连接的 im_* 字段（_store_creds 会存回店铺）；没填就是自己。"""
-        if not self.has_im_app():
-            return self
-        v = LazadaConnector({k: self.creds.get(src) for k, src in self.IM_KEYS.items() if self.creds.get(src) not in (None, "")}
-                            | {"callback_url": self.creds.get("callback_url") or ""})
-        v._im_parent = self
-        return v
+        return self.app_view("im")
+
+    def slot_of(self, path):
+        for slot, (_name, prefixes) in self.APP_SLOTS.items():
+            if path.startswith(prefixes):
+                return slot
+        return None
 
     # ---------- 聊天（v2.46 Instant Messaging API：modules/cs/logic/channels/lazada_im.py）----------
     # 要在开放平台给应用开通「Instant Messaging」权限；没开通时接口会报错，客服页会显示原因。
