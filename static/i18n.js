@@ -2208,7 +2208,7 @@
   Object.assign(TH, window.I18N_MODULES || {});      // v2.29：各模块自带的泰文翻译（modules/<id>/i18n/th.json）
   const OV = window.I18N_OVERRIDES || {};
   Object.assign(TH, OV.subs || {});
-  const KEYS = Object.keys(TH).sort((a, b) => b.length - a.length);
+  let KEYS = Object.keys(TH).sort((a, b) => b.length - a.length);
   const HAS_ZH = /[一-鿿]/;
 
   function t(s) {
@@ -2256,7 +2256,15 @@
     return s;
   }
   window.TR = L;          // 全局名字用 TR（app.js 里已经有一个 L(x)：双语字段按界面语言显示）
-  window.I18N = { lang, t, translate, L };
+  // v2.42：运行时加词（颜色表里的颜色名 → 泰文名），加完把页面再翻一遍
+  function addWords(d) {
+    let n = 0;
+    for (const [zh, th] of Object.entries(d || {})) if (zh && th && HAS_ZH.test(zh) && !TH[zh]) { TH[zh] = th; n++; }
+    if (!n) return;
+    KEYS = Object.keys(TH).sort((a, b) => b.length - a.length);
+    if (lang === "th" && document.body) translate(document.body);
+  }
+  window.I18N = { lang, t, translate, L, addWords };
 
   if (lang === "th") {
     document.documentElement.lang = "th";

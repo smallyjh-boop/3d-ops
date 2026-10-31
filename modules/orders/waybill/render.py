@@ -119,54 +119,89 @@ def info_html(o, tpl, n_print, where, sort_key, full=False, now=None, tx=None, i
     f = set(tpl["fields"])
     items = _items(o, tpl, where, sort_key)
     total = sum(int(it.get("qty") or 1) for it in items)
+    use_bc = "order_bc" in f and bool(o.get("order_no"))
+    use_txt = bool(tpl["text"])
+    use_name, extra_head = "name" in f, True
+
+    def build_lines():
+        out = []
+        for it in items:
+            bits = ['<span class="bx"></span>']
+            if "items" in f:
+                bits.append(f'<b>{h(it.get("sku") or "")}</b><span class="q">×{int(it.get("qty") or 1)}</span>')
+            nm = tx.name(it) if use_name else ""
+            if nm:
+                bits.append(f'<span class="nm">{h(nm)}</span>')
+            sp = tx.spec(it) if "spec" in f else ""
+            if sp:
+                bits.append(f'<span class="sp">{h(sp)}</span>')
+            if "loc" in f and it["_loc"]:
+                bits.append(f'<span class="lc">{h(" ".join(c for c, _q in it["_loc"][:2]))}</span>')
+            if len(bits) > 1:
+                out.append(f'<div class="it">{"".join(bits)}</div>')
+        return out
+
+    notes = [(k, f'<div class="nt"><b>{tag}</b> {h(o.get(k))}</div>')
+             for k, tag in (("buyer_note", "ข้อความ Note"), ("custom_note", "สั่งทำ Custom"), ("seller_note", "หมายเหตุ Remark"))
+             if k in f and o.get(k)]
+    # v2.42：信息区放不下时按优先级减：商品 SKU × 数量 / 规格和客户要求（留言、定制）最重要；
+    # 依次去掉 自定义文字 → 订单号条码 → 卖家备注 → 商品名 → 表头的店铺 / 时间；还放不下就把商品排成紧凑的一段（一行好几个）
+    line_mm = tpl["font"] * 0.3528 * 1.3
+    room = (T.PAPERS[tpl["paper"]][1] - 6 if full else (info_h or tpl["info_mm"]) - 2.5)
+
+    def fixed_mm():
+        return line_mm * (1 + len(notes) + (1.1 if use_txt else 0)) + (6.5 if use_bc else 0)
+
+    lines = build_lines()
+    for step in ("txt", "bc", "seller", "name", "head"):
+        if fixed_mm() + line_mm * len(lines) <= room:
+            break
+        if step == "txt":
+            use_txt = False
+        elif step == "bc":
+            use_bc = False
+        elif step == "seller":
+            notes = [n for n in notes if n[0] != "seller_note"]
+        elif step == "name" and use_name:
+            use_name = False
+            lines = build_lines()
+        elif step == "head":
+            extra_head = False
+    cap = max(1, int((room - fixed_mm()) / line_mm + 0.15))
+    if len(lines) > cap:
+        # 紧凑：「SKU×数量 规格」一个接一个排，自动换行；估一行能放多少字，放不下的最后写「+N」
+        per_line = _per_line(tpl)
+        toks = _tokens(items, f, tx)
+        shown, used, line_n = [], 0, 1
+        for i, t in enumerate(toks):
+            ln = len(t) + 3
+            if used and used + ln > per_line:
+                line_n, used = line_n + 1, 0
+            left = len(toks) - i - 1
+            if line_n > cap or (line_n == cap and left and used + ln + 8 > per_line):
+                break
+            shown.append(t)
+            used += ln
+        rest = len(toks) - len(shown)
+        more = f' <span class="more1">+{rest} รายการ/items</span>' if rest else ""
+        chips = "".join('<span><i class="bx"></i>' + h(t) + "</span>" for t in shown)
+        lines = [f'<div class="itc">{chips}{more}</div>']
     head = []
     if "order_no" in f:
         head.append(f'<b class="ono">{h(o.get("order_no") or "")}</b>')
-    if "shop" in f and (o.get("shop") or o.get("platform")):
-        head.append(f'<span>{h(o.get("shop") or o.get("platform") or "")}</span>')
-    if "total" in f:
+    if "total" in f:                        # 表头一行放不下时右边的先被挤掉：重要的放前面
         head.append(f'<span>รวม {total} ชิ้น/pcs</span>')
-    if "time" in f:
-        head.append(f'<span>{time.strftime("%m-%d %H:%M", time.localtime(now or time.time()))}</span>')
     if "count" in f:
         head.append(f'<span class="reprint">พิมพ์ซ้ำ/Reprint #{n_print}</span>' if n_print > 1 else f'<span class="pc">#{n_print}</span>')
-    lines = []
-    for it in items:
-        bits = ['<span class="bx"></span>']
-        if "items" in f:
-            bits.append(f'<b>{h(it.get("sku") or "")}</b><span class="q">×{int(it.get("qty") or 1)}</span>')
-        nm = tx.name(it) if "name" in f else ""
-        if nm:
-            bits.append(f'<span class="nm">{h(nm)}</span>')
-        sp = tx.spec(it) if "spec" in f else ""
-        if sp:
-            bits.append(f'<span class="sp">{h(sp)}</span>')
-        if "loc" in f and it["_loc"]:
-            bits.append(f'<span class="lc">{h(" ".join(c for c, _q in it["_loc"][:2]))}</span>')
-        if len(bits) > 1:
-            lines.append(f'<div class="it">{"".join(bits)}</div>')
-    notes = []
-    for k, tag in (("buyer_note", "ข้อความ Note"), ("custom_note", "สั่งทำ Custom"), ("seller_note", "หมายเหตุ Remark")):
-        if k in f and o.get(k):
-            notes.append(f'<div class="nt"><b>{tag}</b> {h(o.get(k))}</div>')
-    # 估计信息区放得下几行商品；放不下的合成「还有 N 项」（一行都放不下就加在第一行后面）
-    line_mm = tpl["font"] * 0.3528 * 1.3
-    room = (T.PAPERS[tpl["paper"]][1] - 6 if full else (info_h or tpl["info_mm"]) - 2)
-    room -= line_mm * (1 + len(notes) + (1.1 if tpl["text"] else 0)) + (6.5 if "order_bc" in f else 0)
-    cap = max(1, int(room / line_mm + 0.15))
-    if len(lines) > cap:
-        if cap == 1:
-            rest = len(lines) - 1
-            lines = [lines[0].replace('<div class="it">', '<div class="it"><span class="more1">' + f'+{rest} รายการ / items</span>', 1)]
-        else:
-            rest = len(lines) - (cap - 1)
-            lines = lines[:cap - 1] + [f'<div class="it more">…อีก {rest} รายการ (ดูใบหยิบสินค้า) / +{rest} more (see pick list)</div>']
-    bc = (f'<div class="obc">{code128_svg(o.get("order_no") or "", height=30, module=1)}</div>'
-          if "order_bc" in f and o.get("order_no") else "")
-    txt = f'<div class="txt">{h(tpl["text"])}</div>' if tpl["text"] else ""
+    if extra_head and "shop" in f and (o.get("shop") or o.get("platform")):
+        head.append(f'<span>{h(o.get("shop") or o.get("platform") or "")}</span>')
+    if extra_head and "time" in f:
+        head.append(f'<span>{time.strftime("%m-%d %H:%M", time.localtime(now or time.time()))}</span>')
+    bc = (f'<div class="obc">{code128_svg(o.get("order_no") or "", height=30, module=1)}</div>' if use_bc else "")
+    txt = f'<div class="txt">{h(tpl["text"])}</div>' if use_txt else ""
     st = f' style="flex-basis:{info_h:.1f}mm"' if info_h and not full else ""
     return (f'<div class="info{" full" if full else ""}"{st}><div class="ihd">{"".join(head)}</div>{bc}'
-            f'{"".join(lines)}{"".join(notes)}{txt}</div>')
+            f'{"".join(lines)}{"".join(n[1] for n in notes)}{txt}</div>')
 
 
 def _css(tpl):
@@ -174,12 +209,13 @@ def _css(tpl):
     return f"""@page {{ size: {w}mm {hh}mm; margin: 0 }}
 * {{ box-sizing: border-box }}
 body {{ margin: 0; font-family: 'Leelawadee UI', Tahoma, 'Microsoft YaHei', 'PingFang SC', sans-serif; color: #000 }}
-.wb {{ width: {w}mm; height: {hh}mm; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; position: relative }}
+.wb {{ width: {w}mm; height: {hh - 0.4}mm; page-break-after: always; break-inside: avoid; display: flex; flex-direction: column; overflow: hidden; position: relative }}
 .awb {{ flex: 1 1 auto; min-height: 0; flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 1mm }}
 .awb img {{ width: 100%; height: 100%; object-fit: contain; image-rendering: crisp-edges }}
-.info {{ flex: 0 0 {tpl['info_mm']}mm; flex-grow: 0; border-top: .5mm dashed #000; padding: 1mm 2mm; font-size: {tpl['font']}pt; line-height: 1.3; overflow: hidden }}
+.info {{ flex: 0 1 {tpl['info_mm']}mm; border-top: .5mm dashed #000; padding: 1mm 2mm; font-size: {tpl['font']}pt; line-height: 1.3; overflow: hidden }}
 .info.full {{ flex: 1 1 auto; border-top: 0; padding: 3mm }}
-.ihd {{ display: flex; flex-wrap: wrap; gap: 0 2.5mm; align-items: center; font-weight: 700 }}
+.ihd {{ display: flex; flex-wrap: nowrap; gap: 0 2.5mm; align-items: center; font-weight: 700; white-space: nowrap; overflow: hidden }}
+.itc {{ display: flex; flex-wrap: wrap; gap: 0 2.5mm; font-weight: 700; font-size: .92em }} .itc span {{ white-space: nowrap }} .itc .bx {{ display: inline-block; width: .8em; height: .8em; border: .3mm solid #000; margin-right: .8mm; vertical-align: -.05em }}
 .ihd .ono {{ font-size: 1.1em }}
 .reprint {{ background: #000; color: #fff; padding: 0 1.5mm; border-radius: 1mm }}
 .pc {{ font-weight: 400 }}
@@ -218,14 +254,46 @@ def _sample_awb():
 SAMPLE_AWB = _sample_awb()
 
 
-def split_mm(tpl, aspect):
+def split_mm(tpl, aspect, need=0):
     """v2.42：面单下面加信息时，(面单区高度, 信息区高度) 毫米。面单宽度占满纸（左右各留 1 毫米），高度按面单比例（高 / 宽）；
-    剩下的都给信息区；面单太长、信息区不够 info_mm 时才把面单缩小。不知道比例时按信息区 = info_mm。"""
+    剩下的都给信息区；信息区不够「info_mm」和这单必须印的内容（need：商品 × 数量、买家留言、定制要求）时才把面单缩小，
+    面单区至少留 60 毫米。不知道比例时按信息区 = 这两个里大的。"""
     w, hh = T.PAPERS[tpl["paper"]]
+    info_min = min(max(tpl["info_mm"], need or 0), hh - 60)
     if not aspect:
-        return hh - tpl["info_mm"], tpl["info_mm"]
-    awb = min((w - 2) * aspect + 2, hh - tpl["info_mm"])
+        return hh - info_min, info_min
+    awb = min((w - 2) * aspect + 2, hh - info_min)
     return awb, hh - awb
+
+
+def _per_line(tpl):
+    """紧凑排商品时一行大约放几个字（按字号估）。"""
+    return max(10, int((T.PAPERS[tpl["paper"]][0] - 5) / (tpl["font"] * 0.3528 * 0.92 * 0.58)))
+
+
+def _tokens(items, f, tx):
+    return [f'{it.get("sku") or ""}×{int(it.get("qty") or 1)}' + (f" {tx.spec(it)}" if "spec" in f and tx.spec(it) else "")
+            for it in items]
+
+
+def _compact_lines(toks, per_line):
+    n, used = 1, 0
+    for t in toks:
+        ln = len(t) + 3
+        if used and used + ln > per_line:
+            n, used = n + 1, 0
+        used += ln
+    return n
+
+
+def need_mm(o, tpl, tx):
+    """这单信息区必须印的高度（毫米）：表头一行 + 全部商品（3 个以内一个一行，多了紧凑排）+ 买家留言 + 定制要求。"""
+    f = set(tpl["fields"])
+    items = o.get("items") or []
+    line_mm = tpl["font"] * 0.3528 * 1.3
+    n_items = len(items) if len(items) <= 3 else min(len(items), _compact_lines(_tokens(items, f, tx), _per_line(tpl)))
+    n_notes = sum(1 for k in ("buyer_note", "custom_note") if k in f and o.get(k))
+    return 2.5 + line_mm * (1 + n_items + n_notes) + 0.5
 
 
 def compose(entries, tpl, where, sort_key, missing=(), title="Waybill", autoprint=True, aspects=None):
@@ -246,7 +314,7 @@ def compose(entries, tpl, where, sort_key, missing=(), title="Waybill", autoprin
         for i, src in enumerate(imgs):
             more = f'<div class="pg2">{i + 1}/{len(imgs)}</div>' if len(imgs) > 1 else ""
             if tpl["layout"] == "below" and i == 0:
-                awb_h, inf_h = split_mm(tpl, (aspects or {}).get(o.get("id")))
+                awb_h, inf_h = split_mm(tpl, (aspects or {}).get(o.get("id")), need_mm(o, tpl, tx))
                 inf = info_html(o, tpl, n, where, sort_key, now=now, tx=tx, info_h=inf_h)
                 out.append(f'<div class="wb"><div class="awb" style="flex-basis:{awb_h:.1f}mm"><img src="{h(src)}" alt=""></div>{inf}{more}</div>')
             else:

@@ -256,6 +256,8 @@ function statusBadge(errors, warnings) {
 let COLORS = {};
 async function loadConfig() {
   try { COLORS = await api("/api/colors"); } catch { COLORS = {}; }
+  // v2.42：颜色名（耗材提醒、订单商品等后台发来的文字里）按颜色表翻成泰文
+  if (window.I18N && I18N.addWords) I18N.addWords(Object.fromEntries(Object.entries(COLORS).map(([zh, c]) => [zh, c.th || c.en])));
   const r = await api("/api/config");
   CFG = r.config; CFG_REMBG = r.rembg; window.IN_DOCKER = !!r.docker;
   $("#ver").textContent = "v" + r.version;

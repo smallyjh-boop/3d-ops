@@ -39,3 +39,4 @@
 - 1.8 补充：上传平台面单 PDF 时，页面文字里找不到订单号就读条码（core/labels._page_barcodes，pypdfium2 + zxing-cpp），图片型 PDF（Lazada 卖家中心打印的）也能对上订单。测试 modules/orders/tests/t_label_barcode.py。
 - 1.9（系统 v2.42.0）：面单只印泰文 / 英文（labeltext.py；平台面单信息区、自制快递面单、旧版自制面单）；「面单下面加信息」面单宽度占满纸、剩下的给信息区（render.split_mm，info_mm 改成最少高度，旧的 34 迁移成 12）。测试 tests/t_label_th.py。
 - 1.9 补充：打面单（/api/labels/check、/print/labels）、打包核对、发货交接前先 integrations.refresh_platforms 拉一次平台最新状态，orders.BLOCK_SHIP（已取消 / 退货 / 拒收）拦下。测试 tests/t_v242ship.py（含 10 / 20 / 50 单批量打印）。
+- 1.9 补充：信息区按必须印的内容定高度（render.need_mm / split_mm(need)），放不下按优先级减、商品多紧凑排；.wb 高度比纸短 0.4 毫米、break-inside: avoid，不会挤到下一张。

@@ -73,7 +73,17 @@ a, b = render.split_mm(WT_, 1.0)
 ok(abs(a - 100) < 0.01 and abs(b - 50) < 0.01, f"short label gives info the rest {a} {b}")
 ok(WT.clean({"info_mm": 34})["info_mm"] == 12 and WT.clean({"info_mm": 20})["info_mm"] == 20, "old default 34 migrated")
 html2 = render.compose([(o, ["x.png"], 1)], WT_, {}, lambda c: (0,), autoprint=False, aspects={o["id"]: 134 / 98})
-ok('flex-basis:136.0mm' in html2 and 'flex-basis:14.0mm' in html2, "sizes in page")
+a, b = render.split_mm(WT_, 134 / 98, render.need_mm(o, WT_, tx))
+ok(f'flex-basis:{a:.1f}mm' in html2 and f'flex-basis:{b:.1f}mm' in html2 and b >= render.need_mm(o, WT_, tx) - 0.01, f"sizes in page {a} {b}")
+# 必须印的内容多（12 个商品 + 留言 + 定制）：面单缩一点，信息区够放；面单区至少 60 毫米
+big = {"id": 9, "order_no": "X", "buyer_note": "ขอด่วน", "custom_note": "Name: MALI",
+       "items": [{"sku": f"3DP0017-BK-{i}X{j}", "qty": 1} for i in range(1, 5) for j in range(2, 5)]}
+nb = render.need_mm(big, WT_, tx)
+a, b = render.split_mm(WT_, 134 / 98, nb)
+ok(nb > 14 and abs(b - nb) < 0.01 and a >= 60, f"many items: info grows to {b:.1f}mm, label {a:.1f}mm")
+ok(render.split_mm(WT_, 134 / 98, 500)[0] == 60, "label area never below 60mm")
+hb = render.info_html(big, WT_, 1, {}, lambda c: (0,), tx=tx, info_h=b)
+ok("+" not in re.sub(r"<[^>]+>", "", hb).split("pcs")[1] and "Name: MALI" in hb and "ขอด่วน" in hb, "all items + customer notes printed")
 ok("<title>Waybill" in html2, "page title not Chinese")
 print("ERRORS", E_)
 sys.exit(1 if E_ else 0)
