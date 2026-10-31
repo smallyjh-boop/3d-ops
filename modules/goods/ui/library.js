@@ -55,10 +55,10 @@ function renderLibrary() {
       <td>${p.thumb ? `<img class="thumb" src="${esc(p.thumb)}" alt="" loading="lazy">` : ""}</td>
       <td><b data-notr>${esc(p.id)}</b>${p.exported ? ' <span class="muted small" title="已导出过，SKU 已锁定">🔒</span>' : ""}
         ${p.draft ? '<div><span class="pill warn-pill" title="选品工具推过来的，填好颜色、核对售价后再导出">草稿·待完善</span></div>' : p.from_curator ? '<div class="small muted">来自选品工具</div>' : ""}</td>
-      <td><span data-notr>${esc(p.name_zh)}</span>${window.SEO ? SEO.badge(p) : ""}${p.title_th ? `<div class="small muted" data-notr>${esc(p.title_th.slice(0, 50))}</div>` : ""}</td>
+      <td class="lib-name"><span data-notr>${esc(p.name_zh)}</span>${window.SEO ? SEO.badge(p) : ""}${p.title_th ? `<div class="small muted clamp2" data-notr title="${esc(p.title_th)}">${esc(p.title_th)}</div>` : ""}</td>
       <td>${(p.groups || []).map((g) => gname[g] ? `<span class="pill tag-pill" data-notr>${esc(gname[g])}</span>` : "").join(" ")}
         <div class="small">${p.lz && p.lz.status !== "none" ? `LZ ${lstBadge(p.lz, "lazada")}` : ""} ${p.sp && p.sp.status !== "none" ? `SP ${lstBadge(p.sp, "shopee")}` : ""}</div></td>
-      <td class="small mono" data-notr>${(p.skus || []).map(esc).join("<br>")}</td>
+      <td class="small">${skuCell(p)}</td>
       <td>${p.category ? `<span data-notr>${esc(LANG === "th" ? p.category_th || p.category : p.category)}</span>` : '<span class="bad small">未选</span>'}</td>
       <td>${statusBadge(p.errors, p.warnings)}</td>
       <td class="small">${!p.has_model ? '<span class="muted">无模型</span>' : p.file_status ? `<span class="pill fpill-${p.file_status}">${FST_ZH[p.file_status]}</span>` : '<span class="warn">没切片</span>'}</td>
@@ -159,4 +159,14 @@ async function openProduct(id, edit = false) {
   ED_EDIT = !!edit;
   showTab("edit");          // 先切过去（显示得快），再填内容
   await renderEditor();
+}
+// v2.42：SKU 多的产品（颜色 × 规格几十个）只显示前 3 个 + 颜色 / 个数，其余点开看，不把整行撑得很高
+function skuCell(p) {
+  const skus = (p.skus || []).filter(Boolean);
+  const cols = [...new Set((p.colors || []).filter(Boolean))];
+  const one = (x) => `<div class="mono nowrap" data-notr>${esc(x)}</div>`;
+  if (skus.length <= 3) return skus.map(one).join("");
+  const colTxt = cols.length ? ` · ${cols.slice(0, 4).map((c) => esc(typeof colorLabel === "function" ? colorLabel(c) : c)).join(" / ")}${cols.length > 4 ? " …" : ""}` : "";
+  return `<div class="nowrap"><b>${skus.length}</b> 个 SKU<span class="muted">${colTxt}</span></div>${skus.slice(0, 2).map(one).join("")}
+    <details class="sku-more"><summary class="muted">全部 ${skus.length} 个</summary><div class="sku-grid">${skus.map(one).join("")}</div></details>`;
 }

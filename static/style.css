@@ -666,3 +666,8 @@ td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 
 /* v2.30 模块：属于某个模块的按钮 / 区块，模块开着才显示 */
 [data-needmod]:not(.mod-on){display:none !important}
+/* v2.42：产品库 SKU 多的产品 */
+.sku-more summary { cursor: pointer; font-size: 11px }
+.sku-more .sku-grid { max-height: 220px; overflow: auto; padding-right: 4px }
+#lib-table td.lib-name { min-width: 180px; max-width: 280px }
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }
