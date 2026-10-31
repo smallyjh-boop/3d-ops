@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 *.part
 *.upg
+templates_lazada/lazada_auto_*.xlsx
