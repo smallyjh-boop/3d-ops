@@ -37,7 +37,7 @@ ok(C.post(f"/api/listing/fix/{P}", json={"action": "nope"}).status_code == 400, 
 ok(C.get("/api/listing/issues/NOPE").status_code == 404, "unknown product 404")
 pid2 = "3DP0002"
 r = C.get(f"/api/listing/issues/{pid2}?platform=shopee").get_json()
-ok(isinstance(r["errors"], list) and all(x["fix"] in ("ai", "edit", "confirm_cat", "confirm_attr", "confirm_pkg") for x in r["errors"]), "shopee issues")
+ok(isinstance(r["errors"], list) and all(x["fix"] in ("ai", "edit", "host", "confirm_cat", "confirm_attr", "confirm_pkg") for x in r["errors"]), "shopee issues")
 
 # ---------- AI 补齐（假 AI） ----------
 p = store.load(pid2); cat_before = p["category"]; p["category"] = {}; p["attributes"] = {}; store.save(p)

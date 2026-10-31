@@ -12,10 +12,12 @@
 产品里存：p["lazada_api"] = {"item_id", "skus": {SellerSku: sku_id}, "images": {原网址: Lazada 网址}, "at", "error"}
 对外：shop() push(pids, user) payload(p, ...) sync_stock(user, how) start()
 """
+import json
+import os
 import threading
 import time
 
-from core import categories, connectors, integrations, lazada_template, pricing, store
+from core import categories, connectors, imghost, integrations, lazada_template, pricing, store
 from core.config import load_config
 
 # 表格的固定字段 → 接口属性名（类目属性表里有才发）
@@ -82,20 +84,57 @@ def _html(text):
     return "".join(f"<p>{html.escape(x)}</p>" for x in text.split("\n") if x.strip())
 
 
-def _img(conn, state, url):
-    if not url:
+def _s(v):
+    """Lazada 的例子里数字都写成字符串：35 → "35"，0.5 → "0.5"。"""
+    if isinstance(v, bool) or v is None:
+        return v
+    if isinstance(v, (int, float)):
+        f = float(v)
+        if f != f or f in (float("inf"), float("-inf")):
+            raise PushError(f"数值不对：{v}")
+        return str(int(f)) if f == int(f) else f"{round(f, 2):g}"
+    return str(v)
+
+
+def _img_path(pid, im):
+    folder = "out" if im.get("processed") or str(im.get("file", "")).startswith("white_") else "raw"
+    return os.path.join(store.image_dir(pid, folder), im["file"])
+
+
+def _lz_img(conn, state, pid, im):
+    """一张图片 → Lazada 图片空间的网址（传过的记住）。v2.43.1：本地有文件就直接传给 Lazada（不用先上传图床），
+    没有本地文件才用图床网址搬（/image/migrate）。"""
+    if not im:
         return None
-    imgs = state.setdefault("images", {})
-    if url not in imgs:
-        imgs[url] = conn.migrate_image(url)
-    return imgs[url]
+    cache = state.setdefault("images", {})
+    path = _img_path(pid, im) if im.get("file") else ""
+    if path and os.path.exists(path):
+        key = f"{im['file']}|{int(os.path.getmtime(path))}"
+        if key not in cache:
+            data, ext = imghost.prepare(path, max_bytes=1_000_000, max_side=2000, min_side=330)     # Lazada：1MB 以内、边长 ≥ 330
+            cache[key] = conn.upload_image(data, f"{os.path.splitext(im['file'])[0]}.{ext}")
+        return cache[key]
+    url = im.get("url")
+    if url:
+        if url not in cache:
+            cache[url] = conn.migrate_image(url)
+        return cache[url]
+    return None
+
+
+def _cut(text, n, what):
+    t = str(text or "").strip()
+    return t if len(t) <= n else t[:n].rstrip()
 
 
 def payload(p, rows, cat, attrs, conn, state):
-    """build_rows 出来的这个产品的几行（一行一个 SKU）→ /product/create 的 Product。"""
+    """build_rows 出来的这个产品的几行（一行一个 SKU）→ /product/create 的 Product（按 Lazada 文档「Create a product」
+    和「变体」说明：值都是字符串；变体写在 variation.variation1 / variation2（最多 2 个，名字 ≤ 15 字、选项 ≤ 20 字），
+    SKU 的 saleProp 用变体名；颜色能对上 Lazada 标准颜色（color_family）就用标准的，对不上用自定义）。"""
     by_id = {str(a.get("id")): a for a in attrs}
     by_name = {a.get("name"): a for a in attrs}
     fields = {f["key"]: f for f in (cat or {}).get("fields") or []}
+    sale_names = {a.get("name") for a in attrs if str(a.get("is_sale_prop")) == "1"}
 
     def api_attr(key):
         if key.startswith(("catProperty.p-", "saleProp.p-")):
@@ -108,63 +147,96 @@ def payload(p, rows, cat, attrs, conn, state):
         return by_name.get(name)
 
     first = rows[0][2]
-    product_attrs, sku_attr_keys = {}, []
+    product_attrs, sku_attr_keys, sale_keys = {}, [], {}
     for key, val in first.items():
         if key.startswith(("sku.", "mainImage.", "customSaleProp.", "__")) and key not in SKU_FIXED:
             continue
         a = api_attr(key)
         if not a:
             continue
+        if a.get("name") in sale_names:          # 标准变体属性（例如 color_family）：放进变体，不当普通属性
+            sale_keys[a["name"]] = (key, a)
+            continue
         if a.get("attribute_type") == "sku" or key in SKU_FIXED:
             sku_attr_keys.append((key, a))
             continue
         if key == "marketImages.1:1":
-            v = _img(conn, state, val)
+            v = _lz_img(conn, state, p["id"], p.get("white_bg"))
         elif key in ("description", "packageContent"):
             v = _html(val)
         else:
             v = _value(fields.get(key), val, a)
         if v not in (None, ""):
-            product_attrs[a["name"]] = v
-    images = [_img(conn, state, first[f"mainImage.{i}"]) for i in range(8) if first.get(f"mainImage.{i}")]
+            product_attrs[a["name"]] = _s(v)
+    images = [u for u in (_lz_img(conn, state, p["id"], im) for im in (p.get("images") or [])[:8]) if u]
     if not images:
-        raise PushError("没有图片网址（处理图片后点「上传图床」）")
+        raise PushError("没有图片（先上传图片或生成商品图）")
     out = {"PrimaryCategory": str(cat["cat_id"]), "Images": {"Image": images}, "Attributes": product_attrs}
     if state.get("item_id"):
         out["ItemId"] = str(state["item_id"])
 
-    # 变体：和表格一样用自定义变体名（颜色 / 规格），每个 SKU 带 saleProp
-    var_names = [first.get(f"customSaleProp.Custom_Variation_Name_{n}") for n in (1, 2)]
-    variation = {}
-    for n, vn in enumerate(var_names, 1):
-        if not vn:
-            continue
-        options = list(dict.fromkeys(r[2].get(f"customSaleProp.Custom_Opt_Name_{n}") for r in rows
-                                     if r[2].get(f"customSaleProp.Custom_Opt_Name_{n}")))
-        variation[f"Variation{n}"] = {"name": vn, "hasImage": n == 1 and any(r[2].get("sku.images.0") for r in rows),
-                                      "customize": True, "options": {"option": options}}
-    if variation and len(rows) > 1:
-        out["variation"] = variation
+    # SKU 的图片（每个颜色的图）
+    by_raw = {im.get("raw"): im for im in p.get("images") or []}
+    sku_img = {}
+    for _p, idx, vals in rows:
+        v = (p.get("variants") or [])[idx] if idx < len(p.get("variants") or []) else {}
+        if v.get("image") and by_raw.get(v["image"]):
+            sku_img[vals["sku.SellerSku"]] = _lz_img(conn, state, p["id"], by_raw[v["image"]])
+
+    # 变体
+    opt = lambda vals, n: _cut(vals.get(f"customSaleProp.Custom_Opt_Name_{n}"), 20, "选项")
+    variation, sale_of = {}, {r[2]["sku.SellerSku"]: {} for r in rows}
+    if len(rows) > 1:
+        dims = []                              # [(变体名, customize, {SellerSku: 选项})]
+        names = [first.get(f"customSaleProp.Custom_Variation_Name_{n}") for n in (1, 2)]
+        if names[0]:
+            col = {r[2]["sku.SellerSku"]: opt(r[2], 1) for r in rows}
+            fam = None
+            if "color_family" in sale_keys:     # 颜色能一一对上 Lazada 标准颜色：用标准的（搜索筛选能用）
+                key, a = sale_keys["color_family"]
+                fam = {r[2]["sku.SellerSku"]: _value(fields.get(key), r[2].get(key), a) for r in rows}
+                pairs = {(col[s], fam[s]) for s in col}
+                if not all(fam.values()) or len({c for c, _f in pairs}) != len({f for _c, f in pairs}) or len(pairs) != len({c for c, _f in pairs}):
+                    fam = None
+            dims.append(("color_family", False, fam) if fam else (_cut(names[0], 15, "变体名"), True, col))
+        if names[1]:
+            dims.append((_cut(names[1], 15, "变体名"), True, {r[2]["sku.SellerSku"]: opt(r[2], 2) for r in rows}))
+        all_img = bool(sku_img) and all(sku_img.get(r[2]["sku.SellerSku"]) for r in rows)
+        for n, (name, custom, by_sku) in enumerate(dims[:2], 1):
+            options = list(dict.fromkeys(v for v in by_sku.values() if v))
+            if len(options) > 50:
+                raise PushError(f"变体「{name}」的选项超过 50 个（Lazada 上限）")
+            variation[f"variation{n}"] = {"name": name, "hasImage": n == 1 and all_img, "customize": custom,
+                                          "options": {"option": options}}
+            for sku, v in by_sku.items():
+                if v:
+                    sale_of[sku][name] = v
+        combos = [tuple(sorted(sale_of[r[2]["sku.SellerSku"]].items())) for r in rows]
+        if len(set(combos)) != len(combos):
+            raise PushError("有两个 SKU 的颜色 / 规格完全一样（选项名截到 20 个字后重复了），Lazada 分不出来，请改选项名")
+        if variation:
+            out["variation"] = variation
+    has_img = bool(variation.get("variation1", {}).get("hasImage"))
 
     skus = []
     for _p, _idx, vals in rows:
-        sk = {"SellerSku": vals["sku.SellerSku"], "quantity": int(vals.get("__stock__") or 0), "price": vals["sku.price"]}
-        sid = (state.get("skus") or {}).get(vals["sku.SellerSku"])
+        sku = vals["sku.SellerSku"]
+        sk = {"SellerSku": sku, "quantity": _s(int(vals.get("__stock__") or 0)), "price": _s(vals["sku.price"])}
+        sid = (state.get("skus") or {}).get(sku)
         if sid:
             sk["SkuId"] = str(sid)
         for key, a in sku_attr_keys:
             v = vals.get(key)
             v = _num(v) if key in SKU_FIXED else _value(fields.get(key), v, a)
             if v not in (None, ""):
-                sk[a["name"] if key not in SKU_FIXED else SKU_FIXED[key]] = v
+                sk[a["name"] if key not in SKU_FIXED else SKU_FIXED[key]] = _s(v)
         if vals.get("sku.special_price.SpecialPrice"):
-            sk.update(special_price=vals["sku.special_price.SpecialPrice"], special_from_date=vals["sku.special_price.Start"],
+            sk.update(special_price=_s(vals["sku.special_price.SpecialPrice"]), special_from_date=vals["sku.special_price.Start"],
                       special_to_date=vals["sku.special_price.End"])
-        if "variation" in out:
-            sk["saleProp"] = {var_names[n - 1]: vals[f"customSaleProp.Custom_Opt_Name_{n}"] for n in (1, 2)
-                              if var_names[n - 1] and vals.get(f"customSaleProp.Custom_Opt_Name_{n}")}
-        if vals.get("sku.images.0"):
-            sk["Images"] = {"Image": [_img(conn, state, vals["sku.images.0"])]}
+        if sale_of.get(sku):
+            sk["saleProp"] = sale_of[sku]
+        if has_img or (len(rows) == 1 and sku_img.get(sku)):
+            sk["Images"] = {"Image": [sku_img[sku]]}
         skus.append(sk)
     out["Skus"] = {"Sku": skus}
     return out
@@ -203,6 +275,7 @@ def push(pids, user="", force=False):
                     attr_cache[cat["cat_id"]] = conn.category_attributes(cat["cat_id"])
                 rows = lazada_template.build_rows([p], {p["id"]: pricing.price_product(cfg, p)}, cfg, cat)
                 body = payload(p, rows, cat, attr_cache[cat["cat_id"]], conn, state)
+                state["last_payload"] = json.dumps(body, ensure_ascii=False)[:30000]      # 排查用：最后一次发出去的内容
                 created = not state.get("item_id")
                 r = conn.create_product(body) if created else conn.update_product(body)
                 if r.get("item_id"):

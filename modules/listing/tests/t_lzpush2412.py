@@ -35,8 +35,12 @@ for f in cat["fields"]:
 calls = []
 
 
-def fake_call(self, path, params, base=LZ.API, token=True, method="GET"):
+def fake_call(self, path, params, base=LZ.API, token=True, method="GET", files=None):
     calls.append((path, params, method))
+    if path == "/image/upload":            # v2.43.1：本地图片直接传
+        name, data = files["image"]
+        ok(len(data) <= 1_000_000, f"image under 1MB ({len(data)})")
+        return {"code": "0", "data": {"image": {"url": "https://lzd-img/" + name}}}
     if path == "/category/attributes/get":
         return {"code": "0", "data": attrs}
     if path == "/image/migrate":
@@ -62,28 +66,35 @@ sel = [(k, v) for k, v in pa.items() if k.startswith("catProperty.p-") and isins
        and v in next((f for f in cat["fields"] if f["key"] == k), {}).get("options", [])]
 ok(all(create["Attributes"].get("attr_" + k.split("p-")[1]) == "TH:" + v for k, v in sel), f"option by id {sel[:2]} {create['Attributes']}")
 skus = create["Skus"]["Sku"]
-ok([s["SellerSku"] for s in skus] == [v["sku"] for v in p["variants"]] and all(s["price"] > 0 and "quantity" in s and s["package_length"] for s in skus),
+ok([s["SellerSku"] for s in skus] == [v["sku"] for v in p["variants"]] and all(float(s["price"]) > 0 and "quantity" in s and s["package_length"] for s in skus),
    f"skus {skus[:1]}")
-ok("variation" in create and create["variation"]["Variation1"]["options"]["option"] and all(s.get("saleProp") for s in skus),
-   f"variations {create.get('variation')}")
+# v2.43.1：按 Lazada 文档——值都是字符串；变体在 variation.variation1，SKU 的 saleProp 用变体名
+ok(all(isinstance(s[k], str) for s in skus for k in ("price", "quantity", "package_length", "package_weight")), "numbers as strings")
+v1 = create["variation"]["variation1"]
+ok(v1["options"]["option"] and all(s["saleProp"].get(v1["name"]) in v1["options"]["option"] for s in skus)
+   and len(v1["name"]) <= 15 and all(len(o) <= 20 for o in v1["options"]["option"]), f"variations {create.get('variation')}")
+ok(not v1["hasImage"] or all(s.get("Images") for s in skus), "hasImage only when every SKU has a picture")
+ok(any(c[0] == "/image/upload" for c in calls) and not any(c[0] == "/image/migrate" for c in calls), "local images uploaded directly (no image host needed)")
+lp = C.get(f"/api/listing/lazada/last/{PID}")
+ok(lp.status_code == 200 and json.loads(lp.data)["payload"]["PrimaryCategory"] == create["PrimaryCategory"], "last payload downloadable")
 q = store.load(PID)
 ok(q["lazada_api"]["item_id"] == 777 and q["lazada_api"]["skus"] == {s["SellerSku"]: 9000 + i for i, s in enumerate(skus)}, "state saved")
 ok(listing.status_of(q, "lazada")["status"] == "uploaded" and q.get("exported_at") and listing.exported_to(q, "lazada"), "listing uploaded + sku lock")
 ok(all(stockcalc._synced("lazada").get(s["SellerSku"], {}).get("how") == "api" for s in skus), "stock marked synced")
 # 再推 = 更新，带 ItemId / SkuId，图片不重复搬
-n_img = sum(1 for c in calls if c[0] == "/image/migrate")
+n_img = sum(1 for c in calls if c[0] in ("/image/migrate", "/image/upload"))
 calls.clear()
 r = C.post("/api/listing/lazada/push", json={"product_ids": [PID], "force": True}).get_json()
 upd = next((json.loads(c[1]["payload"])["Request"]["Product"] for c in calls if c[0] == "/product/update"), None)
 ok(r["ok"] and not r["ok"][0]["created"] and upd and upd["ItemId"] == "777" and all(s.get("SkuId") for s in upd["Skus"]["Sku"]), "second push updates")
-ok(not any(c[0] == "/image/migrate" for c in calls) and n_img >= 1, "images not migrated twice")
+ok(not any(c[0] in ("/image/migrate", "/image/upload") for c in calls) and n_img >= 1, "images not uploaded twice")
 
 
 # Lazada 报错：记在产品上，返回原因
-def bad_call(self, path, params, base=LZ.API, token=True, method="GET"):
+def bad_call(self, path, params, base=LZ.API, token=True, method="GET", files=None):
     if path == "/product/update":
         raise RuntimeError("Lazada /product/update 出错：500 Invalid（attr_x is mandatory）")
-    return fake_call(self, path, params, base, token, method)
+    return fake_call(self, path, params, base, token, method, files)
 
 
 LZ.LazadaConnector._call = bad_call

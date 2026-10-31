@@ -25,6 +25,19 @@ def lazada_push_products():
     return maybe_async(f"推送到 Lazada（{len(ids)} 个）", run, "lz_push")      # v2.43：?async=1 时后台跑，任务中心看进度
 
 
+@bp.get("/api/listing/lazada/last/<pid>")
+def lazada_last(pid):
+    """v2.43.1：最后一次推送发出去的内容和 Lazada 的报错（推送失败时下载下来发给开发者）。"""
+    try:
+        st = store.load(pid).get("lazada_api") or {}
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    body = {"product": pid, "error": st.get("error") or "", "item_id": st.get("item_id"), "at": st.get("at"),
+            "payload": json.loads(st["last_payload"]) if st.get("last_payload", "").endswith("}") else st.get("last_payload")}
+    return app.response_class(json.dumps(body, ensure_ascii=False, indent=1), mimetype="application/json",
+                              headers={"Content-Disposition": f"attachment; filename=lazada_push_{pid}.json"})
+
+
 @bp.post("/api/listing/lazada/status-sync")
 def lazada_status_sync():
     """v2.43：接口推送过的产品，向 Lazada 查审核结果（平时每 30 分钟自动查一次）。"""
@@ -126,6 +139,8 @@ def export():
     errors, warnings, groups = [], [], {}
     for p in prods:
         e, w = _check(cfg, p)
+        if not any(i.get("url") for i in p.get("images", [])):      # v2.43.1：表格只认网址（推送不用）
+            e = e + ["没有图片网址：导出表格前要先在编辑页点「上传图床」"]
         name = f"{p['id']} {p.get('name_zh', '')}"
         errors += [f"{name}：{x}" for x in e]
         warnings += [f"{name}：{x}" for x in w]

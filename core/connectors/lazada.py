@@ -95,13 +95,15 @@ class LazadaConnector(Connector):
         self._save_token(r)
 
     # ---------- 请求 ----------
-    def _call(self, path, params, base=API, token=True, method="GET"):
+    def _call(self, path, params, base=API, token=True, method="GET", files=None):
         p = {"app_key": self.creds.get("app_key", ""), "timestamp": str(int(time.time() * 1000)), "sign_method": "sha256"}
         if token:
             p["access_token"] = self.creds.get("access_token", "")
         p.update({k: str(v) for k, v in params.items() if v is not None})
         p["sign"] = sign(self.creds.get("app_secret", ""), path, p)
-        if method == "POST":
+        if files:                                   # 上传文件（v2.43.1 /image/upload）：文件不算签名
+            resp = requests.post(base + path, data=p, files=files, timeout=60)
+        elif method == "POST":
             resp = requests.post(base + path, data=p, timeout=30)
         else:
             resp = requests.get(base + path, params=p, timeout=30)
@@ -237,9 +239,19 @@ class LazadaConnector(Connector):
             raise RuntimeError(f"Lazada 没有返回图片网址：{url}")
         return img["url"]
 
+    def upload_image(self, data, name="image.jpg"):
+        """本地图片（不超过 1MB 的 jpg / png）→ Lazada 图片空间的网址。"""
+        self._ensure_token()
+        img = (self._call("/image/upload", {}, method="POST", files={"image": (name, data)}).get("data") or {}).get("image") or {}
+        if not img.get("url"):
+            raise RuntimeError(f"Lazada 没有返回图片网址：{name}")
+        return img["url"]
+
     def _product(self, path, product):
         self._ensure_token()
-        payload = json.dumps({"Request": {"Product": product}}, ensure_ascii=False)
+        # Lazada 的例子里值都是字符串；allow_nan=False：价格之类算出 nan 时在这里就报清楚，不发出去。
+        # 泰文 / 中文用 \u 转义（纯 ASCII 的标准 JSON），不受传输编码影响（v2.43.1：第一次推送报「not in JSON format」）
+        payload = json.dumps({"Request": {"Product": product}}, ensure_ascii=True, allow_nan=False)
         return self._call(path, {"payload": payload}, method="POST").get("data") or {}
 
     def create_product(self, product):

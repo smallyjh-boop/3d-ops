@@ -601,25 +601,49 @@ def image_reorder(pid):
 
 @bp.post("/api/products/<pid>/images/host")
 def image_host(pid):
+    """把还没有网址的图片传到图床（导出表格用）。v2.43.1：同时传 4 张、大图先压缩，每传好一张就记下，
+    一张失败不影响别的（以前一张一张传，一张卡住整个按钮转几分钟，中途传好的也没保存）。"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from core import bgjobs
     cfg = load_config()
+    key = cfg.get("imgbb_api_key")
+    if not key:
+        return err("还没有填写 imgbb 图床密钥（设置页）")
     p = store.load(pid)
-    n = 0
-    targets = list(p.get("images", []))
-    if p.get("white_bg"):
-        targets.append(p["white_bg"])
-    for img in targets:
-        if img.get("url"):
-            continue
+    targets = [im for im in list(p.get("images", [])) + ([p["white_bg"]] if p.get("white_bg") else []) if not im.get("url")]
+
+    def path_of(img):
         folder = "out" if img.get("processed") or img["file"].startswith("white_") else "raw"
-        path = os.path.join(store.image_dir(pid, folder), img["file"])
-        try:
-            img["url"] = imghost.upload_imgbb(cfg.get("imgbb_api_key"), path)
-        except imghost.HostError as e:
-            store.save(p)
-            return err(str(e))
-        n += 1
-    store.save(p)
-    return jsonify({"product": p, "uploaded": n})
+        return os.path.join(store.image_dir(pid, folder), img["file"])
+
+    done, failed = {}, []
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futs = {ex.submit(imghost.upload_imgbb, key, path_of(im)): im for im in targets}
+        for i, f in enumerate(as_completed(futs)):
+            im = futs[f]
+            bgjobs.note(stage=f"{i + 1}/{len(targets)}")
+            try:
+                done[im["file"]] = f.result()
+            except (imghost.HostError, OSError) as e:
+                failed.append(f"{im['file']}：{e}")
+            if done and (i % 4 == 3 or i == len(targets) - 1):
+                _save_host_urls(pid, done)
+    _save_host_urls(pid, done)
+    p = store.load(pid)
+    if failed and not done:
+        return err("上传图床失败：" + "；".join(failed[:3]))
+    return jsonify({"product": p, "uploaded": len(done), "failed": failed})
+
+
+def _save_host_urls(pid, urls):
+    """把传好的网址写回产品（重新读一次再写：上传期间别人改了产品也不会被盖掉）。"""
+    if not urls:
+        return
+    q = store.load(pid)
+    for im in list(q.get("images", [])) + ([q["white_bg"]] if q.get("white_bg") else []):
+        if not im.get("url") and im.get("file") in urls:
+            im["url"] = urls[im["file"]]
+    store.save(q)
 
 
 @bp.post("/api/products/<pid>/images/url")

@@ -206,6 +206,9 @@ def ensure_brand(p, cat, cfg=None):
     return changed
 
 
+NO_URL_WARN = "图片还没上传图床：推送到 Lazada 不用传；导出 Lazada 表格前要先点「上传图床」"
+
+
 def check_product(p, prices, cat=None, cfg=None):
     """单个产品的上架检查。errors 会阻止导出，warnings 只提醒。"""
     errors, warnings = [], []
@@ -213,10 +216,13 @@ def check_product(p, prices, cat=None, cfg=None):
     t = c.get("title_th", "")
     if not (5 <= len(t) <= 255):
         errors.append(f"泰文标题需要 5-255 个字符（现在 {len(t)}）")
-    if not any(i.get("url") for i in p.get("images", [])):
-        errors.append("没有图片网址（处理图片后点「上传图床」）")
-    elif any(not i.get("url") for i in p.get("images", [])):
-        warnings.append("有图片还没上传图床，导出时会跳过")
+    imgs = p.get("images", [])
+    if not imgs:
+        errors.append("没有图片（先上传图片或生成商品图）")
+    elif not any(i.get("url") for i in imgs):      # v2.43.1：接口推送直接传本地图片，只有导出表格要图床网址
+        warnings.append(NO_URL_WARN)
+    elif any(not i.get("url") for i in imgs):
+        warnings.append("有图片还没上传图床，导出表格时会跳过（推送到 Lazada 不受影响）")
     if not p.get("white_bg"):
         warnings.append("没有白底图（选填，有助曝光）")
     d = c.get("description_th", "")

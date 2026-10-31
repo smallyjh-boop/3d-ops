@@ -30,6 +30,8 @@ def _fix_of(text):
         return "confirm_attr"
     if "包裹尺寸是 AI 估算的" in text:
         return "confirm_pkg"
+    if "上传图床" in text:
+        return "host"
     if any(h in text for h in AI_HINTS):
         return "ai"
     return "edit"

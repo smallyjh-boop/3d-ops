@@ -717,8 +717,10 @@ $("#btn-host").addEventListener("click", async (e) => {
   if (dirty) await saveProduct(true);
   if ((P.images || []).some((i) => !i.processed) && !confirm("有图片还没处理成方图，直接上传原图？")) return;
   await busy(e.target, async () => {
-    const r = await apiJob(`/api/products/${P.id}/images/host`, { method: "POST" });
+    const label = e.target.textContent;
+    const r = await apiJob(`/api/products/${P.id}/images/host`, { method: "POST" }, (s, j) => { if (j && j.stage) e.target.textContent = `上传中 ${j.stage}`; });
+    e.target.textContent = label;
     P = r.product; renderImages(); renderVariants(); refreshPricing(); runCheck();
-    toast(`已上传 ${r.uploaded} 张到图床`);
+    toast(`已上传 ${r.uploaded} 张到图床` + ((r.failed || []).length ? `；${r.failed.length} 张失败（再点一次只传没成功的）：${r.failed[0]}` : ""), !!(r.failed || []).length);
   });
 });

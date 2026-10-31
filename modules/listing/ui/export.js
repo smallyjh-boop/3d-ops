@@ -139,12 +139,13 @@ async function loadIssues(pid) {
     confirm_cat: `<button class="mini" data-fix="confirm_cat" data-pid="${esc(pid)}">✓ 确认类目「<span data-notr>${esc(r.category)}</span>」</button>`,
     confirm_attr: "", confirm_pkg: `<button class="mini" data-fix="confirm_pkg" data-pid="${esc(pid)}">✓ 尺寸没问题（${esc(r.package.length)}×${esc(r.package.width)}×${esc(r.package.height)} cm）</button>`,
     edit: `<button class="mini" data-edit="${esc(pid)}">去编辑</button>`,
+    host: `<button class="mini" data-host="${esc(pid)}" title="导出表格才需要；推送到 Lazada 不用">⬆ 上传图床</button>`,
   })[x.fix] || "";
   const attrs = r.check_attrs.length ? `<div class="lw-attrs"><b>AI 填的属性，看一眼对不对：</b> ${r.check_attrs.map((a) => `<span class="pill" data-notr>${esc(a.label)}：${esc(a.value)}</span>`).join(" ")}
       <button class="mini" data-fix="confirm_attr" data-pid="${esc(pid)}">✓ 全部没问题</button> <button class="mini" data-edit="${esc(pid)}">有不对的，去改</button></div>` : "";
   const errs = r.errors.filter((x) => x.fix !== "confirm_attr");
   box.innerHTML = (errs.length ? `<ul class="lw-iss-list">${errs.map((x) => `<li class="bad"><span>${esc(x.text)}</span> ${btn(x)}</li>`).join("")}</ul>` : "") + attrs +
-    (r.warnings.length ? `<details class="small"><summary class="muted">${r.warnings.length} 条提醒（不影响上架）</summary><ul class="lw-iss-list">${r.warnings.map((x) => `<li class="warn"><span>${esc(x.text)}</span> ${x.fix === "ai" ? btn(x) : ""}</li>`).join("")}</ul></details>` : "") +
+    (r.warnings.length ? `<details class="small"><summary class="muted">${r.warnings.length} 条提醒（不影响上架）</summary><ul class="lw-iss-list">${r.warnings.map((x) => `<li class="warn"><span>${esc(x.text)}</span> ${["ai", "host"].includes(x.fix) ? btn(x) : ""}</li>`).join("")}</ul></details>` : "") +
     (!r.errors.length && !r.warnings.length ? '<span class="ok small">全部检查通过</span>' : "");
 }
 async function aiFill(ids, el) {
@@ -195,6 +196,13 @@ $("#exp-products").addEventListener("click", async (e) => {
   if (t.dataset.iss) { const id = t.dataset.iss; LW.open.has(id) ? LW.open.delete(id) : LW.open.add(id); return renderExpList(); }
   if (t.dataset.edit) return openProduct(t.dataset.edit, true);
   if (t.dataset.fix === "ai") return aiFill([t.dataset.pid], t);
+  if (t.dataset.host) {
+    return busy(t, async () => {
+      const r = await apiJob(`/api/products/${encodeURIComponent(t.dataset.host)}/images/host`, { method: "POST" }, (s, j) => { if (j && j.stage) t.textContent = `上传中 ${j.stage}`; });
+      toast(`已上传 ${r.uploaded} 张到图床` + ((r.failed || []).length ? `；${r.failed.length} 张失败：${r.failed[0]}` : ""), !!(r.failed || []).length);
+      await loadExport();
+    });
+  }
   if (t.dataset.fix) {
     try { await api(`/api/listing/fix/${encodeURIComponent(t.dataset.pid)}`, { json: { action: t.dataset.fix, platform: LW.plat } }); toast("已确认"); await loadExport(); }
     catch (err) { toast(err.message, true); }
@@ -326,7 +334,8 @@ async function lzPush(el) {
     let html = "";
     if (r.errors.length && !r.ok.length && !r.failed.length) html = `<p class="bad">有红色项未处理，没有推送（点产品的「⚠ 缺 N 项」看缺什么）：</p>`;
     if (r.ok.length) html += `<p class="ok">✅ 已推送 ${r.ok.length} 个产品（新建 ${r.ok.filter((x) => x.created).length}，更新 ${r.ok.filter((x) => !x.created).length}），状态改成「平台审核中」。审核结果每 30 分钟自动同步。</p>`;
-    if (r.failed.length) html += `<p class="bad">${r.failed.length} 个推送失败（勾选后可以再推一次；原因看不懂就发给开发者）：</p>` + list(r.failed.map((x) => `${x.id}：${x.error}`), "bad");
+    if (r.failed.length) html += `<p class="bad">${r.failed.length} 个推送失败（勾选后可以再推一次；原因看不懂就把「下载推送内容」的文件发给开发者）：</p>` +
+      `<ul class="msgs">${r.failed.map((x) => `<li class="bad"><span data-notr>${esc(x.id)}：${esc(x.error)}</span> <a class="small" href="/api/listing/lazada/last/${encodeURIComponent(x.id)}">下载推送内容</a></li>`).join("")}</ul>`;
     $("#exp-result").innerHTML = html + list(r.errors, "bad") + list(r.warnings, "warn");
     EXP_SEL.clear();
     r.failed.forEach((x) => EXP_SEL.add(x.id));           // 失败的留着勾选，改好直接再推
