@@ -19,6 +19,7 @@ from flask import g, jsonify, redirect, request, session
 from . import db
 
 PUBLIC = ("/login", "/setup", "/api/auth/", "/static/", "/api/version", "/api/shutdown", "/favicon")
+PUBLIC_EXACT = set()       # 只有这个地址本身不用登录（模块说明书 public_exact，例如手机版 /m 自己显示登录框）
 
 # 只有老板能用
 OWNER_ONLY = [
@@ -373,7 +374,7 @@ def install(app):
             if request.method == "OPTIONS":      # 浏览器扩展跨域预检
                 return "", 204
             return _api_guard(path)
-        if any(path.startswith(p) for p in PUBLIC):
+        if any(path.startswith(p) for p in PUBLIC) or path in PUBLIC_EXACT:
             return None
         if not login_required():
             g.user = {"id": 0, "username": "local", "display_name": "本机", "role": "owner", "lang": "zh"}

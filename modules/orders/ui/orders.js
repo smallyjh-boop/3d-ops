@@ -588,12 +588,20 @@
       ${(o.aftersales || []).length ? `<h4>售后</h4>${o.aftersales.map((a) => `<div class="small">${fmtTime(a.created_at)} · <b>${esc(a.kind_zh)}</b> · ${esc(a.reason || "")}
         ${a.loss && isOwner() ? " · 损失 " + money(a.loss) : ""} · <span class="pill ${a.done ? "ok-pill" : a.overdue ? "bad-pill" : "warn-pill"}">${esc(a.stage_zh)}</span>
         <span data-notr>${esc(a.note || "")}</span> <a class="link" data-asopen="${a.id}">查看 / 处理</a></div>`).join("")}` : ""}
+      <div id="od-photos"></div>
       <details class="log-box"><summary><b>操作记录</b> <span class="muted small">${(o.log || []).length} 条</span></summary>
       <table class="grid small"><tbody>${(o.log || []).map((l) => `<tr><td class="nowrap">${fmtTime(l.ts)}</td><td data-notr>${esc(l.username || "")}</td>
         <td>${esc(l.action)}</td><td class="small" data-notr>${esc(l.detail || "")}</td></tr>`).join("") || '<tr><td class="muted">没有记录</td></tr>'}</tbody></table></details>
     </div>`;
     d.classList.remove("hidden");
     d.querySelector("[data-x]").onclick = () => d.classList.add("hidden");
+    if (window.MODKIT && MODKIT.enabled("mobile")) {        // v2.46：手机验货时拍的打包照片（手机 / 平板 App 模块）
+      api(`/api/mobile/orders/${oid}/photos`).then((r) => {
+        const b = d.querySelector("#od-photos");
+        if (b && r.photos.length) b.innerHTML = `<h4>打包照片</h4><div class="row gap wrap">${r.photos.map((p) => `<a href="${esc(p.url)}" target="_blank"
+          title="${esc(p.user)} ${fmtTime(p.at)}"><img src="${esc(p.url)}" alt="" loading="lazy" style="width:96px;height:96px;object-fit:cover;border-radius:6px"></a>`).join("")}</div>`;
+      }).catch(() => {});
+    }
     if (canEdit) lockBox(d.querySelector(".drawer-in"), { id: "order-detail", bar: d.querySelector("#od-lockbar"), label: "✏ 修改",
       keep: "[data-x], #od-as, #od-edit, #od-del, .log-box, details > summary, #od-approve, #od-hold, .buyer-box, [data-asopen], .pb-wrap, .pb-sel, [data-invdoc]",
       onCancel: () => openOrder(oid),

@@ -688,3 +688,49 @@ input.dp-bad { outline: 2px solid #dc2626 }
 .desc-img img { width: 100%; height: 100%; object-fit: cover }
 .desc-img.on { border-color: #2563eb; opacity: 1 }
 .desc-img.on::after { content: "✓"; position: absolute; right: 2px; top: 0; color: #fff; background: #2563eb; border-radius: 0 0 0 4px; font-size: 11px; padding: 0 3px }
+/* v2.46：平板 / 触屏（安卓 App 的平板版、iPad、触屏电脑）——按钮和输入框够手指点、顶部菜单一行横着滑、
+   宽表格在卡片里横着滑（modules/mobile/ui/boot.js 套一层 .tbl-scroll）、弹窗不超出屏幕、鼠标悬停才出来的按钮直接显示 */
+.tbl-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin-bottom:10px}
+.tbl-scroll>.grid{margin-bottom:0}
+@media (pointer:coarse){
+  button,.filebtn,a.btn,select{min-height:40px}
+  button.mini,button.mini-x,a.mini-btn{min-height:32px;padding:4px 10px;font-size:12.5px}
+  input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{min-height:40px;font-size:15px}
+  input[type=checkbox],input[type=radio]{width:20px;height:20px;min-height:0;vertical-align:middle}
+  .grid td input:not([type=checkbox]):not([type=radio]),.grid td select{min-height:36px}
+  .mod{padding:10px 14px}
+  .subnav .tab{padding:11px 14px}
+  .grid th,.grid td{padding:8px 6px}
+  .grp .grp-act{display:flex}
+  .cfg-mods .chip,.chips .chip{padding:7px 13px;font-size:13.5px}
+  .modal{padding:12px 8px}
+  .modal-in{max-width:100%}
+  .task-panel{max-width:calc(100vw - 16px)}
+}
+@media (max-width:1280px) and (min-width:901px){
+  .top{gap:12px;padding:8px 12px}
+  .brand{font-size:15px;white-space:nowrap}
+  #modnav{flex:1;min-width:0;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
+  #modnav::-webkit-scrollbar{display:none}
+  .mod{white-space:nowrap;padding:8px 11px}
+  .subnav{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;padding:0 10px}
+  .subnav::-webkit-scrollbar{display:none}
+  .subnav .tab{white-space:nowrap}
+  main{padding:12px}
+  .me-box{white-space:nowrap;display:grid;grid-template-columns:auto auto;justify-items:end;gap:0 8px;line-height:1.3;font-size:12px;margin-right:4px}
+  .me-box:empty{display:none}
+  .me-box>span:first-child{grid-column:1/3}
+  .me-box>span:nth-child(2){display:none}
+  .task-btn{margin-right:0}
+  #task-btn>span{display:none}
+  .top .lang{padding:5px 4px}
+}
+@media (pointer:coarse) and (min-width:700px) and (max-width:900px){
+  .grid{display:table}            /* 竖着拿的平板：表格照常排，宽了由 .tbl-scroll 横着滑（不挤成一条） */
+}
+@media (max-width:1100px) and (min-width:901px){ .brand{display:none} .mod{padding:8px 9px} }
+/* 安卓 App 里（User-Agent 带 3DOpsApp）：不显示电脑才有的东西——电脑加速器、桌面客户端下载、本机切片 */
+html.in-app #desk-dl,html.in-app #desk-chip,html.in-app #accel-card,html.in-app [data-modcard="desk"],
+html.in-app a[href^="/api/accel/package"],html.in-app a[href^="/api/desktop/package"],html.in-app .desktop-only{display:none!important}
+html.in-app .m-app-chip{display:inline-flex}
+.m-app-chip{display:none;align-items:center;gap:4px;color:#fff;text-decoration:none;background:#1f2937;border:1px solid #374151;border-radius:8px;padding:5px 10px;font-size:13px;white-space:nowrap}

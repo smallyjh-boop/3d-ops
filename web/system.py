@@ -19,6 +19,9 @@ def index():
     html = html.replace("<!--MODULE_PANELS-->", panels, 1)
     html = html.replace("<!--MODULE_SCRIPTS-->", "\n".join(
         f'<script src="/m/{mid}/{n}?v={VERSION}-{(modules.get(mid)["meta"].get("version") or "")}"></script>' for mid, n in js), 1)
+    if "3DOpsApp" in (request.headers.get("User-Agent") or ""):     # 安卓 App（平板）：隐藏电脑才有的功能（加速器、桌面版下载）
+        html = html.replace('<html lang="zh-CN">', '<html lang="zh-CN" class="in-app">', 1)
+        html = html.replace("</head>", "<script>window.IN_APP=true;</script></head>", 1)
     r = app.response_class(html, mimetype="text/html")
     r.headers["Cache-Control"] = "no-store"
     return r

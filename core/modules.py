@@ -207,6 +207,8 @@ def load_all(app):
                     if pth not in auth.PUBLIC:
                         auth.PUBLIC = tuple(auth.PUBLIC) + (pth,)
                         _prefixes.setdefault(pth, mid)
+                for pth in meta.get("public_exact") or []:          # 只有这个地址本身不用登录（页面自己显示登录框）
+                    auth.PUBLIC_EXACT.add(pth)
                 for rule in meta.get("perm_rules") or []:           # 需要特别权限的接口 (方法, 正则, 权限键)
                     auth.PERM_RULES.append(tuple(rule))
                 for rule in meta.get("owner_only") or []:
