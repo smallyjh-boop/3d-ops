@@ -576,13 +576,63 @@ def _reduce_large(model_path, out_dir, max_tris=800_000, min_mb=15):
         return None, ""
 
 
+# OrcaSlicer 命令行的返回码（src/libslic3r/Utils.hpp 的 CLI_*）→ 说人话。Windows 上负数会显示成 4294967xxx。
+ORCA_RC = {
+    -1: "运行环境出错", -2: "命令行参数不对", -3: "找不到模型文件", -5: "打印机 / 工艺 / 耗材配置文件有问题",
+    -6: "模型文件读不了（可能损坏）", -14: "内存不够", -17: "工艺配置和这台打印机不匹配",
+    -18: "3MF 里带的参数有不认识的值", -20: "模型超出打印范围、被缩小了", -21: "自动摆盘失败", -22: "自动摆放方向失败",
+    -50: "盘上没有能切的零件（零件不在打印范围里，或者分散在几个盘上）", -51: "切片前检查没通过",
+    -52: "有零件一部分在打印范围外", -58: "切片时间太长", -59: "模型面数太多",
+    -60: "跳过不能打的零件后没有零件可切", -61: "耗材和热床板不匹配", -100: "切片过程出错", -102: "走线超出可打印区域",
+}
+
+
+def rc_signed(rc):
+    """4294967246 → -50（Windows 把负的返回码当无符号数显示）。"""
+    try:
+        rc = int(rc)
+    except (TypeError, ValueError):
+        return rc
+    if rc >= (1 << 31):
+        return rc - (1 << 32)
+    if 156 <= rc <= 255:                        # Linux（NAS）上只有低 8 位：-50 → 206，-100 → 156
+        return rc - 256
+    return rc
+
+
+def _as_parts_stl(model_path, out_dir):
+    """3MF 里每个零件单独存一个 STL（各自挪到原点），一起交给 OrcaSlicer 自动摆盘。
+    v2.43.3：零件在文件里摆在盘外 / 分散在几个盘上时（返回码 -50），合成一个 STL 只会更大，拆开摆才放得下。"""
+    try:
+        from . import mesh, modellib
+        import numpy as np
+        parts = modellib.load_parts(model_path)
+        if len(parts) < 2:
+            return []
+        out = []
+        for i, (_n, t) in enumerate(parts):
+            t = np.asarray(t, dtype=np.float64)
+            if not len(t):
+                continue
+            mn, mx = t.reshape(-1, 3).min(0), t.reshape(-1, 3).max(0)
+            t = t - np.array([(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, mn[2]])
+            path = os.path.join(out_dir, f"part_{i + 1:02d}.stl")
+            mesh.write_stl(t, path)
+            out.append(path)
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _as_stl(model_path, out_dir):
     """把 3MF 转成 STL（所有零件合在一起），给切片失败时重试。"""
     try:
         from . import mesh, modellib
         import numpy as np
         parts = modellib.load_parts(model_path)
-        tris = np.concatenate([t for _n, t in parts])
+        tris = np.concatenate([t for _n, t in parts]).astype(np.float64)
+        mn, mx = tris.reshape(-1, 3).min(0), tris.reshape(-1, 3).max(0)          # v2.43.3：挪到原点（文件里可能摆在盘外）
+        tris = tris - np.array([(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, mn[2]])
         out = os.path.join(out_dir, "model_fallback.stl")
         mesh.write_stl(tris, out)
         return out
@@ -661,9 +711,10 @@ def run_cli(exe, m_path, p_path, f_path, model_path, out_dir, params, keep_to=No
     if copies > 1:
         cmd += ["--clone-objects", str(copies)]
 
-    def run(model_file):
+    def run(model_file, extra=()):
+        files = model_file if isinstance(model_file, list) else [model_file]
         try:
-            r = subprocess.run(cmd + [model_file], capture_output=True, timeout=timeout,
+            r = subprocess.run(cmd + list(extra) + files, capture_output=True, timeout=timeout,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except subprocess.TimeoutExpired as e:
             raise SliceError(f"切片超时（{timeout} 秒）") from e
@@ -682,10 +733,16 @@ def run_cli(exe, m_path, p_path, f_path, model_path, out_dir, params, keep_to=No
     r, out = run(model_in)
     log = used + out
     if r.returncode != 0 and model_path.lower().endswith(".3mf") and not glob.glob(os.path.join(out_dir, "*.gcode*")):
-        stl = _as_stl(model_path, out_dir)
-        if stl:
-            r, out = run(stl)
-            log = used + "（3MF 切片失败，改用 STL 重试）\n" + out
+        first = rc_signed(r.returncode)
+        parts = _as_parts_stl(model_path, out_dir)
+        if parts:                               # v2.43.3：先把零件拆开，让 OrcaSlicer 自动摆盘
+            r, out = run(parts, ["--ensure-on-bed"])        # 老版本 OrcaSlicer 不认这个参数：只在重试时加
+            log = used + f"（3MF 切片失败：{ORCA_RC.get(first, first)}；把 {len(parts)} 个零件拆开、自动摆盘重试）\n" + out
+        if r.returncode != 0 and not glob.glob(os.path.join(out_dir, "*.gcode*")):
+            stl = _as_stl(model_path, out_dir)
+            if stl:
+                r, out = run(stl, ["--ensure-on-bed"])
+                log = used + f"（3MF 切片失败：{ORCA_RC.get(first, first)}；合成一个 STL、挪到盘中间重试）\n" + out
     result = None
     used_file = None
     # 优先读导出的 3mf / 任何 3mf / 任何 gcode（不同版本的 OrcaSlicer 输出文件名不一样）
@@ -711,9 +768,14 @@ def run_cli(exe, m_path, p_path, f_path, model_path, out_dir, params, keep_to=No
             pass
     if result is None:
         hint = ""
-        if r.returncode in (-9, 137, -6, 134) or "bad_alloc" in log or "out of memory" in log.lower():
+        rc = rc_signed(r.returncode)
+        if rc in (-9, 137, -6, 134, -14) or "bad_alloc" in log or "out of memory" in log.lower():
             hint = "看起来是内存不够（NAS 内存小、模型太大）：可以把模型在电脑上简化 / 拆开，或者在电脑上切好后上传切片文件。\n"
-        raise SliceError(f"切片没有成功（返回码 {r.returncode}）。{hint}日志：\n{log.strip()[-1500:]}")
+        elif rc in (-50, -52, -60, -20):
+            hint = ("零件放不进打印范围：看看模型尺寸是不是单位错了（英寸 / 米），或者模型比热床大；"
+                    "多个零件的 3MF 可以在 OrcaSlicer 里摆好一盘、切好后上传切片文件。\n")
+        why = ORCA_RC.get(rc)
+        raise SliceError(f"切片没有成功（返回码 {rc}{'：' + why if why else ''}）。{hint}日志：\n{log.strip()[-1500:]}")
     if keep_to:   # 打印文件库：保留切片好的文件
         if used_file.endswith(".3mf"):
             shutil.copyfile(used_file, keep_to)
