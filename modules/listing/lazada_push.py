@@ -1,0 +1,295 @@
+"""ERP 产品直接推到 Lazada（v2.41.2，用店铺对接里授权好的 Lazada 店铺）。
+
+和「生成 Lazada 导入表格」用同一套数据（lazada_template.build_rows：标题、详情、属性、价格、包裹、库存……），
+只是不写表格，改成调 Lazada 开放接口：
+  1. 图片先搬到 Lazada 图片空间（/image/migrate，搬过的记住不重复搬）；
+  2. 表格的字段代码 → 接口的属性名：catProperty.p-20000 / saleProp.p-30097 的数字就是接口属性的 id，
+     选项也按 id 对（模板的选项 id 和接口的一样），对不上的按名字；类目里没有的属性不发；
+  3. 平台上还没有 → /product/create；有了（记着 item_id）→ /product/update；
+  4. 推完：上架状态「平台审核中」、SKU 锁定、库存记为已同步。
+库存：sync_stock() 把「库存待同步」里推送过的 SKU 用 /product/price_quantity/update 改掉；设置里开了就定时自动跑。
+
+产品里存：p["lazada_api"] = {"item_id", "skus": {SellerSku: sku_id}, "images": {原网址: Lazada 网址}, "at", "error"}
+对外：shop() push(pids, user) payload(p, ...) sync_stock(user, how) start()
+"""
+import threading
+import time
+
+from core import categories, connectors, integrations, lazada_template, pricing, store
+from core.config import load_config
+
+# 表格的固定字段 → 接口属性名（类目属性表里有才发）
+FIXED = {"title.th_TH": "name", "description": "description", "packageContent": "package_content",
+         "warrantyType": "warranty_type", "warrantyPeriod": "warranty", "warrantyPolicy": "product_warranty",
+         "radioDangerousGoods": "Hazmat", "marketImages.1:1": "promotion_whitebkg_image"}
+SKU_FIXED = {"sku.package_weight": "package_weight", "sku.package_length": "package_length",
+             "sku.package_width": "package_width", "sku.package_height": "package_height"}
+ALWAYS = ("name", "description")          # 所有类目都有的
+STOCK_BATCH = 20
+
+
+class PushError(Exception):
+    pass
+
+
+def shop():
+    """(店铺 id, 连接器)：店铺对接里启用的 Lazada 店铺（有好几个时用第一个）。"""
+    from core import db
+    r = db.conn().execute("SELECT id FROM shops WHERE platform='lazada' AND enabled=1 ORDER BY id").fetchone()
+    if not r:
+        raise PushError("还没有启用的 Lazada 店铺（设置 → AI 与对接 → 店铺对接，授权后勾「启用自动同步」）")
+    s = integrations.get_shop_raw(r["id"])
+    conn = connectors.make("lazada", s["creds"])
+    try:
+        conn.check()
+    except connectors.NotReady as e:
+        raise PushError(f"Lazada 店铺还没授权好：{e}") from e
+    return r["id"], conn
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _value(field, val, attr):
+    """表格里的值（选项文字）→ 接口要的值：按选项 id 对，再按名字对，都对不上原样发。"""
+    if val in (None, ""):
+        return None
+    opts = attr.get("options") or []
+    if not opts or not isinstance(val, str):
+        return val
+    by_id = {str(o.get("id")): o.get("name") for o in opts}
+    by_name = {str(o.get("name") or "").strip().lower(): o.get("name") for o in opts}
+    out = []
+    for part in ([x.strip() for x in val.split(",")] if attr.get("input_type") == "multiSelect" else [val.strip()]):
+        oid = None
+        if field and field.get("option_ids") and part in field.get("options", []):
+            oid = field["option_ids"][field["options"].index(part)]
+        out.append(by_id.get(str(oid)) or by_name.get(part.lower()) or part)
+    return ",".join(out)
+
+
+def _html(text):
+    """详情：Lazada 接口按网页显示，纯文字的换行会丢 → 每行一段。已经是网页的原样发。"""
+    text = str(text or "").strip()
+    if not text or "<" in text:
+        return text
+    import html
+    return "".join(f"<p>{html.escape(x)}</p>" for x in text.split("\n") if x.strip())
+
+
+def _img(conn, state, url):
+    if not url:
+        return None
+    imgs = state.setdefault("images", {})
+    if url not in imgs:
+        imgs[url] = conn.migrate_image(url)
+    return imgs[url]
+
+
+def payload(p, rows, cat, attrs, conn, state):
+    """build_rows 出来的这个产品的几行（一行一个 SKU）→ /product/create 的 Product。"""
+    by_id = {str(a.get("id")): a for a in attrs}
+    by_name = {a.get("name"): a for a in attrs}
+    fields = {f["key"]: f for f in (cat or {}).get("fields") or []}
+
+    def api_attr(key):
+        if key.startswith(("catProperty.p-", "saleProp.p-")):
+            return by_id.get(key.split("p-", 1)[1])
+        if key in SKU_FIXED:                    # 包裹尺寸重量：每个类目都要
+            return {"name": SKU_FIXED[key], "attribute_type": "sku"}
+        name = FIXED.get(key)
+        if name in ALWAYS:
+            return by_name.get(name) or {"name": name, "attribute_type": "normal"}
+        return by_name.get(name)
+
+    first = rows[0][2]
+    product_attrs, sku_attr_keys = {}, []
+    for key, val in first.items():
+        if key.startswith(("sku.", "mainImage.", "customSaleProp.", "__")) and key not in SKU_FIXED:
+            continue
+        a = api_attr(key)
+        if not a:
+            continue
+        if a.get("attribute_type") == "sku" or key in SKU_FIXED:
+            sku_attr_keys.append((key, a))
+            continue
+        if key == "marketImages.1:1":
+            v = _img(conn, state, val)
+        elif key in ("description", "packageContent"):
+            v = _html(val)
+        else:
+            v = _value(fields.get(key), val, a)
+        if v not in (None, ""):
+            product_attrs[a["name"]] = v
+    images = [_img(conn, state, first[f"mainImage.{i}"]) for i in range(8) if first.get(f"mainImage.{i}")]
+    if not images:
+        raise PushError("没有图片网址（处理图片后点「上传图床」）")
+    out = {"PrimaryCategory": str(cat["cat_id"]), "Images": {"Image": images}, "Attributes": product_attrs}
+    if state.get("item_id"):
+        out["ItemId"] = str(state["item_id"])
+
+    # 变体：和表格一样用自定义变体名（颜色 / 规格），每个 SKU 带 saleProp
+    var_names = [first.get(f"customSaleProp.Custom_Variation_Name_{n}") for n in (1, 2)]
+    variation = {}
+    for n, vn in enumerate(var_names, 1):
+        if not vn:
+            continue
+        options = list(dict.fromkeys(r[2].get(f"customSaleProp.Custom_Opt_Name_{n}") for r in rows
+                                     if r[2].get(f"customSaleProp.Custom_Opt_Name_{n}")))
+        variation[f"Variation{n}"] = {"name": vn, "hasImage": n == 1 and any(r[2].get("sku.images.0") for r in rows),
+                                      "customize": True, "options": {"option": options}}
+    if variation and len(rows) > 1:
+        out["variation"] = variation
+
+    skus = []
+    for _p, _idx, vals in rows:
+        sk = {"SellerSku": vals["sku.SellerSku"], "quantity": int(vals.get("__stock__") or 0), "price": vals["sku.price"]}
+        sid = (state.get("skus") or {}).get(vals["sku.SellerSku"])
+        if sid:
+            sk["SkuId"] = str(sid)
+        for key, a in sku_attr_keys:
+            v = vals.get(key)
+            v = _num(v) if key in SKU_FIXED else _value(fields.get(key), v, a)
+            if v not in (None, ""):
+                sk[a["name"] if key not in SKU_FIXED else SKU_FIXED[key]] = v
+        if vals.get("sku.special_price.SpecialPrice"):
+            sk.update(special_price=vals["sku.special_price.SpecialPrice"], special_from_date=vals["sku.special_price.Start"],
+                      special_to_date=vals["sku.special_price.End"])
+        if "variation" in out:
+            sk["saleProp"] = {var_names[n - 1]: vals[f"customSaleProp.Custom_Opt_Name_{n}"] for n in (1, 2)
+                              if var_names[n - 1] and vals.get(f"customSaleProp.Custom_Opt_Name_{n}")}
+        if vals.get("sku.images.0"):
+            sk["Images"] = {"Image": [_img(conn, state, vals["sku.images.0"])]}
+        skus.append(sk)
+    out["Skus"] = {"Sku": skus}
+    return out
+
+
+def _check(cfg, p, cat):
+    lazada_template.ensure_brand(p, cat, cfg)
+    return lazada_template.check_product(p, pricing.price_product(cfg, p), cat, cfg)
+
+
+def push(pids, user="", force=False):
+    """推一批产品。返回 {ok:[{id, item_id, created}], failed:[{id, error}], errors, warnings}（errors 有就没推）。"""
+    from core import listing, stockcalc
+    cfg = load_config()
+    sid, conn = shop()
+    prods = [store.load(i) for i in pids]
+    errors, warnings = [], []
+    for p in prods:
+        e, w = _check(cfg, p, categories.get((p.get("category") or {}).get("id")))
+        name = f"{p['id']} {p.get('name_zh', '')}"
+        errors += [f"{name}：{x}" for x in e]
+        warnings += [f"{name}：{x}" for x in w]
+    if errors and not force:
+        return {"ok": [], "failed": [], "errors": errors, "warnings": warnings}
+    done, failed, attr_cache = [], [], {}
+    try:
+        for p in prods:
+            state = dict(p.get("lazada_api") or {})
+            try:
+                cat = categories.get((p.get("category") or {}).get("id"))
+                if not cat or not cat.get("cat_id"):
+                    raise PushError("还没有选择 Lazada 类目")
+                if cat["cat_id"] not in attr_cache:
+                    attr_cache[cat["cat_id"]] = conn.category_attributes(cat["cat_id"])
+                rows = lazada_template.build_rows([p], {p["id"]: pricing.price_product(cfg, p)}, cfg, cat)
+                body = payload(p, rows, cat, attr_cache[cat["cat_id"]], conn, state)
+                created = not state.get("item_id")
+                r = conn.create_product(body) if created else conn.update_product(body)
+                if r.get("item_id"):
+                    state["item_id"] = r["item_id"]
+                for x in r.get("sku_list") or []:
+                    if x.get("seller_sku") and x.get("sku_id"):
+                        state.setdefault("skus", {})[x["seller_sku"]] = x["sku_id"]
+                state.update(at=time.time(), error="", by=user)
+                p["lazada_api"] = state
+                if not p.get("exported_at"):
+                    p["exported_at"] = int(time.time())     # SKU 锁定（和导出表格一样）
+                p.pop("exported_first", None)
+                listing._set(p, "lazada", "uploaded", note="接口推送" if created else "接口更新", user=user)
+                store.save(p)
+                stockcalc.mark_synced([{"sku": r_[2]["sku.SellerSku"], "stock": r_[2].get("__stock__"), "product_id": p["id"]}
+                                       for r_ in rows], user, "api", "lazada")
+                done.append({"id": p["id"], "item_id": state.get("item_id"), "created": created})
+            except Exception as e:  # noqa: BLE001  一个失败不影响别的
+                state.update(error=str(e)[:500], at=time.time())
+                p["lazada_api"] = state            # 搬过的图片记住，下次不重复搬
+                store.save(p)
+                failed.append({"id": p["id"], "error": str(e)})
+    finally:
+        integrations._store_creds(sid, conn)
+    return {"ok": done, "failed": failed, "errors": errors, "warnings": warnings}
+
+
+def sync_stock(user="", how="api"):
+    """「库存待同步」里推送过（有 item_id 和 sku_id）的 SKU → Lazada。返回 {synced, skipped, failed}。"""
+    from core import stockcalc
+    items = stockcalc.pending("lazada")
+    if not items:
+        return {"synced": 0, "skipped": 0, "failed": []}
+    sid, conn = shop()
+    states = {}
+    todo, skipped = [], 0
+    for it in items:
+        st = states.get(it["product_id"])
+        if st is None:
+            try:
+                st = states[it["product_id"]] = store.load(it["product_id"]).get("lazada_api") or {}
+            except FileNotFoundError:
+                st = states[it["product_id"]] = {}
+        sku_id = (st.get("skus") or {}).get(it["sku"])
+        if not st.get("item_id") or not sku_id:
+            skipped += 1                       # 用表格上传的：Lazada 上的编号不知道，还是人工改
+            continue
+        todo.append((it, {"ItemId": str(st["item_id"]), "SkuId": str(sku_id), "SellerSku": it["sku"], "Quantity": int(it["stock"])}))
+    n, failed = 0, []
+    try:
+        for i in range(0, len(todo), STOCK_BATCH):
+            part = todo[i:i + STOCK_BATCH]
+            try:
+                conn.update_price_quantity([x[1] for x in part])
+                n += stockcalc.mark_synced([x[0] for x in part], user, how, "lazada")
+            except Exception as e:  # noqa: BLE001
+                failed.append(f"{', '.join(x[0]['sku'] for x in part)}：{e}")
+    finally:
+        integrations._store_creds(sid, conn)
+    return {"synced": n, "skipped": skipped, "failed": failed}
+
+
+_started = False
+
+
+def _loop():
+    from core import diag
+    last = 0
+    while True:
+        time.sleep(60)
+        try:
+            mins = int(load_config().get("lazada_stock_sync_min") or 0)
+        except (TypeError, ValueError):
+            mins = 0
+        if mins <= 0 or time.time() - last < mins * 60:
+            continue
+        last = time.time()
+        try:
+            r = sync_stock("系统", "auto")
+            if r["failed"]:
+                diag.log.warning("Lazada 库存自动同步有失败：%s", r["failed"][:3])
+        except PushError:
+            pass                                   # 没有 Lazada 店铺：不用同步
+        except Exception as e:  # noqa: BLE001
+            diag.log.warning("Lazada 库存自动同步失败：%s", e)
+
+
+def start():
+    global _started
+    if _started:
+        return
+    _started = True
+    threading.Thread(target=_loop, daemon=True, name="lazada-stock").start()

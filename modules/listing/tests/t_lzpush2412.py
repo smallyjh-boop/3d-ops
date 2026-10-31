@@ -1,0 +1,111 @@
+# v2.41.2：ERP 产品直接推到 Lazada（接口，模拟 Lazada）：建商品 / 再推是更新 / 属性按 id 对 / 图片先搬 / 变体 / 库存推送 / 复制产品不带
+import os as _os
+T = _os.environ["T3D_TMP"]; APP = _os.environ["T3D_APP"]
+import os, sys, shutil, sqlite3, json
+D = T + "/m_lzpush"; shutil.rmtree(D, ignore_errors=True); shutil.copytree(T + "/v13", D)
+c0 = sqlite3.connect(D + "/app.db"); c0.execute("delete from users"); c0.commit(); c0.close()
+os.environ["LH_DATA_DIR"] = D; sys.path.insert(0, APP)
+E_ = 0
+def ok(b, m):
+    global E_; print(("OK  " if b else "ERR ") + m); E_ += (not b)
+import app as A
+from core import db, store, categories, integrations, listing, stockcalc, config
+from core.connectors import lazada as LZ
+db.create_user("boss", "secret123", "owner", "Boss")
+C = A.app.test_client(); C.post("/api/auth/login", json={"username": "boss", "password": "secret123"})
+PID = "3DP0015"
+
+# 没有 Lazada 店铺
+r = C.post("/api/listing/lazada/push", json={"product_ids": [PID]})
+ok(r.status_code == 400 and "店铺" in r.get_json()["error"], f"no shop {r.get_json()}")
+integrations.save_shop({"platform": "lazada", "name": "LZ", "enabled": True,
+                        "creds": {"app_key": "k", "app_secret": "s", "access_token": "t", "refresh_token": "r"}})
+
+p = store.load(PID)
+cat = categories.get(p["category"]["id"])
+# 模拟 Lazada 类目属性：模板里的 catProperty / saleProp 都有，id 一样，选项 id 一样、名字换成「TH:」开头，看是不是按 id 对
+attrs = [{"id": 1, "name": "name", "attribute_type": "normal"}, {"id": 2, "name": "description", "attribute_type": "normal"},
+         {"id": 3, "name": "package_content", "attribute_type": "normal"}]
+for f in cat["fields"]:
+    if f["key"].startswith(("catProperty.p-", "saleProp.p-")):
+        aid = f["key"].split("p-", 1)[1]
+        attrs.append({"id": int(aid), "name": f"attr_{aid}", "attribute_type": "sku" if f["key"].startswith("saleProp") else "normal",
+                      "input_type": "multiSelect" if f.get("multi") else "singleSelect",
+                      "options": [{"id": int(i), "name": "TH:" + o} for o, i in zip(f["options"], f["option_ids"])]})
+calls = []
+
+
+def fake_call(self, path, params, base=LZ.API, token=True, method="GET"):
+    calls.append((path, params, method))
+    if path == "/category/attributes/get":
+        return {"code": "0", "data": attrs}
+    if path == "/image/migrate":
+        u = params["payload"].split("<Url>")[1].split("</Url>")[0]
+        return {"code": "0", "data": {"image": {"url": "https://lzd-img/" + u.rsplit("/", 1)[-1]}}}
+    if path == "/product/create":
+        pr = json.loads(params["payload"])["Request"]["Product"]
+        return {"code": "0", "data": {"item_id": 777, "sku_list": [{"seller_sku": s["SellerSku"], "sku_id": 9000 + i}
+                                                                     for i, s in enumerate(pr["Skus"]["Sku"])]}}
+    return {"code": "0", "data": {}}
+
+
+LZ.LazadaConnector._call = fake_call
+
+r = C.post("/api/listing/lazada/push", json={"product_ids": [PID], "force": True}).get_json()
+ok(len(r["ok"]) == 1 and r["ok"][0]["created"] and r["ok"][0]["item_id"] == 777 and not r["failed"], f"pushed {r}")
+create = next(json.loads(c[1]["payload"])["Request"]["Product"] for c in calls if c[0] == "/product/create")
+ok(create["PrimaryCategory"] == str(cat["cat_id"]), "category id")
+ok(create["Images"]["Image"] and all(u.startswith("https://lzd-img/") for u in create["Images"]["Image"]), f"images migrated {create['Images']}")
+ok(create["Attributes"]["name"] == p["copy"]["title_th"] and create["Attributes"]["description"].startswith("<p>"), "name / description")
+pa = {k: a.get("value") for k, a in p["attributes"].items()}
+sel = [(k, v) for k, v in pa.items() if k.startswith("catProperty.p-") and isinstance(v, str)
+       and v in next((f for f in cat["fields"] if f["key"] == k), {}).get("options", [])]
+ok(all(create["Attributes"].get("attr_" + k.split("p-")[1]) == "TH:" + v for k, v in sel), f"option by id {sel[:2]} {create['Attributes']}")
+skus = create["Skus"]["Sku"]
+ok([s["SellerSku"] for s in skus] == [v["sku"] for v in p["variants"]] and all(s["price"] > 0 and "quantity" in s and s["package_length"] for s in skus),
+   f"skus {skus[:1]}")
+ok("variation" in create and create["variation"]["Variation1"]["options"]["option"] and all(s.get("saleProp") for s in skus),
+   f"variations {create.get('variation')}")
+q = store.load(PID)
+ok(q["lazada_api"]["item_id"] == 777 and q["lazada_api"]["skus"] == {s["SellerSku"]: 9000 + i for i, s in enumerate(skus)}, "state saved")
+ok(listing.status_of(q, "lazada")["status"] == "uploaded" and q.get("exported_at") and listing.exported_to(q, "lazada"), "listing uploaded + sku lock")
+ok(all(stockcalc._synced("lazada").get(s["SellerSku"], {}).get("how") == "api" for s in skus), "stock marked synced")
+# 再推 = 更新，带 ItemId / SkuId，图片不重复搬
+n_img = sum(1 for c in calls if c[0] == "/image/migrate")
+calls.clear()
+r = C.post("/api/listing/lazada/push", json={"product_ids": [PID], "force": True}).get_json()
+upd = next((json.loads(c[1]["payload"])["Request"]["Product"] for c in calls if c[0] == "/product/update"), None)
+ok(r["ok"] and not r["ok"][0]["created"] and upd and upd["ItemId"] == "777" and all(s.get("SkuId") for s in upd["Skus"]["Sku"]), "second push updates")
+ok(not any(c[0] == "/image/migrate" for c in calls) and n_img >= 1, "images not migrated twice")
+
+
+# Lazada 报错：记在产品上，返回原因
+def bad_call(self, path, params, base=LZ.API, token=True, method="GET"):
+    if path == "/product/update":
+        raise RuntimeError("Lazada /product/update 出错：500 Invalid（attr_x is mandatory）")
+    return fake_call(self, path, params, base, token, method)
+
+
+LZ.LazadaConnector._call = bad_call
+r = C.post("/api/listing/lazada/push", json={"product_ids": [PID], "force": True}).get_json()
+ok(r["failed"] and "mandatory" in r["failed"][0]["error"] and "mandatory" in store.load(PID)["lazada_api"]["error"], f"error kept {r['failed']}")
+LZ.LazadaConnector._call = fake_call
+# 不 force：有红色项不推
+r = C.post("/api/listing/lazada/push", json={"product_ids": ["3DP0002"]}).get_json()
+ok(r["errors"] and not r["ok"] and not r["failed"], f"check errors block {r}")
+# 库存推送：只推用接口推过的 SKU
+config.save_config({"stock_auto": True, "lazada_stock_sync_min": "0"})
+stockcalc.mark_synced([{"sku": s["SellerSku"], "stock": 99, "product_id": PID} for s in skus], "t", "api", "lazada")
+pend = [x for x in stockcalc.pending("lazada") if x["product_id"] == PID]
+calls.clear()
+r = C.post("/api/listing/lazada/stock-sync", json={}).get_json()
+pq = [json.loads(c[1]["payload"])["Request"]["Product"]["Skus"]["Sku"] for c in calls if c[0] == "/product/price_quantity/update"]
+flat = [x for b in pq for x in b]
+ok(pend and r["synced"] == len(pend) and {x["SellerSku"] for x in flat} == {x["sku"] for x in pend}
+   and all(x["ItemId"] == "777" and x["SkuId"] for x in flat), f"stock pushed {r} {flat[:1]}")
+ok(not [x for x in stockcalc.pending("lazada") if x["product_id"] == PID], "nothing pending after sync")
+# 复制产品：不带 Lazada 编号
+d = C.post(f"/api/products/{PID}/duplicate").get_json()
+ok(not store.load(d["id"]).get("lazada_api"), "duplicate drops lazada_api")
+print("ERRORS", E_)
+sys.exit(1 if E_ else 0)

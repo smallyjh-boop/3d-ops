@@ -31,6 +31,7 @@ def products():
             "colors": [v.get("opt1_zh") for v in p.get("variants", []) if v.get("opt1_zh")],
             "exported": bool(p.get("exported_at") or p.get("shopee_exported_at")),
             "lz": _lst(p, "lazada"), "sp": _lst(p, "shopee"), "active": p.get("active", True) is not False,
+            "lz_item": (p.get("lazada_api") or {}).get("item_id"),       # v2.41.2：用接口推到 Lazada 的商品编号
             "updated_at": p.get("updated_at") or 0,
             "groups": p.get("groups") or [], "material": p.get("material") or "",
             "has_model": bool(p.get("model")), "keywords": p.get("keywords") or "",
@@ -104,7 +105,7 @@ def product_duplicate(pid):
     p["id"] = store.new_id(_prefix(cfg))
     p["images"], p["white_bg"], p["exported_at"] = [], None, None
     # v2.40：上架 / 导出状态不跟着复制（以前新产品显示「已导出」、Shopee「待上传」）
-    for k in ("shopee_exported_at", "exported_first", "listing", "ad_designs", "seo_review", "seo_undo", "seo_log",
+    for k in ("shopee_exported_at", "exported_first", "listing", "lazada_api", "ad_designs", "seo_review", "seo_undo", "seo_log",
               "title_changed_at", "copy_dirty_after_export", "edit_rev", "edited_by", "edited_at"):
         p.pop(k, None)
     p["listing"] = {}

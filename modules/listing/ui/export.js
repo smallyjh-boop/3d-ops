@@ -177,3 +177,22 @@ async function doExport(e, url, note) {
 }
 $("#btn-export").addEventListener("click", (e) => doExport(e, "/api/export", "Lazada 卖家中心 → 批量管理 → 逐个上传这些文件。导出后这些产品的 SKU 已锁定。"));
 $("#btn-export-sp").addEventListener("click", (e) => doExport(e, "/api/export/shopee", "Shopee 卖家中心 → 我的产品 → 批量功能 → 批量上传 → 上传文件。上传后 Shopee 可能要求补充品牌等属性（在 Shopee 后台补）。"));
+// v2.41.2：直接推送到 Lazada（接口）：平台上还没有就新建，推过的就更新
+$("#btn-lz-push").addEventListener("click", async (e) => {
+  const ids = [...EXP_SEL];
+  if (!ids.length) return toast("先勾选要推送的产品", true);
+  const xls = PRODUCT_LIST.filter((p) => ids.includes(p.id) && ["uploaded", "live", "rejected", "inactive"].includes((p.lz || {}).status) && !p.lz_item);
+  if (xls.length && !confirm(`其中 ${xls.length} 个产品已经用表格传到 Lazada 了（${xls.slice(0, 6).map((p) => p.id).join("、")}${xls.length > 6 ? "…" : ""}）。\n再推送会新建一个重复的商品。确定继续？`)) return;
+  if (!confirm(`把 ${ids.length} 个产品推送到 Lazada？平台上还没有的会新建，推送过的会更新（标题、详情、属性、图片、价格、库存）。`)) return;
+  await busy(e.target, async () => {
+    const list = (arr, cls) => arr.length ? `<ul class="msgs">${arr.map((m) => `<li class="${cls}">${esc(m)}</li>`).join("")}</ul>` : "";
+    const r = await api("/api/listing/lazada/push", { json: { product_ids: ids, force: $("#exp-force").checked } });
+    let html = "";
+    if (r.errors.length && !r.ok.length && !r.failed.length) html = `<p class="bad">有红色项未处理，没有推送：</p>`;
+    if (r.ok.length) html += `<p class="ok">✅ 已推送 ${r.ok.length} 个产品（新建 ${r.ok.filter((x) => x.created).length}，更新 ${r.ok.filter((x) => !x.created).length}），状态改成「平台审核中」。Lazada 审核通过后在卖家中心能看到。</p>`;
+    if (r.failed.length) html += `<p class="bad">${r.failed.length} 个推送失败（把下面的原因发给开发者）：</p>` + list(r.failed.map((x) => `${x.id}：${x.error}`), "bad");
+    $("#exp-result").innerHTML = html + list(r.errors, "bad") + list(r.warnings, "warn");
+    EXP_SEL.clear();
+    await loadExport();
+  });
+});

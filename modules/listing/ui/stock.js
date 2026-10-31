@@ -28,6 +28,15 @@
   }
   document.addEventListener("click", (e) => {
     if (e.target.id === "stk-refresh") load();
+    else if (e.target.id === "stk-lz-push") {
+      busy(e.target, async () => {
+        try {
+          const r = await api("/api/listing/lazada/stock-sync", { json: {} });
+          toast(`已推到 Lazada：${r.synced} 个 SKU` + (r.skipped ? `；${r.skipped} 个是用表格上传的，请到后台人工改` : "") + (r.failed.length ? `；失败：${r.failed[0]}` : ""), !!r.failed.length);
+          load();
+        } catch (er) { toast(er.message, true); }
+      });
+    }
     else if (e.target.id === "stk-mark-all") { if (confirm(TR("stk.confirm_all"))) mark({ all: true }); }
     else if (e.target.id === "stk-mark-sel") {
       const skus = [...document.querySelectorAll("#stk-pending [data-sku]:checked")].map((x) => x.dataset.sku);

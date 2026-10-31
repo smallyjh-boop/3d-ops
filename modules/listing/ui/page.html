@@ -33,6 +33,7 @@
         <label class="small row gap"><input type="checkbox" id="exp-split"> 按分组分别导出（每个分组一个批次 / 一套文件）</label>
       </div>
       <div class="row gap" style="margin-top:10px">
+        <button id="btn-lz-push" class="primary" title="用店铺对接里授权好的 Lazada 店铺，直接建商品 / 更新商品，不用下载上传表格">⚡ 直接推送到 Lazada</button>
         <button id="btn-export" class="primary">生成 Lazada 导入表格</button>
         <button id="btn-export-sp" class="primary sp">生成 Shopee 导入表格</button>
         <label class="row gap small"><input type="checkbox" id="exp-force"> 有红色项也强制导出（不建议）</label>
@@ -48,9 +49,11 @@
   <div class="card" id="stk-card">
     <div class="row between"><h3>4. 库存待同步到平台</h3>
       <span><select id="stk-plat" class="small"><option value="lazada">Lazada</option><option value="shopee">Shopee</option></select>
+      <button class="mini primary-lite" id="stk-lz-push" title="用接口推送过的产品：把这里的库存直接改到 Lazada（用表格上传的产品还是人工改）">⚡ 推到 Lazada</button>
       <button class="mini" id="stk-refresh">刷新</button></span></div>
     <p class="muted small">开了「按耗材自动算库存」的产品：耗材用掉 / 进货后，库存变化够多的 SKU 列在这里。
-      现在请到平台后台改好库存后点「已改好」；以后接上 Lazada 接口会自动推送。导出上架表格时表格里的库存自动记为已同步。</p>
+      用「直接推送到 Lazada」上架的产品：点「推到 Lazada」或按 设置 → 商品 → Lazada 接口推送 的间隔自动改；
+      用表格上传的产品请到平台后台改好库存后点「已改好」。导出上架表格 / 推送时的库存自动记为已同步。</p>
     <div id="stk-pending"></div>
   </div>
 </section>

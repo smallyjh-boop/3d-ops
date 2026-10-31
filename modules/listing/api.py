@@ -5,6 +5,30 @@ from web.common import *  # noqa: F401,F403
 
 bp = Blueprint("m_listing", __name__)
 PREFIXES = ['/api/export', '/api/listing']
+
+
+# ---------------- v2.41.2：直接推到 Lazada（接口） ----------------
+@bp.post("/api/listing/lazada/push")
+def lazada_push_products():
+    from . import lazada_push
+    b = request.get_json(force=True) or {}
+    ids = b.get("product_ids") or []
+    if not ids:
+        return err("请至少选择一个产品")
+    try:
+        r = lazada_push.push(ids, _uname(), force=bool(b.get("force")))
+    except lazada_push.PushError as e:
+        return err(str(e))
+    return jsonify(r)
+
+
+@bp.post("/api/listing/lazada/stock-sync")
+def lazada_stock_sync():
+    from . import lazada_push
+    try:
+        return jsonify(lazada_push.sync_stock(_uname(), "api"))
+    except lazada_push.PushError as e:
+        return err(str(e))
 PATTERNS = []
 
 

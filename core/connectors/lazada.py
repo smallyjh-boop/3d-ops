@@ -107,7 +107,10 @@ class LazadaConnector(Connector):
             resp = requests.get(base + path, params=p, timeout=30)
         data = resp.json()
         if str(data.get("code", "0")) != "0":
-            raise RuntimeError(f"Lazada {path} 出错：{data.get('code')} {data.get('message')}")
+            # v2.41.2：建产品出错时 detail 里有具体哪个字段不对
+            det = "；".join(f"{d.get('field') or ''} {d.get('message') or ''}".strip() for d in (data.get("detail") or [])
+                           if isinstance(d, dict))
+            raise RuntimeError(f"Lazada {path} 出错：{data.get('code')} {data.get('message')}" + (f"（{det}）" if det else ""))
         return data
 
     def _ensure_token(self):
@@ -217,3 +220,39 @@ class LazadaConnector(Connector):
         self._ensure_token()
         o = (self._call("/order/get", {"order_id": oid}).get("data") or {})
         return self._with_items([o]) if o else None
+
+    # ---------- 商品（v2.41.2：ERP 产品推到 Lazada，modules/listing/lazada_push.py）----------
+    def category_attributes(self, cat_id):
+        """类目属性：[{id, name, label, input_type, is_mandatory, attribute_type(normal / sku), options:[{id, name}]}]"""
+        self._ensure_token()
+        return self._call("/category/attributes/get", {"primary_category_id": cat_id, "language_code": "th_TH"}).get("data") or []
+
+    def migrate_image(self, url):
+        """外面的图片网址 → Lazada 图片空间的网址（建产品只认 Lazada 的图片）。"""
+        self._ensure_token()
+        x = ("<?xml version=\"1.0\" encoding=\"UTF-8\" ?><Request><Image><Url>"
+             + url.replace("&", "&amp;").replace("<", "&lt;") + "</Url></Image></Request>")
+        img = (self._call("/image/migrate", {"payload": x}, method="POST").get("data") or {}).get("image") or {}
+        if not img.get("url"):
+            raise RuntimeError(f"Lazada 没有返回图片网址：{url}")
+        return img["url"]
+
+    def _product(self, path, product):
+        self._ensure_token()
+        payload = json.dumps({"Request": {"Product": product}}, ensure_ascii=False)
+        return self._call(path, {"payload": payload}, method="POST").get("data") or {}
+
+    def create_product(self, product):
+        """返回 {item_id, sku_list:[{seller_sku, sku_id, shop_sku}]}"""
+        return self._product("/product/create", product)
+
+    def update_product(self, product):
+        return self._product("/product/update", product)
+
+    def update_price_quantity(self, skus):
+        """skus：[{ItemId, SkuId, SellerSku, Quantity?, Price?}]，一次最多 50 个。"""
+        return self._product("/product/price_quantity/update", {"Skus": {"Sku": skus}})
+
+    def get_item(self, item_id):
+        self._ensure_token()
+        return self._call("/product/item/get", {"item_id": item_id}).get("data") or {}
