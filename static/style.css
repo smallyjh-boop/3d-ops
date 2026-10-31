@@ -682,3 +682,9 @@ td.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .dp-ft { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; gap: 6px } .dp-ft span { margin-left: auto }
 .dp-tl { font-size: 12px } .dp-time { width: 56px; padding: 2px 4px }
 input.dp-bad { outline: 2px solid #dc2626 }
+/* v2.44.1：详情图片 */
+.desc-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px }
+.desc-img { width: 64px; height: 64px; border: 2px solid #e2e8f0; border-radius: 6px; overflow: hidden; cursor: pointer; opacity: .45; position: relative }
+.desc-img img { width: 100%; height: 100%; object-fit: cover }
+.desc-img.on { border-color: #2563eb; opacity: 1 }
+.desc-img.on::after { content: "✓"; position: absolute; right: 2px; top: 0; color: #fff; background: #2563eb; border-radius: 0 0 0 4px; font-size: 11px; padding: 0 3px }

@@ -1,5 +1,5 @@
 "use strict";
-const APP_JS_VERSION = "2.44.0";   // 必须和 app.py 的 VERSION 一致
+const APP_JS_VERSION = "2.44.1";   // 必须和 app.py 的 VERSION 一致
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -830,3 +830,16 @@ function L(x) {   // 双语字段按界面语言显示
   });
   window.INTG_UI = { load: loadIntegrations };
 })();
+// v2.44.1：工作台 / 订单页的「同步订单」：开了接口的店铺马上拉一次订单
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest(".sync-orders"); if (!b) return;
+  busy(b, async () => {
+    try {
+      const r = await api("/api/shops/sync-all", { json: {} });
+      const bad = r.shops.filter((x) => x.error);
+      toast(r.shops.map((x) => x.error ? `${x.shop}：失败 ${x.error}` : `${x.shop}：新订单 ${x.new}，更新 ${x.updated}`).join("；"), !!bad.length);
+      if (CUR_TAB === "dashboard") $("#btn-dash-reload").click();
+      if (window.OPS && OPS.show) OPS.show(CUR_TAB);
+    } catch (err) { toast(err.message, true); }
+  });
+});

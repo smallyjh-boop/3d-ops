@@ -231,6 +231,7 @@ def _save_from_client(pid, p):
             p["exported_first"] = old["exported_first"]       # v2.40：只导出过 Shopee（由导出接口维护）
         else:
             p.pop("exported_first", None)
+        p["lazada_api"] = old.get("lazada_api")       # v2.44.1：平台编号由推送 / 在线商品同步维护（编辑页开着时推送过，别被旧的盖掉）
         p["listing"] = old.get("listing") or {}      # 上架进度由导出 / 标记接口维护（没导出过的是 {}，不能存成 null）
         if "specs" in old:
             p["specs"] = old.get("specs")              # 规格由选品工具同步 / 「确认规格」接口维护（v2.16）

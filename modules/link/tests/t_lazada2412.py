@@ -59,12 +59,18 @@ o = LZ.LazadaConnector({}).convert({"order_id": 2, "statuses": ["pending"], "pri
 ok(o["cod"] is None and o["payment"] == "MIXEDCARD", "not cod")
 # 面单：现取包裹号 → 按包裹取 PDF
 calls = []
-def fake_call2(self, path, params, base=LZ.API, token=True, method="GET"):
+def fake_call2(self, path, params, base=LZ.API, token=True, method="GET", files=None):
     calls.append((path, params, method))
     if path == "/orders/items/get":
         pk = {} if params["order_ids"] == "[3]" else {"package_id": "FP001"}
         return {"code": "0", "data": [{"order_id": int(json.loads(params["order_ids"])[0]),
-                                       "order_items": [{"tracking_code": "LEX9", **pk}, {"tracking_code": "LEX9", **pk}]}]}
+                                       "order_items": [{"order_item_id": 31, "tracking_code": "" if pk == {} else "LEX9", **pk},
+                                                       {"order_item_id": 32, "tracking_code": "" if pk == {} else "LEX9", **pk}]}]}
+    if path == "/order/fulfill/pack":
+        req = json.loads(params["packReq"])
+        return {"code": "0", "result": {"success": "true", "data": {"pack_order_list": [{"order_id": req["pack_order_list"][0]["order_id"],
+                "order_item_list": [{"order_item_id": i, "item_err_code": "0", "msg": "success", "tracking_number": "TH-NEW-1",
+                                     "package_id": "FP-NEW", "shipment_provider": "LEX TH"} for i in req["pack_order_list"][0]["order_item_list"]]}]}}}
     return {"code": "0", "result": {"success": True, "data": {"pdf_url": "https://lz.example/x.pdf"}}}
 class R:
     content = b"%PDF-1.4 fake"
@@ -74,18 +80,50 @@ LZ.requests.get = lambda url, timeout=0: R()
 lc = LZ.LazadaConnector({"app_key": "a", "app_secret": "b", "access_token": "c", "refresh_token": "d"})
 doc = lc.fetch_label({"order_no": "999", "raw": {"order_id": 1134620956753716}})
 req = json.loads(calls[-1][1]["getDocumentReq"])
-ok(doc == {"kind": "pdf", "data": b"%PDF-1.4 fake", "tracking_no": "LEX9"} and calls[0][1]["order_ids"] == "[1134620956753716]"
+ok(doc == {"kind": "pdf", "data": b"%PDF-1.4 fake", "tracking_no": "LEX9", "packed": False} and calls[0][1]["order_ids"] == "[1134620956753716]"
    and calls[-1][0] == "/order/package/document/get" and calls[-1][2] == "POST"
    and req["packages"] == [{"package_id": "FP001"}] and req["doc_type"] == "PDF", f"fetch label {calls}")
+# v2.44.1：还没打包 → 和卖家中心「打包 & 打印」一样，先在 Lazada 打包再取面单
+calls.clear()
+doc = lc.fetch_label({"order_no": "3", "raw": {}})
+pk = next((json.loads(c[1]["packReq"]) for c in calls if c[0] == "/order/fulfill/pack"), None)
+req = json.loads(calls[-1][1]["getDocumentReq"])
+ok(pk and pk["pack_order_list"][0]["order_id"] == "3" and pk["pack_order_list"][0]["order_item_list"] == ["31", "32"]
+   and pk["shipping_allocate_type"] == "TFS" and req["packages"] == [{"package_id": "FP-NEW"}]
+   and doc["tracking_no"] == "TH-NEW-1" and doc["packed"], f"pack then print {doc} {pk}")
+def pack_fail(self, path, params, base=LZ.API, token=True, method="GET", files=None):
+    if path == "/order/fulfill/pack":
+        return {"code": "0", "result": {"success": "true", "data": {"pack_order_list": [{"order_item_list": [{"item_err_code": "700026", "msg": "item current status not allow to pack"}]}]}}}
+    return fake_call2(self, path, params, base, token, method)
+LZ.LazadaConnector._call = pack_fail
 try:
-    lc.fetch_label({"order_no": "3", "raw": {}}); ok(False, "not packed")
-except connectors.NotReady as e:
-    ok("打包" in str(e), f"not packed {e}")
+    lc.fetch_label({"order_no": "3", "raw": {}}); ok(False, "pack fail")
+except RuntimeError as e:
+    ok("打包失败" in str(e) and "not allow" in str(e), f"pack fail explained {e}")
+LZ.LazadaConnector._call = fake_call2
 LZ.LazadaConnector._call = lambda *a, **k: {"code": "0", "data": [{"order_id": 5, "order_items": [{"package_id": "P"}]}]} \
     if a[1] == "/orders/items/get" else {"code": "0", "result": {"success": False, "error_msg": "package not ready"}}
 try:
     lc.fetch_label({"order_no": "5"}); ok(False, "lazada error")
 except RuntimeError as e:
     ok("package not ready" in str(e), f"lazada error {e}")
+# v2.44.1：ERP 里标「已发货」→ Lazada「安排发货」；平台同步回来的不调
+from core import orders as orders_mod, chain
+LZ.LazadaConnector._call = fake_call2
+db.conn().execute("DELETE FROM shops"); db.conn().commit()
+integrations.save_shop({"platform": "lazada", "name": "LZ", "enabled": True, "creds": {"app_key": "a", "app_secret": "b", "access_token": "c", "refresh_token": "d"}})
+orders_mod.upsert([{"platform": "lazada", "shop": "LZ", "order_no": "RTS-1", "status": "to_ship", "items": [{"sku": "X", "qty": 1}],
+                    "raw": {"order_id": 777}}], source="test")
+oid = db.conn().execute("SELECT id FROM orders WHERE order_no='RTS-1'").fetchone()["id"]
+calls.clear()
+C2 = A.app.test_client(); C2.post("/api/auth/login", json={"username": "boss", "password": "secret123"})
+C2.post("/api/orders/batch", json={"ids": [oid], "action": "status", "value": "shipped"})
+rts = [json.loads(c[1]["readyToShipReq"]) for c in calls if c[0] == "/order/package/rts"]
+ok(rts == [{"packages": [{"package_id": "FP001"}]}], f"RTS when marked shipped in ERP {rts}")
+ok(any(x["action"] == "Lazada 安排发货" for x in orders_mod.get_log(oid)), "order log")
+calls.clear()
+orders_mod.upsert([{"platform": "lazada", "shop": "LZ", "order_no": "RTS-2", "status": "to_ship", "items": [{"sku": "X", "qty": 1}], "raw": {"order_id": 778}}], source="test")
+orders_mod.upsert([{"platform": "lazada", "shop": "LZ", "order_no": "RTS-2", "status": "shipped", "items": [{"sku": "X", "qty": 1}], "raw": {"order_id": 778}}], source="sync")
+ok(not any(c[0] == "/order/package/rts" for c in calls), "platform sync does not call RTS")
 print("ERRORS", E_)
 sys.exit(1 if E_ else 0)

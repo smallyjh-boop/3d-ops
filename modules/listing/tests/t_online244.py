@@ -90,5 +90,8 @@ ok(lib["3DP0015"]["online"] and lib["3DP0015"]["online"][0]["shop"] == "ร้�
 SHOP[:] = SHOP[:2]
 C.post("/api/online/sync", json={})
 ok({x["item_id"] for x in C.get("/api/online").get_json()["items"]} == {"111", "222"}, "deleted items removed")
+# v2.44.1：工作台 / 订单页「同步订单」
+r = C.post("/api/shops/sync-all", json={}).get_json()
+ok(r["shops"] and r["shops"][0]["shop"] == "ร้านรวมของดี" and "new" in r["shops"][0], f"sync all shops {r}")
 print("ERRORS", E_)
 sys.exit(1 if E_ else 0)

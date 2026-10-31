@@ -32,3 +32,4 @@
   box-shadow: 0 8px 24px #0003; display: flex; flex-direction: column; gap: 6px; min-width: 220px }
 .lw-pop-wide { width: 440px; max-width: calc(100vw - 40px) }
 @media (max-width: 900px) { .lw-body { flex-direction: column } .lw-groups { position: static; flex: none; width: 100% } }
+.lw-grp-h { margin: 8px 0 2px; padding-left: 8px }

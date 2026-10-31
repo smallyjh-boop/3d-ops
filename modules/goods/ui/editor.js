@@ -219,8 +219,30 @@ $("#btn-kw").addEventListener("click", async (e) => {
 });
 function updatePreview() {
   const html = (P.copy.description_th || "").replace(/<(?!\/?(p|ul|ol|li|strong|b|br|em)\b)[^>]*>/gi, "");
-  $("#desc-preview").innerHTML = html;
+  $("#desc-preview").innerHTML = html + descImgs().map((im) => `<p><img src="${imgSrc(im)}" alt="" style="max-width:100%"></p>`).join("");
+  renderDescImgs();
 }
+// v2.44.1：详情图片——勾选的（P.desc_images），没选过自动前 3 张，至少 1 张
+function descImgs() {
+  const imgs = P.images || [], by = Object.fromEntries(imgs.map((im) => [im.raw, im]));
+  const chosen = (P.desc_images || []).map((r) => by[r]).filter(Boolean);
+  return chosen.length ? chosen : imgs.slice(0, 3);
+}
+function renderDescImgs() {
+  const box = $("#desc-imgs"); if (!box) return;
+  const on = new Set(descImgs().map((im) => im.raw));
+  box.innerHTML = (P.images || []).map((im, i) => `<span class="desc-img ${on.has(im.raw) ? "on" : ""}" data-draw="${esc(im.raw)}" title="${i === 0 ? "主图" : "图 " + (i + 1)}"><img src="${imgSrc(im)}" alt=""></span>`).join("") ||
+    '<span class="muted small">还没有图片</span>';
+  $("#btn-desc-auto").classList.toggle("hidden", !(P.desc_images || []).length);
+}
+document.addEventListener("click", (e) => {
+  const t = e.target.closest && e.target.closest("#desc-imgs [data-draw], #btn-desc-auto"); if (!t || !P) return;
+  if (t.id === "btn-desc-auto") { P.desc_images = []; markDirty(); return updatePreview(); }
+  const cur = descImgs().map((im) => im.raw), r = t.dataset.draw;
+  const next = cur.includes(r) ? cur.filter((x) => x !== r) : (P.images || []).map((im) => im.raw).filter((x) => cur.includes(x) || x === r);
+  if (!next.length) return toast("详情里至少放 1 张产品图", true);
+  P.desc_images = next; markDirty(); updatePreview();
+});
 
 // 变体
 function renderVariants() {

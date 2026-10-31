@@ -93,6 +93,7 @@ PRODUCTION_ALLOW = [
     ("GET", r"^/api/(stock|quality|maintenance|dashboard|groups|aftersales)$"),
     ("POST", r"^/api/(stock/make|maintenance|materials/flag|pack/done)$"),
     ("GET", r"^/api/pack/lookup$"),
+    ("POST", r"^/api/shops/sync-all$"),                   # v2.44.1：工作台 / 订单页「同步订单」
     ("GET", r"^/print/jobs$"),
     ("GET", r"^/api/colors$"),                            # v2.41：颜色表（泰文颜色名，生产员工用泰文界面）
     ("GET", r"^/fonts/"),                                 # v2.41：泰文字体

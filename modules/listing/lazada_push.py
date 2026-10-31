@@ -132,6 +132,14 @@ def _lz_img(conn, state, pid, im):
     return None
 
 
+def desc_images(p):
+    """详情里放的图片（v2.44.1）：编辑页勾选的（desc_images = 图片 raw 名单）；没选过就自动取前 3 张。至少一张（主图）。"""
+    imgs = p.get("images") or []
+    by_raw = {im.get("raw"): im for im in imgs}
+    chosen = [by_raw[r] for r in (p.get("desc_images") or []) if r in by_raw]
+    return chosen or imgs[:3]
+
+
 def _cut(text, n, what):
     t = str(text or "").strip()
     return t if len(t) <= n else t[:n].rstrip()
@@ -172,7 +180,12 @@ def payload(p, rows, cat, attrs, conn, state):
             continue
         if key == "marketImages.1:1":
             v = _lz_img(conn, state, p["id"], p.get("white_bg"))
-        elif key in ("description", "packageContent"):
+        elif key == "description":
+            v = _html(val)
+            pics = [u for u in (_lz_img(conn, state, p["id"], im) for im in desc_images(p)) if u]
+            if pics:                            # 详情后面接产品图（Lazada 详情只认它自己图片空间的网址）
+                v += "".join(f'<p><img src="{u}" style="max-width:100%"/></p>' for u in pics)
+        elif key == "packageContent":
             v = _html(val)
         else:
             v = _value(fields.get(key), val, a)

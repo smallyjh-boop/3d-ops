@@ -153,6 +153,23 @@ def shop_delete(sid):
     return jsonify({"shops": integrations.list_shops()})
 
 
+@bp.post("/api/shops/sync-all")
+def shop_sync_all():
+    """v2.44.1：工作台 / 订单页的「同步订单」：开了接口的店铺都马上拉一次订单。"""
+    out = []
+    for r in integrations.list_shops():
+        if not r.get("enabled") or not r.get("ready"):
+            continue
+        try:
+            st = integrations.sync_shop(r["id"])
+            out.append({"shop": r["name"], "new": st.get("orders_new", 0), "updated": st.get("orders_updated", 0)})
+        except Exception as e:  # noqa: BLE001  一个店失败不影响别的
+            out.append({"shop": r["name"], "error": str(e)[:200]})
+    if not out:
+        return err("还没有开了接口的店铺（设置 → AI 与对接 → 店铺对接）")
+    return jsonify({"shops": out})
+
+
 @bp.post("/api/shops/<int:sid>/sync")
 def shop_sync(sid):
     b = request.get_json(force=True, silent=True) or {}

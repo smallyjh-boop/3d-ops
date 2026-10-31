@@ -193,17 +193,59 @@ class LazadaConnector(Connector):
         d = self._call("/orders/items/get", {"order_ids": json.dumps([int(oid)])}).get("data") or []
         items = next((r.get("order_items") or [] for r in d if str(r.get("order_id")) == str(oid)), [])
         pkgs = list(dict.fromkeys(it.get("package_id") for it in items if it.get("package_id")))
-        if not pkgs:
-            raise NotReady("这个订单在 Lazada 还没打包（没有包裹号），先在 Lazada 打包再打印")
+        packed = []
+        if not pkgs:                            # v2.44.1：还没打包——和卖家中心「打包 & 打印」一样，先在 Lazada 打包
+            ids = [it.get("order_item_id") for it in items if it.get("order_item_id")]
+            if not ids:
+                raise NotReady("Lazada 没有返回这个订单的商品，没法打包")
+            packed = self.pack(oid, ids)
+            pkgs = list(dict.fromkeys(x.get("package_id") for x in packed if x.get("package_id")))
+            if not pkgs:
+                raise RuntimeError("Lazada 打包了，但没有返回包裹号")
         req = {"doc_type": "PDF", "packages": [{"package_id": p} for p in pkgs], "print_item_list": False}
-        r = self._call("/order/package/document/get", {"getDocumentReq": json.dumps(req)}, method="POST")
-        res = r.get("result") or {}
+        for attempt in range(3):                # 刚打包完，面单可能要一两秒才生成
+            r = self._call("/order/package/document/get", {"getDocumentReq": json.dumps(req)}, method="POST")
+            res = r.get("result") or {}
+            if (res.get("data") or {}).get("pdf_url") or not packed:
+                break
+            time.sleep(2)
         if res.get("success") is False or not (res.get("data") or {}).get("pdf_url"):
             raise RuntimeError(f"Lazada 没有返回面单：{res.get('error_msg') or res.get('error_code') or json.dumps(r)[:300]}")
         pdf = requests.get(res["data"]["pdf_url"], timeout=60)
         pdf.raise_for_status()
-        tracking = next((it.get("tracking_code") for it in items if it.get("tracking_code")), "")
-        return {"kind": "pdf", "data": pdf.content, "tracking_no": tracking}
+        tracking = next((it.get("tracking_code") for it in items if it.get("tracking_code")), "") or \
+            next((x.get("tracking_number") for x in packed if x.get("tracking_number")), "")
+        return {"kind": "pdf", "data": pdf.content, "tracking_no": tracking, "packed": bool(packed)}
+
+    # ---------- 打包 / 安排发货（v2.44.1，Fulfillment API）----------
+    def pack(self, order_id, item_ids):
+        """在 Lazada 打包（快递由 Lazada 分配）：返回 [{order_item_id, package_id, tracking_number, shipment_provider}]。"""
+        self._ensure_token()
+        req = {"pack_order_list": [{"order_id": str(order_id), "order_item_list": [str(i) for i in item_ids]}],
+               "delivery_type": "dropship", "shipping_allocate_type": "TFS"}
+        res = (self._call("/order/fulfill/pack", {"packReq": json.dumps(req)}, method="POST").get("result") or {})
+        items = [it for o in ((res.get("data") or {}).get("pack_order_list") or []) for it in (o.get("order_item_list") or [])]
+        bad = [it for it in items if str(it.get("item_err_code") or "0") != "0"]
+        if bad or (str(res.get("success")).lower() == "false") or not items:
+            msg = (bad[0].get("msg") if bad else "") or res.get("error_msg") or res.get("error_code") or json.dumps(res)[:200]
+            raise RuntimeError(f"Lazada 打包失败：{msg}")
+        return items
+
+    def rts(self, package_ids):
+        """安排发货（Ready to Ship）。"""
+        self._ensure_token()
+        req = {"packages": [{"package_id": p} for p in package_ids]}
+        res = (self._call("/order/package/rts", {"readyToShipReq": json.dumps(req)}, method="POST").get("result") or {})
+        if str(res.get("success")).lower() == "false":
+            raise RuntimeError(f"Lazada 安排发货失败：{res.get('error_msg') or res.get('error_code')}")
+        return res
+
+    def packages_of(self, order_id):
+        """订单在 Lazada 的包裹号（打包后才有）。"""
+        self._ensure_token()
+        d = self._call("/orders/items/get", {"order_ids": json.dumps([int(order_id)])}).get("data") or []
+        items = next((r.get("order_items") or [] for r in d if str(r.get("order_id")) == str(order_id)), [])
+        return list(dict.fromkeys(it.get("package_id") for it in items if it.get("package_id")))
 
     # ---------- 推送（Lazada Push Mechanism）----------
     def handle_webhook(self, headers, body, url=""):

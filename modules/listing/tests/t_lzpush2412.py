@@ -61,6 +61,7 @@ create = next(json.loads(c[1]["payload"])["Request"]["Product"] for c in calls i
 ok(create["PrimaryCategory"] == str(cat["cat_id"]), "category id")
 ok(create["Images"]["Image"] and all(u.startswith("https://lzd-img/") for u in create["Images"]["Image"]), f"images migrated {create['Images']}")
 ok(create["Attributes"]["name"] == p["copy"]["title_th"] and create["Attributes"]["description"].startswith("<p>"), "name / description")
+ok('<img src="https://lzd-img/' in create["Attributes"]["description"], "description ends with product pictures (v2.44.1)")
 pa = {k: a.get("value") for k, a in p["attributes"].items()}
 sel = [(k, v) for k, v in pa.items() if k.startswith("catProperty.p-") and isinstance(v, str)
        and v in next((f for f in cat["fields"] if f["key"] == k), {}).get("options", [])]

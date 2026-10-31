@@ -20,7 +20,7 @@ async function loadExport() {
 }
 let EXP_GROUPS = [];
 const EXP_SEL = new Set();
-const LW = { plat: "lazada", stage: "", group: "", page: 1, open: new Set(), view: "main" };
+const LW = { plat: "lazada", stage: "", group: "", page: 1, open: new Set(), view: "main", autoStage: "" };
 const LW_STAGES = [["todo", "待完善", "资料还没补齐（红色项）"], ["ready", "可上架", "检查通过、还没上到平台"], ["review", "审核中", "已推送 / 已上传，平台在审核"], ["live", "已上线", "平台审核通过、在售"]];
 const LW_ISSUES = [["rejected", "审核不通过"], ["failed", "上传失败"], ["update", "有修改待同步"], ["inactive", "平台已下架"], ["pending", "表格待上传"]];
 const lwSt = (p) => ((LW.plat === "shopee" ? p.sp : p.lz) || {}).status || "none";
@@ -44,7 +44,8 @@ function lwBase() {
 }
 function expFiltered() {
   let rows = lwBase();
-  if (LW.stage) rows = rows.filter((p) => stageOf(p) === LW.stage);
+  if (LW.stage === "issues") rows = rows.filter((p) => LW_ISSUES.some(([k]) => stageOf(p) === k));
+  else if (LW.stage) rows = rows.filter((p) => stageOf(p) === LW.stage);
   const by = $("#exp-sort").value;
   const key = {
     id: (p) => p.id, id_desc: (p) => p.id, name: (p) => p.name_zh || "", cat: (p) => (p.category || "") + p.id,
@@ -66,8 +67,15 @@ function renderFlow(base) {
 }
 function renderGroupsLW() {
   const all = PRODUCT_LIST.length, none = PRODUCT_LIST.filter((p) => !(p.groups || []).length).length;
-  const g = (id, name, n) => `<div class="grp ${LW.group === id ? "on" : ""}" data-g="${id}"><span data-notr>${esc(name)}</span> <span class="muted">${n}</span></div>`;
-  $("#lw-grp").innerHTML = g("", "全部产品", all) + g("none", "未分组", none) + EXP_GROUPS.map((x) => g(String(x.id), x.name, x.count)).join("");
+  const g = (id, name, n) => `<div class="grp ${LW.group === id && !LW.autoStage ? "on" : ""}" data-g="${id}"><span data-notr>${esc(name)}</span> <span class="muted">${n}</span></div>`;
+  // v2.44.1：按状态自动分组（推送、平台审核结果回来后自动换组，不用手动挪）
+  const cnt = {};
+  PRODUCT_LIST.forEach((p) => { const k = stageOf(p); cnt[k] = (cnt[k] || 0) + 1; });
+  const issues = LW_ISSUES.reduce((a, [k]) => a + (cnt[k] || 0), 0);
+  const a = (k, zh, n) => `<div class="grp ${LW.autoStage === k ? "on" : ""}" data-auto="${k}"><span>${zh}</span> <span class="muted">${n}</span></div>`;
+  $("#lw-grp").innerHTML = `<div class="small muted lw-grp-h">按状态（自动）</div>` +
+    LW_STAGES.map(([k, zh]) => a(k, zh, cnt[k] || 0)).join("") + a("issues", "需处理", issues) +
+    `<div class="small muted lw-grp-h">我的分组</div>` + g("", "全部产品", all) + g("none", "未分组", none) + EXP_GROUPS.map((x) => g(String(x.id), x.name, x.count)).join("");
 }
 function renderExpList() {
   $("#exp-plat").value = LW.plat;
@@ -177,9 +185,14 @@ $("#lw-view").addEventListener("click", (e) => {
 $("#lw-flow").addEventListener("click", (e) => {
   if (e.target.closest("#lw-qc")) return qcSync(null, e.target.closest("#lw-qc"));
   const b = e.target.closest("[data-stage]"); if (!b) return;
-  LW.stage = b.dataset.stage; LW.page = 1; renderExpList();
+  LW.stage = b.dataset.stage; LW.autoStage = ""; LW.page = 1; renderExpList();
 });
-$("#lw-grp").addEventListener("click", (e) => { const d = e.target.closest("[data-g]"); if (!d) return; LW.group = d.dataset.g; $("#exp-group").value = LW.group; LW.page = 1; renderExpList(); });
+$("#lw-grp").addEventListener("click", (e) => {
+  const au = e.target.closest("[data-auto]");
+  if (au) { LW.autoStage = au.dataset.auto; LW.stage = au.dataset.auto; LW.group = ""; LW.page = 1; return renderExpList(); }
+  const d = e.target.closest("[data-g]"); if (!d) return;
+  LW.autoStage = ""; LW.group = d.dataset.g; $("#exp-group").value = LW.group; LW.page = 1; renderExpList();
+});
 $("#lw-pager").addEventListener("click", (e) => { const b = e.target.closest("[data-pg]"); if (!b) return; LW.page = +b.dataset.pg; renderExpList(); });
 ["#exp-sort", "#lw-psize"].forEach((k) => $(k).addEventListener("change", () => { LW.page = 1; renderExpList(); }));
 { let t = null; $("#exp-q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { LW.page = 1; renderExpList(); }, 250); }); }

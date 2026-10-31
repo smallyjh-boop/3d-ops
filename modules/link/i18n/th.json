@@ -65,5 +65,7 @@
  "。检查地址、端口，选品工具有没有在运行": " ตรวจที่อยู่ พอร์ต และดูว่า เครื่องมือคัดสินค้า 3D เปิดอยู่หรือไม่",
  "授权后地址栏的整个网址（或 code= 后面的内容）": "URL ทั้งหมดในแถบที่อยู่หลังอนุญาต (หรือข้อความหลัง code=)",
  "Callback URL（回调地址）": "Callback URL (ที่อยู่ส่งกลับ)",
- "需要 Lazada 开放平台的 App Key / App Secret 和店铺授权（access_token）。回调地址必须是 https，和 Lazada 后台应用里填的 Callback URL 一字不差（例如 https://www.google.com/）；授权后把浏览器地址栏的整个网址粘贴到下面的框里换 token。按官方文档编写，拿到正式 App Key 后需要联调确认。": "ต้องมี App Key / App Secret ของ Lazada Open Platform และการอนุญาตร้าน (access_token) Callback URL ต้องเป็น https และตรงกับที่กรอกในแอปบน Lazada ทุกตัวอักษร (เช่น https://www.google.com/) หลังอนุญาตให้วาง URL ทั้งหมดจากแถบที่อยู่ในช่องด้านล่างเพื่อแลก token เขียนตามเอกสารทางการ ต้องทดสอบจริงเมื่อได้ App Key"
+ "需要 Lazada 开放平台的 App Key / App Secret 和店铺授权（access_token）。回调地址必须是 https，和 Lazada 后台应用里填的 Callback URL 一字不差（例如 https://www.google.com/）；授权后把浏览器地址栏的整个网址粘贴到下面的框里换 token。按官方文档编写，拿到正式 App Key 后需要联调确认。": "ต้องมี App Key / App Secret ของ Lazada Open Platform และการอนุญาตร้าน (access_token) Callback URL ต้องเป็น https และตรงกับที่กรอกในแอปบน Lazada ทุกตัวอักษร (เช่น https://www.google.com/) หลังอนุญาตให้วาง URL ทั้งหมดจากแถบที่อยู่ในช่องด้านล่างเพื่อแลก token เขียนตามเอกสารทางการ ต้องทดสอบจริงเมื่อได้ App Key",
+ "Lazada 订单": "ออเดอร์ Lazada",
+ "订单在 ERP 里标成「已发货」（发货交接完成）时，自动在 Lazada 上「安排发货」（Ready to Ship）": "เมื่อออเดอร์ใน ERP เป็น「ส่งแล้ว」(ส่งมอบพัสดุเสร็จ) ให้กด「พร้อมส่ง」(Ready to Ship) ใน Lazada อัตโนมัติ"
 }
