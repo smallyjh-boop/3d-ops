@@ -3,7 +3,7 @@ import json
 import time
 
 from core import db
-from .presets import PLAYBOOK, PRESETS
+from .presets import OLD_PLAYBOOKS, PLAYBOOK, PRESETS
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cs_conv (
@@ -58,10 +58,11 @@ DEFAULT_SETTINGS = {
     "shop_name": "",
     "persona": "礼貌、热情、简短。用买家的语言回复（一般是泰语）。泰语称呼买家 คุณลูกค้า，女性语气结尾用 ค่ะ/นะคะ。"
                "不要长篇大论，一般 1–3 句。可以适当用 1 个表情。",
-    "ship_policy": "所有商品都是接单后 3D 打印制作，付款后 24–48 小时内发货（定制新设计、大尺寸、批发大单按确认的日期）。物流：曼谷 1–2 天，外府 2–3 天，偏远地区 3–5 天。",
+    "ship_policy": "付款后 24–48 小时内发货（定制新设计、大尺寸、批发大单按确认的日期）。物流：曼谷 1–2 天，外府 2–3 天，偏远地区 3–5 天。"
+                   "对买家只说备货、打包、尽快发货，不提生产、打印、制作过程。",
     "return_policy": "收到商品有破损或少件，请在收货 3 天内拍照/视频联系客服，我们补发或退款。非质量问题不退换。",
     "custom_policy": "可以定制颜色、刻字（名字/文字）、尺寸放大缩小。定制前先和客服确认细节，下单时在备注里写清楚。"
-                     "复杂定制需要加价，由客服报价。",
+                     "复杂定制需要加价，由客服报价；交期由客服确认（对买家说「准备好就发货」，不提生产 / 打印）。",
     "wholesale_tiers": "10:5,30:10,50:15,100:20",     # 数量:折扣%（10 个以上 95 折…）
     "wholesale_note": "批发/大单可以开发票吗？可以私下下单或在平台下单，交期按数量另算。",
     "extra": "",                                      # 其他补充（营业时间、活动等）
@@ -84,13 +85,14 @@ DEFAULT_SETTINGS = {
     "notify_shipped": "1",                            # 订单发货了主动告诉买家（按店铺的 AI 模式：自动发 / 出草稿）
     "notify_delayed": "1",                            # 订单超过 48 小时还没发货，主动安抚买家
     "tpl_shipped": "คุณ{买家名} คะ คำสั่งซื้อ {订单号} จัดส่งแล้วนะคะ เลขพัสดุ {运单号} ขอบคุณที่อุดหนุนค่ะ 🙏",
-    "tpl_delayed": "คุณ{买家名} คะ คำสั่งซื้อ {订单号} กำลังผลิตอยู่ค่ะ คาดว่าจะจัดส่งภายใน {预计发货日} ขออภัยที่ให้รอนะคะ 🙏",
+    "tpl_delayed": "คุณ{买家名} คะ คำสั่งซื้อ {订单号} กำลังเตรียมสินค้าอยู่ค่ะ คาดว่าจะจัดส่งภายใน {预计发货日} ขออภัยที่ให้รอนะคะ 🙏",
     "qa_daily": "5",                                  # 每天让 AI 抽查几个昨天的会话打分（0 = 不抽查）
     "shop_cfg": "{}",                                 # 每个店铺的 AI 模式等（JSON，见 shopcfg.py）
     # ---- v2.22 智能客服 ----
     "tiers": "",          # 每类问题怎么处理（JSON {意图: auto 自动发 / confirm AI 写好人确认 / human 转人工}），空 = 按 auto_intents 推出来
     "forbidden": "退款、赔偿、补发、免运费、额外折扣、保证某天一定送到、保证永不损坏、平台外交易（LINE/电话/转账）",
-    "forbidden_words": "คืนเงินให้,โอนเงินคืน,ชดเชย,ส่งฟรี,แถมฟรี,รับประกัน 100,ไลน์,LINE,โอนเข้าบัญชี,退款给,赔偿,包邮,保证",
+    "forbidden_words": "คืนเงินให้,โอนเงินคืน,ชดเชย,ส่งฟรี,แถมฟรี,รับประกัน 100,ไลน์,LINE,โอนเข้าบัญชี,退款给,赔偿,包邮,保证,"
+                       "ผลิต,พิมพ์ 3D,3D print,กำลังพิมพ์,งานพิมพ์,เครื่องพิมพ์,เส้นพลาสติก,生产,打印,3D 打印,耗材",   # v2.49 不提生产 / 打印
     "smart": "1",          # 更灵活：可以追问、推荐相关产品 / 套装、记住这个买家以前买过什么
     "learn_mode": "suggest",   # 从人工回复里学新知识：suggest 先放「待确认」/ auto 直接加进知识库 / off 不学
     "follow_hours": "24",  # 新线索多久后提醒跟进（小时）；报价后按 2 倍
@@ -117,7 +119,9 @@ def init():
                      ("lead_at", "REAL"), ("shop", "TEXT"),
                      # v2.46：人工接管 / 分配、平台会话的最后消息、头像、夜间提示、主动提醒
                      ("mode", "TEXT DEFAULT ''"), ("taken_by", "TEXT"), ("taken_at", "REAL"), ("ext_last_id", "TEXT"),
-                     ("avatar", "TEXT"), ("night_noticed_at", "REAL"), ("notified", "TEXT")):
+                     ("avatar", "TEXT"), ("night_noticed_at", "REAL"), ("notified", "TEXT"),
+                     # v2.49：kind='system' 平台通知（Lazada 官方账号的卖家通知），不是买家
+                     ("kind", "TEXT DEFAULT ''")):
         if col not in cols:
             c.execute(f"ALTER TABLE cs_conv ADD COLUMN {col} {typ}")
     mcols = {r[1] for r in c.execute("PRAGMA table_info(cs_msg)")}
@@ -142,11 +146,21 @@ def init():
     else:
         update_presets()          # 没改过的旧版标准话术自动换成新版
     _migrate_settings()
+    try:
+        from . import notice
+        notice.reclassify_all()   # v2.49：以前收进来的平台通知认出来，清掉错的需人工 / 标签 / 草稿
+    except Exception:  # noqa: BLE001  分类出错不影响启动
+        pass
 
 
 # 以前版本的默认店铺政策（没改过的自动换成新的）
 OLD_SETTINGS = {
-    "ship_policy": ["所有商品都是接单后 3D 打印制作，一般付款后 2–3 天内发货，大单/定制按实际制作时间。"],
+    "ship_policy": ["所有商品都是接单后 3D 打印制作，一般付款后 2–3 天内发货，大单/定制按实际制作时间。",
+                    "所有商品都是接单后 3D 打印制作，付款后 24–48 小时内发货（定制新设计、大尺寸、批发大单按确认的日期）。物流：曼谷 1–2 天，外府 2–3 天，偏远地区 3–5 天。"],
+    "custom_policy": ["可以定制颜色、刻字（名字/文字）、尺寸放大缩小。定制前先和客服确认细节，下单时在备注里写清楚。复杂定制需要加价，由客服报价。"],
+    "tpl_delayed": ["คุณ{买家名} คะ คำสั่งซื้อ {订单号} กำลังผลิตอยู่ค่ะ คาดว่าจะจัดส่งภายใน {预计发货日} ขออภัยที่ให้รอนะคะ 🙏"],
+    "forbidden_words": ["คืนเงินให้,โอนเงินคืน,ชดเชย,ส่งฟรี,แถมฟรี,รับประกัน 100,ไลน์,LINE,โอนเข้าบัญชี,退款给,赔偿,包邮,保证"],
+    "playbook": OLD_PLAYBOOKS,
 }
 
 
@@ -154,7 +168,8 @@ def _migrate_settings():
     c = db.conn()
     for k, olds in OLD_SETTINGS.items():
         r = c.execute("SELECT v FROM cs_settings WHERE k=?", (k,)).fetchone()
-        if r and (r["v"] or "").strip() in olds:
+        norm = lambda x: (x or "").replace("\r\n", "\n").strip()
+        if r and norm(r["v"]) in {norm(o) for o in olds}:
             c.execute("UPDATE cs_settings SET v=? WHERE k=?", (DEFAULT_SETTINGS[k], k))
     c.commit()
 
@@ -275,7 +290,7 @@ def update_conv(cid, **kw):
     allowed = ("buyer", "platform", "order_id", "order_no", "status", "needs_human", "human_reason", "intent", "summary",
                "lang", "draft", "draft_zh", "analysis", "draft_at", "unread", "assigned", "last_buyer_at",
                "tags", "needs", "lead_stage", "lead_value", "next_follow_at", "follow_note", "tier", "urgent_alerted_at", "lead_at", "shop",
-               "mode", "taken_by", "taken_at", "ext_last_id", "avatar", "night_noticed_at", "notified", "shop_id", "channel")
+               "mode", "taken_by", "taken_at", "ext_last_id", "avatar", "night_noticed_at", "notified", "shop_id", "channel", "kind")
     sets = {k: v for k, v in kw.items() if k in allowed}
     for k in ("analysis", "needs"):
         if k in sets and not isinstance(sets[k], (str, type(None))):
@@ -297,7 +312,12 @@ def delete_conv(cid):
 
 
 def list_convs(status="", q="", limit=200, shop="", agent="", shops=None, mine=""):
+    """status=system：只要平台通知；其它状态都不含平台通知（v2.49）。"""
     conds, args = [], []
+    if status == "system":
+        conds.append("kind='system'")
+    else:
+        conds.append("COALESCE(kind,'')!='system'")
     if mine:                                   # v2.46：分给我的 / 我接管的
         conds.append("(assigned=? OR taken_by=?) AND status!='closed'"); args += [mine, mine]
     if shop:
@@ -320,7 +340,7 @@ def list_convs(status="", q="", limit=200, shop="", agent="", shops=None, mine="
         conds.append("status='open'")
     elif status == "taken":
         conds.append("mode='human' AND status!='closed'")
-    elif status:
+    elif status and status != "system":
         conds.append("status=?"); args.append(status)
     if q:
         conds.append("(buyer LIKE ? OR order_no LIKE ? OR summary LIKE ? OR id IN (SELECT conv_id FROM cs_msg WHERE text LIKE ?))")
@@ -332,6 +352,9 @@ def list_convs(status="", q="", limit=200, shop="", agent="", shops=None, mine="
         m = c.execute("SELECT role, text, created_at FROM cs_msg WHERE conv_id=? AND role IN ('buyer','seller') "
                       "ORDER BY id DESC LIMIT 1", (d["id"],)).fetchone()
         d["last"] = dict(m) if m else None
+        if d["last"]:
+            from .notice import plain
+            d["last"]["text"] = plain(d["last"]["text"])
         d["wait_min"] = int((time.time() - m["created_at"]) / 60) if m and m["role"] == "buyer" and d["status"] != "closed" else None
         d.pop("analysis", None)
         d.pop("needs", None)
@@ -487,6 +510,7 @@ def stats(shops=None):
     if shops is not None:
         cond = " AND COALESCE(shop,'') IN (%s)" % ",".join("?" * len(shops)) if shops else " AND 0"
         args = list(shops)
+    cond = " AND COALESCE(kind,'')!='system'" + cond
     ov = overdue()
     if shops is not None:
         ids = {r[0] for r in c.execute("SELECT id FROM cs_conv WHERE 1" + cond, args)}
@@ -514,15 +538,23 @@ def overdue(minutes=None):
     c = db.conn()
     now = time.time()
     out = []
-    for r in c.execute("SELECT id, buyer, platform, alerted_at FROM cs_conv WHERE status!='closed'"):
+    for r in c.execute("SELECT id, buyer, platform, alerted_at FROM cs_conv WHERE status!='closed' AND COALESCE(kind,'')!='system'"):
         m = c.execute("SELECT role, text, created_at FROM cs_msg WHERE conv_id=? AND role IN ('buyer','seller') "
                       "ORDER BY id DESC LIMIT 1", (r["id"],)).fetchone()
         if m and m["role"] == "buyer" and now - (m["created_at"] or now) >= minutes * 60:
             out.append({"id": r["id"], "buyer": r["buyer"] or "", "platform": r["platform"] or "",
-                        "wait_min": int((now - m["created_at"]) / 60), "text": (m["text"] or "")[:80],
+                        "wait_min": int((now - m["created_at"]) / 60), "text": _plain(m["text"])[:80],
                         "alerted_at": r["alerted_at"], "last_at": m["created_at"]})
     out.sort(key=lambda x: -x["wait_min"])
     return out
+
+
+def _plain(t):
+    from .notice import plain
+    return plain(t or "")
+
+
+NOT_SYS = " AND conv_id NOT IN (SELECT id FROM cs_conv WHERE kind='system')"
 
 
 def perf(days=7):
@@ -530,7 +562,7 @@ def perf(days=7):
     c = db.conn()
     since = time.time() - days * 86400
     rows = c.execute("SELECT conv_id, role, text, source, ai_draft, created_at FROM cs_msg "
-                     "WHERE created_at>=? AND role IN ('buyer','seller') ORDER BY conv_id, id", (since,)).fetchall()
+                     "WHERE created_at>=? AND role IN ('buyer','seller')" + NOT_SYS + " ORDER BY conv_id, id", (since,)).fetchall()
     sent = auto = with_draft = edited = 0
     waits = []
     pending = {}
@@ -549,7 +581,7 @@ def perf(days=7):
         if t0 and r["created_at"] >= t0:
             waits.append((r["created_at"] - t0) / 60)
     waits.sort()
-    convs = c.execute("SELECT COUNT(DISTINCT conv_id) FROM cs_msg WHERE created_at>=? AND role='buyer'", (since,)).fetchone()[0]
+    convs = c.execute("SELECT COUNT(DISTINCT conv_id) FROM cs_msg WHERE created_at>=? AND role='buyer'" + NOT_SYS, (since,)).fetchone()[0]
     return {"days": days, "convs": convs, "sent": sent, "auto": auto, "with_draft": with_draft, "edited": edited,
             "adopt_pct": round(100 * (with_draft - edited) / with_draft) if with_draft else None,
             "avg_reply_min": round(sum(waits) / len(waits), 1) if waits else None,

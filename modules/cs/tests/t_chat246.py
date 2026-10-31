@@ -79,7 +79,7 @@ MSGS["S1"].append({"message_id": "m4", "from_account_type": "1", "send_time": st
 SESS[0]["last_message_time"] = str(NOW + 1000)
 jobs.poll_all(force=True)
 todo = db.conn().execute("SELECT kind FROM cs_jobs WHERE conv_id=? AND status='todo'", (cv["id"],)).fetchall()
-ok([x["kind"] for x in todo] == ["draft"], f"draft job queued (default mode draft) {[dict(x) for x in todo]}")
+ok([x["kind"] for x in todo if x["kind"] != "tr"] == ["draft"], f"draft job queued (default mode draft) {[dict(x) for x in todo]}")
 jobs.run_due()
 c1 = data.get_conv(cv["id"])
 ok(c1["draft"] == "ราคา 199 บาทค่ะ" and not SENT, "draft written, nothing sent")

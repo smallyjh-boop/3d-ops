@@ -14,7 +14,7 @@ import time
 
 from . import data
 
-KINDS = ("draft", "auto", "poll", "notify", "qa")
+KINDS = ("draft", "auto", "poll", "notify", "qa", "tr")
 _wake = threading.Event()
 _state = {"started": False, "last_poll": {}, "last_sweep": 0, "last_hour": 0, "errors": {}}
 
@@ -74,6 +74,8 @@ def run_job(j):
         return chat.notify(int(p["order_id"]), p.get("what") or "shipped")
     if k == "qa":
         return chat.qa_one(j["conv_id"])
+    if k == "tr":                 # v2.49：买家消息翻成中文
+        return chat.translate_pending(j["conv_id"])
     if k == "poll":
         return poll_all(force=True)
     raise ValueError("不认识的任务 " + k)

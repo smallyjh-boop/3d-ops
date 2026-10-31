@@ -5,7 +5,7 @@ import random
 import re
 import time
 
-from . import brain, channels, data, erp_link, service, shopcfg
+from . import brain, channels, data, erp_link, notice, service, shopcfg
 
 # 自动标签（不花 AI，消息一进来就按关键词打；AI 写草稿时还会补更细的标签）
 INTENT_TAG = {"price": "询价", "wholesale": "询价", "order_status": "催单", "stock": "询价", "complaint": "售后", "refund": "售后",
@@ -24,6 +24,8 @@ def send(cid, text="", user="", kind="text", extra=None, source="manual", force=
     c = data.get_conv(cid)
     if not c:
         raise ValueError("会话不存在")
+    if c.get("kind") == notice.KIND:
+        raise ValueError("这是平台通知，不能回复")
     me = (user or "").strip()
     if c.get("mode") == "human" and c.get("taken_by") and me and c["taken_by"] != me and not force and source != "auto":
         raise PermissionError(f"{c['taken_by']} 正在处理这个会话")
@@ -114,6 +116,8 @@ def auto_tags(cid, text):
     if not tag:
         return
     c = data.get_conv(cid)
+    if not c or c.get("kind") == notice.KIND:
+        return
     tags = c.get("tag_list") or []
     if tag not in tags:
         data.update_conv(cid, tags=",".join([tag] + tags)[:300])
@@ -122,8 +126,10 @@ def auto_tags(cid, text):
 def on_buyer(cid):
     """有新的买家消息（接口拉到 / 扩展推上来）：打标签、夜间提示、按 AI 模式排后台任务。"""
     c = data.get_conv(cid)
-    if not c:
+    if not c or c.get("kind") == notice.KIND:        # v2.49：平台通知不打标签、不写草稿
         return None
+    from . import jobs
+    jobs.enqueue("tr", cid, delay=1)                   # v2.49：买家的话在后台翻成中文（界面中文时显示在消息下面）
     pend = []
     for m in reversed(data.messages(cid, 30)):
         if m["role"] == "seller":
@@ -132,7 +138,8 @@ def on_buyer(cid):
             pend.insert(0, m["text"])
     auto_tags(cid, " ".join(pend) or " ".join([m["text"] for m in data.messages(cid, 30) if m["role"] == "buyer"][-3:]))
     s = data.settings()
-    if shopcfg.is_night() and s.get("night_mode") == "notice" and can_send(c) and c.get("mode") != "human":
+    if shopcfg.is_night() and s.get("night_mode") == "notice" and can_send(c) and c.get("mode") != "human" \
+            and not brain.production_hit(s.get("night_text") or ""):
         last = c.get("night_noticed_at") or 0
         if time.time() - last > 10 * 3600:
             try:
@@ -143,7 +150,6 @@ def on_buyer(cid):
     mode = shopcfg.mode_of(c)
     if mode == "off":
         return None
-    from . import jobs
     return jobs.enqueue("auto" if mode == "auto" and can_send(c) else "draft", cid)
 
 
@@ -152,6 +158,8 @@ def run_ai(cid, auto=False):
     c = data.get_conv(cid)
     if not c or c.get("status") == "closed":
         return {"sent": False, "reason": "会话已结束"}
+    if c.get("kind") == notice.KIND:
+        return {"sent": False, "reason": "平台通知"}
     msgs = data.messages(cid, 5)
     if not msgs or msgs[-1]["role"] != "buyer" and not any(m["role"] == "buyer" for m in msgs[-3:]):
         return {"sent": False, "reason": "已经回复过了"}
@@ -165,17 +173,106 @@ def run_ai(cid, auto=False):
     return {"sent": True, "reason": ""}
 
 
+# ---------------- v2.49：买家消息自动翻成中文（后台、限速、存在 cs_msg.text_zh）----------------
+TR_PER_MIN = 20          # 每分钟最多翻几条（AI 费用 / 速度）
+_tr_times = []
+_HAS_ZH = re.compile(r"[\u4e00-\u9fff]")
+_HAS_WORD = re.compile(r"[A-Za-z\u0e00-\u0e7f]")
+
+
+def _tr_slot():
+    now = time.time()
+    while _tr_times and now - _tr_times[0] > 60:
+        _tr_times.pop(0)
+    if len(_tr_times) >= TR_PER_MIN:
+        return False
+    _tr_times.append(now)
+    return True
+
+
+def translate_pending(cid, limit=6):
+    """把这个会话最近还没翻译的买家文字消息翻成中文。超过限速 → 1 分钟后再排。返回翻了几条。"""
+    c = data.get_conv(cid)
+    if not c or c.get("kind") == notice.KIND:
+        return 0
+    rows = [dict(r) for r in _db().execute(
+        "SELECT id, text FROM cs_msg WHERE conv_id=? AND role='buyer' AND COALESCE(kind,'text')='text' AND COALESCE(text_zh,'')='' "
+        "ORDER BY id DESC LIMIT ?", (cid, int(limit)))]
+    n = 0
+    for r in reversed(rows):
+        t = notice.plain(r["text"] or "").strip()
+        if not t or _HAS_ZH.search(t) or not _HAS_WORD.search(t):
+            continue              # 已经是中文 / 只有表情数字：不用翻
+        if not _tr_slot():
+            from . import jobs
+            jobs.enqueue("tr", cid, delay=60)
+            break
+        try:
+            zh = brain.translate(t, "zh", polite=False)
+        except Exception:  # noqa: BLE001  AI 没设置 / 出错：不翻（不影响别的）
+            break
+        if zh and zh.strip() and zh.strip() != t:
+            data.set_msg(r["id"], text_zh=zh.strip()[:2000])
+            n += 1
+    return n
+
+
+# ---------------- v2.49：打开会话 = 平台上也标已读 ----------------
+def mark_read(cid, background=True):
+    """清掉未读；接口渠道（Lazada）同时在平台上标已读。返回有没有调用平台。"""
+    c = data.get_conv(cid)
+    if not c:
+        return False
+    if c.get("unread"):
+        data.update_conv(cid, unread=0)
+    ch = channels.of(c)
+    if not ch or not c.get("ext_last_id") or not c.get("unread"):
+        return False
+
+    def go():
+        try:
+            ch.mark_read(c)
+        except Exception:  # noqa: BLE001  平台标已读失败不要紧
+            pass
+        finally:
+            if background:
+                from core import db
+                db.release()
+    if background:
+        import threading
+        threading.Thread(target=go, daemon=True, name="cs-read").start()
+    else:
+        go()
+    return True
+
+
+def read_all_notices(shops=None):
+    """平台通知全部标已读（平台上也标）。返回几个会话。"""
+    n = 0
+    for c in data.list_convs("system", limit=1000, shops=shops):
+        if c.get("unread"):
+            mark_read(c["id"], background=False)
+            n += 1
+    return n
+
+
 # ---------------- 快捷回复（可带变量）----------------
 VARS = {"买家名": "buyer", "订单号": "order_no", "运单号": "tracking", "预计发货日": "ship_date", "店铺名": "shop",
-        "buyer": "buyer", "order_no": "order_no", "tracking": "tracking", "ship_date": "ship_date", "shop": "shop"}
+        "buyer": "buyer", "order_no": "order_no", "tracking": "tracking", "ship_date": "ship_date", "shop": "shop",
+        # v2.49：泰文界面用泰文变量名
+        "ชื่อลูกค้า": "buyer", "เลขคำสั่งซื้อ": "order_no", "เลขพัสดุ": "tracking", "วันจัดส่ง": "ship_date", "ชื่อร้าน": "shop"}
 DEFAULT_QUICK = [
     ("问候", "สวัสดีค่ะคุณ{买家名} ยินดีให้บริการค่ะ สนใจสินค้าชิ้นไหนสอบถามได้เลยนะคะ 😊", "常用"),
     ("已发货", "คำสั่งซื้อ {订单号} จัดส่งแล้วค่ะ เลขพัสดุ {运单号} ค่ะ 🙏", "物流"),
-    ("制作中", "สินค้าของคุณ{买家名}กำลังผลิตอยู่ค่ะ คาดว่าจะจัดส่งภายใน {预计发货日} นะคะ", "物流"),
+    ("备货中", "สินค้าของคุณ{买家名}กำลังเตรียมสินค้าอยู่ค่ะ คาดว่าจะจัดส่งภายใน {预计发货日} นะคะ", "物流"),
     ("请稍等", "รบกวนรอสักครู่นะคะ แอดมินกำลังตรวจสอบให้ค่ะ 🙏", "常用"),
     ("感谢好评", "ขอบคุณมากนะคะ ถ้าพอใจสินค้าฝากรีวิวให้ร้านด้วยนะคะ 💕", "售后"),
     ("请拍照", "ขออภัยด้วยนะคะ รบกวนถ่ายรูป/วิดีโอสินค้าที่ได้รับส่งมาให้แอดมินดูหน่อยค่ะ จะรีบดูแลให้ค่ะ", "售后"),
 ]
+
+
+# v2.49：以前的默认快捷回复（没改过的换成新版：不对买家说「生产」）
+OLD_QUICK = {"สินค้าของคุณ{买家名}กำลังผลิตอยู่ค่ะ คาดว่าจะจัดส่งภายใน {预计发货日} นะคะ": DEFAULT_QUICK[2]}
 
 
 def quick_list(shop=""):
@@ -185,6 +282,9 @@ def quick_list(shop=""):
         for i, (t, x, cat) in enumerate(DEFAULT_QUICK):
             c.execute("INSERT INTO cs_quick(title, text, cat, sort, created_at, username) VALUES(?,?,?,?,?,?)", (t, x, cat, i, now, "system"))
         c.commit()
+    for old, (t, x, _cat) in OLD_QUICK.items():
+        if c.execute("UPDATE cs_quick SET title=CASE WHEN title='制作中' THEN ? ELSE title END, text=? WHERE text=?", (t, x, old)).rowcount:
+            c.commit()
     rows = [dict(r) for r in c.execute("SELECT * FROM cs_quick ORDER BY sort, uses DESC, id")]
     return [r for r in rows if not shop or (r.get("shop") or "") in ("", shop)]
 
@@ -228,7 +328,7 @@ def values_of(c):
 def fill(text, c):
     """把 {买家名} {订单号} {运单号} {预计发货日} {店铺名} 换成这个会话的值；没有值的变量换成空。"""
     v = values_of(c)
-    return re.sub(r"\{([^{}]{1,12})\}", lambda m: v.get(VARS.get(m.group(1).strip(), ""), m.group(0)) if m.group(1).strip() in VARS else m.group(0), text)
+    return re.sub(r"\{([^{}]{1,24})\}", lambda m: v.get(VARS.get(m.group(1).strip(), ""), m.group(0)) if m.group(1).strip() in VARS else m.group(0), text)
 
 
 def quick_use(qid, cid):
@@ -273,7 +373,7 @@ def notify(order_id, what):
     if not text.strip():
         return None
     data.update_conv(c["id"], notified=",".join([x for x in done if x] + [key])[-500:])
-    if shopcfg.mode_of(c) == "auto" and can_send(c):
+    if shopcfg.mode_of(c) == "auto" and can_send(c) and not brain.production_hit(text):
         try:
             send(c["id"], text, "AI", source="auto")
             return "sent"
@@ -377,7 +477,8 @@ def dashboard(user):
     w = lambda c: c.get("wait_min") or 0
     # 今天：新会话、首次响应、AI / 人工回复条数
     rows = db.execute("SELECT m.conv_id, m.role, m.source, m.username, m.created_at, c.shop FROM cs_msg m JOIN cs_conv c ON c.id=m.conv_id "
-                      "WHERE m.created_at>=? AND m.role IN ('buyer','seller') ORDER BY m.conv_id, m.id", (d0,)).fetchall()
+                      "WHERE m.created_at>=? AND m.role IN ('buyer','seller') AND COALESCE(c.kind,'')!='system' ORDER BY m.conv_id, m.id",
+                      (d0,)).fetchall()
     rows = [r for r in rows if inshop(r["shop"])]
     first_wait, pend, seen = [], {}, set()
     by_agent = {}
@@ -401,7 +502,9 @@ def dashboard(user):
             if r["source"] != "auto":
                 by_agent[crm.agent_of(r["username"]) or "?"]["waits"].append(wmin)
     avg = (lambda xs: round(sum(xs) / len(xs), 1) if xs else None)
-    new_convs = sum(1 for c in db.execute("SELECT shop FROM cs_conv WHERE created_at>=?", (d0,)) if inshop(c["shop"]))
+    series = _series(db, inshop, d0)
+    new_convs = sum(1 for c in db.execute("SELECT shop FROM cs_conv WHERE created_at>=? AND COALESCE(kind,'')!='system'", (d0,))
+                    if inshop(c["shop"]))
     buyers_today = len({r["conv_id"] for r in rows if r["role"] == "buyer"})
     urgent = sorted([c for c in convs if c.get("needs_human") or w(c) >= 15], key=lambda c: (-int(bool(c.get("needs_human"))), -w(c)))[:12]
     # 店铺
@@ -456,7 +559,39 @@ def dashboard(user):
                         "overdue": r.get("overdue")} for r in after],
         "records": recs,
         "perf": data.perf(7),
-        "unanswered": [{"id": u["id"], "q": (u.get("question_zh") or u["question"])[:80], "count": u["count"]} for u in data.unanswered()[:6]],
+        "unanswered": [{"id": u["id"], "q": (u.get("question_zh") or u["question"])[:80], "q_th": (u["question"] or "")[:80], "count": u["count"]}
+                       for u in data.unanswered()[:6]],
         "qa": qa, "qa_avg": avg([q["score"] for q in qa if q.get("score")]),
         "night": shopcfg.is_night(),
+        "series": series,
+        "alert_minutes": float(data.settings().get("alert_minutes") or 0),
+        "notices": sum(1 for c in data.list_convs("system", limit=500) if inshop(c.get("shop")) and c.get("unread")),
     }
+
+
+def _series(db, inshop, d0, days=7):
+    """工作台的走势小图（v2.49）：最近 7 天每天来问的买家、回复条数、AI 自动回复、平均首次响应（分钟）。"""
+    t0 = d0 - (days - 1) * 86400
+    rows = db.execute("SELECT m.conv_id, m.role, m.source, m.created_at, c.shop FROM cs_msg m JOIN cs_conv c ON c.id=m.conv_id "
+                      "WHERE m.created_at>=? AND m.role IN ('buyer','seller') AND COALESCE(c.kind,'')!='system' ORDER BY m.conv_id, m.id",
+                      (t0,)).fetchall()
+    idx = lambda t: min(days - 1, max(0, int((t - t0) // 86400)))
+    buyers = [set() for _ in range(days)]
+    sent, ai, waits = [0] * days, [0] * days, [[] for _ in range(days)]
+    pend = {}
+    for r in rows:
+        if not inshop(r["shop"]):
+            continue
+        i = idx(r["created_at"])
+        if r["role"] == "buyer":
+            buyers[i].add(r["conv_id"])
+            pend.setdefault(r["conv_id"], r["created_at"])
+            continue
+        sent[i] += 1
+        ai[i] += r["source"] == "auto"
+        t = pend.pop(r["conv_id"], None)
+        if t:
+            waits[i].append((r["created_at"] - t) / 60)
+    return {"days": [time.strftime("%m-%d", time.localtime(t0 + k * 86400)) for k in range(days)],
+            "buyers": [len(x) for x in buyers], "sent": sent, "ai": ai,
+            "reply_min": [round(sum(w) / len(w), 1) if w else 0 for w in waits]}

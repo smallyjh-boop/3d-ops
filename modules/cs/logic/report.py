@@ -35,20 +35,34 @@ def weekly(days=7, with_ai=True):
         "leads": {"new": leads_new[0], "value": round(leads_new[1] or 0, 2), "stages": stages,
                   "due": [{"id": x["id"], "buyer": x.get("buyer"), "stage": data.LEAD_STAGES.get(x.get("lead_stage"), ""),
                            "note": x.get("follow_note") or "", "value": x.get("lead_value")} for x in due[:20]]},
-        "unanswered": [{"q": u["question_zh"] or u["question"], "n": u["count"]} for u in data.unanswered()[:10]],
+        "unanswered": [{"q": u["question_zh"] or u["question"], "q_th": u["question"] or u["question_zh"], "n": u["count"]}
+                       for u in data.unanswered()[:10]],
         "learned": learned, "kb_pending": pending, "overdue_now": len(data.overdue()),
     }
-    out["points"] = []
+    out["points"], out["points_th"] = [], []
     if with_ai:
         try:
             from .brain import weekly_insight
-            out["points"] = weekly_insight({k: out[k] for k in ("perf", "intents", "tags", "leads", "unanswered", "learned")})
+            pts = weekly_insight({k: out[k] for k in ("perf", "intents", "tags", "leads", "unanswered", "learned")})
+            out["points"], out["points_th"] = pts.get("zh") or [], pts.get("th") or []
         except Exception:  # noqa: BLE001  没有 AI 也照样出周报
-            out["points"] = []
+            pass
     return out
 
 
-def as_text(r):
+# v2.49：泰文界面的周报（泰国员工看）
+INTENT_TH = {"product": "ถามสินค้า", "price": "ถามราคา / ส่วนลด", "stock": "ถามของ / ส่งกี่วัน", "order_status": "ถามสถานะคำสั่งซื้อ",
+             "custom": "สั่งทำพิเศษ", "wholesale": "ขายส่ง / จำนวนมาก", "complaint": "ร้องเรียน / ของเสียหาย", "refund": "คืนเงิน / คืนสินค้า",
+             "change_order": "แก้ไขคำสั่งซื้อ", "thanks": "ขอบคุณ / รีวิว", "other": "อื่นๆ"}
+TAG_TH = {"批发": "ขายส่ง", "定制": "สั่งทำ", "送礼": "ของขวัญ", "企业团购": "องค์กร", "回头客": "ลูกค้าเก่า", "急单": "ด่วน", "价格敏感": "เน้นราคา",
+          "比价": "เทียบราคา", "要样品": "ขอตัวอย่าง", "新品询问": "ถามสินค้าใหม่", "售后": "หลังการขาย", "差评风险": "เสี่ยงรีวิวไม่ดี", "好评": "รีวิวดี",
+          "海外 / 外地": "ต่างประเทศ / ต่างจังหวัด", "询价": "ถามราคา", "催单": "ตามของ", "闲聊": "คุยทั่วไป", "咨询": "สอบถาม"}
+STAGE_TH = {"new": "ลูกค้าใหม่", "follow": "กำลังติดตาม", "quoted": "เสนอราคาแล้ว", "won": "ปิดการขาย", "lost": "หลุด"}
+
+
+def as_text(r, lang="zh"):
+    if lang == "th":
+        return as_text_th(r)
     p = r["perf"]
     L = [f"客服周报 {r['from']} ~ {r['to']}", "",
          f"有买家消息的会话 {p['convs']} 个，回复 {p['sent']} 条（自动发送 {p['auto']} 条），"
@@ -84,3 +98,28 @@ def last():
         return json.loads(r["v"]) if r else None
     except ValueError:
         return None
+
+
+def as_text_th(r):
+    p = r["perf"]
+    dash = lambda v: "-" if v is None else v
+    L = [f"รายงานแชทลูกค้า {r['from']} ~ {r['to']}", "",
+         f"แชทที่มีข้อความลูกค้า {p['convs']} แชท ตอบ {p['sent']} ข้อความ (ส่งอัตโนมัติ {p['auto']}) "
+         f"ใช้ร่าง AI ตรงๆ {dash(p['adopt_pct'])}% ตอบเฉลี่ย {dash(p['avg_reply_min'])} นาที "
+         f"ตอบช้าเกินกำหนด {p['over_alert']} ครั้ง ตอนนี้ยังไม่ได้ตอบเกินเวลา {r['overdue_now']} แชท", ""]
+    if r["intents"]:
+        L.append("ถามบ่อยที่สุด: " + ", ".join(f"{INTENT_TH.get(x['intent'], x['intent'])} {x['n']}" for x in r["intents"][:6]))
+    if r["tags"]:
+        L.append("แท็กความต้องการ: " + ", ".join(f"{TAG_TH.get(x['tag'], x['tag'])} {x['n']}" for x in r["tags"][:8]))
+    ld = r["leads"]
+    L.append(f"โอกาสขายใหม่ {ld['new']} ราย (ประมาณ ฿{ld['value']:,.0f}) " + ", ".join(f"{STAGE_TH.get(k, k)} {v}" for k, v in ld["stages"].items()))
+    if ld["due"]:
+        L.append("ลูกค้าที่ต้องติดตาม:")
+        L += [f"  · {x['buyer'] or 'ลูกค้า'}" for x in ld["due"][:10]]
+    if r["unanswered"]:
+        L.append("คำถามที่ AI ตอบไม่ได้ (เพิ่มในคลังความรู้):")
+        L += [f"  · {x.get('q_th') or x['q']} ({x['n']} ครั้ง)" for x in r["unanswered"]]
+    L.append(f"สัปดาห์นี้ AI เรียนรู้ความรู้ใหม่ {r['learned']} รายการ รอยืนยัน {r['kb_pending']} รายการ")
+    if r.get("points_th"):
+        L += ["", "สรุปและคำแนะนำจาก AI:"] + [f"  {i + 1}. {x}" for i, x in enumerate(r["points_th"])]
+    return "\n".join(L)

@@ -41,6 +41,9 @@
     const box = document.querySelector("#cs-presence");
     if (!box) return;
     const tabs = d.tabs || [];
+    // v2.49：没有浏览器扩展开着店铺页（店铺都走接口）时不显示这一行
+    box.classList.toggle("hidden", !tabs.length);
+    if (!tabs.length) { box.innerHTML = ""; return; }
     box.innerHTML = tabs.length
       ? `<span class="small muted">${Z("浏览器里的店铺", "ร้านที่เปิดในเบราว์เซอร์")}：</span>` + tabs.map((t) => `<span class="pill ${t.unread ? "warn-pill" : ""}" title="${esc((t.buyers || []).join("、"))}">
           <span data-notr>${esc(t.shop || t.host || "?")}</span> · ${esc(t.platform || "")} ${t.unread ? `🔔 ${t.unread}` : "✓"}${t.auto ? "" : ` · ${Z("自动关", "ปิดอัตโนมัติ")}`}</span>`).join(" ")

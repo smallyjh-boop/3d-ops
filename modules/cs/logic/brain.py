@@ -144,7 +144,7 @@ def quote(items, tiers=None):
 
 
 # ---------------- AI ----------------
-SYSTEM = """你是泰国网店「{shop}」的客服，店里卖 3D 打印的产品（接单后打印制作）。
+SYSTEM = """你是泰国网店「{shop}」的客服，店里卖家居小物、摆件、定制礼品。
 回复风格：{persona}
 
 必须遵守：
@@ -156,8 +156,10 @@ SYSTEM = """你是泰国网店「{shop}」的客服，店里卖 3D 打印的产�
 5. 批发/大量：用资料里算好的报价（quote），不能比它更便宜；交期用 quote.ship_days。
 6. 用买家用的语言回复（泰语买家用泰语）。回复要短，像真人客服。
 7. 下面这些事你不能自己答应（要答应的话 needs_human=true，回复里只说「马上帮您确认」）：{forbidden}
+8. 用词：回复里绝对不要提生产、制作过程、3D 打印、打印机、耗材、层纹、「接单后才做」（泰语不要用 ผลิต、พิมพ์ 3D、งานพิมพ์、กำลังพิมพ์、เส้นพลาสติก）。
+   说「备货 เตรียมสินค้า / 打包 แพ็กสินค้า / 尽快发货 จัดส่งให้เร็วที่สุด」。订单资料里的内部进度只给你参考，不能告诉买家。
 {smart}只输出 JSON。"""
-SMART = """8. 灵活一点：信息不够就礼貌追问 1 个最关键的问题（尺寸、颜色、数量、要不要刻字、哪天要）；
+SMART = """9. 灵活一点：信息不够就礼貌追问 1 个最关键的问题（尺寸、颜色、数量、要不要刻字、哪天要）；
    买家犹豫时可以推荐资料里相关的产品、颜色或套装；老顾客（资料里有买家历史）要认出来，语气更亲切；
    能一次说清楚的不要分好几条。不确定的事情不要假装知道。
 """
@@ -237,7 +239,7 @@ def build_context(conv, msgs, orders_found, instruction=""):
                 "用途": p["features_zh"], "发货天数": p["lead_days"],
                 "款式": [{"sku": v["sku"], "款式": v["option_zh"], "泰文": v["option_th"], "售价THB": v["price"]} for v in p["variants"]]}
                for p in prods],
-        "相关订单": orders_found,
+        "相关订单": [_buyer_safe(o) for o in orders_found],
         "知识库": [{"id": k["id"], "问": k["q"], "答": k["a"]} for k in kb_match(last_text, shop=conv.get("shop") or "")],
         "以前的好回复（参考语气和说法）": [{"买家": e["question"][:300], "回复": e["final_reply"][:400]} for e in example_match(last_text)],
         "批发报价（程序算好的）": q,
@@ -249,6 +251,17 @@ def build_context(conv, msgs, orders_found, instruction=""):
     if instruction:
         ctx["老板/客服的要求（这次回复必须照做）"] = instruction
     return ctx, pending, intent0, q
+
+
+def _buyer_safe(o):
+    """订单资料给 AI：生产进度改名成「内部进度」，提醒 AI 不能告诉买家（v2.49）。"""
+    if not isinstance(o, dict):
+        return o
+    o = dict(o)
+    prog = o.pop("production", None)
+    if prog:
+        o["内部备货进度（只给你参考，不能告诉买家；对买家只说正在备货 / 打包）"] = prog
+    return o
 
 
 def _cs_cfg():
@@ -287,7 +300,10 @@ def draft(conv, msgs, orders_found, instruction=""):
     hit = forbidden_hit(str(d.get("reply") or ""), s)
     if hit:
         needs = True
-        reason = (reason + "；" if reason else "") + f"回复里有要老板确认的承诺（{hit}）"
+        if hit in PROD_WORDS or production_hit(hit):
+            reason = (reason + "；" if reason else "") + f"回复里提到了生产 / 打印（{hit}），不能这样对买家说，请改成「备货 / 打包」"
+        else:
+            reason = (reason + "；" if reason else "") + f"回复里有要老板确认的承诺（{hit}）"
         tier = "human"
     try:
         conf = max(0.0, min(1.0, float(d.get("confidence") or 0)))
@@ -334,14 +350,34 @@ def _num(v):
         return 0.0
 
 
+# v2.49：发给买家的话不能提生产 / 3D 打印 / 接单后制作（不管设置里的词怎么改，这些一直挡）
+PROD_WORDS = ["ผลิต", "พิมพ์ 3D", "พิมพ์3D", "พิมพ์ 3 มิติ", "งานพิมพ์", "การพิมพ์", "กำลังพิมพ์", "เครื่องพิมพ์", "เส้นพลาสติก", "ฟิลาเมนต์",
+              "ทีละชั้น", "3D print", "3D-print", "3Dprint", "printing", "printer", "filament", "layer line", "made to order",
+              "made-to-order", "生产", "打印", "耗材", "层纹", "接单后制作", "接单后才做"]
+_OK_WORDS = ("ผลิตภัณฑ์",)          # 「产品」这个词里也有 ผลิต，不算
+
+
+def _clean(text):
+    t = (text or "").lower()
+    for w in _OK_WORDS:
+        t = t.replace(w, "")
+    return t
+
+
+def production_hit(text):
+    """回复里有没有提生产 / 打印（发给买家前挡住）。返回命中的词或空。"""
+    low = _clean(text)
+    return next((w for w in PROD_WORDS if w.lower() in low), "")
+
+
 def forbidden_hit(reply, s=None):
     s = s or data.settings()
     words = [w.strip() for w in re.split(r"[,，\n]", s.get("forbidden_words") or "") if w.strip()]
-    low = (reply or "").lower()
+    low = _clean(reply)
     for w in words:
         if w.lower() in low:
             return w
-    return ""
+    return production_hit(reply)
 
 
 _TR_CACHE = {}
@@ -399,5 +435,6 @@ def weekly_insight(stats):
     cfg = _cs_cfg()
     d = ai_copy.extract_json(ai_copy.call(cfg, "你是电商客服主管。只输出 JSON。",
                                           "根据这周的客服数据，写 3-5 条简短的中文总结和下周建议（哪些问题多、该补什么知识库、哪些客户要跟进、"
-                                          "自动回复哪里可以放开或收紧）。输出 {\"points\": [\"...\"]}\n\n" + json.dumps(stats, ensure_ascii=False, default=str)))
-    return [str(x) for x in d.get("points") or []][:6]
+                                          "自动回复哪里可以放开或收紧），每条再给一句意思一样的泰语（给泰国员工看）。"
+                                          "输出 {\"points\": [\"...\"], \"points_th\": [\"...\"]}\n\n" + json.dumps(stats, ensure_ascii=False, default=str)))
+    return {"zh": [str(x) for x in d.get("points") or []][:6], "th": [str(x) for x in d.get("points_th") or []][:6]}
