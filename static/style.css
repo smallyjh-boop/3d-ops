@@ -692,3 +692,9 @@ input.dp-bad { outline: 2px solid #dc2626 }
 .cfg-mods { gap: 8px; flex-wrap: wrap; padding: 6px 0 }
 .cfg-mods .chip { font-size: 15px; padding: 8px 16px; border-radius: 10px; font-weight: 600; cursor: pointer }
 .cfg-mods .chip.on { background: #1d4ed8; border-color: #1d4ed8; color: #fff; box-shadow: 0 2px 6px #1d4ed844 }
+/* v2.46：今日待办（工作台卡片 + 运营分析「今日待办」页面，static/home.js 的 TODO_UI） */
+.todo-card h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap } .todo-card h3 button { margin-left: auto }
+.todo-it { display: flex; align-items: flex-start; gap: 10px; padding: 6px 8px; border-left: 3px solid #cbd5e1; border-radius: 4px; margin: 4px 0; background: #fff }
+.todo-it.lv-bad { border-left-color: #dc2626; background: #fef2f2 } .todo-it.lv-warn { border-left-color: #f59e0b; background: #fffbeb }
+.todo-it.is-done { opacity: .55 } .todo-tx { flex: 1; min-width: 0 } .todo-tx b[data-todo-go] { cursor: pointer } .todo-tx b[data-todo-go]:hover { text-decoration: underline }
+.todo-bt button { margin: 0 0 0 4px } .todo-grp h4 { margin: 12px 0 4px }

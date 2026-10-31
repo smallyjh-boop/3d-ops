@@ -209,6 +209,65 @@ def do_import(token, mapping, platform, shop="", user=""):
             "total": r2(total)}
 
 
+def import_lines(platform, shop, lines, filename="", user=""):
+    """v2.46：别的模块用接口拉到的结算明细（例如运营分析模块拉的 Lazada 财务流水）直接记进来，和导入表格一样：
+    lines = [{order_no, fee_name, amount, wht, vat, day(YYYY-MM-DD), ref, uid（这一行在平台的唯一编号，用来去重）, is_item}]
+    同一行（同一个 uid）记过就跳过；对上的订单写进「实际到账」。返回 {batch, new_rows, orders, matched}。"""
+    platform = (platform or "").strip().lower()
+    if platform not in ("lazada", "shopee", "tiktok", "other"):
+        raise ValueError("平台不对")
+    c = db.conn()
+    rows = []
+    for ln in lines or []:
+        try:
+            amount = float(ln.get("amount"))
+        except (TypeError, ValueError):
+            continue
+        uid = str(ln.get("uid") or "")
+        if not uid:
+            continue
+        rows.append((ln, amount, "api:" + hashlib.sha1(uid.encode("utf-8", "ignore")).hexdigest()[:24]))
+    if not rows:
+        return {"batch": None, "new_rows": 0, "orders": 0, "matched": 0}
+    have = set()
+    hashes = [h for _l, _a, h in rows]
+    for i in range(0, len(hashes), 500):
+        chunk = hashes[i:i + 500]
+        have |= {r[0] for r in c.execute(f"SELECT row_hash FROM fin_settle_lines WHERE platform=? AND row_hash IN "
+                                          f"({','.join('?' * len(chunk))})", (platform, *chunk))}
+    rows = [x for x in rows if x[2] not in have]
+    if not rows:
+        return {"batch": None, "new_rows": 0, "orders": 0, "matched": 0}
+    cur = c.execute("INSERT INTO fin_settle_batches(platform, shop, filename, rows, username, created_at, mapping) VALUES(?,?,?,?,?,?,?)",
+                    (platform, shop or "", filename or "接口", 0, user, time.time(), json.dumps({"source": "api"})))
+    bid = cur.lastrowid
+    touched, days, new = set(), [], 0
+    for ln, amount, h in rows:
+        on = str(ln.get("order_no") or "")
+        day = str(ln.get("day") or "")[:10]
+        if day:
+            days.append(day)
+        try:
+            c.execute("INSERT INTO fin_settle_lines(batch_id, platform, shop, order_no, order_key, fee_name, amount, wht, vat, day, ref, "
+                      "row_hash, is_item) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (bid, platform, shop or "", on, key(on), str(ln.get("fee_name") or "")[:80], amount, abs(float(ln.get("wht") or 0)),
+                       abs(float(ln.get("vat") or 0)), day, str(ln.get("ref") or "")[:60], h,
+                       1 if (ln.get("is_item") if ln.get("is_item") is not None else _is_item(ln.get("fee_name"))) else 0))
+            new += 1
+            if on:
+                touched.add(key(on))
+        except Exception as e:  # noqa: BLE001
+            if "UNIQUE" not in str(e):
+                raise
+    total = c.execute("SELECT COALESCE(SUM(amount),0) FROM fin_settle_lines WHERE batch_id=?", (bid,)).fetchone()[0]
+    c.execute("UPDATE fin_settle_batches SET rows=?, new_rows=?, orders=?, total=?, date_from=?, date_to=? WHERE id=?",
+              (len(rows), new, len(touched), r2(total), min(days) if days else "", max(days) if days else "", bid))
+    c.commit()
+    matched = _apply(platform, touched)
+    db.audit(user or "系统", "财务·接口结算明细", f"{platform} {shop}".strip(), f"{filename}：{new} 行新数据，{len(touched)} 个订单，对上 {matched} 个")
+    return {"batch": bid, "new_rows": new, "orders": len(touched), "matched": matched}
+
+
 def _order_index(c, platform):
     idx = {}
     for o in c.execute("SELECT id, order_no FROM orders WHERE platform=?", (platform,)):

@@ -90,6 +90,7 @@ MODULES = [
             ("fin_fixed_cats", "算「固定费用」的支出分类（逗号分隔；这期间没记账就按「成本与定价」里的房租、人工、折旧估算）", "list"),
             ("fin_expense_cats", "自己加的支出分类（逗号分隔）", "list")]),
     ]},
+    {"id": "ops", "zh": "运营分析", "th": "วิเคราะห์การขาย", "module": "ops", "groups": []},     # v2.46 运营分析模块（设置在模块说明书里）
     {"id": "ai", "zh": "AI 与对接", "th": "AI และการเชื่อมต่อ", "ext": True, "groups": [
         ("AI", [
             ("ai_provider", "接口类型", ["anthropic", "openai_compatible"]), ("ai_model", "模型名称"),

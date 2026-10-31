@@ -379,3 +379,70 @@ class LazadaConnector(Connector):
         """按订单号打开（没有就新建）和买家的会话（OpenSession）：返回 session_id。"""
         d = self._im("/im/session/open", {"order_id": order_id}, method="POST")
         return d.get("session_id") or ""
+    # ---------- 运营数据（v2.46：modules/ops/lazada.py 拉财务流水、评价、退货退款、店铺表现）----------
+    # 这几个接口要在 open.lazada.com 的 App Console 里给应用开对应的权限（Finance / Product Review / Return and Refund / Seller），
+    # 没开会报 permission 之类的错：运营分析页面上会显示，并提示去申请。
+    def finance_transactions(self, start_date, end_date, offset=0, limit=500, trans_type=None, order_id=None):
+        """QueryTransactionDetails：start_date / end_date 是 YYYY-MM-DD（相差不超过 180 天），一次最多 500 行。返回 [行]。"""
+        self._ensure_token()
+        p = {"start_time": start_date, "end_time": end_date, "offset": offset, "limit": limit}
+        if trans_type not in (None, ""):
+            p["trans_type"] = trans_type
+        if order_id:
+            p["trade_order_id"] = order_id
+        d = self._call("/finance/transaction/details/get", p).get("data")
+        return d if isinstance(d, list) else ((d or {}).get("list") or (d or {}).get("data") or [])
+
+    @staticmethod
+    def _ok(r, path):
+        """评价、退货接口：外层 code 是 0，里面还有 success / error_code。"""
+        if str(r.get("success", "true")).lower() == "false":
+            raise RuntimeError(f"Lazada {path} 出错：{r.get('error_code') or ''} {r.get('error_msg') or ''}".strip())
+        return r
+
+    def review_ids(self, item_id, start_ms, end_ms, page=1):
+        """GetHistoryReviewIdList：一个商品在一段时间（不超过 7 天、最近 90 天内）的评价编号。
+        返回 {current, total, page_size, id_list:[…]}。"""
+        self._ensure_token()
+        path = "/review/seller/history/list"
+        r = self._ok(self._call(path, {"item_id": item_id, "start_time": int(start_ms), "end_time": int(end_ms), "current": int(page)}), path)
+        return r.get("data") or {}
+
+    def reviews(self, ids):
+        """GetReviewListByIdList（v2）：一次最多 10 个评价编号 → [评价]（rating 在 ratings 里，卖家回复在 seller_reply）。"""
+        self._ensure_token()
+        path = "/review/seller/list/v2"
+        r = self._ok(self._call(path, {"id_list": json.dumps([int(x) for x in ids][:10])}), path)
+        return (r.get("data") or {}).get("review_list") or []
+
+    def review_reply(self, review_id, content):
+        """回复评价（SubmitSellerReply）。"""
+        self._ensure_token()
+        path = "/review/seller/reply/add"
+        r = self._ok(self._call(path, {"id": int(review_id), "content": str(content)[:500]}), path)     # 文档写的是 GET
+        if str(r.get("data", "true")).lower() == "false":
+            raise RuntimeError("Lazada 没有接受这条回复")
+        return r
+
+    def reverse_orders(self, page_no=1, page_size=50, start_ms=None, end_ms=None):
+        """GetReverseOrdersForSeller：退货 / 退款 / 取消申请（按页）。start_ms / end_ms = 退货行「最后修改时间」的范围（毫秒），
+        这样状态变了的也能拉到。返回 {total, items:[{reverse_order_id, trade_order_id, request_type, reverse_order_lines:[…]}]}。"""
+        self._ensure_token()
+        path = "/reverse/getreverseordersforseller"
+        p = {"page_no": int(page_no), "page_size": int(page_size)}
+        if start_ms:
+            p["ReverseOrderLineModifiedTimeRangeStart"] = int(start_ms)
+        if end_ms:
+            p["ReverseOrderLineModifiedTimeRangeEnd"] = int(end_ms)
+        r = self._ok(self._call(path, p), path)
+        res = r.get("result") or r.get("data") or {}
+        if isinstance(res, dict) and isinstance(res.get("data"), dict):      # 有的版本多包一层
+            res = res["data"]
+        return res if isinstance(res, dict) else {"items": res or []}
+
+    def seller_performance(self, language="en-US"):
+        """店铺表现（GetSellerPerformance）：{indicators:[{name, type, score, formatted_score, formatted_target, target_respected, tip}]}。"""
+        self._ensure_token()
+        path = "/seller/performance/get"
+        r = self._ok(self._call(path, {"language": language}), path)
+        return r.get("data") or r.get("result") or {}

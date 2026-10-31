@@ -34,3 +34,24 @@ def modules_ui(mid, name):
     r = send_file(p, max_age=0)
     r.headers["Cache-Control"] = "no-cache"
     return r
+
+
+# ---------------- 今日待办（v2.46，core/todo.py）：各模块交上来的待办，工作台卡片和「运营分析 → 今日待办」页面共用 ----------------
+from core import todo as _todo  # noqa: E402
+_todo.init()
+
+
+@app.get("/api/todo")
+def todo_list():
+    u = auth.current_user() or {"role": "owner"}
+    return jsonify({"ok": True, **_todo.collect(u.get("role"), include_done=request.args.get("all") == "1")})
+
+
+@app.post("/api/todo/state")
+def todo_state():
+    b = request.get_json(silent=True) or {}
+    try:
+        _todo.set_state(b.get("key"), b.get("state") or "", _uname())
+    except ValueError as e:
+        return err(str(e))
+    return jsonify({"ok": True})
