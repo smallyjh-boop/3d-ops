@@ -26,6 +26,7 @@ SKU_FIXED = {"sku.package_weight": "package_weight", "sku.package_length": "pack
              "sku.package_width": "package_width", "sku.package_height": "package_height"}
 ALWAYS = ("name", "description")          # 所有类目都有的
 STOCK_BATCH = 20
+STATUS_EVERY = 1800
 
 
 class PushError(Exception):
@@ -190,7 +191,9 @@ def push(pids, user="", force=False):
         return {"ok": [], "failed": [], "errors": errors, "warnings": warnings}
     done, failed, attr_cache = [], [], {}
     try:
-        for p in prods:
+        from core import bgjobs
+        for i, p in enumerate(prods):
+            bgjobs.note(stage=f"{i + 1}/{len(prods)}")          # 任务中心显示进度（v2.43）
             state = dict(p.get("lazada_api") or {})
             try:
                 cat = categories.get((p.get("category") or {}).get("id"))
@@ -262,14 +265,78 @@ def sync_stock(user="", how="api"):
     return {"synced": n, "skipped": skipped, "failed": failed}
 
 
+# Lazada 商品状态 → 上架状态（v2.43：接口推送过的产品自动同步审核结果，不用手点）
+LZ_STATUS = {"active": "live", "inactive": "inactive", "pending qc": "uploaded", "pending": "uploaded", "qc pending": "uploaded",
+             "suspended": "rejected", "rejected": "rejected", "qc rejected": "rejected", "qc failed": "rejected",
+             "deleted": "inactive", "deactivated": "inactive"}
+
+
+def _reason(d):
+    """审核不通过的原因：接口在不同地方给（suspendedSkus、reject_reason、qc_reason……），有就拼起来。"""
+    out = []
+    for k in ("reject_reason", "rejectReason", "qc_reason", "reason"):
+        if d.get(k):
+            out.append(str(d[k]))
+    for s in d.get("suspendedSkus") or d.get("suspended_skus") or []:
+        r = s.get("rejectReason") or s.get("reject_reason") or s.get("reason") if isinstance(s, dict) else None
+        if r:
+            out.append(str(r))
+    return "；".join(dict.fromkeys(out))[:300]
+
+
+def sync_status(user="系统", pids=None):
+    """接口推送过的产品：向 Lazada 查商品状态，改上架状态（审核中 → 已上线 / 审核不通过 / 已下架）。
+    返回 {checked, changed:[{id, from, to, note}], failed:[…]}。"""
+    from core import listing
+    sid, conn = shop()
+    checked, changed, failed = 0, [], []
+    try:
+        for it in store.list_products():
+            pid = it["id"]
+            if pids and pid not in pids:
+                continue
+            p = store.load(pid)
+            st = p.get("lazada_api") or {}
+            if not st.get("item_id"):
+                continue
+            checked += 1
+            try:
+                d = conn.get_item(st["item_id"])
+            except Exception as e:  # noqa: BLE001
+                failed.append(f"{pid}：{e}")
+                continue
+            raw = str(d.get("status") or d.get("Status") or "").strip()
+            new = LZ_STATUS.get(raw.lower())
+            st["platform_status"], st["status_at"] = raw, time.time()
+            cur = listing.status_of(p, "lazada").get("status")
+            note = _reason(d) if new == "rejected" else None
+            if new and (new != cur or (note and note != (listing.status_of(p, "lazada").get("note") or ""))):
+                if not (cur == "update" and new == "live"):          # 有修改待同步的：上线了也保持「待同步」提醒
+                    listing._set(p, "lazada", new, note=note, user=user)
+                    changed.append({"id": pid, "from": cur, "to": new, "note": note or ""})
+            p["lazada_api"] = st
+            store.save(p)
+    finally:
+        integrations._store_creds(sid, conn)
+    return {"checked": checked, "changed": changed, "failed": failed}
+
+
 _started = False
 
 
 def _loop():
     from core import diag
-    last = 0
+    last = last_status = 0
     while True:
         time.sleep(60)
+        if time.time() - last_status >= STATUS_EVERY:          # v2.43：每 30 分钟同步一次审核结果
+            last_status = time.time()
+            try:
+                sync_status()
+            except PushError:
+                pass
+            except Exception as e:  # noqa: BLE001
+                diag.log.warning("Lazada 审核状态同步失败：%s", e)
         try:
             mins = int(load_config().get("lazada_stock_sync_min") or 0)
         except (TypeError, ValueError):

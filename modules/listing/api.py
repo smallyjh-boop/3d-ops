@@ -15,11 +15,57 @@ def lazada_push_products():
     ids = b.get("product_ids") or []
     if not ids:
         return err("请至少选择一个产品")
+    user, force = _uname(), bool(b.get("force"))
+
+    def run():
+        try:
+            return jsonify(lazada_push.push(ids, user, force=force))
+        except lazada_push.PushError as e:
+            return err(str(e))
+    return maybe_async(f"推送到 Lazada（{len(ids)} 个）", run, "lz_push")      # v2.43：?async=1 时后台跑，任务中心看进度
+
+
+@bp.post("/api/listing/lazada/status-sync")
+def lazada_status_sync():
+    """v2.43：接口推送过的产品，向 Lazada 查审核结果（平时每 30 分钟自动查一次）。"""
+    from . import lazada_push
+    b = request.get_json(force=True, silent=True) or {}
     try:
-        r = lazada_push.push(ids, _uname(), force=bool(b.get("force")))
+        return jsonify(lazada_push.sync_status(_uname(), b.get("product_ids") or None))
     except lazada_push.PushError as e:
         return err(str(e))
-    return jsonify(r)
+
+
+# ---------------- v2.43：上架工作台（缺什么、原地修、AI 补齐） ----------------
+@bp.get("/api/listing/issues/<pid>")
+def listing_issues(pid):
+    from . import workbench
+    try:
+        return jsonify(workbench.issues(pid, request.args.get("platform") or "lazada"))
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+
+
+@bp.post("/api/listing/fix/<pid>")
+def listing_fix(pid):
+    from . import workbench
+    b = request.get_json(force=True, silent=True) or {}
+    try:
+        workbench.fix(pid, b.get("action") or "", _uname())
+        return jsonify(workbench.issues(pid, b.get("platform") or "lazada"))
+    except (ValueError, FileNotFoundError) as e:
+        return err(str(e))
+
+
+@bp.post("/api/listing/ai-fill")
+def listing_ai_fill():
+    from . import workbench
+    b = request.get_json(force=True, silent=True) or {}
+    ids = b.get("product_ids") or []
+    if not ids:
+        return err("请至少选择一个产品")
+    user, plat = _uname(), b.get("platform") or "lazada"
+    return maybe_async(f"AI 补齐上架资料（{len(ids)} 个）", lambda: jsonify(workbench.ai_fill(ids, plat, user)), "ai_fill")
 
 
 @bp.post("/api/listing/lazada/stock-sync")

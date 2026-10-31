@@ -1,101 +1,234 @@
 "use strict";
 // 上架导出模块：导出上架表格页（选产品、分组、导出 Lazada / Shopee 表格、上架批次和状态）。v2.31 从 app.js 搬过来。
 // 和 app.js 共用的：PRODUCT_LIST（产品列表）、lstBadge / LST_*（上架状态小标签，产品库也用）、api / esc / toast 等工具函数。
+// v2.43：上架工作台——一次看一个平台；流程条（待完善 → 可上架 → 审核中 → 已上线，问题单独一组）点哪段筛哪段；
+// 左边分组；表格分页；点「⚠ 缺 N 项」原地展开缺什么、能修的直接修；勾选后底部出现操作条，按当前阶段给该用的按钮。
+// 平台、状态、分组的值还放在隐藏的 #exp-plat / #exp-status / #exp-group 里（导出、标状态的老代码在用）。
 async function loadExport() {
   await loadCats();
   const nf = new Set(CATS.map((c) => c.template)).size;
   $("#exp-tplinfo").textContent = CATS.length ? `${CATS.length} 个类目 · ${nf} 个模板文件` : "还没有模板";
   const [list, g] = await Promise.all([api("/api/products"), api("/api/groups").catch(() => ({ groups: [] }))]);
   PRODUCT_LIST = list; EXP_GROUPS = g.groups || [];
-  const cur = $("#exp-group").value;
-  $("#exp-group").innerHTML = `<option value="">全部（${list.length}）</option><option value="none">未分组（${list.filter((p) => !(p.groups || []).length).length}）</option>` +
-    EXP_GROUPS.map((x) => `<option value="${x.id}" data-notr>${esc(x.name)}（${x.count}）</option>`).join("");
-  $("#exp-group").value = cur;
-  const cur2 = $("#exp-addgroup").value;
-  $("#exp-addgroup").innerHTML = '<option value="">（不加）</option>' + EXP_GROUPS.map((x) => `<option value="${x.id}" data-notr>${esc(x.name)}</option>`).join("");
-  $("#exp-addgroup").value = cur2;
+  const ids = new Set(list.map((p) => p.id));
+  [...EXP_SEL].forEach((x) => { if (!ids.has(x)) EXP_SEL.delete(x); });
+  $("#exp-addgroup").innerHTML = '<option value="">（选分组）</option>' + EXP_GROUPS.map((x) => `<option value="${x.id}" data-notr>${esc(x.name)}</option>`).join("");
+  $("#exp-group").innerHTML = '<option value="">全部</option><option value="none">未分组</option>' + EXP_GROUPS.map((x) => `<option value="${x.id}">${x.id}</option>`).join("");
+  $("#exp-group").value = LW.group;
   renderExpList();
   loadBatches();
 }
 let EXP_GROUPS = [];
 const EXP_SEL = new Set();
-
-function expFiltered() {
-  const gsel = $("#exp-group").value, st = $("#exp-status").value, plat = $("#exp-plat").value;
+const LW = { plat: "lazada", stage: "", group: "", page: 1, open: new Set(), view: "main" };
+const LW_STAGES = [["todo", "待完善", "资料还没补齐（红色项）"], ["ready", "可上架", "检查通过、还没上到平台"], ["review", "审核中", "已推送 / 已上传，平台在审核"], ["live", "已上线", "平台审核通过、在售"]];
+const LW_ISSUES = [["rejected", "审核不通过"], ["failed", "上传失败"], ["update", "有修改待同步"], ["inactive", "平台已下架"], ["pending", "表格待上传"]];
+const lwSt = (p) => ((LW.plat === "shopee" ? p.sp : p.lz) || {}).status || "none";
+const lwErr = (p) => (LW.plat === "shopee" ? p.sp_errors : p.errors) || 0;
+function stageOf(p) {
+  const st = lwSt(p);
+  if (st === "uploaded") return "review";
+  if (st === "live") return "live";
+  if (st === "none") return lwErr(p) ? "todo" : "ready";
+  return st;                       // rejected / failed / update / inactive / pending
+}
+function lwBase() {
+  // 分组 + 搜索（不含阶段）：流程条的数字按这个算
   const q = $("#exp-q").value.trim().toLowerCase();
-  let rows = PRODUCT_LIST.filter((p) => {
-    if (gsel === "none" && (p.groups || []).length) return false;
-    if (gsel && gsel !== "none" && !(p.groups || []).map(String).includes(gsel)) return false;
-    const ls = ((plat === "shopee" ? p.sp : p.lz) || {}).status || "none";
-    if (st === "ready") { if (ON_PLAT.includes(ls) || (plat === "shopee" ? p.sp_errors : p.errors)) return false; }
-    else if (st && ls !== st) return false;
-    if (q && !`${p.id} ${p.name_zh} ${p.category} ${p.category_th}`.toLowerCase().includes(q)) return false;
+  return PRODUCT_LIST.filter((p) => {
+    if (LW.group === "none" && (p.groups || []).length) return false;
+    if (LW.group && LW.group !== "none" && !(p.groups || []).map(String).includes(LW.group)) return false;
+    if (q && !`${p.id} ${p.name_zh} ${p.category} ${p.category_th} ${(p.skus || []).join(" ")}`.toLowerCase().includes(q)) return false;
     return true;
   });
+}
+function expFiltered() {
+  let rows = lwBase();
+  if (LW.stage) rows = rows.filter((p) => stageOf(p) === LW.stage);
   const by = $("#exp-sort").value;
   const key = {
     id: (p) => p.id, id_desc: (p) => p.id, name: (p) => p.name_zh || "", cat: (p) => (p.category || "") + p.id,
-    status: (p) => LST_RANK[((plat === "shopee" ? p.sp : p.lz) || {}).status || "none"] + p.id, updated: (p) => -(p.updated_at || 0),
+    status: (p) => LST_RANK[lwSt(p)] + p.id, updated: (p) => -(p.updated_at || 0),
   }[by] || ((p) => p.id);
   rows = rows.sort((a, b) => { const x = key(a), y = key(b); return x < y ? -1 : x > y ? 1 : 0; });
   if (by === "id_desc") rows.reverse();
   return rows;
 }
+function renderFlow(base) {
+  const cnt = {};
+  base.forEach((p) => { const s = stageOf(p); cnt[s] = (cnt[s] || 0) + 1; });
+  const chip = (k, zh, tip, cls = "") => `<button class="lw-chip ${cls} ${LW.stage === k ? "on" : ""}" data-stage="${k}" title="${tip || ""}"><span>${zh}</span> <b>${cnt[k] || 0}</b></button>`;
+  const issues = LW_ISSUES.filter(([k]) => cnt[k]).map(([k, zh]) => chip(k, zh, "", "warn"));
+  $("#lw-flow").innerHTML = `<button class="lw-chip ${LW.stage === "" ? "on" : ""}" data-stage=""><span>全部</span> <b>${base.length}</b></button><span class="lw-arrow">｜</span>` +
+    LW_STAGES.map(([k, zh, tip]) => chip(k, zh, tip)).join('<span class="lw-arrow">→</span>') +
+    (issues.length ? `<span class="lw-arrow">｜</span><span class="small muted">需处理</span> ${issues.join("")}` : "") +
+    (LW.plat === "lazada" ? '<span class="lw-flow-r"><button class="mini" id="lw-qc" title="接口推送过的产品，向 Lazada 查审核结果（平时每 30 分钟自动查一次）">🔄 同步 Lazada 审核状态</button></span>' : "");
+}
+function renderGroupsLW() {
+  const all = PRODUCT_LIST.length, none = PRODUCT_LIST.filter((p) => !(p.groups || []).length).length;
+  const g = (id, name, n) => `<div class="grp ${LW.group === id ? "on" : ""}" data-g="${id}"><span data-notr>${esc(name)}</span> <span class="muted">${n}</span></div>`;
+  $("#lw-grp").innerHTML = g("", "全部产品", all) + g("none", "未分组", none) + EXP_GROUPS.map((x) => g(String(x.id), x.name, x.count)).join("");
+}
 function renderExpList() {
+  $("#exp-plat").value = LW.plat;
+  $$("#lw-plat button").forEach((b) => b.classList.toggle("on", b.dataset.plat === LW.plat));
+  renderGroupsLW();
+  const base = lwBase();
+  renderFlow(base);
   const rows = expFiltered();
-  const plat = $("#exp-plat").value;
+  const size = +$("#lw-psize").value || 50, pages = Math.max(1, Math.ceil(rows.length / size));
+  LW.page = Math.min(Math.max(1, LW.page), pages);
+  const shown = rows.slice((LW.page - 1) * size, LW.page * size);
+  $("#exp-sum").textContent = `${rows.length} 个产品`;
   const gname = Object.fromEntries(EXP_GROUPS.map((x) => [x.id, x.name]));
-  const cnt = Object.fromEntries(Object.keys(LST_ZH).map((k) => [k, 0]));
-  rows.forEach((p) => { const k = ((plat === "shopee" ? p.sp : p.lz) || {}).status || "none"; cnt[k] = (cnt[k] || 0) + 1; });
-  $("#exp-sum").innerHTML = `显示 ${rows.length} 个 · ${plat === "shopee" ? "Shopee" : "Lazada"}：` +
-    ["none", "pending", "failed", "uploaded", "rejected", "live", "inactive", "update"].map((k) => `<span>${LST_ZH[k]}</span> ${cnt[k]}`).join(" · ");      // v2.41：标签单独一段，泰文才翻得到
-  const row = (p) => `<tr class="${EXP_SEL.has(p.id) ? "sel" : ""}"><td><input type="checkbox" class="exp-p" value="${esc(p.id)}" ${EXP_SEL.has(p.id) ? "checked" : ""}></td>
-      <td class="mono" data-notr>${esc(p.id)}${p.exported ? " 🔒" : ""}</td><td><span data-notr>${esc(p.name_zh)}</span>${p.active === false ? ' <span class="pill bad-pill">已下架</span>' : ""}</td>
-      <td>${p.category ? `<span data-notr>${esc(LANG === "th" ? p.category_th || p.category : p.category)}</span>` : '<span class="bad">未选</span>'}</td>
-      <td>${(p.groups || []).map((g) => gname[g] ? `<span class="pill tag-pill" data-notr>${esc(gname[g])}</span>` : "").join(" ")}</td>
-      <td>${statusBadge(p.errors, p.warnings)} ${lstBadge(p.lz, "lazada")}</td><td>${statusBadge(p.sp_errors, p.sp_warnings)} ${lstBadge(p.sp, "shopee")}</td></tr>`;
-  const head = '<thead><tr><th></th><th>编码</th><th>名称</th><th>类目</th><th>分组</th><th>Lazada（检查 · 上架）</th><th>Shopee（检查 · 上架）</th></tr></thead>';
-  if (!rows.length) { $("#exp-products").innerHTML = '<p class="muted">没有符合条件的产品</p>'; updExpN(); return; }
-  let html = "";
-  if ($("#exp-bygroup").checked && !$("#exp-group").value) {
-    const secs = EXP_GROUPS.map((g) => ({ id: String(g.id), name: g.name, rows: [] })).concat([{ id: "none", name: "未分组", rows: [] }]);
-    const byId = Object.fromEntries(secs.map((x) => [x.id, x]));
-    rows.forEach((p) => { const g = (p.groups || []).map(String).find((x) => byId[x]); (byId[g] || byId.none).rows.push(p); });
-    html = secs.filter((x) => x.rows.length).map((x) => `<details class="exp-sec" open><summary><label class="row gap" onclick="event.stopPropagation()"><input type="checkbox" data-secall="${x.id}"></label>
-        <b data-notr>${esc(x.name)}</b> <span class="muted small">${x.rows.length} 个</span></summary>
-      <table class="grid" data-sec="${x.id}">${head}<tbody>${x.rows.map(row).join("")}</tbody></table></details>`).join("");
-    html += '<p class="muted small">一个产品在多个分组里时，只显示在第一个分组下。</p>';
+  const row = (p) => {
+    const e = lwErr(p), w = (LW.plat === "shopee" ? p.sp_warnings : p.warnings) || 0, st = (LW.plat === "shopee" ? p.sp : p.lz) || {};
+    const chk = e ? `<button class="lw-iss-btn bad" data-iss="${esc(p.id)}">⚠ 缺 ${e} 项 ▾</button>` :
+      `<button class="lw-iss-btn ok" data-iss="${esc(p.id)}">✓ 可上架${w ? ` · ${w} 条提醒` : ""} ▾</button>`;
+    return `<tr class="${EXP_SEL.has(p.id) ? "sel" : ""}" data-pid="${esc(p.id)}"><td><input type="checkbox" class="exp-p" value="${esc(p.id)}" ${EXP_SEL.has(p.id) ? "checked" : ""}></td>
+      <td>${p.thumb ? `<img class="thumb" src="${esc(p.thumb)}" alt="" loading="lazy">` : ""}</td>
+      <td class="mono nowrap" data-notr>${esc(p.id)}${p.exported ? " 🔒" : ""}</td>
+      <td class="lib-name"><span data-notr>${esc(p.name_zh)}</span>${p.active === false ? ' <span class="pill bad-pill">已下架</span>' : ""}
+        <div class="small">${(p.groups || []).map((g) => gname[g] ? `<span class="pill tag-pill" data-notr>${esc(gname[g])}</span>` : "").join(" ")}</div></td>
+      <td class="small">${p.category ? `<span data-notr>${esc(LANG === "th" ? p.category_th || p.category : p.category)}</span>` : '<span class="bad">未选类目</span>'}</td>
+      <td class="small nowrap">${(p.skus || []).length} SKU</td>
+      <td>${chk}</td>
+      <td class="nowrap">${lstBadge(st, LW.plat)}${LW.plat === "lazada" && p.lz_item ? ' <span class="small muted" title="用接口推送的">⚡</span>' : ""}${st.note ? `<div class="small muted clamp2" data-notr title="${esc(st.note)}">${esc(st.note)}</div>` : ""}</td>
+      <td><button class="mini" data-edit="${esc(p.id)}">编辑</button></td></tr>` +
+      (LW.open.has(p.id) ? `<tr class="lw-iss-row"><td></td><td colspan="8"><div class="lw-iss" data-for="${esc(p.id)}">…</div></td></tr>` : "");
+  };
+  if (!rows.length) {
+    $("#exp-products").innerHTML = `<p class="muted">${LW.stage ? "这一段没有产品" : "没有符合条件的产品"}</p>`;
   } else {
-    html = `<label class="prod-check"><input type="checkbox" data-secall="all"> 全选列表里的产品</label><table class="grid" data-sec="all">${head}<tbody>${rows.map(row).join("")}</tbody></table>`;
+    $("#exp-products").innerHTML = `<table class="grid lw-table"><thead><tr><th><input type="checkbox" data-secall="page" title="勾选这一页"></th><th></th><th>编码</th><th>名称 / 分组</th><th>类目</th><th>SKU</th><th>检查</th><th>${LW.plat === "shopee" ? "Shopee" : "Lazada"} 状态</th><th></th></tr></thead>
+      <tbody>${shown.map(row).join("")}</tbody></table>`;
+    LW.open.forEach((pid) => { if (shown.some((p) => p.id === pid)) loadIssues(pid); });
   }
-  $("#exp-products").innerHTML = html;
+  $("#lw-pager").innerHTML = pages > 1 ? `<button class="mini" data-pg="${LW.page - 1}" ${LW.page <= 1 ? "disabled" : ""}>上一页</button><span>${LW.page} / ${pages}</span>
+    <button class="mini" data-pg="${LW.page + 1}" ${LW.page >= pages ? "disabled" : ""}>下一页</button>` : "";
   updExpN();
 }
-function updExpN() { $("#exp-n").textContent = EXP_SEL.size; }
-["#exp-group", "#exp-status", "#exp-sort", "#exp-plat", "#exp-bygroup"].forEach((k) => $(k).addEventListener("change", renderExpList));
-{ let t = null; $("#exp-q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(renderExpList, 250); }); }
+function updExpN() {
+  $("#exp-n").textContent = EXP_SEL.size;
+  $("#lw-bar").classList.toggle("hidden", !EXP_SEL.size);
+  const n = expFiltered().length;
+  $("#lw-selall").textContent = `勾选全部 ${n} 个`;
+  $("#lw-selall").classList.toggle("hidden", n <= EXP_SEL.size);
+  $("#lw-ungroup").classList.toggle("hidden", !LW.group || LW.group === "none");
+  renderActs();
+}
+function renderActs() {
+  // 按选中产品所在的阶段给按钮（选了好几段时都给）
+  const sel = PRODUCT_LIST.filter((p) => EXP_SEL.has(p.id));
+  const has = (...ks) => sel.some((p) => ks.includes(stageOf(p)));
+  const lz = LW.plat === "lazada", b = [];
+  if (has("todo", "rejected", "failed")) b.push('<button class="primary mini" data-act="aifill" title="AI 选类目、填类目属性、补空着的文案（后台做，任务中心看进度）">✨ AI 补齐资料</button>');
+  if (lz && has("ready", "todo", "failed", "rejected")) b.push('<button class="primary mini" data-act="push">⚡ 推送到 Lazada</button>');
+  if (lz && has("live", "update", "review", "inactive")) b.push('<button class="mini primary-lite" data-act="push" title="把 ERP 里改过的标题、详情、属性、图片、价格、库存更新到 Lazada">⚡ 更新到 Lazada</button>');
+  if (lz && has("review")) b.push('<button class="mini" data-act="qc">🔄 查审核结果</button>');
+  if (!lz && has("ready", "todo", "failed", "rejected", "update")) b.push('<button class="primary mini" data-act="xls-sp" title="Shopee 还没有接口：生成表格到 Shopee 卖家中心批量上传">生成 Shopee 导入表格</button>');
+  if (has("pending")) b.push('<span class="small muted">表格待上传：到平台上传后在「更多」里标状态</span>');
+  $("#lw-acts").innerHTML = b.join(" ");
+}
+async function loadIssues(pid) {
+  const box = $(`.lw-iss[data-for="${CSS.escape(pid)}"]`); if (!box) return;
+  let r;
+  try { r = await api(`/api/listing/issues/${encodeURIComponent(pid)}?platform=${LW.plat}`); } catch (e) { box.innerHTML = `<span class="bad">${esc(e.message)}</span>`; return; }
+  const btn = (x) => ({
+    ai: `<button class="mini" data-fix="ai" data-pid="${esc(pid)}">✨ AI 补</button>`,
+    confirm_cat: `<button class="mini" data-fix="confirm_cat" data-pid="${esc(pid)}">✓ 确认类目「<span data-notr>${esc(r.category)}</span>」</button>`,
+    confirm_attr: "", confirm_pkg: `<button class="mini" data-fix="confirm_pkg" data-pid="${esc(pid)}">✓ 尺寸没问题（${esc(r.package.length)}×${esc(r.package.width)}×${esc(r.package.height)} cm）</button>`,
+    edit: `<button class="mini" data-edit="${esc(pid)}">去编辑</button>`,
+  })[x.fix] || "";
+  const attrs = r.check_attrs.length ? `<div class="lw-attrs"><b>AI 填的属性，看一眼对不对：</b> ${r.check_attrs.map((a) => `<span class="pill" data-notr>${esc(a.label)}：${esc(a.value)}</span>`).join(" ")}
+      <button class="mini" data-fix="confirm_attr" data-pid="${esc(pid)}">✓ 全部没问题</button> <button class="mini" data-edit="${esc(pid)}">有不对的，去改</button></div>` : "";
+  const errs = r.errors.filter((x) => x.fix !== "confirm_attr");
+  box.innerHTML = (errs.length ? `<ul class="lw-iss-list">${errs.map((x) => `<li class="bad"><span>${esc(x.text)}</span> ${btn(x)}</li>`).join("")}</ul>` : "") + attrs +
+    (r.warnings.length ? `<details class="small"><summary class="muted">${r.warnings.length} 条提醒（不影响上架）</summary><ul class="lw-iss-list">${r.warnings.map((x) => `<li class="warn"><span>${esc(x.text)}</span> ${x.fix === "ai" ? btn(x) : ""}</li>`).join("")}</ul></details>` : "") +
+    (!r.errors.length && !r.warnings.length ? '<span class="ok small">全部检查通过</span>' : "");
+}
+async function aiFill(ids, el) {
+  if (!ids.length) return;
+  await busy(el, async () => {
+    const r = await apiJob("/api/listing/ai-fill", { json: { product_ids: ids, platform: LW.plat } }, (s, j) => { if (j && j.stage) el.textContent = `✨ AI 补齐中 ${j.stage}`; });
+    toast(`AI 补齐了 ${r.done.length} 个产品` + (r.failed.length ? `；${r.failed.length} 个失败：${r.failed[0].id} ${r.failed[0].error}` : ""), !!r.failed.length);
+    await loadExport();
+  });
+}
+async function qcSync(ids, el) {
+  await busy(el, async () => {
+    const r = await api("/api/listing/lazada/status-sync", { json: { product_ids: ids || null } });
+    toast(`查了 ${r.checked} 个接口推送的产品，${r.changed.length} 个状态有变化` + (r.failed.length ? `；${r.failed.length} 个没查到` : ""), !!r.failed.length);
+    await loadExport();
+  });
+}
+$("#lw-plat").addEventListener("click", (e) => { const b = e.target.closest("[data-plat]"); if (!b) return; LW.plat = b.dataset.plat; LW.stage = ""; LW.page = 1; renderExpList(); });
+$("#lw-view").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-view]"); if (!b) return;
+  LW.view = b.dataset.view;
+  $$("#lw-view button").forEach((x) => x.classList.toggle("on", x === b));
+  $("#lw-main").classList.toggle("hidden", LW.view !== "main");
+  $("#lw-batches").classList.toggle("hidden", LW.view !== "batches");
+  $("#lw-stock").classList.toggle("hidden", LW.view !== "stock");
+  if (LW.view === "batches") loadBatches();
+  if (LW.view === "stock" && window.loadStockPending) loadStockPending();
+});
+$("#lw-flow").addEventListener("click", (e) => {
+  if (e.target.closest("#lw-qc")) return qcSync(null, e.target.closest("#lw-qc"));
+  const b = e.target.closest("[data-stage]"); if (!b) return;
+  LW.stage = b.dataset.stage; LW.page = 1; renderExpList();
+});
+$("#lw-grp").addEventListener("click", (e) => { const d = e.target.closest("[data-g]"); if (!d) return; LW.group = d.dataset.g; $("#exp-group").value = LW.group; LW.page = 1; renderExpList(); });
+$("#lw-pager").addEventListener("click", (e) => { const b = e.target.closest("[data-pg]"); if (!b) return; LW.page = +b.dataset.pg; renderExpList(); });
+["#exp-sort", "#lw-psize"].forEach((k) => $(k).addEventListener("change", () => { LW.page = 1; renderExpList(); }));
+{ let t = null; $("#exp-q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { LW.page = 1; renderExpList(); }, 250); }); }
 $("#exp-products").addEventListener("change", (e) => {
   const t = e.target;
   if (t.classList.contains("exp-p")) { t.checked ? EXP_SEL.add(t.value) : EXP_SEL.delete(t.value); t.closest("tr").classList.toggle("sel", t.checked); updExpN(); return; }
   if (t.dataset.secall) {
-    const tbl = t.dataset.secall === "all" ? $('#exp-products table[data-sec="all"]') : $(`#exp-products table[data-sec="${t.dataset.secall}"]`);
-    tbl.querySelectorAll(".exp-p").forEach((c) => { c.checked = t.checked; t.checked ? EXP_SEL.add(c.value) : EXP_SEL.delete(c.value); c.closest("tr").classList.toggle("sel", t.checked); });
+    $$("#exp-products .exp-p").forEach((c) => { c.checked = t.checked; t.checked ? EXP_SEL.add(c.value) : EXP_SEL.delete(c.value); c.closest("tr").classList.toggle("sel", t.checked); });
     updExpN();
   }
 });
+$("#exp-products").addEventListener("click", async (e) => {
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.dataset.iss) { const id = t.dataset.iss; LW.open.has(id) ? LW.open.delete(id) : LW.open.add(id); return renderExpList(); }
+  if (t.dataset.edit) return openProduct(t.dataset.edit, true);
+  if (t.dataset.fix === "ai") return aiFill([t.dataset.pid], t);
+  if (t.dataset.fix) {
+    try { await api(`/api/listing/fix/${encodeURIComponent(t.dataset.pid)}`, { json: { action: t.dataset.fix, platform: LW.plat } }); toast("已确认"); await loadExport(); }
+    catch (err) { toast(err.message, true); }
+  }
+});
+$("#lw-selall").addEventListener("click", () => { expFiltered().forEach((p) => EXP_SEL.add(p.id)); renderExpList(); });
+$("#lw-clear").addEventListener("click", () => { EXP_SEL.clear(); renderExpList(); });
+$("#lw-acts").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  const ids = [...EXP_SEL];
+  if (b.dataset.act === "aifill") return aiFill(ids, b);
+  if (b.dataset.act === "push") return lzPush(b);
+  if (b.dataset.act === "qc") return qcSync(ids, b);
+  if (b.dataset.act === "xls-sp") return $("#btn-export-sp").click();
+});
 $("#exp-newgroup").addEventListener("click", async () => {
   const n = prompt("新分组名称（例如：猫咪系列、10 月第 1 批、节日礼物）"); if (!n) return;
-  try { await api("/api/groups", { json: { name: n } }); await loadExport(); const g = EXP_GROUPS.find((x) => x.name === n.trim()); if (g) $("#exp-addgroup").value = g.id; toast("已新建分组"); } catch (err) { toast(err.message, true); }
+  try { await api("/api/groups", { json: { name: n } }); await loadExport(); toast("已新建分组"); } catch (err) { toast(err.message, true); }
 });
 $("#exp-addgroup").addEventListener("change", async (e) => {
   const g = e.target.value; if (!g || !EXP_SEL.size) return;
-  if (!confirm(`把已选的 ${EXP_SEL.size} 个产品加入这个分组？（导出时也会自动加入）`)) return;
+  if (!confirm(`把已选的 ${EXP_SEL.size} 个产品加入这个分组？`)) { e.target.value = ""; return; }
   await api("/api/groups/assign", { json: { ids: [...EXP_SEL], group: +g, add: true } });
-  toast("已加入分组"); loadExport();
+  toast("已加入分组"); e.target.value = ""; loadExport();
+});
+$("#lw-ungroup").addEventListener("click", async () => {
+  if (!LW.group || LW.group === "none" || !EXP_SEL.size) return;
+  if (!confirm(`把已选的 ${EXP_SEL.size} 个产品移出当前分组？`)) return;
+  await api("/api/groups/assign", { json: { ids: [...EXP_SEL], group: +LW.group, add: false } });
+  toast("已移出分组"); loadExport();
 });
 $$(".exp-actions [data-mark]").forEach((b) => b.addEventListener("click", async () => {
   if (!EXP_SEL.size) return toast("先勾选产品", true);
-  const plat = $("#exp-plat").value, st = b.dataset.mark;
+  const plat = LW.plat, st = b.dataset.mark;
   let note = null;
   if (st === "failed") { note = prompt("失败原因（可空），例如：类目属性缺失、图片不合格、价格被拦截"); if (note === null) return; }
   if (st === "rejected") { note = prompt("平台给的不通过原因（可空），例如：图片有水印、类目错误、违禁词"); if (note === null) return; }
@@ -170,29 +303,33 @@ async function doExport(e, url, note) {
             `<li><a href="/api/export/${encodeURIComponent(f.file)}">下载 ${esc(f.file)}</a> <span class="muted small">${f.rows} 行 · ${f.categories.map(esc).join("、")}</span></li>`).join("")}</ul>`
         : `<p class="bad">${parts.length > 1 ? `「<span data-notr>${esc(part.name)}</span>」` : ""}有红色项未处理，没有生成文件：</p>`) + list(r.errors, "bad") + list(r.warnings, "warn");
     }
-    $("#exp-result").innerHTML = html + `<p class="muted small">${note}上传成功后，到下面「3. 上架批次」点「整批上传成功」。</p>`;
+    $("#exp-result").innerHTML = html + `<p class="muted small">${note}上传成功后，到「批次记录」里点「整批上传成功」。</p>`;
     EXP_SEL.clear();
     await loadExport();
   });
 }
 $("#btn-export").addEventListener("click", (e) => doExport(e, "/api/export", "Lazada 卖家中心 → 批量管理 → 逐个上传这些文件。导出后这些产品的 SKU 已锁定。"));
 $("#btn-export-sp").addEventListener("click", (e) => doExport(e, "/api/export/shopee", "Shopee 卖家中心 → 我的产品 → 批量功能 → 批量上传 → 上传文件。上传后 Shopee 可能要求补充品牌等属性（在 Shopee 后台补）。"));
-// v2.41.2：直接推送到 Lazada（接口）：平台上还没有就新建，推过的就更新
-$("#btn-lz-push").addEventListener("click", async (e) => {
+// v2.41.2：直接推送到 Lazada（接口）：平台上还没有就新建，推过的就更新。v2.43：后台跑，任务中心看进度
+async function lzPush(el) {
   const ids = [...EXP_SEL];
   if (!ids.length) return toast("先勾选要推送的产品", true);
   const xls = PRODUCT_LIST.filter((p) => ids.includes(p.id) && ["uploaded", "live", "rejected", "inactive"].includes((p.lz || {}).status) && !p.lz_item);
   if (xls.length && !confirm(`其中 ${xls.length} 个产品已经用表格传到 Lazada 了（${xls.slice(0, 6).map((p) => p.id).join("、")}${xls.length > 6 ? "…" : ""}）。\n再推送会新建一个重复的商品。确定继续？`)) return;
   if (!confirm(`把 ${ids.length} 个产品推送到 Lazada？平台上还没有的会新建，推送过的会更新（标题、详情、属性、图片、价格、库存）。`)) return;
-  await busy(e.target, async () => {
+  await busy(el, async () => {
     const list = (arr, cls) => arr.length ? `<ul class="msgs">${arr.map((m) => `<li class="${cls}">${esc(m)}</li>`).join("")}</ul>` : "";
-    const r = await api("/api/listing/lazada/push", { json: { product_ids: ids, force: $("#exp-force").checked } });
+    const label = el.textContent;
+    const r = await apiJob("/api/listing/lazada/push", { json: { product_ids: ids, force: $("#exp-force").checked } },
+      (s, j) => { if (j && j.stage) el.textContent = `⚡ 推送中 ${j.stage}`; });
+    el.textContent = label;
     let html = "";
-    if (r.errors.length && !r.ok.length && !r.failed.length) html = `<p class="bad">有红色项未处理，没有推送：</p>`;
-    if (r.ok.length) html += `<p class="ok">✅ 已推送 ${r.ok.length} 个产品（新建 ${r.ok.filter((x) => x.created).length}，更新 ${r.ok.filter((x) => !x.created).length}），状态改成「平台审核中」。Lazada 审核通过后在卖家中心能看到。</p>`;
-    if (r.failed.length) html += `<p class="bad">${r.failed.length} 个推送失败（把下面的原因发给开发者）：</p>` + list(r.failed.map((x) => `${x.id}：${x.error}`), "bad");
+    if (r.errors.length && !r.ok.length && !r.failed.length) html = `<p class="bad">有红色项未处理，没有推送（点产品的「⚠ 缺 N 项」看缺什么）：</p>`;
+    if (r.ok.length) html += `<p class="ok">✅ 已推送 ${r.ok.length} 个产品（新建 ${r.ok.filter((x) => x.created).length}，更新 ${r.ok.filter((x) => !x.created).length}），状态改成「平台审核中」。审核结果每 30 分钟自动同步。</p>`;
+    if (r.failed.length) html += `<p class="bad">${r.failed.length} 个推送失败（勾选后可以再推一次；原因看不懂就发给开发者）：</p>` + list(r.failed.map((x) => `${x.id}：${x.error}`), "bad");
     $("#exp-result").innerHTML = html + list(r.errors, "bad") + list(r.warnings, "warn");
     EXP_SEL.clear();
+    r.failed.forEach((x) => EXP_SEL.add(x.id));           // 失败的留着勾选，改好直接再推
     await loadExport();
   });
-});
+}

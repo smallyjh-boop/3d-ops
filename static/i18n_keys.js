@@ -214,5 +214,6 @@ window.I18N_KEYS = {
   "task.k.img_host": {"zh": "上传图床", "th": "อัปโหลดรูปขึ้นโฮสต์"},
   "task.k.ai_kw": {"zh": "AI 关键词", "th": "AI คีย์เวิร์ด"},
   "task.k.ai_en": {"zh": "AI 英文文案", "th": "AI ข้อความภาษาอังกฤษ"},
-  "task.k.ai_fill": {"zh": "AI 补全文案", "th": "AI เติมข้อความที่ว่าง"}
+  "task.k.ai_fill": {"zh": "AI 补全文案", "th": "AI เติมข้อความที่ว่าง"},
+  "task.k.lz_push": {"zh": "推送到 Lazada", "th": "ส่งขึ้น Lazada"}
 };

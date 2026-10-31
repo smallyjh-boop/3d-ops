@@ -1,59 +1,83 @@
-<!-- 模块 listing 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上） -->
-<!-- 导出 -->
+<!-- 模块 listing 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上）。v2.43 改成「上架工作台」：一次看一个平台、流程条、底部操作条、分页 -->
 <section id="tab-export" class="panel hidden">
-  <h2>导出批量上新表格（Lazada / Shopee）</h2>
-  <div class="card small" id="exp-tplbar">类目模板库：<span id="exp-tplinfo" class="muted">…</span> <a href="#" data-goto-cfg="goods">管理模板 →</a></div>
-  <div class="card">
-    <h3>1. 选择要导出的产品</h3>
-    <p class="muted small">按分组分批上架：先筛选分组 / 状态，勾选后导出。导出后产品自动变成「待上传」；上传到平台后是「平台审核中」，过审后标「已上线」，没过审标「审核不通过」（写上原因）。同一个模板里的多个类目会写进同一个文件。</p>
-    <div class="row gap wrap exp-bar">
-      <label class="small">分组<select id="exp-group"></select></label>
-      <label class="small">看哪个平台的状态<select id="exp-plat"><option value="lazada">Lazada</option><option value="shopee">Shopee</option></select></label>
-      <label class="small">上架状态<select id="exp-status"><option value="">全部</option><option value="none">未导出</option><option value="pending">待上传</option><option value="failed">上传失败</option><option value="update">有修改待同步</option><option value="uploaded">平台审核中</option><option value="rejected">审核不通过</option><option value="live">已上线（在售）</option><option value="inactive">平台已下架</option><option value="ready">可导出（检查通过、未上传）</option></select></label>
-      <label class="small">排序<select id="exp-sort"><option value="id">编码 ↑</option><option value="id_desc">编码 ↓（最新的在前）</option><option value="name">名称</option><option value="cat">类目</option><option value="status">上架状态</option><option value="updated">最近修改</option></select></label>
-      <input id="exp-q" placeholder="搜索编码 / 名称 / 类目" style="width:200px">
-      <label class="small row gap"><input type="checkbox" id="exp-bygroup" checked> 按分组显示</label>
+  <div class="lw-top">
+    <h2>上架工作台</h2>
+    <div class="seg" id="lw-plat"><button data-plat="lazada" class="on">Lazada</button><button data-plat="shopee">Shopee</button></div>
+    <div class="seg" id="lw-view"><button data-view="main" class="on">上架商品</button><button data-view="batches">批次记录</button><button data-view="stock">库存同步</button></div>
+    <span class="small muted" id="exp-tplbar">类目模板库：<span id="exp-tplinfo">…</span> <a href="#" data-goto-cfg="goods">管理 →</a></span>
+  </div>
+  <!-- 老代码还在用的筛选值（平台、状态）：由上面的按钮和流程条设置 -->
+  <select id="exp-plat" class="hidden"><option value="lazada">Lazada</option><option value="shopee">Shopee</option></select>
+  <select id="exp-status" class="hidden"><option value="">全部</option></select>
+  <select id="exp-group" class="hidden"><option value="">全部</option></select>
+
+  <div id="lw-main">
+    <div class="lw-flow" id="lw-flow"></div>
+    <div class="lw-body">
+      <aside class="card lw-groups">
+        <div class="row between"><b>分组</b><button id="exp-newgroup" class="mini">＋ 新建</button></div>
+        <div id="lw-grp"></div>
+      </aside>
+      <div class="lw-list">
+        <div class="row gap wrap lw-filter">
+          <input id="exp-q" placeholder="搜索编码 / 名称 / 类目 / SKU" style="width:240px">
+          <label class="small">排序<select id="exp-sort"><option value="id_desc">编码 ↓（最新的在前）</option><option value="id">编码 ↑</option><option value="name">名称</option><option value="cat">类目</option><option value="status">上架状态</option><option value="updated">最近修改</option></select></label>
+          <label class="small">每页<select id="lw-psize"><option>30</option><option selected>50</option><option>100</option><option>200</option></select></label>
+          <span id="exp-sum" class="small muted"></span>
+        </div>
+        <div id="exp-products"></div>
+        <div id="lw-pager" class="row gap small"></div>
+        <div id="exp-result"></div>
+      </div>
     </div>
-    <div id="exp-sum" class="small muted"></div>
-    <div id="exp-products"></div>
-    <div class="exp-actions card-sub">
-      <div class="row gap wrap"><b>已选 <span id="exp-n">0</span> 个</b>
-        <label class="small">加入分组<select id="exp-addgroup"><option value="">（不加）</option></select></label>
-        <button id="exp-newgroup" class="mini">＋ 新建分组</button>
-        <span class="muted small">｜标记</span>
-        <button class="mini" data-mark="uploaded" title="已上传到平台，平台还在审核（Lazada Pending QC / Shopee 审核中）">⬆ 已上传·审核中</button>
-        <button class="mini primary-lite" data-mark="live" title="平台审核通过、在售（Lazada Active / Shopee Live）">✔ 已上线</button>
-        <button class="mini" data-mark="rejected" title="Lazada QC Rejected / Shopee 违规、禁止">✗ 审核不通过</button>
-        <button class="mini" data-mark="inactive" title="在平台上已下架（Lazada Inactive / Shopee 已下架）">平台已下架</button>
-        <button class="mini" data-mark="failed" title="上传表格时报错，平台上没生成商品">上传失败</button>
-        <button class="mini" data-mark="pending">待上传</button><button class="mini" data-mark="none">退回未导出</button>
-        <span class="muted small">（标记的是上面所选平台）</span></div>
-      <div class="row gap wrap" style="margin-top:10px">
+    <!-- 底部操作条：勾选后出现，按当前流程阶段给该用的按钮 -->
+    <div class="lw-bar hidden" id="lw-bar">
+      <b>已选 <span id="exp-n">0</span> 个</b>
+      <button class="mini" id="lw-selall"></button><button class="mini" id="lw-clear">清除</button>
+      <span class="lw-sep"></span>
+      <span id="lw-acts"></span>
+      <span class="lw-sep"></span>
+      <details class="lw-menu"><summary class="btn mini">分组 ▾</summary><div class="lw-pop">
+        <label class="small">加入分组<select id="exp-addgroup"><option value="">（选分组）</option></select></label>
+        <button class="mini" id="lw-ungroup">移出当前分组</button>
+      </div></details>
+      <details class="lw-menu"><summary class="btn mini">更多 ▾</summary><div class="lw-pop lw-pop-wide">
+        <div class="small muted">表格上架（特殊情况用）</div>
         <label class="small">批次名称<input id="exp-batch" placeholder="不填自动：Lazada 10-05 第 1 批" style="width:220px" data-notr></label>
         <label class="small row gap"><input type="checkbox" id="exp-split"> 按分组分别导出（每个分组一个批次 / 一套文件）</label>
-      </div>
-      <div class="row gap" style="margin-top:10px">
-        <button id="btn-lz-push" class="primary" title="用店铺对接里授权好的 Lazada 店铺，直接建商品 / 更新商品，不用下载上传表格">⚡ 直接推送到 Lazada</button>
-        <button id="btn-export" class="primary">生成 Lazada 导入表格</button>
-        <button id="btn-export-sp" class="primary sp">生成 Shopee 导入表格</button>
-        <label class="row gap small"><input type="checkbox" id="exp-force"> 有红色项也强制导出（不建议）</label>
-      </div>
+        <label class="row gap small"><input type="checkbox" id="exp-force"> 有红色项也强制导出 / 推送（不建议）</label>
+        <div class="row gap wrap"><button id="btn-export" class="mini">生成 Lazada 导入表格</button><button id="btn-export-sp" class="mini">生成 Shopee 导入表格</button></div>
+        <div class="small muted" style="margin-top:8px">手动改上架状态（用表格上传的产品；标的是当前平台）</div>
+        <div class="row gap wrap exp-actions">
+          <button class="mini" data-mark="uploaded" title="已上传到平台，平台还在审核（Lazada Pending QC / Shopee 审核中）">⬆ 已上传·审核中</button>
+          <button class="mini" data-mark="live" title="平台审核通过、在售（Lazada Active / Shopee Live）">✔ 已上线</button>
+          <button class="mini" data-mark="rejected" title="Lazada QC Rejected / Shopee 违规、禁止">✗ 审核不通过</button>
+          <button class="mini" data-mark="inactive" title="在平台上已下架（Lazada Inactive / Shopee 已下架）">平台已下架</button>
+          <button class="mini" data-mark="failed" title="上传表格时报错，平台上没生成商品">上传失败</button>
+          <button class="mini" data-mark="pending">待上传</button><button class="mini" data-mark="none">退回未上架</button>
+        </div>
+      </div></details>
     </div>
-    <div id="exp-result"></div>
   </div>
-  <div class="card">
-    <div class="row between"><h3>3. 上架批次</h3><select id="bt-plat" class="small"><option value="">全部平台</option><option value="lazada">Lazada</option><option value="shopee">Shopee</option></select></div>
-    <p class="muted small">每次导出是一个批次。在平台上传完文件后点「整批上传成功」（变成平台审核中）；在平台后台看到过审后点「整批审核通过」（变成已上线）；个别没过的展开后单独标记。</p>
-    <div id="exp-batches"></div>
+
+  <div id="lw-batches" class="hidden">
+    <div class="card">
+      <div class="row between"><h3>上架批次</h3><select id="bt-plat" class="small"><option value="">全部平台</option><option value="lazada">Lazada</option><option value="shopee">Shopee</option></select></div>
+      <p class="muted small">每次导出表格 / 接口推送是一个批次。用表格上传的：在平台上传完文件后点「整批上传成功」（变成平台审核中）；在平台后台看到过审后点「整批审核通过」（变成已上线）；个别没过的展开后单独标记。</p>
+      <div id="exp-batches"></div>
+    </div>
   </div>
-  <div class="card" id="stk-card">
-    <div class="row between"><h3>4. 库存待同步到平台</h3>
-      <span><select id="stk-plat" class="small"><option value="lazada">Lazada</option><option value="shopee">Shopee</option></select>
-      <button class="mini primary-lite" id="stk-lz-push" title="用接口推送过的产品：把这里的库存直接改到 Lazada（用表格上传的产品还是人工改）">⚡ 推到 Lazada</button>
-      <button class="mini" id="stk-refresh">刷新</button></span></div>
-    <p class="muted small">开了「按耗材自动算库存」的产品：耗材用掉 / 进货后，库存变化够多的 SKU 列在这里。
-      用「直接推送到 Lazada」上架的产品：点「推到 Lazada」或按 设置 → 商品 → Lazada 接口推送 的间隔自动改；
-      用表格上传的产品请到平台后台改好库存后点「已改好」。导出上架表格 / 推送时的库存自动记为已同步。</p>
-    <div id="stk-pending"></div>
+
+  <div id="lw-stock" class="hidden">
+    <div class="card" id="stk-card">
+      <div class="row between"><h3>库存待同步到平台</h3>
+        <span><select id="stk-plat" class="small"><option value="lazada">Lazada</option><option value="shopee">Shopee</option></select>
+        <button class="mini primary-lite" id="stk-lz-push" title="用接口推送过的产品：把这里的库存直接改到 Lazada（用表格上传的产品还是人工改）">⚡ 推到 Lazada</button>
+        <button class="mini" id="stk-refresh">刷新</button></span></div>
+      <p class="muted small">开了「按耗材自动算库存」的产品：耗材用掉 / 进货后，库存变化够多的 SKU 列在这里。
+        用「直接推送到 Lazada」上架的产品：点「推到 Lazada」或按 设置 → 商品 → Lazada 接口推送 的间隔自动改；
+        用表格上传的产品请到平台后台改好库存后点「已改好」。导出上架表格 / 推送时的库存自动记为已同步。</p>
+      <div id="stk-pending"></div>
+    </div>
   </div>
 </section>
