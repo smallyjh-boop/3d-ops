@@ -34,7 +34,9 @@ ok(mods == ["home", "goods", "orders", "cs", "ops", "prod", "inv", "pur", "biz",
 ok('id="bell-btn"' in html and 'id="gs-btn"' in html and "/static/shell.js" in html and "/static/shell.css" in html, "bell + search in the top bar")
 ms = {m["id"]: m for m in C.get("/api/modules").get_json()["modules"]}
 goods = [mn["tab"] for m in ms.values() for mn in m["menus"] if mn["mod"] == "goods" and not mn["ghost"]]
-ok(goods == ["library", "export"], f"商品 = 产品库 · 上架 {goods}")
+# v2.50：「选品」排在「产品库」前面（菜单 before = library）：商品 = 选品 · 产品库 · 上架
+cur = next((mn for m in ms.values() for mn in m["menus"] if mn["tab"] == "curate"), {})
+ok(sorted(goods) == ["curate", "export", "library"] and cur.get("before") == "library", f"商品 = 选品 · 产品库 · 上架 {goods} {cur.get('before')}")
 on = next(mn for mn in ms["listing"]["menus"] if mn["tab"] == "online")
 ok(on["ghost"] and on["parent"] == "export", "在线商品 = tab of 上架")
 ok(not ms["link"]["menus"], "运营改动 menu removed from 对接")

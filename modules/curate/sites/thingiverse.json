@@ -1,0 +1,64 @@
+{
+  "id": "thingiverse",
+  "name": "Thingiverse",
+  "version": 1,
+  "enabled": true,
+  "key_prefix": "tv",
+  "domains": [
+    "thingiverse.com"
+  ],
+  "image_hosts": [
+    "thingiverse.com",
+    "www.thingiverse.com",
+    "cdn.thingiverse.com",
+    "resize.thingiverse.com",
+    "thingiverse-production-new.s3.amazonaws.com"
+  ],
+  "related_hosts": [
+    "cdn.thingiverse.com",
+    "thingiverse-production-new.s3.amazonaws.com"
+  ],
+  "referer": "https://www.thingiverse.com/",
+  "detail": {
+    "path": "(/thing:(\\d+))",
+    "id_group": 2
+  },
+  "search": [
+    {
+      "id": "tv",
+      "label": "Thingiverse",
+      "url": "https://www.thingiverse.com/search?q={q}&type=things&sort=newest"
+    }
+  ],
+  "image_rules": [
+    {
+      "host": "^resize\\.thingiverse\\.com$",
+      "unwrap_param": "url",
+      "unwrap_hosts": [
+        "cdn.thingiverse.com",
+        "thingiverse-production-new.s3.amazonaws.com"
+      ]
+    }
+  ],
+  "extract": {
+    "settle_ms": 6000,
+    "sources": [],
+    "page_files": "thingiverse\\.com/download:\\d+",
+    "extra_files": [
+      {
+        "name": "thing-{$id}-all-files.zip",
+        "url": "https://www.thingiverse.com/thing:{$id}/zip",
+        "kind": "zip"
+      }
+    ],
+    "category_links": "a[href*=\"/categories/\"]"
+  },
+  "examples": {
+    "detail": [
+      "https://www.thingiverse.com/thing:4242/comments"
+    ],
+    "not_detail": [
+      "https://www.thingiverse.com/search?q=hook&type=things"
+    ]
+  }
+}

@@ -95,7 +95,7 @@ MODULES = [
     {"id": "ops", "zh": "运营分析", "th": "วิเคราะห์การขาย", "module": "ops", "groups": []},     # v2.46 运营分析模块（设置在模块说明书里）
     {"id": "ai", "zh": "AI 与对接", "th": "AI และการเชื่อมต่อ", "ext": True, "groups": [
         ("AI", [
-            ("ai_provider", "接口类型", ["anthropic", "openai_compatible"]), ("ai_model", "模型名称"),
+            ("ai_provider", "接口类型（deepseek = DeepSeek；openai_compatible = 其他 OpenAI 兼容接口，例如通义、OpenAI，要填接口地址）", ["anthropic", "deepseek", "openai_compatible"]), ("ai_model", "模型名称"),
             ("ai_api_key", "接口密钥", "password"), ("ai_base_url", "接口地址（openai_compatible 用）")]),
     ]},
     {"id": "addons", "zh": "组件与插件", "th": "ส่วนประกอบและปลั๊กอิน", "special": ["components", "accel"], "ext": True, "groups": [

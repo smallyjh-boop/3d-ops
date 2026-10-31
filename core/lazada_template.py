@@ -318,6 +318,10 @@ def check_product(p, prices, cat=None, cfg=None):
     e2, w2 = _specs.review_problems(p)
     errors += e2
     warnings += w2
+    from . import copyrules          # v2.50：许可待核验（挡导出）、品牌 / 动漫词、颜色词、营销词、泰国敏感品类（提醒）
+    e3, w3 = copyrules.problems(p)
+    errors += e3
+    warnings += w3
     return errors, warnings
 
 

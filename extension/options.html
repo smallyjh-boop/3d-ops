@@ -31,6 +31,10 @@ label.chk{display:flex;gap:6px;align-items:flex-start;margin:7px 0}label.chk inp
 .lbl{border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:6px 8px;margin:8px 0 0;font-size:12px}.lbl b{word-break:break-all}
 .lbl button{padding:2px 10px;font-size:12px;margin:4px 6px 0 0}
 .sub{font-size:12px;color:var(--muted);margin:8px 0 0;font-weight:600}
+/* v3.1 选品：一行状态 + 两个小按钮 */
+#cur{display:flex;align-items:center;gap:8px;margin-top:8px;padding:7px 10px;border:1px solid var(--line);border-radius:10px}
+#cur b{font-size:16px;line-height:1}#cur .ct{flex:1;min-width:0;font-size:12px;line-height:1.35}#cur .ct span{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#cur button{padding:3px 8px;font-size:12px;flex:none}
 </style></head><body>
 <div class="top"><h3 data-t="h3">3D 运营管理系统 · 插件</h3>
   <select id="lang" title="面板语言 / ภาษา"><option value="zh">中文</option><option value="th">ไทย</option></select></div>
@@ -51,6 +55,9 @@ label.chk{display:flex;gap:6px;align-items:flex-start;margin:7px 0}label.chk inp
   <button id="oa-patrol"><b>🔭</b><span data-t="oapatrol">开始今日巡逻</span></button>
   <button id="lbl-tab"><b>📄</b><span data-t="lbltab">发送当前 PDF</span></button>
 </div>
+<div id="cur"><b>🧩</b><div class="ct"><div><span style="display:inline;color:var(--ink);font-weight:600" data-t="cur">选品（模型网站）</span> <span class="q" data-q="curhelp" style="display:inline-flex">?</span></div><span id="cur-st">…</span></div>
+  <button class="sec" id="cur-open" data-t="curopen">打开选品</button></div>
+<div class="tip" id="curhelp" data-t="curhelp">在 MakerWorld / Printables / Thingiverse 的列表页，每个模型左上角有推荐分和「＋采集」（＝在 ERP 里采用，马上建产品草稿）。插件在后台按 ERP 定的节奏读详情页、用这台电脑浏览器里原站的登录状态下载模型文件、按关注列表巡逻；遇到人机验证 / 请求太频繁会自动暂停这个网站。结果在 ERP「商品 → 选品」。</div>
 <div id="last"></div>
 <div id="lbl-list"></div>
 
@@ -60,6 +67,10 @@ label.chk{display:flex;gap:6px;align-items:flex-start;margin:7px 0}label.chk inp
   <div class="tip" id="lblhelp" data-t="lblhelp">在卖家中心 / BigSeller 下载面单 PDF 时弹出提示，点「发送到系统」才发。有的平台点「打印面单」是在新标签页打开 PDF：在那个标签页点上面的「📄 发送当前 PDF」。系统按每页上的订单号 / 运单号自动对应订单。</div>
   <label class="chk"><input type="checkbox" id="oa_auto_back"><span data-t="oaauto">卖家中心数据页自动采集</span><span class="q" data-q="oahelp">?</span></label>
   <div class="tip" id="oahelp" data-t="oahelp">打开卖家中心的数据页面（商品表现 / 流量 / 关键词）时自动采集，同一页 12 小时一次。在 Lazada / Shopee / TikTok 的商品页、搜索结果页、店铺页，右下角有采集按钮，列表里每个商品卡片左上角有「📊 采集」。今日巡逻：人在电脑旁时用，按系统里的清单一页一页看，每天有上限，遇到验证码马上停。结果在系统「商品 → 竞品 / 爆款雷达 / 竞店」和「工作台 → 流量数据」。</div>
+  <div class="sub" data-t="cursub">选品（模型网站）</div>
+  <label class="chk"><input type="checkbox" id="cur_picker"><span data-t="curpick">在模型网站上显示推荐分和「＋采集」按钮</span></label>
+  <label class="chk"><input type="checkbox" id="cur_auto"><span data-t="curauto">后台自动采集详情页、下载模型文件、关注巡逻</span><span class="q" data-q="curautohelp">?</span></label>
+  <div class="tip" id="curautohelp" data-t="curautohelp">每分钟问一次 ERP 有没有活，一次只开一个后台标签页，读完就关。要这台电脑开着、Chrome 开着；在原站登录过才能下载要登录的文件。关掉就不再自动做（列表页的推荐分照样显示）。</div>
   <div class="sub" data-t="cs">AI 客服（聊天页右下角的面板）</div>
   <label class="chk"><input type="checkbox" id="cs_autorun"><span data-t="csauto">打开聊天页时 AI 客服默认开启</span><span class="q" data-q="cshelp">?</span></label>
   <label class="chk"><input type="checkbox" id="cs_patrol"><span data-t="cspatrol">有未读消息、我没在操作时，自动切到那个买家</span></label>

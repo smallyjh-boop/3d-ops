@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "3D 运营管理系统 · 浏览器扩展",
-  "version": "3.0.2",
-  "description": "AI 客服（卖家中心聊天页读消息、生成泰语回复）；面单 PDF 转交；运营采集（竞品、搜索结果、店铺、卖家后台数据页，今日巡逻）——都发到你自己的 3D 运营管理系统。",
+  "version": "3.1.0",
+  "description": "AI 客服（卖家中心聊天页读消息、生成泰语回复）；面单 PDF 转交；运营采集（竞品、搜索结果、店铺、卖家后台数据页，今日巡逻）；选品（模型网站上的推荐分和采集、用浏览器登录状态下载模型文件、关注巡逻）——都发到你自己的 3D 运营管理系统。",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
@@ -21,7 +21,8 @@
     "activeTab",
     "notifications",
     "downloads",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -78,6 +79,25 @@
       ],
       "js": [
         "capture.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://makerworld.com/*",
+        "https://*.makerworld.com/*",
+        "https://makerworld.com.cn/*",
+        "https://*.makerworld.com.cn/*",
+        "https://printables.com/*",
+        "https://*.printables.com/*",
+        "https://thingiverse.com/*",
+        "https://*.thingiverse.com/*"
+      ],
+      "js": [
+        "cur_sites_builtin.js",
+        "cur_sites.js",
+        "cur_extract.js",
+        "cur_picker.js"
       ],
       "run_at": "document_idle"
     }

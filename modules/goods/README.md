@@ -32,3 +32,4 @@
 - 2.3（系统 v2.45.0）：类目字段接口优先（core/lazada_cats：类目树、类目属性生成字段表；categories.get / library / by_cat_id 接上；api|类目ID）；编辑页显示属性来源和许可证提醒；AI 匹配类目避开要许可证的类目（categories.needs_license）。测试 tests/cases/t_cats245.py。
 - 2.4（系统 v2.45.1）：AI 匹配类目先用 Lazada 类目推荐（lazada_cats.suggest）、搜不到按一级类目缩小（attributes._by_top_level），返回推荐类目 options，编辑页「用这个」。
 - 2.5（系统 v2.46.0）：泰文 / 英文详情换成富文本编辑器（static/rte.js：源码、撤销重做、清除格式、加粗斜体下划线删除线、列表、缩进、对齐、链接、图片（产品图 / 网址，点图改大小）、表格、分隔线、样式 / 格式 / 字体 / 大小、文字颜色 / 背景色、全屏、字数）；AI 生成照旧写进 textarea，编辑器跟着刷新（RTE.syncAll）。详情里自己放了图片时预览不再自动接图。
+- （系统 v2.50.0）：选品模块「采用」的产品草稿带 license_check（许可待核验）：编辑页上面的许可横幅（「核验通过」/「仍然核验通过（已买授权）」/ 撤销），接口 POST /api/products/<编号>/license（core/copyrules.verify_license，记操作日志）；上架检查（core/lazada_template.check_product → core/copyrules.problems）许可待核验 = 错误（挡 Lazada / Shopee 导出和接口推送），另外提醒品牌 / 动漫词、标题和规格名里的颜色词、营销词、需要证明的功能说法、泰国敏感品类。测试 modules/curate/tests/t_curate250.py。

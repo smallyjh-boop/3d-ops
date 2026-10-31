@@ -165,7 +165,7 @@ async function innerTabs(pg, lang, user, page, scope) {
 }
 
 // 页面里的「打开详情 / 新建」：点第一个，弹窗 / 抽屉里的文字也查一遍，然后关掉（不保存）
-const OPENERS = ["[data-oid]", "[data-po]", "[data-iid]", "[data-item]", "[data-doc]", "[data-sup]", "[data-loc]", "[data-edit]", "[data-hid]", "[data-cid]", "PLUS"];
+const OPENERS = ["[data-oid]", "[data-c-open]", "[data-po]", "[data-iid]", "[data-item]", "[data-doc]", "[data-sup]", "[data-loc]", "[data-edit]", "[data-hid]", "[data-cid]", "PLUS"];
 async function closeAll(pg) {
   await pg.evaluate(() => {
     if (window.MODAL && !document.querySelector("#modal").classList.contains("hidden")) MODAL.close();

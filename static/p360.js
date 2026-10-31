@@ -127,7 +127,7 @@
     return `<section class="p360-card ${opts.tone ? "p360-card-" + opts.tone : ""}"><div class="p360-card-h"><h4>${E(title)}${opts.n != null ? ` <b>${E(opts.n)}</b>` : ""}</h4>${opts.right || ""}</div>${body}</section>`;
   }
   const col = (c) => (c && typeof colorLabel === "function" ? colorLabel(c) : c);          // 颜色按界面语言（泰文界面显示泰文颜色名）
-  const varName = (v) => [col(v.opt1), v.opt2].filter(Boolean).join(" · ");
+  const varName = (v) => [col(v.opt1), TH() && v.opt2_th ? v.opt2_th : v.opt2].filter(Boolean).join(" · ");
 
   // ---------------- 内容 ----------------
   function render(d) {
@@ -154,12 +154,13 @@
           ${vs.length > 12 ? chip(`+${vs.length - 12}`) : ""}
         </div>
         <div class="p360-chips">
-          ${!p.active ? chip(Z("ERP 已下架", "ปิดใน ERP"), "warn") : ""}${p.draft ? chip(Z("草稿", "ฉบับร่าง"), "warn") : ""}
+          ${!p.active ? chip(Z("ERP 已下架", "ปิดใน ERP"), "warn") : ""}${p.draft ? chip(Z("草稿", "ฉบับร่าง"), "warn") : ""}${p.license_pending ? chip(Z("许可待核验", "รอตรวจสัญญาอนุญาต"), "bad") : ""}
           ${lstChip("LZ", lz)}${lstChip("SP", sp)}
         </div>
       </div></div>
       <div class="p360-acts">
         <button type="button" class="primary" data-p360-act="edit" data-id="${E(p.id)}">✏️ ${E(Z("编辑产品", "แก้ไขสินค้า"))}</button>
+        ${p.license_pending && role !== "production" ? `<button type="button" data-p360-act="license" data-id="${E(p.id)}">✔ ${E(Z("核验许可", "ตรวจสัญญาอนุญาต"))}</button>` : ""}
         ${role !== "production" && hasTab("export") ? `<button type="button" data-p360-act="export" data-id="${E(p.id)}">⬆️ ${E(Z("上架", "ลงขาย"))}</button>` : ""}
         ${d.online && hasTab("online") ? `<button type="button" data-p360-act="online" data-id="${E(fv ? fv.sku : p.id)}">🛒 ${E(Z("在线商品", "สินค้าออนไลน์"))}</button>` : ""}
       </div>`;
@@ -338,6 +339,12 @@
       if (a) {
         const id = a.dataset.id;
         if (a.dataset.p360Act === "edit") { close(); if (typeof openProduct === "function") await openProduct(id); return; }
+        if (a.dataset.p360Act === "license") {        // v2.50：许可核验（原站许可允许商用才点）
+          if (!confirm(Z("确认已经打开原站看过许可证，可以商用？", "ยืนยันว่าเปิดดูสัญญาอนุญาตที่เว็บต้นทางแล้ว และใช้เชิงพาณิชย์ได้?"))) return;
+          await api(`/api/products/${encodeURIComponent(id)}/license`, { json: { verified: true } });
+          if (typeof toast === "function") toast(Z("许可已核验", "ตรวจสัญญาอนุญาตแล้ว"));
+          await load(HIST[POS] || id); return;
+        }
         if (a.dataset.p360Act === "export") { close(); await goTab("export"); setTimeout(() => setQuery("#exp-q", id), 50); return; }
         if (a.dataset.p360Act === "online") { close(); await goTab("online"); setTimeout(() => setQuery("#ol-q", id), 50); return; }
       }

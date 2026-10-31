@@ -150,3 +150,4 @@ oa_patrol_competitors）、机会分权重（oa_radar_w_*、oa_radar_alert_score
 - 3.0（系统 v2.49.0）：顶部新大菜单「运营」：经营概况 / 商品表现 / 市场与竞争 / 计划与活动 4 个页面，共用筛选条和页签（ui/hub.js），
   页面用统一组件（static/ux.js）重画成图形；旧页面 id 变成页签（ghost 菜单）；今日待办改成右上角 🔔；运营改动搬进「商品表现 → 待确认的建议」；
   商品表现、流量给上架客服看（没有成本利润）；看板接口支持时间段 / 平台 / 店铺；店铺表现指标名中文 / 泰文、进度条。测试 tests/t_ops246.py、t_ops248.py、tests/cases/t_shell249.py。
+- （系统 v2.50.0）：public.market_keywords / market_keyword 给选品模块（候选卡片显示泰国市场数据）；爆款雷达每个关键词加「去模型站找」（POST /api/cur/from-radar：每个模型网站建一个关键词关注，然后打开「商品 → 选品 → 关注巡逻」）。

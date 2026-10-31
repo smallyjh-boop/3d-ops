@@ -87,6 +87,7 @@ def _variants(cfg, p, role):
     for i, v in enumerate(p.get("variants") or []):
         sku = str(v.get("sku") or "").strip().upper()
         row = {"idx": i, "sku": sku, "opt1": v.get("opt1_zh") or "", "opt2": v.get("opt2_zh") or "", "image": _img(p, v.get("image"))}
+        row["opt2_th"] = ((p.get("copy") or {}).get("options_th") or {}).get(row["opt2"]) or ""      # v2.50：规格的泰文名（泰文界面用）
         if see_price:
             pr = pricing.price_variant(cfg, v, p.get("markup"), p.get("material"))
             row.update(price=pr["final_price"], list_price=pr["list_price"])
@@ -279,9 +280,15 @@ def _changes(p, skus, role):
                    "reason": ch.get("reason") or "", "status": ch["status"], "status_zh": ch.get("status_zh"), "source": "ops", "id": ch["id"]}
             (pending if ch["status"] == "pending" else out).append(row)
     if role == "owner":
+        try:                               # v2.50：操作名有泰文翻译（各模块 th.json）就带上
+            th_map = modules.i18n_th()
+        except Exception:  # noqa: BLE001
+            th_map = {}
         for a in db.audit_list(limit=30, target=p["id"]):
             a = dict(a)
-            out.append({"ts": a["ts"], "who": a.get("username") or "", "what": a.get("action") or "", "detail": a.get("detail") or "", "source": "audit"})
+            act = a.get("action") or ""
+            out.append({"ts": a["ts"], "who": a.get("username") or "", "what": act, "what_th": th_map.get(act) or None, "detail": a.get("detail") or "",
+                        "source": "audit"})
     if p.get("edited_at") and not any(x["source"] == "audit" for x in out):
         out.append({"ts": p["edited_at"], "who": p.get("edited_by") or "", "what": "编辑产品资料", "what_th": "แก้ไขข้อมูลสินค้า", "source": "edit"})
     out.sort(key=lambda x: -(x["ts"] or 0))
@@ -343,6 +350,7 @@ def view(target, user=None):
                     "image": imgs[0] if imgs else "", "images": imgs[:8], "material": p.get("material") or "",
                     "opt1_name": p.get("variation1_name_zh") or "", "opt2_name": p.get("variation2_name_zh") or "",
                     "active": p.get("active", True) is not False, "draft": bool(p.get("draft")),
+                    "license_pending": (p.get("license_check") or {}).get("status") == "pending",    # v2.50 选品采用的草稿：许可待核验
                     "updated_at": p.get("updated_at") or None, "edited_at": p.get("edited_at") or None, "edited_by": p.get("edited_by") or "",
                     "listing": {k: {"status": v.get("status"), "status_zh": core_listing.STATUS_ZH.get(v.get("status") or "none", ""),
                                     "first_listed_at": v.get("first_listed_at"), "note": v.get("note")} for k, v in lst_view.items()}},

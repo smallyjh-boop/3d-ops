@@ -838,6 +838,21 @@ def spec_confirm(pid, spec_id, action):
     return jsonify({"ok": True, "product": p})
 
 
+@bp.post("/api/products/<pid>/license")
+def license_verify(pid):
+    """v2.50 许可核验（从「商品 → 选品」采用的草稿：license_check 待核验时不能导出 / 推送）。
+    {verified: true/false, force: 初判禁止商用也通过, note}"""
+    from core import copyrules
+    b = request.get_json(force=True, silent=True) or {}
+    try:
+        p = copyrules.verify_license(pid, bool(b.get("verified", True)), bool(b.get("force")), _uname(), b.get("note") or "")
+    except FileNotFoundError:
+        return err("没有这个产品", 404)
+    except ValueError as e:
+        return err(str(e))
+    return jsonify({"ok": True, "product": p})
+
+
 @bp.post("/api/products/<pid>/ip-risk")
 def ip_risk_set(pid):
     """侵权待确认（选品工具 listing.ip_risk）：ok = 确认没问题（已改掉品牌 / 角色词，或确认不侵权）；pending = 改回待确认。"""

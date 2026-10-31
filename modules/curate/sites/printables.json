@@ -1,0 +1,120 @@
+{
+  "id": "printables",
+  "name": "Printables",
+  "version": 1,
+  "enabled": true,
+  "key_prefix": "pr",
+  "domains": [
+    "printables.com"
+  ],
+  "image_hosts": [
+    "media.printables.com"
+  ],
+  "related_hosts": [
+    "api.printables.com",
+    "files.printables.com",
+    "media.printables.com"
+  ],
+  "referer": "https://www.printables.com/",
+  "detail": {
+    "path": "(/(?:[a-z]{2}/)?model/(\\d+)[^/?#]*)",
+    "id_group": 2
+  },
+  "search": [
+    {
+      "id": "pr",
+      "label": "Printables",
+      "url": "https://www.printables.com/search/models?q={q}"
+    }
+  ],
+  "image_rules": [
+    {
+      "host": "^media\\.printables\\.com$",
+      "key_replace": [
+        "/thumbs/(?:inside|cover)/\\d+x\\d+/(?:jpg|png|webp)/",
+        "/"
+      ]
+    }
+  ],
+  "extract": {
+    "settle_ms": 2000,
+    "sources": [
+      {
+        "type": "graphql",
+        "url": "https://api.printables.com/graphql/",
+        "query": "query ModelImages($id: ID!) { print(id: $id) { id name images { filePath } } }",
+        "variables": {
+          "id": "{$id}"
+        },
+        "root": "data.print",
+        "fields": {
+          "images": {
+            "path": "images",
+            "each": {
+              "path": "filePath",
+              "prefix": "https://media.printables.com/",
+              "trim_slash": true
+            }
+          }
+        }
+      },
+      {
+        "type": "graphql",
+        "url": "https://api.printables.com/graphql/",
+        "query": "query ModelFiles($id: ID!) { print(id: $id) { id stls { id name fileSize folder } } }",
+        "variables": {
+          "id": "{$id}"
+        },
+        "root": "data.print",
+        "fields": {
+          "files": {
+            "path": "stls",
+            "each": {
+              "name": "name",
+              "url": {
+                "template": "https://www.printables.com/model/{$id}/files#{id}"
+              },
+              "size": {
+                "path": "fileSize",
+                "mb": true
+              },
+              "kind": {
+                "path": "name",
+                "ext": true
+              },
+              "folder": "folder"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "download": [
+    {
+      "url_regex": "printables\\.com/model/(\\d+)[^#]*#(\\d+)$",
+      "graphql": {
+        "url": "https://api.printables.com/graphql/",
+        "operation": "GetDownloadLink",
+        "credentials": "include",
+        "query": "mutation GetDownloadLink($id: ID!, $modelId: ID!, $fileType: DownloadFileTypeEnum!, $source: DownloadSourceEnum!) { getDownloadLink(id: $id, printId: $modelId, fileType: $fileType, source: $source) { ok errors { field messages } output { link } } }",
+        "variables": {
+          "id": "{2}",
+          "modelId": "{1}",
+          "fileType": "stl",
+          "source": "model_detail"
+        },
+        "link": "data.getDownloadLink.output.link"
+      },
+      "fail_hint": "可能需要先登录 Printables"
+    }
+  ],
+  "examples": {
+    "detail": [
+      "https://www.printables.com/model/1801951-factorio-transport-belts/files",
+      "https://www.printables.com/de/model/77"
+    ],
+    "not_detail": [
+      "https://www.printables.com/search/models?q=hook"
+    ]
+  }
+}

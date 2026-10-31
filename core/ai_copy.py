@@ -138,6 +138,11 @@ def _request(cfg, system, user, image_b64):
             data = r.json()
             return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
         base = (cfg.get("ai_base_url") or "").rstrip("/")
+        if provider == "deepseek":         # v2.50：DeepSeek 单独一个选项（OpenAI 兼容接口，地址固定）
+            if not base or "deepseek" not in base:
+                base = "https://api.deepseek.com"
+            if not model or str(model).lower().startswith("claude"):
+                raise AIError("接口类型选了 DeepSeek：请在「模型名称」里填 DeepSeek 的模型名（DeepSeek 开放平台的模型列表里有）")
         url = base + ("/chat/completions" if base.endswith("/v1") or "deepseek" in base else "/v1/chat/completions")
         r = requests.post(
             url,
