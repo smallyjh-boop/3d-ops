@@ -308,7 +308,7 @@ mods = {m["id"]: m for m in C.get("/api/modules").get_json()["modules"]}
 ok([m["tab"] for m in mods["ops"]["menus"]] == ["ops_todo", "ops_dash", "ops_life", "ops_lazada", "ops_plans", "ops_cal", "ops_traffic",
                                                   "ops_comp", "ops_radar", "ops_shops"], "menus")
 ml = {m["id"]: m for m in CL.get("/api/modules").get_json()["modules"]}
-ok([m["tab"] for m in ml["ops"]["menus"]] == ["ops_todo", "ops_lazada", "ops_plans", "ops_cal"], "listing menus")
+ok([m["tab"] for m in ml["ops"]["menus"]] == ["ops_todo", "ops_lazada", "ops_plans", "ops_cal", "ops_comp", "ops_radar", "ops_shops"], "listing menus")
 for f in ("page.html", "ops.js", "page.js", "page.css"):
     ok(C.get(f"/m/ops/{f}").status_code == 200, f"ui {f}")
 html = C.get("/m/ops/page.html").get_data(as_text=True)

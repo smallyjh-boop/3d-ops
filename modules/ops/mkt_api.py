@@ -2,6 +2,8 @@
   /api/oa/comp…、/api/oa/radar…、/api/oa/shops…、/api/oa/plans…、/api/oa/campaigns…、/api/oa/traffic  —— 软件界面用（登录）
   /api/v1/ops/ext/…  —— 浏览器扩展采集用（员工的扩展密钥，和 AI 客服、面单转交同一把；core/auth.py 放行 full / ops 权限的密钥）
 都挂在运营分析模块的 Blueprint 上（api.py 里 attach(bp)）。"""
+import re
+
 from flask import g, jsonify, request
 
 from core.config import load_config
@@ -24,7 +26,7 @@ def _e(msg, code=400):
 
 def _go(fn):
     try:
-        return jsonify({"ok": True, **(fn() or {})})
+        return jsonify({"ok": True, **_strip(fn() or {})})      # 员工：去掉成本利润
     except (ValueError, TypeError, AiError) as e:
         return _e(e)
 
@@ -43,13 +45,16 @@ MONEY = {"actual_profit", "unit_cost", "my_unit_cost", "my_profit_unit", "profit
          "margin", "floor_price", "actual_revenue", "target_revenue"}
 
 
+MONEY_RE = re.compile(r"cost|profit|margin|fee_unit|fee_7d|fee_30d|floor_price|revenue", re.I)
+
+
 def _strip(o):
-    """员工（上架客服）看计划时去掉成本、利润（和 ERP 别的页面一样，员工看不到成本利润）。"""
+    """员工（上架客服）看计划、竞品、雷达、竞店时去掉成本、利润（和 ERP 别的页面一样，员工看不到成本利润）。"""
     from core import auth
     if auth.is_owner():
         return o
     if isinstance(o, dict):
-        return {k: _strip(v) for k, v in o.items() if k not in MONEY}
+        return {k: _strip(v) for k, v in o.items() if k not in MONEY and not MONEY_RE.search(str(k))}
     if isinstance(o, list):
         return [_strip(v) for v in o]
     return o
@@ -93,7 +98,7 @@ def attach(bp):
     def oa_comp_update(cid):
         if not comp.get(cid):
             return _e("没有这个竞品", 404)
-        return _go(lambda: comp.update(cid, _body()))
+        return _go(lambda: comp.update(cid, _body() if _owner() else {k: v for k, v in _body().items() if not re.search(r"cost|fee|gram|hour|material", k)}))
 
     @bp.post("/api/oa/comp/<int:cid>/snap")
     def oa_comp_snap(cid):

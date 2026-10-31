@@ -12,8 +12,30 @@
   const PLAT = (p) => ({ lazada: "Lazada", shopee: "Shopee", tiktok: "TikTok" }[p] || p || Z("全部平台", "ทุกแพลตฟอร์ม"));
   const day = (ts) => (ts ? fmtTime(ts) : "—");
   const card = (title, body, extra = "") => `<div class="card"><h3>${title}${extra ? ` <span class="muted small">${extra}</span>` : ""}</h3>${body}</div>`;
-  const tbl = (head, rows, empty) => rows.length ? `<div class="oa-wrap"><table class="grid"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`
-    : `<p class="muted">${empty || Z("没有", "ไม่มี")}</p>`;
+  // v2.48.0：上架客服也能看竞品 / 雷达 / 竞店，但成本、利润、平台费那几列和格子不显示（接口也不给这些数）
+  const OWN = () => !!(window.OPSH && OPSH.isOwner());
+  const MONEY_TXT = /成本|利润|平台费|扣点|最低价|销售额|ต้นทุน|กำไร|ค่าธรรมเนียม|ราคาขั้นต่ำ|ยอดขาย/;
+  const tbl = (head, rows, empty) => {
+    if (!rows.length) return `<p class="muted">${empty || Z("没有", "ไม่มี")}</p>`;
+    let html = `<div class="oa-wrap"><table class="grid"><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
+    const drop = OWN() ? [] : head.map((h, i) => (MONEY_TXT.test(String(h)) ? i : -1)).filter((i) => i >= 0);
+    if (!drop.length) return html;
+    const t = document.createElement("template");
+    t.innerHTML = html;
+    t.content.querySelectorAll("tr").forEach((tr) => { const cells = [...tr.children]; if (cells.length === head.length) drop.slice().reverse().forEach((i) => cells[i] && cells[i].remove()); });
+    return t.innerHTML;
+  };
+  // 员工：页面画好以后把成本利润的格子、成本设置项、「AI 估成本」按钮去掉
+  const scrub = (root) => {
+    if (OWN() || !root) return;
+    root.querySelectorAll(".tile").forEach((x) => { const lab = x.querySelector("span"); if (lab && MONEY_TXT.test(lab.textContent)) x.remove(); else x.querySelectorAll("small").forEach((sm) => { if (MONEY_TXT.test(sm.textContent)) sm.remove(); }); });
+    root.querySelectorAll("label").forEach((l) => { const i = l.querySelector("[name]"); if (i && /cost|fee|gram|hour|material/.test(i.name)) l.remove(); });
+    root.querySelectorAll("button").forEach((b) => { if (/AI 估成本|AI ประเมินต้นทุน/.test(b.textContent)) b.remove(); });
+  };
+  if (window.MutationObserver) {
+    new MutationObserver(() => { if (!OWN()) ["#tab-ops_comp", "#tab-ops_radar", "#tab-ops_shops"].forEach((sel) => scrub(document.querySelector(sel))); })
+      .observe(document.body, { childList: true, subtree: true });
+  }
   const img = (u, s = 40) => (u ? `<img class="oa-thumb" src="${esc(u)}" referrerpolicy="no-referrer" loading="lazy" style="width:${s}px;height:${s}px" alt="">` : "");
   const link = (u, t) => (u ? `<a href="${esc(u)}" target="_blank" rel="noopener" data-notr>${esc(t || u)}</a>` : `<span data-notr>${esc(t || "")}</span>`);
   const conf = (c) => (c ? `<span class="oa-pill ${c === "实测" ? "ok" : "warn"}">${c === "实测" ? Z("实测", "วัดจริง") : Z("估", "ประมาณ")}</span>` : "");

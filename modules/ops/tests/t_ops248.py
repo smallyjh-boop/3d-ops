@@ -116,8 +116,10 @@ r = C.post("/api/v1/ops/ext/competitor", headers=H, json={"url": "https://www.la
                                                           "shop_url": "https://www.lazada.co.th/shop/shopx", "shop_name": "ShopX"}).get_json()
 ok(r["ok"] and r["new"] and r["how"] == "ai" and r["est"]["price_eff"] == 189 and r["image"] == "https://img.lazcdn.com/a.jpg", f"ext capture {r.get('est', {}).get('price_eff')}")
 C2 = r["id"]
-ok(comp.get(C2)["est_grams"] == 40 and r["est"]["cost_key"] == "ai" and r["radar"], "new competitor gets AI cost estimate, goes to radar")
-ok(r["est"]["unit_cost"] == mkt_util.unit_cost(40, 2, False), "AI grams/hours x ERP cost params")
+E2 = comp.estimate(A.load_config(), comp.get(C2))
+ok(comp.get(C2)["est_grams"] == 40 and E2["cost_key"] == "ai" and r["radar"], "new competitor gets AI cost estimate, goes to radar")
+ok(E2["unit_cost"] == mkt_util.unit_cost(40, 2, False), "AI grams/hours x ERP cost params")
+ok("unit_cost" not in r["est"] and "profit_unit" not in r["est"], "extension (staff key) gets no cost / profit (v2.48.0)")
 sh = shops.by_key("lazada:shopx")
 ok(sh and not sh["watch"] and r.get("shop_id") == sh["id"], "its shop remembered as candidate")
 r = C.post("/api/v1/ops/ext/competitor", headers=H, json={"url": "https://www.lazada.co.th/products/stand-i999-s1.html", "text": "x"}).get_json()
@@ -138,7 +140,9 @@ L = C.get("/api/oa/comp").get_json()
 g = next(x for x in L["compare"] if x["sku"] == "3DP0015-WH")
 ok(g["comp_count"] == 1 and abs(g["my_daily"] - 0.2) < 0.01 and g["comp_daily_top"] == 10, f"my sku vs competitor {g['my_daily']} {g['comp_daily_top']}")
 ok(any(x["id"] == C2 for x in L["radar"]) and not any(x["id"] == CID for x in L["radar"]), "selection radar = unlinked")
-ok(CL.get("/api/oa/comp").status_code == 403, "competitors owner only")
+LS = CL.get("/api/oa/comp").get_json()
+ok(LS["ok"] and LS["rows"] and not any(k for x in LS["rows"] for k in x if "cost" in k or "profit" in k), "listing staff sees competitors without cost / profit (v2.48.0)")
+ok(CL.post(f"/api/oa/comp/{C2}/ai-cost").status_code == 403 and CL.get("/api/oa/traffic").status_code == 403, "AI cost and traffic stay owner-only")
 r = C.post(f"/api/oa/comp/{C2}/ai-cost").get_json()
 ok(r["ok"] and r["grams"] == 40, "ai cost endpoint")
 
@@ -151,7 +155,10 @@ r = C.post("/api/v1/ops/ext/search", headers=H, json={"url": "https://www.lazada
                                                        "cards": cards, "total_text": "2,345 items found"}).get_json()
 ok(r["ok"] and r["cards"] == 12 and r["total_results"] == 2345, f"search capture {r.get('cards')} {r.get('total_results')}")
 o = r["opportunity"]
-ok(0 < o["score"] <= 100 and o["ai"].get("summary") == "值得做" and o["unit_cost"] == mkt_util.unit_cost(30, 1.5), f"opportunity scored with AI {o['score']}")
+ok(0 < o["score"] <= 100 and o["ai"].get("summary") == "值得做" and "unit_cost" not in o, f"opportunity scored with AI, staff key sees no cost {o['score']}")
+KW1 = next(k for k in C.get("/api/oa/radar").get_json()["rows"] if k["keyword"] == "ที่วางโทรศัพท์")
+o = C.get(f"/api/oa/radar/keywords/{KW1['id']}").get_json()["opp"]      # 老板看得到成本利润
+ok(o["unit_cost"] == mkt_util.unit_cost(30, 1.5), "owner sees radar cost")
 ok(o["price_median"] and o["profit_unit"] == round(o["price_median"] * (1 - 0.15) - o["unit_cost"], 2), "radar profit uses real fee + ERP cost")
 KID = r["keyword_id"]
 AI["ip"] = True

@@ -20,7 +20,7 @@ MODULE = {
     "id": "ops",
     "name_zh": "运营分析",
     "name_th": "วิเคราะห์การขาย",
-    "version": "2.0",
+    "version": "2.1",
     "desc_zh": "运营看板、商品生命周期、今日待办与 LINE / Telegram 提醒、Lazada 财务流水 / 评价 / 退货退款 / 店铺表现；"
                "竞品、爆款雷达、竞店、爆款 / 上量计划、营销日历、卖家后台流量数据（浏览器扩展采集）。",
     "desc_th": "แดชบอร์ดการขาย วงจรชีวิตสินค้า งานวันนี้และแจ้งเตือน LINE / Telegram ข้อมูลการเงิน รีวิว คืนสินค้า และประสิทธิภาพร้านจาก Lazada "
@@ -36,12 +36,14 @@ MODULE = {
         {"tab": "ops_plans", "mod": "home", "zh": "爆款 / 上量计划", "th": "แผนสินค้าขายดี", "roles": "owner,listing", "after": "ops_lazada"},
         {"tab": "ops_cal", "mod": "home", "zh": "营销日历", "th": "ปฏิทินการตลาด", "roles": "owner,listing", "after": "ops_plans"},
         {"tab": "ops_traffic", "mod": "home", "zh": "流量数据", "th": "ข้อมูลทราฟฟิก", "roles": "owner", "after": "ops_cal"},
-        {"tab": "ops_comp", "mod": "goods", "zh": "竞品", "th": "สินค้าคู่แข่ง", "roles": "owner"},
-        {"tab": "ops_radar", "mod": "goods", "zh": "爆款雷达", "th": "เรดาร์สินค้าขายดี", "roles": "owner", "after": "ops_comp"},
-        {"tab": "ops_shops", "mod": "goods", "zh": "竞店", "th": "ร้านคู่แข่ง", "roles": "owner", "after": "ops_radar"},
+        {"tab": "ops_comp", "mod": "goods", "zh": "竞品", "th": "สินค้าคู่แข่ง", "roles": "owner,listing"},
+        {"tab": "ops_radar", "mod": "goods", "zh": "爆款雷达", "th": "เรดาร์สินค้าขายดี", "roles": "owner,listing", "after": "ops_comp"},
+        {"tab": "ops_shops", "mod": "goods", "zh": "竞店", "th": "ร้านคู่แข่ง", "roles": "owner,listing", "after": "ops_radar"},
     ],
     "owner_only": [("GET", r"^/api/oa/(dashboard|lifecycle|alerts)$"), ("POST", r"^/api/oa/(lazada/sync|alerts/)"),
-                   ("*", r"^/api/oa/(comp|radar|shops|traffic)(/|$)"),          # 竞品、雷达、竞店、流量：有成本和利润，只给老板
+                   ("*", r"^/api/oa/traffic(/|$)"),                            # 流量只给老板
+                   # v2.48.0：竞品、雷达、竞店也给上架客服看（成本、利润在接口里去掉，见 mkt_api._strip）；估成本只给老板
+                   ("POST", r"^/api/oa/comp/\d+/ai-cost$"),
                    ("POST", r"^/api/oa/plans(/\d+)?$"), ("POST", r"^/api/oa/plans/\d+/ai$"), ("POST", r"^/api/oa/campaigns")],
     "settings_module": "ops",
     "settings": [
