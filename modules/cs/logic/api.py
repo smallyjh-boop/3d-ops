@@ -401,6 +401,11 @@ def alerts_view():
                     "unread_in_browser": sum(int(t.get("unread") or 0) for t in tabs)})
 
 
+NOT_BUYER = re.compile(r"^\s*(messages?|chats?|inbox|im|แชท|ข้อความ|消息|聊天|会话|客服|customer service|ลูกค้า|buyer|chat with buyers?|"
+                       r"(my )?last orders?|my orders?|orders?|recent orders?|products?|recommend(ed|ations)?|vouchers?|coupons?|"
+                       r"quick ?replies|คำสั่งซื้อ(ล่าสุด|ของฉัน)?|สินค้า(แนะนำ)?|โค้ดส่วนลด|订单|最近订单|商品|推荐|优惠券)\s*$", re.I)
+
+
 @bp.post("/api/v1/cs/capture")
 @_wrap
 def x_capture():
@@ -409,6 +414,8 @@ def x_capture():
     b = request.get_json(force=True) or {}
     platform = b.get("platform") or _platform_of(b.get("url"))
     buyer = (b.get("buyer") or "").strip()
+    if NOT_BUYER.match(buyer):        # v2.47.1：旧版扩展把聊天页的标签（My Last Order、Messages…）当成买家名字
+        buyer = ""
     shop = (b.get("shop") or "").strip()
     shot = b.get("screenshot")
     raw = None

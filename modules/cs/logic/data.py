@@ -129,6 +129,13 @@ def init():
                      ("shop", "TEXT DEFAULT ''")):
         if col not in kcols:
             c.execute(f"ALTER TABLE cs_kb ADD COLUMN {col} {typ}")
+    # v2.47.1：旧版扩展把聊天页的标签当成了买家名字 → 清掉（会话本身保留）
+    c.execute("UPDATE cs_conv SET buyer='' WHERE LOWER(TRIM(COALESCE(buyer,''))) IN "
+              "('messages','message','my last order','last order','orders','order','chat','chats','คำสั่งซื้อล่าสุด','ข้อความ','แชท')")
+    try:
+        c.execute("UPDATE cs_record SET buyer='' WHERE LOWER(TRIM(COALESCE(buyer,''))) IN ('messages','message','my last order','last order','orders','order','chat','chats')")
+    except Exception:  # noqa: BLE001  登记表还没建
+        pass
     c.commit()
     if not c.execute("SELECT COUNT(*) FROM cs_kb").fetchone()[0]:
         seed_presets()

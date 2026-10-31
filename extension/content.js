@@ -10,7 +10,8 @@
   // 平台的系统提示（不是买家说的话）
   const SYS = /^(unknown message type|please check it on (the )?app|\[?(system notice|order confirmation|ระบบ|系统通知)\]?|ข้อความประเภทนี้|ไม่รองรับข้อความ|此消息类型|该消息类型)/i;
   // 聊天区标题里常见的通用词（不是买家名字）
-  const GENERIC = /^(messages?|chats?|inbox|im|แชท|ข้อความ|消息|聊天|会话|客服|customer service|ลูกค้า|buyer|chat with buyers?)$/i;
+  // 聊天页上的按钮 / 标签（不是买家名字）。v2.47.1 加了「My Last Order」这一类（Lazada 聊天右侧的订单面板）
+  const GENERIC = /^\s*(messages?|chats?|inbox|im|แชท|ข้อความ|消息|聊天|会话|客服|customer service|ลูกค้า|buyer|chat with buyers?|(my )?last orders?|my orders?|orders?|recent orders?|products?|recommend(ed|ations)?|vouchers?|coupons?|quick ?replies|คำสั่งซื้อ(ล่าสุด|ของฉัน)?|สินค้า(แนะนำ)?|โค้ดส่วนลด|订单|最近订单|商品|推荐|优惠券)\s*$/i;
   function visible(r) { return r.width > 2 && r.height > 2; }
   function ownText(el) {
     let t = "";
