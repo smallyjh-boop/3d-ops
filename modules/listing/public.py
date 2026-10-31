@@ -49,3 +49,28 @@ def online_item_ids(platform="lazada", shop_id=None, status="live"):
         q += " AND status=?"
         a.append(status)
     return [r[0] for r in db.conn().execute(q + " ORDER BY updated DESC", a)]
+
+
+def product_online(pid, skus=()):
+    """商品 360 抽屉：这个产品在各店铺的在线商品（product_id 对上，或者任一 SellerSku 对上）。
+    [{platform, shop_id, shop, item_id, status, status_zh, raw_status, reason, name, url, price_min, price_max, qty, created, updated,
+      skus:[{seller_sku, price, special_price, qty, status}]}]"""
+    import json
+    from core import db
+    from . import online
+    online.init()
+    want = {str(s or "").strip().upper() for s in skus if s}
+    shops = {r["id"]: r["name"] for r in db.conn().execute("SELECT id, name FROM shops")}
+    out = []
+    for r in db.conn().execute("SELECT * FROM online_items ORDER BY platform, shop_id, updated DESC"):
+        sk = json.loads(r["skus"] or "[]")
+        mine = [s for s in sk if str(s.get("seller_sku") or "").strip().upper() in want]
+        if r["product_id"] != pid and not mine:
+            continue
+        out.append({"platform": r["platform"], "shop_id": r["shop_id"], "shop": shops.get(r["shop_id"], ""), "item_id": r["item_id"],
+                    "status": r["status"], "status_zh": online.STATUS_ZH.get(r["status"] or "", r["status"] or ""),
+                    "raw_status": r["raw_status"], "reason": r["reason"] or "", "name": r["name"] or "", "url": r["url"] or "",
+                    "price_min": r["price_min"], "price_max": r["price_max"], "qty": r["qty"], "created": r["created"] or None,
+                    "updated": r["updated"] or None,
+                    "skus": [{k: s.get(k) for k in ("seller_sku", "price", "special_price", "qty", "status")} for s in (mine or sk)]})
+    return out

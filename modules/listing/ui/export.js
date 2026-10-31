@@ -95,7 +95,7 @@ function renderExpList() {
       `<button class="lw-iss-btn ok" data-iss="${esc(p.id)}">✓ 可上架${w ? ` · ${w} 条提醒` : ""} ▾</button>`;
     return `<tr class="${EXP_SEL.has(p.id) ? "sel" : ""}" data-pid="${esc(p.id)}"><td><input type="checkbox" class="exp-p" value="${esc(p.id)}" ${EXP_SEL.has(p.id) ? "checked" : ""}></td>
       <td>${p.thumb ? `<img class="thumb" src="${esc(p.thumb)}" alt="" loading="lazy">` : ""}</td>
-      <td class="mono nowrap" data-notr>${esc(p.id)}${p.exported ? " 🔒" : ""}</td>
+      <td class="mono nowrap" data-notr><span data-p360="${esc(p.id)}">${esc(p.id)}</span>${p.exported ? " 🔒" : ""}</td>
       <td class="lib-name"><span data-notr>${esc(p.name_zh)}</span>${p.active === false ? ' <span class="pill bad-pill">已下架</span>' : ""}
         <div class="small">${(p.groups || []).map((g) => gname[g] ? `<span class="pill tag-pill" data-notr>${esc(gname[g])}</span>` : "").join(" ")}</div></td>
       <td class="small">${p.category ? `<span data-notr>${esc(LANG === "th" ? p.category_th || p.category : p.category)}</span>` : '<span class="bad">未选类目</span>'}</td>

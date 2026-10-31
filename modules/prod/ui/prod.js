@@ -28,7 +28,7 @@
   function prodHead(j) {
     const pr = j.product || {};
     return `<div class="wk-head">${pr.img ? `<img src="${esc(pr.img)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
-      <div><div class="wk-sku mono" data-notr>${esc(j.sku || "?")}</div>
+      <div><div class="wk-sku mono" data-notr><span${j.sku ? ` data-p360="${esc(j.sku)}"` : ""}>${esc(j.sku || "?")}</span></div>
         <div class="wk-name" data-notr>${esc(pr.name_zh || j.name || "")}</div>
         ${pr.title_th ? `<div class="wk-th small" data-notr>${esc(pr.title_th)}</div>` : ""}</div></div>`;
   }
@@ -285,7 +285,7 @@
         ${st.layer != null && st.total_layers ? `层 ${st.layer}/${st.total_layers} · ` : ""}
         ${st.nozzle != null ? `喷头 ${h.num(st.nozzle, 0)}°C · 热床 ${h.num(st.bed, 0)}°C` : ""}
         ${st.error ? `<div class="bad">${esc(st.error)}</div>` : ""}</div>
-      ${p.run ? `<div class="small">这一盘：<b class="mono" data-notr>${esc(p.run.sku)}</b> ${h.colorTxt(p.run.color)} × ${p.run.count}
+      ${p.run ? `<div class="small">这一盘：<b class="mono" data-notr data-p360="${esc(p.run.sku)}">${esc(p.run.sku)}</b> ${h.colorTxt(p.run.color)} × ${p.run.count}
         ${p.run.alert ? `<div class="alert-box">⚠ ${esc(p.run.alert)}</div>` : ""}</div>` : ""}
       ${h.trayHtml(st)}
       <label class="small">现在装的料（没有料盘读数时填，例如：白色,黑色）
@@ -404,13 +404,13 @@
   async function loadStock() {
     const r = await api("/api/stock");
     const h = H();
-    $("#sg-table tbody").innerHTML = r.suggest.map((s) => `<tr><td class="mono" data-notr>${esc(s.sku)}</td><td data-notr>${esc(s.name || "")} ${h.colorTxt(s.color)}</td>
+    $("#sg-table tbody").innerHTML = r.suggest.map((s) => `<tr><td class="mono" data-notr data-p360="${esc(s.sku)}">${esc(s.sku)}</td><td data-notr>${esc(s.name || "")} ${h.colorTxt(s.color)}</td>
       <td>${s.sold30}</td><td>${s.daily}</td><td>${s.target}${s.auto_target ? ' <span class="muted small">(自动)</span>' : ""}</td><td>${s.stock}${s.reserved ? ` <span class="small muted">${Z(`（订单占 ${s.reserved}）`, `(จองให้ออเดอร์ ${s.reserved})`)}</span>` : ""}</td><td>${s.order_need}</td><td>${s.making}</td>
       <td>${s.suggest ? `<b>${s.suggest}</b>` : '<span class="muted">够了</span>'}</td>
       <td class="small">${s.suggest ? (s.suggest_after - Date.now() / 1000 < 3600 ? "现在（打印机有空）" : h.short(s.suggest_after) + " 以后（订单排完）") : ""}</td>
       <td>${s.suggest ? `<input type="number" min="1" value="${s.suggest}" style="width:64px" data-mkq="${esc(s.sku)}"> <button class="mini" data-mk="${esc(s.sku)}">生成备货任务</button>` : ""}</td></tr>`).join("")
       || '<tr><td colspan="11" class="muted">暂时没有建议（近 30 天销量不够多，或者库存已经够）</td></tr>';
-    $("#st-table tbody").innerHTML = r.items.map((s) => `<tr><td class="mono" data-notr>${esc(s.sku)}</td><td data-notr>${esc(s.name || "")}</td><td>${h.colorTxt(s.color)}</td>
+    $("#st-table tbody").innerHTML = r.items.map((s) => `<tr><td class="mono" data-notr data-p360="${esc(s.sku)}">${esc(s.sku)}</td><td data-notr>${esc(s.name || "")}</td><td>${h.colorTxt(s.color)}</td>
       <td><b>${s.qty}</b>${s.reserved ? ` <span class="small muted">${Z(`（订单占 ${s.reserved}，发货时扣）`, `(จองให้ออเดอร์ ${s.reserved} ตัดตอนส่ง)`)}</span>` : ""}</td><td>${s.target ?? '<span class="muted">自动</span>'}</td><td class="small">${fmtTime(s.updated_at)}</td></tr>`).join("")
       || '<tr><td colspan="6" class="muted">还没有成品库存</td></tr>';
     if (window.OPS && OPS.loadSkus) OPS.loadSkus();
