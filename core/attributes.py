@@ -50,21 +50,66 @@ CAT_SYSTEM = ("You are a Lazada Thailand category expert. Choose the most specif
 BIG_LIBRARY = 150     # 有模板的类目超过这么多（v2.25 下载了全部类目模板）：先按关键词找候选，再让 AI 从候选里选
 
 
+def _by_top_level(cfg, product, kws):
+    """关键词在类目树里一个都没搜到时（v2.45.1）：AI 先从一级类目里选方向，再给出那个方向下面的最末级类目当候选。"""
+    t = categories.tree()
+    tops = sorted({path.split(" > ")[0] for path, dis in t.values() if path and not dis})
+    if not tops:
+        return []
+    user = f"""Product:
+{_product_brief(product)}
+
+Lazada Thailand top-level categories:
+{chr(10).join("- " + x for x in tops)}
+
+Return JSON {{"top": ["1 to 3 top-level names exactly as listed where this product can be listed"]}}"""
+    try:
+        picked = [x for x in ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user)).get("top") or [] if x in tops]
+    except ai_copy.AIError:
+        return []
+    leaves = [(cid, path) for cid, (path, dis) in t.items() if not dis and path.split(" > ")[0] in picked]
+    words = [k.lower() for k in kws if k]
+    leaves.sort(key=lambda x: -sum(1 for w in words if w in x[1].lower()))
+    return leaves[:200]
+
+
+def _options(cands, first="", n=5):
+    """给页面的推荐类目（都能上架、不要许可证）：[{id, cat_id, path}]，AI 选的排第一。"""
+    out, seen = [], set()
+    for cid, path in ([(first, categories.path_of(first))] if first else []) + list(cands):
+        if not cid or cid in seen or categories.needs_license(cid):
+            continue
+        hit = categories.by_cat_id(cid)
+        if not hit:
+            continue
+        seen.add(cid)
+        out.append({"id": hit["id"], "cat_id": cid, "path": path or hit.get("path") or hit.get("name", "")})
+        if len(out) >= n:
+            break
+    return out
+
+
 def _match_big(cfg, product, lib):
-    """全部类目都有模板时：AI 先给关键词 → 在完整类目树里找候选 → AI 从候选里选。"""
+    """全部类目都能选时：Lazada 自己的类目推荐 + AI 关键词在类目树里找候选 → AI 从候选里选；
+    关键词搜不到就按一级类目缩小范围。无论如何都给出几个能放的推荐类目（options）。"""
+    from . import lazada_cats
+    sugg = lazada_cats.suggest(product)                     # v2.45.1：Lazada 按商品名 + 图片推荐的类目
     user = f"""Product:
 {_product_brief(product)}
 
 Return JSON {{"search_keywords_th": ["8-12 short Thai words to find this product's leaf category in the Lazada Thailand
 category tree: product-type words AND category-level words as Lazada names them (e.g. ของตกแต่งบ้าน, ของเล่น, ที่วาง,
-อุปกรณ์จัดเก็บ, ข้อต่อ, ท่อ, อะไหล่)"], "ideal_path_th": "<the Thai category path you would expect>"}}"""
+อุปกรณ์จัดเก็บ, ข้อต่อ, ท่อ, อะไหล่, เครื่องมือ, อุปกรณ์วัด)"], "ideal_path_th": "<the Thai category path you would expect>"}}"""
     d1 = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user))
     kws = list(d1.get("search_keywords_th") or [])
     kws += [x.strip() for x in str(d1.get("ideal_path_th") or "").split(">") if x.strip()]
-    cands = categories.search_tree(kws, limit=80)
-    res = {"id": "", "confidence": 0, "reason": "", "reason_th": "", "suggest_id": "", "suggest_path": "", "suggest_path_zh": "", "status": "check"}
+    cands = list(dict.fromkeys(sugg + categories.search_tree(kws, limit=80)))
     if not cands:
-        res["reason"] = "类目树里没找到匹配的候选，请手动选择"
+        cands = _by_top_level(cfg, product, kws)
+    res = {"id": "", "confidence": 0, "reason": "", "reason_th": "", "suggest_id": "", "suggest_path": "", "suggest_path_zh": "",
+           "status": "check", "options": []}
+    if not cands:
+        res["reason"] = "没找到合适的类目，请在上面搜索类目手动选择"
         return res
     # v2.45：要 TISI 等许可证的类目不给 AI 选（我们没有许可证）；全是这种才留着，选了也要人工确认
     lic = {cid for cid, _p in cands if categories.needs_license(cid)}
@@ -72,23 +117,29 @@ category tree: product-type words AND category-level words as Lazada names them 
         cands = [(cid, path) for cid, path in cands if cid not in lic]
         lic = set()
     have = {c["cat_id"] for c in lib}
-    lst = "\n".join(f"- {cid} | {path}" + ("" if cid in have else " (no template yet)") for cid, path in cands)
+    from_lz = {cid for cid, _p in sugg}
+    lst = "\n".join(f"- {cid} | {path}" + (" (Lazada suggests)" if cid in from_lz else "") +
+                    ("" if cid in have else " (no template yet)") for cid, path in cands)
     user2 = f"""Product:
 {_product_brief(product)}
 
 Candidate Lazada Thailand leaf categories (id | Thai path):
 {lst}
 
-Pick the most specific leaf category that describes what the product physically is.
+Pick the most specific leaf category that describes what the product physically is. Lazada's own suggestions are
+marked; prefer one of them when it fits.
 Categories that need a Thai TISI / industrial-standard licence were removed from this list (the seller has none):
 if the product's natural category needs a licence, pick the closest category from this list where the product
 can legitimately be listed (e.g. a decorative / ornament / accessory category instead of a regulated electrical or toy one).
-Return JSON {{"cat_id": "<id exactly as listed>", "confidence": <0..1>, "reason_zh": "<one sentence Chinese>",
- "reason_th": "<same in Thai>", "path_zh": "<the chosen path translated to Chinese>"}}"""
+Return JSON {{"cat_id": "<id exactly as listed>", "alternatives": ["up to 4 other ids from the list that would also be acceptable"],
+ "confidence": <0..1>, "reason_zh": "<one sentence Chinese>", "reason_th": "<same in Thai>", "path_zh": "<the chosen path translated to Chinese>"}}"""
     d2 = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user2))
+    ids = dict(cands)
     cid = str(d2.get("cat_id") or "").strip()
-    if cid not in dict(cands):
+    if cid not in ids:
         cid = ""
+    alts = [(str(x), ids[str(x)]) for x in (d2.get("alternatives") or []) if str(x) in ids]
+    res["options"] = _options(alts + sugg + cands, cid)
     try:
         conf = float(d2.get("confidence") or 0)
     except (TypeError, ValueError):

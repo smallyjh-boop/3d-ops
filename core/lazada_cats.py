@@ -248,3 +248,37 @@ def needs_license(cat_id):
         if _mandatory(a) and any(w in txt for w in LICENSE_WORDS):
             return True
     return False
+
+
+def suggest(product):
+    """Lazada 自己按商品名 + 主图推荐的类目（v2.45.1）：[(类目ID, 路径)]。没接口 / 拉不到返回 []。
+    主图要 Lazada 图片空间的网址：推送 / 在线商品记过的直接用，没有就把主图传一次。"""
+    name = ((product.get("copy") or {}).get("title_th") or (product.get("copy") or {}).get("title_en") or product.get("name_zh") or "").strip()
+    imgs = product.get("images") or []
+    if not name or not imgs:
+        return []
+    sid, conn = _conn()
+    if not conn:
+        return []
+    try:
+        url = next((u for u in ((product.get("lazada_api") or {}).get("images") or {}).values() if u), "")
+        if not url:
+            from . import imghost, store
+            im = imgs[0]
+            folder = "out" if im.get("processed") or str(im.get("file", "")).startswith("white_") else "raw"
+            path = os.path.join(store.image_dir(product["id"], folder), im["file"])
+            if not os.path.exists(path):
+                return []
+            data, ext = imghost.prepare(path, max_bytes=1_000_000, max_side=2000, min_side=330)
+            url = conn.upload_image(data, f"main.{ext}")
+        out = []
+        for x in conn.category_suggestion(name, url):
+            cid = str(x.get("categoryId") or x.get("category_id") or "").strip()
+            if cid.isdigit():
+                from . import categories
+                out.append((cid, categories.path_of(cid) or str(x.get("categoryPath") or x.get("categoryName") or "")))
+        return out
+    except Exception:  # noqa: BLE001  推荐拉不到：AI 照旧按类目树选
+        return []
+    finally:
+        _done(sid, conn)

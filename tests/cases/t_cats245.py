@@ -43,6 +43,7 @@ def attrs_of(cid):
 
 
 calls = []
+SUGG, SUGG_IDS = [], []
 
 
 def fake(self, path, params, base=LZ.API, token=True, method="GET", files=None):
@@ -51,6 +52,11 @@ def fake(self, path, params, base=LZ.API, token=True, method="GET", files=None):
         return {"code": "0", "data": TREE}
     if path == "/category/attributes/get":
         return {"code": "0", "data": attrs_of(params["primary_category_id"])}
+    if path == "/image/upload":
+        return {"code": "0", "data": {"image": {"url": "https://lz/main.jpg"}}}
+    if path == "/product/category/suggestion/get":
+        SUGG.append(params)
+        return {"code": "0", "data": {"categorySuggestions": [{"categoryId": c, "categoryPath": "x"} for c in SUGG_IDS]}}
     return {"code": "0", "data": {}}
 
 
@@ -107,5 +113,41 @@ ai_copy.call = fake_ai
 m = attributes.match_category(A.load_config(), store.load("3DP0015"))
 ok("14221" not in prompts[1] and "99999" in prompts[1] and "licence" in prompts[1], "licensed candidates removed from the AI list")
 ok(m["id"] == "api|99999" and m["status"] == "ai", f"matched usable category {m}")
+ok(any(o["cat_id"] == "99999" for o in m.get("options", [])) or m["id"] == "api|99999", "options returned")
+# v2.45.1：关键词在类目树里一个都搜不到 → 用 Lazada 自己推荐的类目；推荐里要许可证的不要；总给出几个能放的
+SUGG_IDS[:] = ["14221", "5003", "5004"]
+prompts.clear()
+
+
+def fake_ai2(cfg, system, user, **k):
+    prompts.append(user)
+    if len(prompts) == 1:
+        return json.dumps({"search_keywords_th": ["ไม่มีคำนี้ในต้นไม้"], "ideal_path_th": "ไม่มี"})
+    return json.dumps({"cat_id": "5003", "alternatives": ["5004", "14221"], "confidence": 0.6, "reason_zh": "测量工具"})
+
+
+ai_copy.call = fake_ai2
+m = attributes.match_category(A.load_config(), store.load("3DP0015"))
+ok(SUGG and SUGG[-1]["image_url"] == "https://lz/main.jpg" and SUGG[-1]["product_name"], f"Lazada suggestion called {SUGG[-1:]}")
+ok("5003" in prompts[1] and "Lazada suggests" in prompts[1] and "14221" not in prompts[1], "suggestions offered to AI, licensed removed")
+ok(m["id"] == "api|5003" and m["status"] == "check" and [o["cat_id"] for o in m["options"]][:2] == ["5003", "5004"]
+   and not any(o["cat_id"] == "14221" for o in m["options"]), f"low confidence: chosen + usable options {m}")
+# Lazada 也没推荐、关键词也搜不到 → AI 先选一级类目，再从它下面选
+SUGG_IDS[:] = []
+prompts.clear()
+
+
+def fake_ai3(cfg, system, user, **k):
+    prompts.append(user)
+    if len(prompts) == 1:
+        return json.dumps({"search_keywords_th": ["ไม่มีคำนี้"], "ideal_path_th": ""})
+    if len(prompts) == 2:
+        return json.dumps({"top": ["ของเล่น"]})
+    return json.dumps({"cat_id": "99999", "confidence": 0.8})
+
+
+ai_copy.call = fake_ai3
+m = attributes.match_category(A.load_config(), store.load("3DP0015"))
+ok("top-level" in prompts[1] and "99999" in prompts[2] and "5003" not in prompts[2] and m["id"] == "api|99999" and m["options"], f"top-level fallback {m}")
 print("ERRORS", E_)
 sys.exit(1 if E_ else 0)

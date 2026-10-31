@@ -271,6 +271,12 @@ class LazadaConnector(Connector):
         self._ensure_token()
         return self._call("/category/tree/get", {"language_code": "th_TH"}).get("data") or []
 
+    def category_suggestion(self, product_name, image_url):
+        """Lazada 按商品名 + 图片推荐类目（GetCategorySuggestion）：[{categoryId, categoryPath, categoryName}]"""
+        self._ensure_token()
+        d = self._call("/product/category/suggestion/get", {"product_name": product_name[:255], "image_url": image_url}).get("data") or {}
+        return d.get("categorySuggestions") or []
+
     def category_attributes(self, cat_id):
         """类目属性：[{id, name, label, input_type, is_mandatory, attribute_type(normal / sku), options:[{id, name}]}]"""
         self._ensure_token()

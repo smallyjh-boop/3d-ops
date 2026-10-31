@@ -30,3 +30,4 @@
 - 2.1（系统 v2.44.0）：图片「★ 设为主图」；产品库显示在哪些店铺在线（modules.public("listing").online_shops()）和对应筛选。
 - 2.2（系统 v2.44.1）：编辑页「详情图片」选择（P.desc_images，至少 1 张，预览里显示）。
 - 2.3（系统 v2.45.0）：类目字段接口优先（core/lazada_cats：类目树、类目属性生成字段表；categories.get / library / by_cat_id 接上；api|类目ID）；编辑页显示属性来源和许可证提醒；AI 匹配类目避开要许可证的类目（categories.needs_license）。测试 tests/cases/t_cats245.py。
+- 2.4（系统 v2.45.1）：AI 匹配类目先用 Lazada 类目推荐（lazada_cats.suggest）、搜不到按一级类目缩小（attributes._by_top_level），返回推荐类目 options，编辑页「用这个」。

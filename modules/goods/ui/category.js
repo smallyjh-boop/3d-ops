@@ -39,6 +39,10 @@ async function renderCategory() {
   if (c.suggest_id && !CATS.some((x) => x.cat_id === c.suggest_id)) {      // 没接 Lazada 接口时才会有（接了接口所有类目都能选）
     info += `<div class="warn">AI 建议的理想类目还没有模板：<b data-notr>${esc(LANG === "th" ? c.suggest_path : (c.suggest_path_zh || ""))}</b><br><span class="muted">${esc(c.suggest_path)}（类目ID ${esc(c.suggest_id)}）</span><br>全部类目模板下载完以后（进度在「导出上架表格」页）重新点 AI 匹配类目就行。</div>`;
   }
+  // v2.45.1：推荐类目（Lazada 推荐 + AI 选的，都不要许可证），点「用这个」直接换
+  const opts = (c.options || []).filter((o) => o.id !== c.id);
+  if (opts.length) info += `<div class="cat-opts"><div class="small muted">也可以放这些类目（都不需要许可证）：</div>${opts.map((o) =>
+    `<div class="row gap small"><button class="mini" data-catpick="${esc(o.id)}">用这个</button><span data-notr>${esc(o.path)}</span> <span class="muted">(${esc(o.cat_id)})</span></div>`).join("")}</div>`;
   $("#cat-info").innerHTML = info;
   FIELDS = null;
   if (c.id && known) {
@@ -137,7 +141,7 @@ $("#btn-ai-cat").addEventListener("click", async (e) => {
     renderPackage(); await renderCategory(); runCheck();
     const red = Object.values(P.attributes).filter((a) => a.status === "check" || a.status === "missing").length;
     toast(P.category.id ? `已匹配：${$("#cat-select").selectedOptions[0].textContent}。${red ? red + " 项标红请确认" : "属性已全部填好"}`
-      : "现有模板里没有合适的类目，请看建议的类目路径并下载对应模板", !P.category.id);
+      : ((P.category.options || []).length ? "AI 没把握，请从右边推荐的类目里选一个" : "没找到合适的类目，请在上面搜索类目手动选择"), !P.category.id);
   });
 });
 $("#btn-fill-attrs").addEventListener("click", async (e) => {
@@ -346,3 +350,14 @@ document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "s" && ED_EDIT) { e.preventDefault(); saveProduct(false); }
 });
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+// v2.45.1：推荐类目「用这个」
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest("[data-catpick]"); if (!b || !P) return;
+  const sel = $("#cat-select");
+  if (![...sel.options].some((o) => o.value === b.dataset.catpick)) {
+    const c = CATS.find((x) => x.id === b.dataset.catpick);
+    sel.insertAdjacentHTML("beforeend", `<option value="${esc(b.dataset.catpick)}">${esc(c ? catName(c) : b.dataset.catpick)}</option>`);
+  }
+  sel.value = b.dataset.catpick;
+  sel.dispatchEvent(new Event("change"));
+});
