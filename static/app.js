@@ -1,5 +1,5 @@
 "use strict";
-const APP_JS_VERSION = "2.48.0";   // 必须和 app.py 的 VERSION 一致
+const APP_JS_VERSION = "2.49.0";   // 必须和 app.py 的 VERSION 一致
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
