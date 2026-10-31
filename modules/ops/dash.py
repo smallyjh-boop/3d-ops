@@ -311,4 +311,22 @@ def dashboard():
             "breakdown_source": src, "fin_net": fin_net_30d(), "loss_orders": loss_orders(rows), "shipping": shipping(warn_h),
             "cod": cod_stats(30), "aftersales": af, "pricing": pricing_issues(cfg)[:50], "health": data_health(rows, cfg),
             "production": production(), "materials": materials_low(), "lazada": lazada.summary(),
-            "fee_rate_setting": cfg.get("platform_fee_rate")}
+            "fee_rate_setting": cfg.get("platform_fee_rate"), "market": market_summary(cfg)}
+
+
+def market_summary(cfg=None):
+    """v2.48：看板上的「市场」卡片：卖家后台流量（访客最多 / 转化最低）、近 7 天竞品动态、计划进度、下一个大促。"""
+    out = {}
+    try:
+        from . import campaigns, comp, plans, traffic
+        out["traffic"] = traffic.summary()
+        out["comp_events"] = comp.events(7, 8)
+        ps = plans.listing(cfg, include_closed=False)
+        out["plans"] = [{"id": p["id"], "sku": p["sku"], "platform": p["platform"], "kind_label": p["kind_label"], "kind_th": p["kind_th"],
+                         "status": p["progress"]["status"], "status_label": p["progress"]["status_label"], "status_th": p["progress"]["status_th"],
+                         "cum_actual": p["progress"]["cum_actual"], "cum_target": p["progress"]["cum_target"]} for p in ps]
+        nxt = [e for e in campaigns.big_events(cfg, 30) if e["days_left"] >= 0]
+        out["next_campaign"] = {k: nxt[0][k] for k in ("name", "name_th", "start", "days_left", "expected_orders", "over_capacity")} if nxt else None
+    except Exception as e:  # noqa: BLE001  第二期的表出问题不影响看板
+        out["error"] = str(e)[:200]
+    return out

@@ -9,3 +9,27 @@
 #ops-life td, #ops-lz td { vertical-align: top }
 #ops-lz textarea[data-rv-text] { width: 100%; min-width: 180px; box-sizing: border-box }
 #ops-alerts h4 { margin: 12px 0 4px }
+/* v2.48 第二期：竞品、雷达、竞店、计划、日历、流量 */
+.oa-wrap { overflow-x: auto; max-width: 100% }
+.oa-thumb { object-fit: cover; border-radius: 6px; border: 1px solid #e5e7eb; flex: none; vertical-align: middle; background: #f3f4f6 }
+.oa-pic { display: flex; gap: 8px; align-items: flex-start }
+.oa-pill { display: inline-block; padding: 0 6px; border-radius: 8px; font-size: 11px; background: #e5e7eb }
+.oa-pill.ok { background: #dcfce7; color: #166534 } .oa-pill.warn { background: #fef3c7; color: #92400e }
+.oa-fgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 10px; margin: 6px 0 }
+.oa-fgrid label { display: flex; flex-direction: column; font-size: 12px; gap: 2px }
+.oa-fgrid input, .oa-fgrid select { width: 100%; box-sizing: border-box }
+.oa-fgrid .oa-span { grid-column: 1 / -1 }
+.oa-full { width: 100%; box-sizing: border-box }
+.oa-url { word-break: break-all; max-width: 360px }
+.oa-chart-s { height: 110px } .oa-chart .oa-low { fill: #fbbf24 } .oa-chart .oa-target { fill: none; stroke: #2563eb; stroke-width: 2 }
+.oa-note { white-space: pre-line; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; margin: 6px 0 }
+.oa-tasks { list-style: none; padding: 0; margin: 4px 0 } .oa-tasks li { margin: 3px 0 } .oa-tasks li.muted span { text-decoration: line-through }
+.oa-tls { display: flex; gap: 6px; overflow-x: auto } .oa-tl { flex: 1 0 140px; border: 1px solid #e5e7eb; border-radius: 6px; padding: 4px 6px }
+.oa-tl.today { border-color: #f59e0b; background: #fffbeb } .oa-tl.done { opacity: .55 }
+.oa-ev-small { opacity: .85 } .oa-ev-small h3 { font-size: 14px }
+#ops-plans .card h3, #ops-comp .card h3, #ops-cal .card h3 { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+@media (max-width: 700px) { .oa-fgrid { grid-template-columns: 1fr 1fr } .oa-tl { flex-basis: 120px } }
+.oa-pic input[type=checkbox], .oa-tasks input[type=checkbox], #ops-radar input[type=checkbox] { width: auto; margin: 2px 4px 0 0; flex: none }
+.oa-tasks label { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; margin: 0; font-weight: normal }
+.oa-tasks li.warn { color: inherit } .oa-tasks li.warn .small { color: #b45309; font-weight: 600 }
+#ops-radar label.small { display: inline-flex; align-items: center; gap: 2px; margin: 2px 0 0 }

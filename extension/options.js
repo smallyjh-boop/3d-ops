@@ -6,6 +6,10 @@ const TH = {
   lbltitle: "ส่งใบปะหน้า PDF เข้าระบบ",
   lblon: "เมื่อดาวน์โหลดใบปะหน้า PDF จากเว็บผู้ขาย / BigSeller ให้ถามว่าจะส่งเข้าระบบไหม (กด「ส่งเข้าระบบ」ถึงจะส่ง)",
   lbltab: "ส่ง PDF ในแท็บนี้เข้าระบบ",
+  h3: "ระบบบริหารจัดการ 3D · ส่วนขยายเบราว์เซอร์",
+  oatitle: "เก็บข้อมูลการขาย (คู่แข่ง ผลค้นหา ร้าน ข้อมูลหลังร้าน)", oarun: "เก็บข้อมูลหน้านี้", oapatrol: "🔭 เริ่มตระเวนวันนี้",
+  oaauto: "เปิดหน้าข้อมูลในหลังร้าน (ประสิทธิภาพสินค้า / ทราฟฟิก / คีย์เวิร์ด) แล้วเก็บอัตโนมัติ (หน้าเดิม 12 ชม. ครั้ง)",
+  oahelp: "ในหน้าสินค้า หน้าค้นหา หน้าร้านของ Lazada / Shopee / TikTok มีปุ่มเก็บข้อมูลมุมขวาล่าง และ「📊 เก็บ」บนการ์ดสินค้า ตระเวนวันนี้: ใช้ตอนอยู่หน้าคอม เปิดตามรายการในระบบทีละหน้า มีจำนวนสูงสุดต่อวัน เจอแคปช่าหยุดทันที ดูผลใน「สินค้า → สินค้าคู่แข่ง / เรดาร์สินค้าขายดี / ร้านคู่แข่ง」",
   lblhelp: "บางแพลตฟอร์มกด「พิมพ์ใบปะหน้า」แล้วเปิด PDF ในแท็บใหม่ ไม่ได้ดาวน์โหลด: ให้กดปุ่มนี้ในแท็บนั้น ระบบจะจับคู่ออเดอร์จากเลขออเดอร์ / เลขพัสดุในแต่ละหน้า",
 };
 const $ = (id) => document.getElementById(id);
@@ -13,9 +17,10 @@ let LANG = "zh";
 const Z = (zh, th) => (LANG === "th" ? th : zh);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function tr(lang) { document.querySelectorAll("[data-t]").forEach((e) => { if (lang === "th" && TH[e.dataset.t]) e.textContent = TH[e.dataset.t]; }); }
-chrome.storage.sync.get({ server: "", server2: "", key: "", lang: "zh", label_forward: true }, (d) => {
+chrome.storage.sync.get({ server: "", server2: "", key: "", lang: "zh", label_forward: true, oa_auto_back: true }, (d) => {
   $("server").value = d.server; $("server2").value = d.server2; $("key").value = d.key; $("lang").value = d.lang;
   $("label_forward").checked = d.label_forward !== false;
+  $("oa_auto_back").checked = d.oa_auto_back !== false;
   LANG = d.lang; tr(d.lang); loadLabels();
 });
 $("save").onclick = async () => {
@@ -80,5 +85,21 @@ $("lbl-tab").onclick = () => {
   chrome.runtime.sendMessage({ type: "label-send-tab" }, (r) => {
     void chrome.runtime.lastError;
     $("lbl-tab").disabled = false; showResult(r); loadLabels();
+  });
+};
+
+// ---------- 运营采集（v3.0）----------
+$("oa_auto_back").onchange = () => chrome.storage.sync.set({ oa_auto_back: $("oa_auto_back").checked });
+$("oa-patrol").onclick = () => chrome.tabs.create({ url: chrome.runtime.getURL("patrol.html") });
+$("oa-run").onclick = async () => {
+  const st = $("oa-st");
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) return;
+  chrome.tabs.sendMessage(tab.id, { type: "oa-run" }, { frameId: 0 }, (r) => {
+    if (chrome.runtime.lastError || !r || !r.ok) {
+      st.className = "bad";
+      st.textContent = Z("这一页不能采集：请打开 Lazada / Shopee / TikTok 的商品页、搜索结果页、店铺页，或卖家中心的数据页面（打开后刷新一次）",
+        "หน้านี้เก็บไม่ได้: เปิดหน้าสินค้า หน้าค้นหา หน้าร้าน ของ Lazada / Shopee / TikTok หรือหน้าข้อมูลในหลังร้าน (เปิดแล้วรีเฟรชหนึ่งครั้ง)");
+    } else window.close();
   });
 };

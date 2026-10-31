@@ -1,6 +1,7 @@
 // 后台：替页面里的面板访问3D 运营管理系统（NAS / 本机），以及截取当前标签页画面。
 // v2.8：两个地址——局域网地址 + 外网地址（Tailscale）。哪个通用哪个，记住上次能用的那个。
 // v2.9：面单 PDF 转交在 labels.js（下载面单时问一下，点「发送」才发到系统）。
+// v3.0：运营采集（capture.js、巡逻 patrol.html）也通过这里的 "api" 消息访问 /api/v1/ops/ext/…（同一把员工密钥）。
 importScripts("labels.js");
 async function cfg() {
   const d = await chrome.storage.sync.get({ server: "", server2: "", key: "", lang: "zh" });
@@ -31,7 +32,7 @@ async function callApi(path, body, method) {
   for (let i = 0; i < c.servers.length; i++) {
     try {
       // 有备用地址时：第一个地址 8 秒连不上就换下一个（AI 生成回复可能要几十秒，所以只有一个地址时不限时）
-      r = c.servers.length > 1 && i === 0 ? await fetchT(c.servers[i] + path, opt, path.includes("/draft") || path.includes("/capture") ? 90000 : 8000)
+      r = c.servers.length > 1 && i === 0 ? await fetchT(c.servers[i] + path, opt, path.includes("/draft") || path.includes("/capture") || path.startsWith("/api/v1/ops/ext/") ? 90000 : 8000)
                                           : await fetch(c.servers[i] + path, opt);
       if (i > 0 || c.servers.length > 1) chrome.storage.local.set({ active: c.servers[i] });
       break;

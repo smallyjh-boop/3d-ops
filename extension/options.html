@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><title>AI 客服设置</title>
+<html lang="zh"><head><meta charset="utf-8"><title>3D 运营管理系统 · 插件</title>
 <style>
 body{font:14px/1.5 system-ui,-apple-system,"Segoe UI","Noto Sans Thai","Microsoft YaHei",sans-serif;margin:0;padding:16px;width:360px;color:#1d2330;background:#fff}
 h3{margin:0 0 10px}label{display:block;margin:8px 0}input,select{width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #cfd5dd;border-radius:6px;font:inherit}
@@ -10,7 +10,7 @@ label.chk{display:flex;gap:6px;align-items:flex-start}label.chk input{width:auto
 .lbl{border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;margin:6px 0;font-size:13px}.lbl b{word-break:break-all}
 .lbl button{padding:3px 10px;font-size:12px;margin:4px 6px 0 0}.last{font-size:12px;margin:3px 0;white-space:pre-line}
 </style></head><body>
-<h3>3D 运营管理系统 · AI 客服</h3>
+<h3 data-t="h3">3D 运营管理系统 · 浏览器扩展</h3>
 <label><span data-t="server">局域网地址（NAS 或电脑）</span><input id="server" placeholder="http://192.168.1.20:8790"></label>
 <label><span data-t="server2">外网地址（Tailscale，可不填）</span><input id="server2" placeholder="http://100.x.x.x:8790"></label>
 <p class="muted" data-t="s2help">不在店里时用：电脑装好 Tailscale 并登录同一个账号，局域网地址连不上会自动换这个。</p>
@@ -26,5 +26,11 @@ label.chk{display:flex;gap:6px;align-items:flex-start}label.chk input{width:auto
 <button class="sec" id="lbl-tab" data-t="lbltab">把当前标签页的 PDF 发到系统</button>
 <p class="muted" data-t="lblhelp">有的平台点「打印面单」是在新标签页打开 PDF，不是下载：在那个标签页点这个按钮。系统按每页上的订单号 / 运单号自动对应订单。</p>
 <div id="lbl-st"></div>
+<hr>
+<h4 data-t="oatitle">运营采集（竞品、搜索结果、店铺、卖家后台数据）</h4>
+<button id="oa-run" data-t="oarun">采集当前页</button><button class="sec" id="oa-patrol" data-t="oapatrol">🔭 开始今日巡逻</button>
+<label class="chk"><input type="checkbox" id="oa_auto_back"><span data-t="oaauto">打开卖家中心的数据页面（商品表现 / 流量 / 关键词）时自动采集（同一页 12 小时一次）</span></label>
+<p class="muted" data-t="oahelp">在 Lazada / Shopee / TikTok 的商品页、搜索结果页、店铺页，右下角有采集按钮，列表里每个商品卡片左上角有「📊 采集」。今日巡逻：人在电脑旁时用，按系统里的清单一页一页看，每天有上限，遇到验证码马上停。结果在系统「商品 → 竞品 / 爆款雷达 / 竞店」和「工作台 → 流量数据」。</p>
+<div id="oa-st"></div>
 <script src="options.js"></script>
 </body></html>
