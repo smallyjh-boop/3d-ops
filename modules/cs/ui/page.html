@@ -1,17 +1,21 @@
 <!-- AI 客服模块的页面（v2.30 从 index.html 搬过来）。每页一个 section，id 和菜单的 tab 对应。 -->
+<section id="tab-csdash" class="panel hidden">
+  <div class="row between wrap gap"><h2>客服工作台</h2><div class="row gap"><span class="small muted" id="csd-time"></span><button class="mini" id="csd-sync">⟳ 立即拉取新消息</button><button class="mini primary" id="csd-chat">💬 打开客服聊天</button></div></div>
+  <div id="csd-body"><p class="muted">加载中…</p></div>
+</section>
 <section id="tab-cs" class="panel hidden">
   <div id="cs-presence" class="cs-presence"></div>
-  <div class="cs-wrap">
-    <aside class="cs-list card">
-      <div class="row gap"><button class="primary" id="cs-new">＋ 新消息</button>
-        <select id="cs-filter"><option value="active">对话中</option><option value="human">需人工</option><option value="open">待回复</option><option value="follow">今天要跟进</option><option value="leads">销售线索</option><option value="closed">已结束</option><option value="">全部</option></select></div>
-      <input id="cs-q" placeholder="搜索买家 / 订单号 / 内容">
-      <div class="row gap"><select id="cs-shopf" style="flex:1"><option value="">全部店铺</option></select><select id="cs-agentf" style="flex:1"><option value="">全部客服</option></select></div>
-      <div id="cs-stats" class="small muted"></div>
-      <div class="small muted">浏览器 AI 客服扩展：<a href="/api/cs/extension.zip">⬇ 下载</a>（安装方法问老板，或看 设置 → 组件与插件）</div>
+  <div class="cs3">
+    <aside class="cs3-list card">
+      <div class="row gap"><input id="cs-q" placeholder="搜索买家 / 订单号 / 内容" style="flex:1;min-width:0">
+        <button class="mini" id="cs-sync" title="立即拉取平台新消息">⟳</button><button class="mini" id="cs-sound" title="新消息提示音 / 桌面通知">🔔</button><button class="mini primary" id="cs-new" title="手工新建会话（粘贴消息 / 截图）">＋</button></div>
+      <div class="cs-tabs" id="cs-tabs"></div>
+      <select id="cs-shopf"><option value="">全部店铺</option></select>
       <div id="cs-items"></div>
+      <div class="small muted cs-ext">浏览器 AI 客服扩展（没有接口的平台用）：<a href="/api/cs/extension.zip">⬇ 下载</a></div>
     </aside>
-    <main id="cs-main" class="card"><div class="cs-empty"><h3>AI 客服</h3><p class="muted">左边选一个会话，或者点「＋ 新消息」。</p></div></main>
+    <main id="cs-main" class="cs3-chat card"><div class="cs-empty"><h3>客服聊天</h3><p class="muted">左边选一个会话。</p></div></main>
+    <aside id="cs-side" class="cs3-side card"></aside>
   </div>
 </section>
 <section id="tab-csrec" class="panel hidden">
@@ -43,7 +47,10 @@
   <div class="card" id="cskb-learn"></div>
   <div class="card"><div class="row between"><h3>常见问答</h3><div class="row gap"><span id="cskb-presets"></span><button data-kb="add">＋ 添加</button></div></div>
     <p class="small muted">已内置 3D 打印网店常见情况的标准话术（现货与 24–48 小时发货时效、材料与耐热、纹路色差、定制刻字、版权、批发、物流、改单取消、破损少件发错、退款、差评、平台规则等）。可以直接改成你们自己的说法；AI 回复时会参考。</p>
-    <table class="grid"><thead><tr><th>问题</th><th>回答</th><th>标签</th><th>用过</th><th>状态</th><th></th></tr></thead><tbody id="cskb-list"></tbody></table></div>
+    <table class="grid"><thead><tr><th>问题</th><th>回答</th><th>标签</th><th>店铺</th><th>用过</th><th>状态</th><th></th></tr></thead><tbody id="cskb-list"></tbody></table></div>
+  <div class="card"><div class="row between"><h3>快捷回复</h3><button data-kb="q-add">＋ 添加</button></div>
+    <p class="small muted">聊天页点「⚡ 快捷回复」一键填入。可以用变量：{买家名} {订单号} {运单号} {预计发货日} {店铺名}，发送前自动换成这个会话的值。可以只给某个店铺用。</p>
+    <table class="grid"><thead><tr><th>标题</th><th>内容</th><th>分类</th><th>店铺</th><th>用过</th><th></th></tr></thead><tbody id="cskb-quick"></tbody></table></div>
   <div class="card"><h3>学到的回复（员工实际发出去的）</h3>
     <table class="grid"><thead><tr><th>买家问</th><th>实际回复（划线的是 AI 原稿）</th><th>时间</th><th></th></tr></thead><tbody id="cskb-ex"></tbody></table></div>
 </section>

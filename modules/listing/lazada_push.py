@@ -140,6 +140,41 @@ def desc_images(p):
     return chosen or imgs[:3]
 
 
+LZ_HOSTS = ("slatic.net", "lazcdn.com", "lazada.")
+
+
+def desc_img_urls(html_, p, conn, state):
+    """详情里的 <img src>：本系统的产品图（/files/<产品>/raw|out/<文件>）传到 Lazada；外面的网址用 /image/migrate 搬；
+    已经是 Lazada 图片空间的不动；换不了的图片去掉（Lazada 不收外站图片）。"""
+    import re
+    import urllib.parse
+    by_file = {im.get("file"): im for im in p.get("images") or [] if im.get("file")}
+
+    def one(m):
+        src = m.group(2)
+        if any(h in src for h in LZ_HOSTS):
+            return m.group(0)
+        u = None
+        loc = re.match(r"^(?:https?://[^/]+)?/files/([^/]+)/(?:raw|out)/([^?#]+)", src)
+        if loc:
+            im = by_file.get(urllib.parse.unquote(loc.group(2)))
+            if im:
+                u = _lz_img(conn, state, p["id"], im)
+        elif src.startswith(("http://", "https://")):
+            cache = state.setdefault("images", {})
+            try:
+                if src not in cache:
+                    cache[src] = conn.migrate_image(src)
+                u = cache[src]
+            except Exception:  # noqa: BLE001  搬不了：这张图不放
+                u = None
+        if not u:
+            return ""
+        return m.group(1) + u + m.group(3)
+
+    return re.sub(r'(<img\b[^>]*?\bsrc=["\'])([^"\']+)(["\'][^>]*>)', one, html_, flags=re.I)
+
+
 def _cut(text, n, what):
     t = str(text or "").strip()
     return t if len(t) <= n else t[:n].rstrip()
@@ -182,9 +217,12 @@ def payload(p, rows, cat, attrs, conn, state):
             v = _lz_img(conn, state, p["id"], p.get("white_bg"))
         elif key == "description":
             v = _html(val)
-            pics = [u for u in (_lz_img(conn, state, p["id"], im) for im in desc_images(p)) if u]
-            if pics:                            # 详情后面接产品图（Lazada 详情只认它自己图片空间的网址）
-                v += "".join(f'<p><img src="{u}" style="max-width:100%"/></p>' for u in pics)
+            if "<img" in v.lower():             # v2.46：编辑器里自己放了图片 → 图片换成 Lazada 的网址，不再自动接图
+                v = desc_img_urls(v, p, conn, state)
+            else:
+                pics = [u for u in (_lz_img(conn, state, p["id"], im) for im in desc_images(p)) if u]
+                if pics:                        # 详情后面接产品图（Lazada 详情只认它自己图片空间的网址）
+                    v += "".join(f'<p><img src="{u}" style="max-width:100%"/></p>' for u in pics)
         elif key == "packageContent":
             v = _html(val)
         else:

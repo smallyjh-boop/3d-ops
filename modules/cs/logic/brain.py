@@ -85,8 +85,9 @@ def sim(a, b):
     return len(ga & gb) / math.sqrt(len(ga) * len(gb))
 
 
-def kb_match(text, n=5):
-    rows = data.kb_list(active_only=True)
+def kb_match(text, n=5, shop=None):
+    """shop：会话的店铺（v2.46 分店知识库：通用的 + 这个店铺自己的；别的店铺的不用）。"""
+    rows = [r for r in data.kb_list(active_only=True) if shop is None or (r.get("shop") or "") in ("", shop or "")]
     scored = sorted(((sim(text, r["q"] + " " + (r.get("tags") or "")), r) for r in rows), key=lambda x: -x[0])
     return [dict(r, score=round(s, 3)) for s, r in scored[:n] if s > 0.08]
 
@@ -237,7 +238,7 @@ def build_context(conv, msgs, orders_found, instruction=""):
                 "款式": [{"sku": v["sku"], "款式": v["option_zh"], "泰文": v["option_th"], "售价THB": v["price"]} for v in p["variants"]]}
                for p in prods],
         "相关订单": orders_found,
-        "知识库": [{"id": k["id"], "问": k["q"], "答": k["a"]} for k in kb_match(last_text)],
+        "知识库": [{"id": k["id"], "问": k["q"], "答": k["a"]} for k in kb_match(last_text, shop=conv.get("shop") or "")],
         "以前的好回复（参考语气和说法）": [{"买家": e["question"][:300], "回复": e["final_reply"][:400]} for e in example_match(last_text)],
         "批发报价（程序算好的）": q,
         "这个买家的历史（以前的订单、以前的会话标签）": buyer_hist,

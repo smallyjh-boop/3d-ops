@@ -33,3 +33,4 @@
 - 1.7（系统 v2.43.2）：属性 / 变体选项发英文选项名（_opt_out：en_name），按选项 id 或泰文 / 英文名对；选项 id 是 0 时按名字对。
 - 1.8（系统 v2.44.0）：在线商品（online.py、ui/online.js、/api/online…）：Lazada /products/get 拉全店商品存 online_items，按 SellerSku 对上 ERP 并记下 item_id / sku_id、上架状态跟平台走；改价改库存（/product/price_quantity/update，写回 ERP manual_price / stock）、上下架（/product/deactivate、/product/update）；定时同步改成整店拉；public.online_shops() 给产品库。测试 tests/t_online244.py。
 - 1.9（系统 v2.44.1）：推送时详情后面接产品图（lazada_push.desc_images：desc_images 或前 3 张）；工作台「按状态（自动）」分组。
+- 2.0（系统 v2.46.0）：详情里自己插的图片推送时换成 Lazada 图片空间的网址（desc_img_urls：本系统产品图上传、外站图 migrate、Lazada 的不动、换不了的去掉），有图片就不再自动接图。测试 tests/t_desc246.py。

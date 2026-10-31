@@ -432,6 +432,9 @@ def x_capture():
     c = data.get_conv(c["id"])
     msgs = data.messages(c["id"])
     last = next((m for m in reversed(msgs) if m["role"] in ("buyer", "seller")), None)
+    if n and last and last["role"] == "buyer":
+        from . import chat
+        chat.auto_tags(c["id"], last["text"])         # v2.46：询价 / 催单 / 售后 / 定制 / 闲聊
     need_draft = last and last["role"] == "buyer" and (n > 0 or not c.get("draft")) and b.get("draft", True)
     if need_draft:
         out = service.make_draft(c["id"], "", _u())
@@ -673,3 +676,6 @@ def agents_set_shops():
 def x_records_add():
     """扩展：给这个会话 / 买家登记备注、待办、售后、投诉、特殊需求。"""
     return jsonify(_rec_create(request.get_json(force=True) or {}))
+
+
+from . import chat_api  # noqa: E402,F401  v2.46 聊天页 / 工作台的接口（同一个 Blueprint）

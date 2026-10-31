@@ -37,6 +37,20 @@ CREATE TABLE IF NOT EXISTS cs_unanswered (
   created_at REAL, last_at REAL, status TEXT DEFAULT 'open', kb_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS cs_cursor (shop_id INTEGER PRIMARY KEY, cursor REAL, last_ok REAL, last_error TEXT);
+-- v2.46：快捷回复（可带变量）、后台任务队列（以后可以拆到单独的进程 / 机器）、质检抽查
+CREATE TABLE IF NOT EXISTS cs_quick (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, text TEXT, shop TEXT DEFAULT '', cat TEXT DEFAULT '',
+  uses INTEGER DEFAULT 0, sort INTEGER DEFAULT 0, created_at REAL, username TEXT
+);
+CREATE TABLE IF NOT EXISTS cs_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, conv_id INTEGER, payload TEXT, status TEXT DEFAULT 'todo',
+  tries INTEGER DEFAULT 0, run_at REAL, created_at REAL, done_at REAL, error TEXT, worker TEXT
+);
+CREATE INDEX IF NOT EXISTS cs_jobs_st ON cs_jobs(status, run_at);
+CREATE TABLE IF NOT EXISTS cs_qa (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, conv_id INTEGER, day TEXT, score REAL, accuracy REAL, attitude REAL, speed REAL,
+  comment TEXT, agent TEXT, shop TEXT, by_ai INTEGER DEFAULT 1, created_at REAL, username TEXT
+);
 """
 
 # 店铺客服政策（AI 回答的依据）。老板在「客服 → 知识库与话术」里改。
@@ -61,6 +75,18 @@ DEFAULT_SETTINGS = {
     "alert_minutes": "10",                            # 买家消息超过几分钟没回复算「超时」（0 = 不提醒）
     "tg_token": "",                                   # Telegram 机器人 token（手机提醒，可空）
     "tg_chat": "",                                    # 接收提醒的 Telegram chat id
+    # ---- v2.46 接口聊天 / 人工接管 / 夜间 / 主动提醒 / 质检 ----
+    "poll_sec": "15",                                 # 接口店铺多久拉一次新消息（秒）
+    "takeover_min": "30",                             # 人工接管后多少分钟没动静自动交回 AI（0 = 不交回）
+    "night_from": "22:00", "night_to": "08:00",       # 夜间时段
+    "night_mode": "off",                              # 夜间：off 照常 / notice 自动回一句「明早回复」/ auto 能自动答的直接答
+    "night_text": "ขอบคุณที่ทักมานะคะ ตอนนี้นอกเวลาทำการ แอดมินจะรีบตอบกลับพรุ่งนี้เช้าค่ะ 🙏",
+    "notify_shipped": "1",                            # 订单发货了主动告诉买家（按店铺的 AI 模式：自动发 / 出草稿）
+    "notify_delayed": "1",                            # 订单超过 48 小时还没发货，主动安抚买家
+    "tpl_shipped": "คุณ{买家名} คะ คำสั่งซื้อ {订单号} จัดส่งแล้วนะคะ เลขพัสดุ {运单号} ขอบคุณที่อุดหนุนค่ะ 🙏",
+    "tpl_delayed": "คุณ{买家名} คะ คำสั่งซื้อ {订单号} กำลังผลิตอยู่ค่ะ คาดว่าจะจัดส่งภายใน {预计发货日} ขออภัยที่ให้รอนะคะ 🙏",
+    "qa_daily": "5",                                  # 每天让 AI 抽查几个昨天的会话打分（0 = 不抽查）
+    "shop_cfg": "{}",                                 # 每个店铺的 AI 模式等（JSON，见 shopcfg.py）
     # ---- v2.22 智能客服 ----
     "tiers": "",          # 每类问题怎么处理（JSON {意图: auto 自动发 / confirm AI 写好人确认 / human 转人工}），空 = 按 auto_intents 推出来
     "forbidden": "退款、赔偿、补发、免运费、额外折扣、保证某天一定送到、保证永不损坏、平台外交易（LINE/电话/转账）",
@@ -88,11 +114,19 @@ def init():
         c.execute("ALTER TABLE cs_conv ADD COLUMN alerted_at REAL")
     for col, typ in (("tags", "TEXT"), ("needs", "TEXT"), ("lead_stage", "TEXT DEFAULT ''"), ("lead_value", "REAL"),
                      ("next_follow_at", "REAL"), ("follow_note", "TEXT"), ("tier", "TEXT"), ("urgent_alerted_at", "REAL"),
-                     ("lead_at", "REAL"), ("shop", "TEXT")):
+                     ("lead_at", "REAL"), ("shop", "TEXT"),
+                     # v2.46：人工接管 / 分配、平台会话的最后消息、头像、夜间提示、主动提醒
+                     ("mode", "TEXT DEFAULT ''"), ("taken_by", "TEXT"), ("taken_at", "REAL"), ("ext_last_id", "TEXT"),
+                     ("avatar", "TEXT"), ("night_noticed_at", "REAL"), ("notified", "TEXT")):
         if col not in cols:
             c.execute(f"ALTER TABLE cs_conv ADD COLUMN {col} {typ}")
+    mcols = {r[1] for r in c.execute("PRAGMA table_info(cs_msg)")}
+    for col, typ in (("kind", "TEXT DEFAULT 'text'"), ("extra", "TEXT"), ("status", "TEXT DEFAULT ''"), ("error", "TEXT")):
+        if col not in mcols:
+            c.execute(f"ALTER TABLE cs_msg ADD COLUMN {col} {typ}")
     kcols = {r[1] for r in c.execute("PRAGMA table_info(cs_kb)")}
-    for col, typ in (("source", "TEXT DEFAULT 'manual'"), ("status", "TEXT DEFAULT 'active'"), ("conv_id", "INTEGER"), ("note", "TEXT")):
+    for col, typ in (("source", "TEXT DEFAULT 'manual'"), ("status", "TEXT DEFAULT 'active'"), ("conv_id", "INTEGER"), ("note", "TEXT"),
+                     ("shop", "TEXT DEFAULT ''")):
         if col not in kcols:
             c.execute(f"ALTER TABLE cs_kb ADD COLUMN {col} {typ}")
     c.commit()
@@ -233,7 +267,8 @@ def create_conv(buyer="", platform="", channel="manual", shop_id=None, ext_id=No
 def update_conv(cid, **kw):
     allowed = ("buyer", "platform", "order_id", "order_no", "status", "needs_human", "human_reason", "intent", "summary",
                "lang", "draft", "draft_zh", "analysis", "draft_at", "unread", "assigned", "last_buyer_at",
-               "tags", "needs", "lead_stage", "lead_value", "next_follow_at", "follow_note", "tier", "urgent_alerted_at", "lead_at", "shop")
+               "tags", "needs", "lead_stage", "lead_value", "next_follow_at", "follow_note", "tier", "urgent_alerted_at", "lead_at", "shop",
+               "mode", "taken_by", "taken_at", "ext_last_id", "avatar", "night_noticed_at", "notified", "shop_id", "channel")
     sets = {k: v for k, v in kw.items() if k in allowed}
     for k in ("analysis", "needs"):
         if k in sets and not isinstance(sets[k], (str, type(None))):
@@ -254,8 +289,10 @@ def delete_conv(cid):
     c.commit()
 
 
-def list_convs(status="", q="", limit=200, shop="", agent="", shops=None):
+def list_convs(status="", q="", limit=200, shop="", agent="", shops=None, mine=""):
     conds, args = [], []
+    if mine:                                   # v2.46：分给我的 / 我接管的
+        conds.append("(assigned=? OR taken_by=?) AND status!='closed'"); args += [mine, mine]
     if shop:
         conds.append("COALESCE(shop,'')=?"); args.append(shop)
     if shops is not None:                      # v2.24：员工只看自己负责的店铺
@@ -272,6 +309,10 @@ def list_convs(status="", q="", limit=200, shop="", agent="", shops=None):
         args.append(time.time())
     elif status == "active":
         conds.append("status!='closed'")
+    elif status == "unreplied":                # v2.46：买家最后说话、还没回
+        conds.append("status='open'")
+    elif status == "taken":
+        conds.append("mode='human' AND status!='closed'")
     elif status:
         conds.append("status=?"); args.append(status)
     if q:
@@ -290,16 +331,19 @@ def list_convs(status="", q="", limit=200, shop="", agent="", shops=None):
     return rows
 
 
-def add_msg(cid, role, text, source="paste", user="", text_zh=None, ext_id=None, ai_draft=None, ts=None):
+def add_msg(cid, role, text, source="paste", user="", text_zh=None, ext_id=None, ai_draft=None, ts=None, kind="text", extra=None,
+            status=""):
+    """kind：text 文字 / image 图片 / item 商品卡片 / order 订单卡片 / sys 系统；extra 是卡片 / 图片的资料（dict）。"""
     text = (text or "").strip()
-    if not text:
+    if not text and kind == "text":
         return None
     c = db.conn()
     if ext_id and c.execute("SELECT 1 FROM cs_msg WHERE conv_id=? AND ext_id=?", (cid, ext_id)).fetchone():
         return None
     now = ts or time.time()
-    mid = c.execute("INSERT INTO cs_msg(conv_id, role, text, text_zh, source, ext_id, ai_draft, created_at, username) "
-                    "VALUES(?,?,?,?,?,?,?,?,?)", (cid, role, text, text_zh, source, ext_id, ai_draft, now, user)).lastrowid
+    mid = c.execute("INSERT INTO cs_msg(conv_id, role, text, text_zh, source, ext_id, ai_draft, created_at, username, kind, extra, status) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (cid, role, text, text_zh, source, ext_id, ai_draft, now, user, kind or "text",
+                                                        json.dumps(extra, ensure_ascii=False) if extra else None, status or "")).lastrowid
     up = {"updated_at": time.time()}
     if role == "buyer":
         up.update(last_buyer_at=now, status="open")
@@ -317,9 +361,40 @@ def set_msg_zh(mid, zh):
     c.commit()
 
 
+def _msg(r):
+    d = dict(r)
+    try:
+        d["extra"] = json.loads(d["extra"]) if d.get("extra") else None
+    except ValueError:
+        d["extra"] = None
+    return d
+
+
 def messages(cid, limit=200):
-    return [dict(r) for r in db.conn().execute(
+    return [_msg(r) for r in db.conn().execute(
         "SELECT * FROM (SELECT * FROM cs_msg WHERE conv_id=? ORDER BY id DESC LIMIT ?) ORDER BY id", (cid, int(limit)))]
+
+
+def claim_sent(cid, text, ext_id):
+    """平台拉回来的我方消息，是不是 ERP 刚发的那条（还没有平台编号）：是就补上编号，返回 True。"""
+    c = db.conn()
+    if not ext_id or c.execute("SELECT 1 FROM cs_msg WHERE conv_id=? AND ext_id=?", (cid, ext_id)).fetchone():
+        return bool(ext_id)
+    r = c.execute("SELECT id FROM cs_msg WHERE conv_id=? AND role='seller' AND COALESCE(ext_id,'')='' AND text=? "
+                  "AND created_at>? ORDER BY id DESC LIMIT 1", (cid, (text or "").strip(), time.time() - 3 * 86400)).fetchone()
+    if not r:
+        return False
+    c.execute("UPDATE cs_msg SET ext_id=? WHERE id=?", (ext_id, r["id"]))
+    c.commit()
+    return True
+
+
+def set_msg(mid, **kw):
+    sets = {k: v for k, v in kw.items() if k in ("ext_id", "status", "error", "text_zh")}
+    if sets:
+        c = db.conn()
+        c.execute(f"UPDATE cs_msg SET {', '.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), mid))
+        c.commit()
 
 
 def delete_msg(mid):
@@ -340,13 +415,14 @@ def kb_save(d, user=""):
     q, a = (d.get("q") or "").strip(), (d.get("a") or "").strip()
     if not q or not a:
         raise ValueError("问题和回答都要填")
-    vals = (q[:1000], a[:3000], (d.get("a_zh") or "")[:3000], (d.get("tags") or "")[:200], 1 if d.get("active", True) else 0)
+    vals = (q[:1000], a[:3000], (d.get("a_zh") or "")[:3000], (d.get("tags") or "")[:200], 1 if d.get("active", True) else 0,
+            (d.get("shop") or "")[:100])            # v2.46：shop 空 = 所有店铺通用，填了 = 只给这个店铺用
     if d.get("id"):
-        c.execute("UPDATE cs_kb SET q=?, a=?, a_zh=?, tags=?, active=?, updated_at=?, username=? WHERE id=?",
+        c.execute("UPDATE cs_kb SET q=?, a=?, a_zh=?, tags=?, active=?, shop=?, updated_at=?, username=? WHERE id=?",
                   (*vals, now, user, int(d["id"])))
         kid = int(d["id"])
     else:
-        kid = c.execute("INSERT INTO cs_kb(q, a, a_zh, tags, active, created_at, updated_at, username) VALUES(?,?,?,?,?,?,?,?)",
+        kid = c.execute("INSERT INTO cs_kb(q, a, a_zh, tags, active, shop, created_at, updated_at, username) VALUES(?,?,?,?,?,?,?,?,?)",
                         (*vals, now, now, user)).lastrowid
     c.commit()
     return dict(c.execute("SELECT * FROM cs_kb WHERE id=?", (kid,)).fetchone())

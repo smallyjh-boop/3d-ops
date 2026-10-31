@@ -51,6 +51,7 @@ async function renderEditor() {
     const v = getPath(P, el.dataset.f);
     el.value = v == null ? "" : v;
   });
+  if (window.RTE) RTE.syncAll();      // v2.46 富文本编辑器跟着刷新（AI 生成、撤销、换产品后）
   $("#opt-map").value = Object.entries(P.copy.options_th || {}).map(([k, v]) => `${k}=${v}`).join("\n");
   $("#kw-th").value = (P.copy.search_keywords_th || []).join(", ");
   updateTitleCount(); updatePreview(); renderPackage(); renderKw(); if (window.SEO) SEO.schedule();
@@ -218,8 +219,9 @@ $("#btn-kw").addEventListener("click", async (e) => {
   });
 });
 function updatePreview() {
-  const html = (P.copy.description_th || "").replace(/<(?!\/?(p|ul|ol|li|strong|b|br|em)\b)[^>]*>/gi, "");
-  $("#desc-preview").innerHTML = html + descImgs().map((im) => `<p><img src="${imgSrc(im)}" alt="" style="max-width:100%"></p>`).join("");
+  const html = (P.copy.description_th || "").replace(/<(?!\/?(p|ul|ol|li|strong|b|br|em|i|u|s|span|font|div|h[1-6]|blockquote|pre|table|thead|tbody|tr|td|th|hr|img|a)\b)[^>]*>/gi, "").replace(/\son\w+="[^"]*"/gi, "");
+  // 详情里自己插了图片（编辑器）：按编辑器里的放，不再自动接图
+  $("#desc-preview").innerHTML = html + (/<img/i.test(html) ? "" : descImgs().map((im) => `<p><img src="${imgSrc(im)}" alt="" style="max-width:100%"></p>`).join(""));
   renderDescImgs();
 }
 // v2.44.1：详情图片——勾选的（P.desc_images），没选过自动前 3 张，至少 1 张
@@ -751,3 +753,12 @@ $("#btn-host").addEventListener("click", async (e) => {
     toast(`已上传 ${r.uploaded} 张到图床` + ((r.failed || []).length ? `；${r.failed.length} 张失败（再点一次只传没成功的）：${r.failed[0]}` : ""), !!(r.failed || []).length);
   });
 });
+
+// v2.46：泰文 / 英文详情用富文本编辑器（像 BigSeller：源码、格式、字体、颜色、表格、图片、全屏…），AI 生成的内容照样填进来
+if (window.RTE) {
+  const imgsForRte = () => ((P && P.images) || []).map((im, i) => ({ src: imgSrc(im), title: i === 0 ? "主图" : "图 " + (i + 1) }));
+  for (const f of ["copy.description_th", "copy.description_en"]) {
+    const ta = document.querySelector(`#tab-edit [data-f="${f}"]`);
+    if (ta) RTE.attach(ta, { images: imgsForRte, max: 25000 });
+  }
+}

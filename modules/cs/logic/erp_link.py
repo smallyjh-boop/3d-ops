@@ -219,3 +219,69 @@ def confirm_quote(oid, user=""):
         raise ValueError("这个订单已经不是报价单了")
     orders.update_order(oid, user=user, status="to_ship", kind="wholesale")      # 状态变化会自动排产
     return order_brief(oid)
+
+
+# ---------------- v2.46：接了接口的店铺（聊天收发）、商品 / 订单卡片 ----------------
+def api_shops(platform="lazada"):
+    """启用了、填了授权的接口店铺：[{id, name, platform}]。"""
+    from core import integrations
+    out = []
+    for s in integrations.list_shops():
+        if s.get("platform") == platform and s.get("enabled") and (s.get("creds") or {}).get("access_token"):
+            out.append({"id": s["id"], "name": s.get("name") or f"{platform}#{s['id']}", "platform": platform})
+    return out
+
+
+class ShopConn:
+    """with erp_link.ShopConn(shop_id) as conn: …   用完把刷新过的 token 存回店铺。"""
+
+    def __init__(self, shop_id):
+        self.sid = shop_id
+
+    def __enter__(self):
+        from core import connectors, integrations
+        s = integrations.get_shop_raw(self.sid)
+        self.conn = connectors.make(s["platform"], s["creds"])
+        return self.conn
+
+    def __exit__(self, *a):
+        from core import integrations
+        try:
+            integrations._store_creds(self.sid, self.conn)
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+
+def product_card(pid):
+    """发给买家的商品卡片：{id, name, image, price, lazada_item_id}。"""
+    p = store.load(pid)
+    c = p.get("copy") or {}
+    im = next((x for x in p.get("images") or [] if x.get("file")), None)
+    prices = [float(v.get("price") or 0) for v in p.get("variants") or [] if v.get("price")]
+    return {"id": p["id"], "name": c.get("title_th") or c.get("title_en") or p.get("name_zh") or p["id"],
+            "name_zh": p.get("name_zh") or "",
+            "image": f"/files/{p['id']}/{'out' if im and im.get('processed') else 'raw'}/{im['file']}" if im else "",
+            "price": min(prices) if prices else None,
+            "lazada_item_id": (p.get("lazada_api") or {}).get("item_id")}
+
+
+def search_products(q, limit=12):
+    q = (q or "").strip().lower()
+    out = []
+    for p in store.list_products():
+        hay = f"{p['id']} {p['name_zh']} {p['title_th']}".lower()
+        if not q or q in hay:
+            out.append({"id": p["id"], "name": p["title_th"] or p["name_zh"], "name_zh": p["name_zh"]})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def orders_of_buyer(platform, buyer, limit=5):
+    from core import db
+    if not buyer:
+        return []
+    rows = db.conn().execute("SELECT id FROM orders WHERE platform=? AND buyer=? ORDER BY COALESCE(order_time,0) DESC LIMIT ?",
+                             (platform or "", buyer, int(limit))).fetchall()
+    return [order_brief(r["id"]) for r in rows]

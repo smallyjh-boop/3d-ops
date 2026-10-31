@@ -31,3 +31,4 @@
 - 2.2（系统 v2.44.1）：编辑页「详情图片」选择（P.desc_images，至少 1 张，预览里显示）。
 - 2.3（系统 v2.45.0）：类目字段接口优先（core/lazada_cats：类目树、类目属性生成字段表；categories.get / library / by_cat_id 接上；api|类目ID）；编辑页显示属性来源和许可证提醒；AI 匹配类目避开要许可证的类目（categories.needs_license）。测试 tests/cases/t_cats245.py。
 - 2.4（系统 v2.45.1）：AI 匹配类目先用 Lazada 类目推荐（lazada_cats.suggest）、搜不到按一级类目缩小（attributes._by_top_level），返回推荐类目 options，编辑页「用这个」。
+- 2.5（系统 v2.46.0）：泰文 / 英文详情换成富文本编辑器（static/rte.js：源码、撤销重做、清除格式、加粗斜体下划线删除线、列表、缩进、对齐、链接、图片（产品图 / 网址，点图改大小）、表格、分隔线、样式 / 格式 / 字体 / 大小、文字颜色 / 背景色、全屏、字数）；AI 生成照旧写进 textarea，编辑器跟着刷新（RTE.syncAll）。详情里自己放了图片时预览不再自动接图。

@@ -5,6 +5,7 @@
   window.MODS.cs = {
     show(tab) {
       if (window.CS) CS.show(tab);
+      if (window.CSDASH) CSDASH.show(tab);
       if (window.CSREC) CSREC.show(tab);
     },
     settings(box, cat) {

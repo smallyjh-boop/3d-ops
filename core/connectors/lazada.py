@@ -8,6 +8,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import threading
 import time
 import urllib.parse
 
@@ -17,6 +18,7 @@ from . import Connector, NotReady
 
 API = "https://api.lazada.co.th/rest"
 AUTH = "https://auth.lazada.com/rest"
+IM_PUSH = threading.Event()      # v2.46：收到聊天推送时置位，客服轮询马上醒来
 TZ = dt.timezone(dt.timedelta(hours=7))
 
 STATUS = {
@@ -256,6 +258,9 @@ class LazadaConnector(Connector):
             if headers.get("Authorization", "").lower() != expect:
                 raise PermissionError("签名不对")
         msg = json.loads(body or b"{}")
+        if (msg.get("data") or {}).get("session_id"):   # v2.46：聊天推送 → 客服马上拉一次新消息（不用等下一轮）
+            IM_PUSH.set()
+            return None
         if str(msg.get("message_type")) != "0":      # 0 = 订单状态变化
             return None
         oid = (msg.get("data") or {}).get("trade_order_id")
@@ -333,3 +338,44 @@ class LazadaConnector(Connector):
         self._ensure_token()
         body = f"<Request><Product><ItemId>{int(item_id)}</ItemId></Product></Request>"
         return self._call("/product/deactivate", {"apiRequestBody": body}, method="POST")
+
+    # ---------- 聊天（v2.46 Instant Messaging API：modules/cs/logic/channels/lazada_im.py）----------
+    # 要在开放平台给应用开通「Instant Messaging」权限；没开通时接口会报错，客服页会显示原因。
+    def _im(self, path, params, method="GET"):
+        self._ensure_token()
+        d = self._call(path, params, method=method)
+        if str(d.get("success", "true")).lower() == "false" or str(d.get("err_code") or "0") not in ("0", ""):
+            raise RuntimeError(f"Lazada {path} 出错：{d.get('err_code')} {d.get('err_message') or d.get('message') or ''}")
+        return d.get("data") or {k: v for k, v in d.items() if k not in ("code", "request_id")}
+
+    def im_sessions(self, start_time=None, page_size=20, last_session_id=None):
+        """会话列表（GetSessionList，按最后消息时间从新到旧）：
+        {session_list:[{session_id, buyer_id, title, head_url, summary, unread_count, last_message_id, last_message_time}],
+         has_more, next_start_time, last_session_id}"""
+        return self._im("/im/session/list", {"start_time": str(int(start_time or time.time() * 1000)), "page_size": str(page_size),
+                                              "last_session_id": last_session_id})
+
+    def im_session(self, session_id):
+        return self._im("/im/session/get", {"session_id": session_id})
+
+    def im_messages(self, session_id, start_time=None, page_size=20, last_message_id=None):
+        """会话里的消息（GetMessages，从新到旧）：{message_list:[{message_id, template_id, content(JSON 字符串),
+        from_account_type(1 买家 2 卖家), from_account_id, send_time, auto_reply, process_msg}], has_more, next_start_time, last_message_id}"""
+        return self._im("/im/message/list", {"session_id": session_id, "start_time": str(int(start_time or time.time() * 1000)),
+                                              "page_size": str(page_size), "last_message_id": last_message_id})
+
+    def im_send(self, session_id, template_id=1, **kw):
+        """发消息（SendMessage）：template_id 1 文字(txt) / 3 图片(img_url,width,height) / 10006 商品(item_id) / 10007 订单(order_id)。
+        返回 {message_id}"""
+        p = {"session_id": session_id, "template_id": str(template_id)}
+        p.update({k: str(v) for k, v in kw.items() if v not in (None, "")})
+        return self._im("/im/message/send", p, method="POST")
+
+    def im_read(self, session_id, last_read_message_id):
+        """标记已读（ReadSession）。"""
+        return self._im("/im/session/read", {"session_id": session_id, "last_read_message_id": last_read_message_id}, method="POST")
+
+    def im_open(self, order_id):
+        """按订单号打开（没有就新建）和买家的会话（OpenSession）：返回 session_id。"""
+        d = self._im("/im/session/open", {"order_id": order_id}, method="POST")
+        return d.get("session_id") or ""

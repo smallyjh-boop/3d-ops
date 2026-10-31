@@ -40,6 +40,11 @@ def conv_full(cid):
     except Exception:  # noqa: BLE001
         c["customer"] = None
     c["record_kinds"] = crm.KINDS
+    # v2.46：能不能直接发（接口渠道）、AI 现在怎么处理这个会话
+    from . import channels, shopcfg
+    c["can_send"] = channels.of(c) is not None
+    c["ai_mode"] = shopcfg.mode_of(c)
+    c["shop_mode"] = shopcfg.get(c.get("shop") or "")["mode"]
     return c
 
 
@@ -239,12 +244,16 @@ def learn_async(cid, question, ai_reply, final_reply, user=""):
     threading.Thread(target=go, daemon=True, name="cs-learn").start()
 
 
-def record_sent(cid, text, user="", source="manual"):
-    """回复已经发出去了（员工在平台发的，或程序发的）：记下来；和 AI 草稿不一样时，作为「好回复」学习。"""
+def record_sent(cid, text, user="", source="manual", kind="text", extra=None, ext_id=None, status=""):
+    """回复已经发出去了（员工在平台发的，或程序发的）：记下来；和 AI 草稿不一样时，作为「好回复」学习。
+    v2.46：kind / extra 是图片、商品卡片、订单卡片；ext_id 是平台消息编号（接口发的）。"""
     c = data.get_conv(cid)
     text = (text or "").strip()
     if not text:
         raise ValueError("回复是空的")
+    if kind != "text":
+        data.add_msg(cid, "seller", text, source=source, user=user, ext_id=ext_id, kind=kind, extra=extra, status=status)
+        return conv_full(cid)
     msgs = data.messages(cid)
     pending = []
     for m in reversed(msgs):
@@ -253,7 +262,7 @@ def record_sent(cid, text, user="", source="manual"):
         if m["role"] == "buyer":
             pending.insert(0, m["text"])
     ai = c.get("draft") or ""
-    data.add_msg(cid, "seller", text, source=source, user=user, ai_draft=ai or None)
+    data.add_msg(cid, "seller", text, source=source, user=user, ai_draft=ai or None, ext_id=ext_id, status=status)
     if pending and source != "auto":      # 自动发的不当「好回复」学（只学人确认过的）
         # 改过的回复一定学；没改也记一份（说明 AI 的说法被认可）
         data.add_example(cid, "\n".join(pending), ai, text, c.get("intent") or "", user)
@@ -371,6 +380,11 @@ def auto_decision(c):
     a = c.get("analysis") or {}
     if str(s.get("auto_send", "1")) != "1":
         return {"ok": False, "reason": "老板关闭了自动发送"}
+    if (c.get("mode") or "") == "human":
+        return {"ok": False, "reason": f"{c.get('taken_by') or '客服'} 接管了这个会话"}
+    from . import shopcfg
+    if shopcfg.get(c.get("shop") or "")["mode"] == "off":
+        return {"ok": False, "reason": "这个店铺设置为只人工回复"}
     if not c.get("draft"):
         return {"ok": False, "reason": "没有回复草稿"}
     if c.get("needs_human"):
