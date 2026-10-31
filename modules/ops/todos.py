@@ -87,3 +87,6 @@ def provide(add):
             s["hint"] or s["error"][:150], "ops_lazada", "owner",
             alert=f"🔌 Lazada {s['zh']}拉不下来（{s['shop']}）：{s['hint'] or s['error'][:150]}",
             th=(f"ดึง{s['th']}จาก Lazada ไม่ได้: {s['shop']}", s["hint_th"] or s["error"][:150]))
+    # 第二期（v2.48）：竞品、爆款雷达、竞店、计划、营销日历
+    from . import mkt_todos
+    mkt_todos.provide(add, cfg)

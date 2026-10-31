@@ -142,7 +142,13 @@ def run_once(force=False):
     with _lock:
         n = collect(cfg)
         s = flush(cfg)
-    return {"collected": n, "sent": s}
+        report = None
+        try:                      # v2.48：爆款雷达每天到点推一次机会日报
+            from . import radar
+            report = radar.daily_report(cfg)
+        except Exception as e:  # noqa: BLE001
+            print("爆款雷达日报失败：", e)
+    return {"collected": n, "sent": s, "radar_report": bool(report)}
 
 
 def recent(limit=100):

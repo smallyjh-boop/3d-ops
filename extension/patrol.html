@@ -1,0 +1,26 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>今日巡逻 · 3D 运营管理系统</title>
+<style>
+*{box-sizing:border-box}body{font:14px/1.6 system-ui,-apple-system,"Segoe UI","Noto Sans Thai","PingFang SC","Microsoft YaHei",sans-serif;margin:0;background:#f4f6f9;color:#1d2330}
+main{max-width:860px;margin:0 auto;padding:20px 16px}h1{font-size:20px;margin:0 0 4px}.hint{color:#6b7280;font-size:12px}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;margin-top:12px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}.kpi{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:10px 14px}
+.kpi .l{font-size:12px;color:#6b7280}.kpi .v{font-size:22px;font-weight:650}
+button{padding:9px 18px;border-radius:8px;border:1px solid #0f6fde;background:#0f6fde;color:#fff;font:inherit;cursor:pointer}button.s{background:#fff;color:#0f6fde}button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{border-bottom:1px solid #eee;padding:6px;text-align:left;vertical-align:top}th{color:#6b7280;font-weight:500}
+.pill{display:inline-block;padding:0 8px;border-radius:9px;font-size:12px;background:#f4f6f9;color:#6b7280}.pill.ok{background:#dcfce7;color:#166534}.pill.bad{background:#fee2e2;color:#c62828}.pill.run{background:#dbeafe;color:#1e40af}
+#msg{margin-top:10px;padding:10px 12px;border-radius:8px;display:none}#msg.on{display:block}#msg.warn{background:#fef3c7;color:#92400e}#msg.err{background:#fee2e2;color:#c62828}#msg.ok{background:#dcfce7;color:#166534}
+.prog{height:8px;background:#eee;border-radius:4px;overflow:hidden;margin-top:10px}.prog div{height:100%;background:#0f6fde;width:0}
+a{color:#0f6fde}td.u{max-width:360px;word-break:break-all}
+</style></head><body><main>
+<h1 data-t="title">🔭 今日巡逻</h1>
+<div class="hint" data-t="intro">按清单一页一页打开关键词搜索页、盯着的店铺和竞品商品页，每页停留一会儿、慢慢往下滚，再读页面上公开显示的数字发回系统。人在电脑旁时用；建议用一个没登录卖家账号的单独 Chrome 用户（个人资料）巡逻。遇到验证码会马上停，请手动完成验证，今天就别再巡逻了。</div>
+<div class="kpis"><div class="kpi"><div class="l" data-t="k1">今天已巡逻 / 上限</div><div class="v" id="k-done">-</div></div>
+  <div class="kpi"><div class="l" data-t="k2">这次要看</div><div class="v" id="k-left">-</div></div>
+  <div class="kpi"><div class="l" data-t="k3">每页停留</div><div class="v" id="k-wait">-</div></div>
+  <div class="kpi"><div class="l" data-t="k4">预计用时</div><div class="v" id="k-time">-</div></div></div>
+<div class="card"><div class="row"><button id="start" data-t="start">开始巡逻</button><button class="s" id="stop" disabled data-t="stop">停止</button><button class="s" id="reload" data-t="reload">刷新清单</button>
+  <span style="flex:1"></span><span id="now" class="hint"></span></div>
+  <div class="prog"><div id="bar"></div></div><div id="msg"></div></div>
+<div class="card"><b data-t="list">清单</b><table><thead><tr><th>#</th><th data-t="c1">类型</th><th data-t="c2">内容</th><th data-t="c3">结果</th></tr></thead><tbody id="list"></tbody></table></div>
+</main><script src="patrol.js"></script></body></html>

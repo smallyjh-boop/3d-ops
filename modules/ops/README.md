@@ -15,6 +15,54 @@
 - **Lazada 数据**（ops_lazada，老板；上架客服只看同步状态和评价）：同步状态（出错原因 + 怎么办，例如去 App Console 申请接口权限）、立即同步、
   真实扣点（按费用名）、评价（差评 / 没回复 / 全部，直接回复）、退货退款、店铺表现。
 
+## 第二期页面（系统 v2.48.0）
+
+菜单：「商品」下面 竞品 / 爆款雷达 / 竞店（只给老板，里面有成本和利润）；「工作台」下面 爆款 / 上量计划、营销日历（老板和上架客服；
+员工看不到计划里的销售额和利润，也不能建 / 改计划），流量数据（老板）。
+
+- **竞品**（ops_comp）：我的商品 vs 竞品（我的售价、竞品中位价、价格排第几、我的日销（ERP 订单）vs 竞品最高日销、市场份额）、全部竞品、
+  选品雷达（还没关联我方 SKU 的竞品按推算月利润排，标「要做」进今日待办）、竞品动态（降价、涨价、开券、放量、改标题）。
+  添加：浏览器扩展采集，或粘贴商品页文字 →「识别」（配了 AI 用 AI，没配只认常见写法）。
+  日销：两次「累计已售」相减 ÷ 天数（实测）> 页面上的近 30 天已售 > 评价数差值 ÷ 留评比例（估）> 累计已售 ÷ 上架天数（估）。
+  单件利润 = 到手价 − 平台费 − 生产成本。平台费：Lazada 用第一期财务流水算出的真实扣点（近 30 天商品金额 ≥ ฿1,000 才用），
+  其他平台用设置里的扣点；生产成本：手动 > 关联的我方 SKU（ERP 成本）> AI 估克重和时长 × ERP 成本参数（`core/pricing.py`）。
+- **爆款雷达**（ops_radar）：关键词库、巡逻状态和记录、机会分 0–100 = 需求 + 竞争少 + 能打印（AI）+ 利润 + 小爆潜力（AI），
+  AI 判断有侵权风险（品牌 / 角色 / 外观设计）直接 0 分；关键词详情（前 30 名商品、AI 结论）。
+  和「搜索优化」（`core/keywords.py`）不重复存：产品的买家搜索词还是存在产品里；「从产品搜索词导入」把每个产品的标题主词和前 2 个核心词加进来巡逻；
+  每个关键词显示「我们的产品」（搜索词或泰文标题里已经有这个词的产品）。每天到点（设置）推一次机会日报（和手机提醒同一个渠道）。
+- **竞店**（ops_shops）：我的店铺的 ERP 实际数（按订单里的店铺名：订单、每天几单 / 几件、销售额；Lazada 店铺加上第一期店铺表现的回复率、评分）；
+  盯着的竞店的中位数（粉丝、好评率、回复率、在售商品、店铺日销下限、近 7 天上新）和我的店铺落后的地方；店铺列表和详情（卖得最好的、新品起量、历史）。
+- **爆款 / 上量计划**（ops_plans）：爆款计划目标日销 = 对标竞品最高日销 × 30%，上量计划 × 60%（没有竞品按自己销量翻倍；一款最多占一半产能）；
+  前 2/3 天数从起点线性爬到目标；每天用 ERP 实际订单对目标（领先 / 正常 / 落后 / 严重落后）、计划期销售额和利润（和财务一样的算法）；
+  「现在该做什么」（规则：后台流量判断曝光还是转化问题、价格比竞品中位高低、产能、快到的大促、竞品动态）；分阶段任务（模板 + 计划期内大促的报名任务），
+  到日子进今日待办（在待办里点完成 = 计划里勾掉）；「AI 更新计划」（ERP 的 AI 设置）换掉还没做的 AI 任务、写一段判断和泰文关键词。
+- **营销日历**（ops_cal）：内置每月双数日大促、月中 15 号、发薪日 25 号、泰国节日（按平台惯例推算，以卖家中心公告为准），可以隐藏、加自己的活动；
+  每个大促 T-14 / T-7 / T-3 / T / T+3 倒排任务（到日子进今日待办，往回 3 天内都还在）；产能 = 生产模块里开着的打印机 × 每台每天小时，
+  平均每单打印小时按近 30 天订单算，预计订单 = 平时每天订单 × 倍数，超过「大促当天最多能接」就提醒限量或提前打库存。
+- **流量数据**（ops_traffic）：扩展在卖家中心采集的每个商品的曝光、访客、浏览、加购、订单、转化率（AI 识别，按卖家 SKU / 在线商品编号对上 ERP SKU）；
+  商品生命周期多一列「访客 / 转化」，运营看板多一张「市场与计划」卡片（下一个大促、计划进度、竞品动态、访客最多 / 转化最低）。
+
+## 浏览器扩展（和 AI 客服、面单转交是同一个扩展，v3.0.0）
+
+- 下载：系统 → 设置 → 组件与插件（`/api/cs/extension.zip`）；用员工的扩展密钥（和 AI 客服同一把，完整权限）。
+- `extension/capture.js`：Lazada / Shopee / TikTok 前台商品页「📊 采集竞品」、搜索结果页「🔭 采集搜索结果」、店铺页「🏪 采集店铺」、
+  列表里每个商品卡片的「📊 采集」标记和横向对比栏；卖家中心的数据页「📥 采集本页数据」，带流量表格的页面打开 8 秒后自动采一次（同一页 12 小时一次，
+  插件设置里可以关）；聊天页不放按钮（AI 客服的地盘）。
+- `extension/patrol.html / patrol.js`：今日巡逻（插件设置弹窗里「🔭 开始今日巡逻」）：按系统给的清单（关键词搜索页、盯着的店铺、20 小时没更新的竞品页）
+  逐页打开、随机停留并慢慢滚动再读页面；每天有上限（设置）、遇到验证码马上停、连续 3 页失败停、关掉标签页停。
+- 接口 `/api/v1/ops/ext/…`：ping、competitor、competitor/<id>、card、known、compare、patrol、patrol/log、search、shop、shop/watch、shop/known、backend。
+  `core/auth.py`：`/api/v1/ops/ext/` 用完整权限的密钥就行（`/api/v1/ops/` 其余的写回接口还是要「运营写回」密钥），只读密钥不行；也记下扩展版本。
+
+## 第二期的表（ops_ 开头，`mkt_db.py`）和第三期导入旧数据的对应
+
+列名和原来的 analytics.db 一样，直接按表对应复制：competitors → ops_comp，comp_links → ops_comp_links，comp_snaps → ops_comp_snaps，
+comp_events → ops_comp_events（多了 text_th），radar_keywords → ops_radar_keywords（多了 source、product_id），radar_searches → ops_radar_searches，
+radar_items → ops_radar_items，radar_item_snaps → ops_radar_item_snaps，radar_volumes → ops_radar_volumes，radar_patrol_log → ops_patrol_log（多了 who），
+shops → ops_shops（多了 erp_shop），shop_snaps / shop_items / shop_item_snaps / shop_comp_links → ops_shop_*，plans → ops_plans，
+plan_tasks → ops_plan_tasks（多了 text_th），campaigns → ops_campaigns，backend_pages / backend_rows → ops_backend_pages / ops_backend_rows。
+要注意：旧库里的 SKU 是分析系统同步的 erp_skus，和 ERP 一样是大写 SKU，可以直接用；图片列旧库可能存的是本地缓存路径，导入时只留 http(s) 地址；
+旧的设置键（comp_stale_days、patrol_daily_cap、radar_w_*、my_shop_urls……）在 ERP 里前面加了 oa_。
+
 ## 口径（和财务模块一致）
 
 - 计入销售 = 不是取消 / 退货 / 未付款 / 报价 / 拒收（`core.finance.EXCLUDE`）。
@@ -46,6 +94,10 @@
 
 ## 设置（设置 → 运营分析）
 
+第二期加了：竞品推算（oa_comp_stale_days、oa_comp_price_drop_pct、oa_review_rate_*）、巡逻（oa_patrol_daily_cap、oa_patrol_wait_min / max、
+oa_patrol_competitors）、机会分权重（oa_radar_w_*、oa_radar_alert_score、oa_radar_report_hour）、竞店（oa_my_shop_urls、oa_shop_patrol_days）、
+营销日历（oa_avg_hours_per_order、oa_ship_window_hours、oa_campaign_lookahead_days）。第一期的：
+
 `oa_alert_on`、`oa_alert_every_min`、`oa_line_token`（密钥）、`oa_line_to`、`oa_alert_telegram`、`oa_ship_warn_hours`、`oa_cod_fail_rate`、
 `oa_bad_review_stars`、`oa_test_days`、`oa_retest_days`、`oa_hero_qty_30d`、`oa_decline_days`、`oa_delist_days`、`oa_lz_sync_min`。
 
@@ -61,6 +113,9 @@
 - `alerts.py`  手机提醒（表 oa_alerts，去重、推送、后台定时）
 - `line.py`  LINE 推送
 - `public.py`  给别的模块用：dashboard()、lifecycle()、lazada_fee_rates()、notify(text)
+- 第二期：`mkt_db.py`（表）、`mkt_util.py`（数字 / 网址识别、AI 调用 `core.ai_copy.call`、ERP 取数：SKU 成本、扣点、销量、产能）、
+  `comp.py` 竞品、`radar.py` 爆款雷达、`shops.py` 竞店、`plans.py` 计划、`campaigns.py` 营销日历、`traffic.py` 店铺后台数据、
+  `mkt_todos.py` 交给今日待办的条目、`mkt_api.py` 接口（/api/oa/comp… 和扩展的 /api/v1/ops/ext/…）、`ui/market.js`、`ui/plan.js`、`tests/t_ops248.py`
 - `i18n/th.json`
 - `tests/t_ops246.py`
 - `ui/page.html`、`ui/ops.js`、`ui/page.js`、`ui/page.css`
@@ -69,3 +124,6 @@
 
 - 1.0（系统 v2.47.0）：新模块。从运营分析系统搬过来看板、商品生命周期、今日待办、LINE 告警，改成直接读 ERP；新加 Lazada 财务流水
   （进财务对账、真实扣点）、评价（差评待办、回复）、退货退款、店铺表现。测试 tests/t_ops246.py。
+- 2.0（系统 v2.48.0）：第二期。从运营分析系统搬过来竞品、爆款雷达、竞店、爆款 / 上量计划、营销日历、店铺后台数据，表都在 ERP 里（ops_ 开头）；
+  AI 用 ERP 的 AI 设置；成本用 ERP 定价、Lazada 用第一期的真实扣点、产能用生产模块的打印机；计划任务和活动任务进今日待办；
+  原来单独的采集插件并进 ERP 的浏览器扩展（v3.0.0，扩展接口 /api/v1/ops/ext/…）。测试 tests/t_ops248.py。

@@ -306,7 +306,7 @@ def _api_guard(path):
     scope = k.get("scope") or "full"
     g.user = {"id": -1, "username": f"api:{k['name']}", "display_name": k["name"], "role": "api", "lang": "zh",
               "scope": scope}
-    if path.startswith(("/api/v1/cs/", "/api/v1/labels/")):
+    if path.startswith(("/api/v1/cs/", "/api/v1/labels/", "/api/v1/ops/ext/")):
         integrations.note_ext(k["name"], request.headers.get("X-Ext-Version", "").strip()[:12])
     if path.startswith("/api/v1/accel/") and scope not in ("worker", "full"):
         return jsonify({"ok": False, "error": "电脑加速要用「电脑加速」权限的密钥（scope = worker）"}), 403
@@ -348,7 +348,8 @@ def _api_guard(path):
         # 财务密钥（规范第 11 条）：只能读 /api/v1/finance/…（和 ping）
         if not (request.method in ("GET", "HEAD") and (path.startswith("/api/v1/finance/") or path == "/api/v1/ping")):
             return jsonify({"ok": False, "error": "这个密钥只能读取财务接口 /api/v1/finance/"}), 403
-    elif path.startswith("/api/v1/ops/"):
+    elif path.startswith("/api/v1/ops/") and not path.startswith("/api/v1/ops/ext/"):
+        # v2.48：/api/v1/ops/ext/… 是浏览器扩展的采集接口（竞品、搜索结果、店铺、卖家后台数据），员工的扩展密钥（完整权限）就能用
         return jsonify({"ok": False, "error": "写回接口要用「运营写回」权限的密钥（scope = ops）"}), 403
     if path.startswith("/api/v1/catalog/") and scope != "catalog":
         return jsonify({"ok": False, "error": "新建产品要用「建产品」权限的密钥（scope = catalog）"}), 403

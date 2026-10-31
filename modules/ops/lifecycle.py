@@ -135,6 +135,12 @@ def _stage(r, lst, online, start, sales, now):
     return "growing"
 
 
+def _trf(t):
+    if not t:
+        return None
+    return {k: t.get(k) for k in ("visitors", "views", "add_to_cart", "orders", "conversion", "period_text", "ts")}
+
+
 def board(cfg=None):
     from core import modules
     from .dash import price_rows
@@ -149,6 +155,11 @@ def board(cfg=None):
         except Exception:  # noqa: BLE001
             online = {}
     sales = _sales()
+    try:                                   # v2.48：卖家后台流量（浏览器扩展采集）
+        from . import traffic
+        trf = traffic.by_sku()
+    except Exception:  # noqa: BLE001
+        trf = {}
     rows = []
     views = {}
     for pr in price_rows(cfg):
@@ -180,7 +191,8 @@ def board(cfg=None):
                          "qty_total": sa["qty_total"], "qty_7d": sa["qty_7d"], "qty_30d": sa["qty_30d"],
                          "profit_30d": round(sa["profit_30d"], 2), "last_sale": sa["last_sale"],
                          "price": pr["price"], "floor_price": pr["floor_price"], "unit_cost": pr["unit_cost"],
-                         "below_floor": bool(pr["price"] is not None and pr["floor_price"] and pr["price"] < pr["floor_price"] - 0.01)})
+                         "below_floor": bool(pr["price"] is not None and pr["floor_price"] and pr["price"] < pr["floor_price"] - 0.01),
+                         "traffic": _trf(trf.get((pr["sku"], plat)))})
     rows.sort(key=lambda x: (STAGE_ORDER.index(x["stage"]), -x["qty_30d"], x["sku"], x["platform"]))
     counts = {}
     for x in rows:

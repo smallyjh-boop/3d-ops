@@ -1,15 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "3D 运营管理系统 · AI 客服",
-  "version": "2.9.2",
-  "description": "在 Lazada / Shopee / TikTok 卖家中心的聊天页面读取买家消息，用3D 运营管理系统的 AI 生成泰语回复并填入回复框；下载平台面单 PDF 时，点一下就发到系统。",
+  "name": "3D 运营管理系统 · 浏览器扩展",
+  "version": "3.0.1",
+  "description": "AI 客服（卖家中心聊天页读消息、生成泰语回复）；面单 PDF 转交；运营采集（竞品、搜索结果、店铺、卖家后台数据页，今日巡逻）——都发到你自己的 3D 运营管理系统。",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
     "128": "icon128.png"
   },
   "action": {
-    "default_title": "3D 运营管理系统 · 插件设置",
+    "default_title": "3D 运营管理系统 · 插件",
     "default_popup": "options.html"
   },
   "options_page": "options.html",
@@ -66,6 +66,20 @@
       ],
       "run_at": "document_start",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "https://*.lazada.co.th/*",
+        "https://shopee.co.th/*",
+        "https://*.shopee.co.th/*",
+        "https://*.tiktok.com/*",
+        "https://*.tiktokshop.com/*",
+        "https://*.tiktokglobalshop.com/*"
+      ],
+      "js": [
+        "capture.js"
+      ],
+      "run_at": "document_idle"
     }
   ]
 }

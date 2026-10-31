@@ -16,7 +16,10 @@
   let CUR = "";
 
   async function show(tab) {
-    if (!BOX[tab]) return;
+    if (!BOX[tab]) {           // v2.48：第二期的页面在 market.js / plan.js
+      const o = Object.values(window.OPSB || {}).find((x) => x.tabs.includes(tab));
+      return o ? o.show(tab) : undefined;
+    }
     CUR = tab;
     const box = $("#" + BOX[tab]);
     if (!box) return;
@@ -153,6 +156,7 @@
         ${card(Z("生产与耗材", "การผลิตและวัสดุ"), (pr ? `<p class="small">${Z("排队", "คิว")} ${pr.queue_jobs} ${Z("个任务", "งาน")} / ${pr.queue_pcs} ${Z("件", "ชิ้น")} · ${n0(pr.queue_hours)} ${Z("打印小时", "ชม.พิมพ์")}
           ${pr.days_of_work != null ? ` · ${Z("约", "ประมาณ")} ${pr.days_of_work} ${Z("天的活", "วันงาน")}` : ""} · ${Z("待后处理", "รอเก็บงาน")} ${pr.post}</p>` : "")
           + (d.materials.map((x) => `<div class="small ${x.short ? "bad" : "warn"}">${esc(x.material)} ${esc(x.color)} · ${Z("剩", "เหลือ")} ${n0(x.kg)} kg · ${x.short ? Z("不够打待打印的单", "ไม่พอพิมพ์งานที่รอ") : Z(`约 ${n0(x.days_left)} 天用完`, `หมดในราว ${n0(x.days_left)} วัน`)}</div>`).join("") || `<p class="muted small">${Z("耗材够用", "วัสดุพอใช้")}</p>`))}
+        ${marketCard(d.market || {})}
         ${card(Z("数据健康", "ความครบของข้อมูล"), `<table class="grid"><tbody>${[
           [Z("SKU 总数", "จำนวน SKU"), h.skus], [Z("缺克数或时长的 SKU", "SKU ที่ไม่มีกรัมหรือเวลาพิมพ์"), h.skus_missing_cost],
           [Z("成本数据不全的订单（30 天）", "ออเดอร์ที่ข้อมูลต้นทุนไม่ครบ (30 วัน)"), h.orders_missing_data],
@@ -162,6 +166,23 @@
           .map(([k, v]) => `<tr><td>${k}</td><td class="num" data-notr>${esc(v)}</td></tr>`).join("")}</tbody></table>
           <p class="small muted">${d.breakdown_source === "fin" ? Z("利润和「财务」模块同一个算法（平台、SKU 的数直接取自财务）。", "กำไรใช้วิธีคิดเดียวกับโมดูลการเงิน") : ""}</p>`)}
       </div>`;
+  }
+
+  // v2.48：看板上的「市场与计划」卡片（第二期：卖家后台流量、竞品动态、计划进度、下一个大促）
+  function marketCard(mk) {
+    const t = mk.traffic, nc = mk.next_campaign;
+    const parts = [];
+    if (nc) parts.push(`<p class="small">${Z("下一个大促", "แคมเปญถัดไป")}：<b data-notr>${esc(Z(nc.name, nc.name_th))}</b> ${nc.start}（${Z(`还有 ${nc.days_left} 天`, `อีก ${nc.days_left} วัน`)}）
+      · ${Z("预计", "คาด")} ${n0(nc.expected_orders)} ${Z("单/天", "ออเดอร์/วัน")}${nc.over_capacity ? ` <b class="bad">${Z("超过产能", "เกินกำลังผลิต")}</b>` : ""} <button class="mini" data-ops-go="ops_cal">${Z("日历", "ปฏิทิน")}</button></p>`);
+    if ((mk.plans || []).length) parts.push(`<p class="small">${Z("进行中的计划", "แผนที่กำลังทำ")}：${mk.plans.map((p) => `<span class="mono" data-notr>${esc(p.sku)}</span> <b class="${p.status === "far" ? "bad" : p.status === "behind" ? "warn" : "ok"}">${esc(Z(p.status_label, p.status_th))}</b> ${p.cum_actual}/${p.cum_target}`).join(" · ")}
+      <button class="mini" data-ops-go="ops_plans">${Z("计划", "แผน")}</button></p>`);
+    if ((mk.comp_events || []).length) parts.push(`<h4>${Z("竞品动态（近 7 天）", "ความเคลื่อนไหวคู่แข่ง (7 วัน)")}</h4>` + mk.comp_events.map((e) => `<div class="small" data-notr>${esc(Z(e.text, e.text_th || e.text))}</div>`).join(""));
+    if (t) parts.push(`<h4>${Z("卖家后台流量（访客最多）", "ทราฟฟิกหลังร้าน (ผู้เข้าชมมากสุด)")} <span class="small muted">${fmtTime(t.last_ts)}</span></h4>`
+      + t.top.map((r) => `<div class="small"><span class="mono" data-notr>${esc(r.sku || r.name || "")}</span> ${Z("访客", "ผู้เข้าชม")} ${n0(r.visitors)} · ${Z("订单", "ออเดอร์")} ${n0(r.orders)} · ${Z("转化", "อัตราซื้อ")} ${r.conversion != null ? r.conversion + "%" : "—"}</div>`).join("")
+      + (t.low_conv.length ? `<div class="small warn">${Z("转化率最低", "อัตราซื้อต่ำสุด")}：${t.low_conv.map((r) => `<span data-notr>${esc(r.sku || r.name || "")}</span> ${r.conversion}%`).join(" · ")}</div>` : "")
+      + `<button class="mini" data-ops-go="ops_traffic">${Z("流量数据", "ข้อมูลทราฟฟิก")}</button>`);
+    if (!parts.length) return "";
+    return card(Z("市场与计划", "ตลาดและแผน"), parts.join(""));
   }
 
   // ---------------- 商品生命周期 ----------------
@@ -190,12 +211,13 @@
     const rows = L.rows.filter((r) => (!STAGE || r.stage === STAGE) && (!LPLAT || r.platform === LPLAT) && (!q || `${r.sku} ${r.name}`.toLowerCase().includes(q)));
     const lv = { bad: "bad", warn: "warn", ok: "ok", good: "ok", info: "", mute: "muted" };
     $("#oa-ltable").innerHTML = tbl(["SKU", Z("平台", "แพลตฟอร์ม"), Z("阶段", "ช่วง"), Z("在售天数", "วันที่ขาย"), Z("7 天", "7 วัน"), Z("30 天", "30 วัน"), Z("累计", "รวม"),
-      Z("30 天利润", "กำไร 30 วัน"), Z("售价", "ราคา"), Z("建议动作", "สิ่งที่ควรทำ")],
+      Z("30 天利润", "กำไร 30 วัน"), Z("售价", "ราคา"), Z("访客 / 转化（后台）", "ผู้เข้าชม / อัตราซื้อ"), Z("建议动作", "สิ่งที่ควรทำ")],
       rows.slice(0, 600).map((r) => `<tr><td><span class="mono" data-notr>${esc(r.sku)}</span><div class="small muted" data-notr>${esc(r.name)} ${esc(r.variant || "")}</div></td>
         <td>${esc(PLAT(r.platform))}</td><td><b class="${lv[r.level] || ""}">${esc(Z(r.stage_label, r.stage_th))}</b></td>
         <td class="num">${r.days_live == null ? "—" : r.days_live}${r.start_estimated && r.days_live != null ? ` <span class="warn small">${Z("估", "ประมาณ")}</span>` : ""}</td>
         <td class="num">${r.qty_7d}</td><td class="num">${r.qty_30d}</td><td class="num">${r.qty_total}</td><td class="num ${neg(r.profit_30d)}">${m(r.profit_30d)}</td>
         <td class="num ${r.below_floor ? "bad" : ""}" title="${Z("最低价", "ราคาขั้นต่ำ")} ${m(r.floor_price)} · ${Z("成本", "ต้นทุน")} ${m(r.unit_cost)}">${m(r.price)}</td>
+        <td class="num small" title="${esc((r.traffic && r.traffic.period_text) || "")}">${r.traffic ? `${n0(r.traffic.visitors)}${r.traffic.conversion != null ? ` / ${r.traffic.conversion}%` : ""}` : "—"}</td>
         <td class="small">${esc(Z(r.action, r.action_th))}</td></tr>`), Z("没有符合的商品", "ไม่มีสินค้าที่ตรง"))
       + (rows.length > 600 ? `<p class="small muted">${Z(`只显示前 600 行（共 ${rows.length}）`, `แสดง 600 แถวแรก (ทั้งหมด ${rows.length})`)}</p>` : "");
   }

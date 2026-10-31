@@ -3,12 +3,13 @@
 from flask import Blueprint
 
 from web.common import *  # noqa: F401,F403
-from . import alerts, dash, lazada, lifecycle
+from . import alerts, dash, lazada, lifecycle, mkt_api
 
 bp = Blueprint("m_ops", __name__)
-PREFIXES = ["/api/oa/"]
+PREFIXES = ["/api/oa/", "/api/v1/ops/ext/"]          # v2.48：浏览器扩展采集 /api/v1/ops/ext/…（最长前缀优先，/api/v1/ops/ 其余的还是对接模块的）
 lazada.init()
 alerts.init()
+mkt_api.attach(bp)                                  # v2.48：竞品、爆款雷达、竞店、计划、营销日历、店铺后台数据
 
 
 def _wrap(fn):
