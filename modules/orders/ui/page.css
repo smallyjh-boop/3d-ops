@@ -21,3 +21,11 @@
 /* v2.43：订单详情里生产任务的操作按钮（单独一行） */
 .od-jobs tr.od-job-acts td { border-top: 0; padding-top: 0 }
 .od-jobs tr.od-job-acts .mini { margin: 0 }
+/* v2.46：面单模板编辑 */
+.wb-tabs { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden }
+.wb-tabs button { border: 0; border-radius: 0; background: #fff; padding: 4px 12px; margin: 0; cursor: pointer }
+.wb-tabs button + button { border-left: 1px solid #cbd5e1 } .wb-tabs button.on { background: #1d4ed8; color: #fff }
+.wb-cols { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px }
+.wb-col { display: flex; align-items: center; gap: 4px } .wb-col .wb-opt { min-width: 110px } .wb-col .mini { margin: 0; padding: 0 6px }
+.wb-dim { opacity: .45; pointer-events: none }
+.wb-dim #wb-save { pointer-events: auto }

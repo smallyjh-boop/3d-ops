@@ -64,7 +64,7 @@ ok("Pickup" in t and "No address" in t and "NO COD" in t, "ship method / no addr
 t = printed(labels.self_made_html([o], cfg))
 ok(not CJK.search(t), f"old self-made label has no Chinese: {CJK.findall(t)[:10]}")
 # v2.42：面单宽度占满纸，剩下的给信息区
-WT_ = WT.clean({"enabled": True, "paper": "100x150", "info_mm": 12})
+WT_ = WT.clean({"enabled": True, "paper": "100x150", "info_mm": 12, "style": "list"})
 a, b = render.split_mm(WT_, 134 / 98)
 ok(abs(a - 136) < 0.01 and abs(b - 14) < 0.01, f"lazada label full width {a} {b}")
 a, b = render.split_mm(WT_, 1.6)
@@ -92,7 +92,26 @@ ok(labeltext.platform_spec("Black,L") == "Black / L" and labeltext.short("ABCDEF
 it_p = {"variation": "Variation2:มาตรฐาน, Variation1:สีสุ่ม (คละสี)"}
 ok(tx.spec(it_p) == "สีสุ่ม", "platform item spec")
 sp0 = tx.spec(it0)
-hb2 = render.info_html({"id": 5, "order_no": "Y", "items": [dict(it0, name="ชื่อสินค้ายาวมาก " * 5)]}, WT.clean({"enabled": True, "fields": WT.FIELD_IDS}), 1, {}, lambda c: (0,), tx=tx, info_h=20)
+hb2 = render.info_html({"id": 5, "order_no": "Y", "items": [dict(it0, name="ชื่อสินค้ายาวมาก " * 5)]}, WT.clean({"enabled": True, "fields": WT.FIELD_IDS, "style": "list"}), 1, {}, lambda c: (0,), tx=tx, info_h=20)
 ok(hb2.index('class="sp"') < hb2.index('class="nm"'), "spec printed before the long name")
+# v2.46：商品清单表格——列开关 / 顺序、图片、数量画圈、放不下提示、按平台的模板
+TT = WT.clean({"enabled": True, "style": "table", "cols": [{"id": "qty", "on": True}, {"id": "sku", "on": True}, {"id": "img", "on": True},
+                                                          {"id": "name", "on": False}], "fields": WT.FIELD_IDS})
+ok([c["id"] for c in TT["cols"]][:3] == ["qty", "sku", "img"] and not next(c for c in TT["cols"] if c["id"] == "name")["on"]
+   and {c["id"] for c in TT["cols"]} == set(WT.COL_IDS), "cols order / on-off kept, missing ones appended")
+ht = render.info_html(o, TT, 1, {}, lambda c: (0,), tx=tx, info_h=60)
+ok(ht.index("<th class=c-qty>") < ht.index("<th class=c-sku>") < ht.index("<th class=c-img>") and "<th class=c-name>" not in ht, "table columns in order")
+ok('class="qc">2<' in ht and "/files/3DP0015/" in ht and 'class="noimg"' in ht, "qty circled, product image, placeholder for unknown")
+ok(not CJK.search(printed(render.compose([(o, [render.SAMPLE_AWB], 1)], TT, {}, lambda c: (0,), autoprint=False))), "table has no Chinese")
+many = {"id": 7, "order_no": "Z", "platform": "lazada", "items": [{"sku": f"S{i}", "qty": 1} for i in range(14)]}
+ok(render.overflow(many, TT, tx) and not render.overflow(o, TT, tx) and not render.overflow(many, dict(TT, layout="page"), tx), "overflow only when below + too many")
+from modules.orders import waybill as WB
+WT.save({"enabled": True, "style": "table", "font": 9})
+WT.save({"style": "list", "font": 11, "paper": "a6"}, "shopee")
+ok(WB.tpl_of_order({"platform": "shopee"})["style"] == "list" and WB.tpl_of_order({"platform": "shopee"})["paper"] == "100x150"
+   and WB.tpl_of_order({"platform": "lazada"})["style"] == "table", "per-platform content, shared paper")
+WT.save({"same": True}, "shopee")
+ok(WB.tpl_of_order({"platform": "shopee"})["style"] == "table", "back to the shared template")
+ok([x["order_no"] for x in WB.overflow_orders([many, o])] == ["Z"], "overflow orders listed for the print prompt")
 print("ERRORS", E_)
 sys.exit(1 if E_ else 0)

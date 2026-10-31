@@ -34,6 +34,19 @@ FIELDS = [
     ("time", "打印时间", "เวลาพิมพ์"),
 ]
 FIELD_IDS = [f[0] for f in FIELDS]
+# v2.46：信息区的样式：table 商品清单表格（像 BigSeller 的拣货清单）/ list 紧凑（一行一个商品）
+STYLES = {"table": ("商品清单表格（图片、商品名、规格、SKU、数量一列一列）", "ตารางรายการสินค้า"),
+          "list": ("紧凑（一行一个商品）", "แบบกะทัดรัด (หนึ่งบรรทัดต่อสินค้า)")}
+# 商品清单表格的列（顺序可以调）：(id, 中文, 泰文, 印在表头的字)
+COLS = [("img", "图片", "รูป", "Img"), ("name", "商品名", "ชื่อสินค้า", "Item"), ("spec", "规格 / 颜色", "ตัวเลือก / สี", "Variant"),
+        ("sku", "SKU", "SKU", "SKU"), ("psku", "产品编号", "รหัสสินค้า", "P.SKU"), ("qty", "数量", "จำนวน", "Qty"),
+        ("loc", "货位", "ช่องเก็บ", "Loc")]
+COL_IDS = [c[0] for c in COLS]
+DEFAULT_COLS = [{"id": "img", "on": False}, {"id": "name", "on": True}, {"id": "spec", "on": True}, {"id": "sku", "on": True},
+                {"id": "psku", "on": False}, {"id": "qty", "on": True}, {"id": "loc", "on": True}]
+# 按平台可以单独设的（内容）；纸张、版式、裁边、转向所有平台共用（一次打印只能是一种纸）
+CONTENT_KEYS = ("style", "cols", "fields", "font", "text", "qty_circle", "name_lines", "sort")
+PLATFORMS = {"lazada": "Lazada", "shopee": "Shopee", "tiktok": "TikTok", "manual": "手工单 / 其它"}
 LAYOUTS = {"below": ("面单下面加信息（同一张纸，面单自动缩小）", "เพิ่มข้อมูลใต้ใบปะหน้า (แผ่นเดียว ย่อใบปะหน้าอัตโนมัติ)"),
            "page": ("面单原样，后面另起一张打信息", "ใบปะหน้าขนาดเดิม แล้วพิมพ์ข้อมูลอีกแผ่น")}
 PAPERS = {"100x150": (100, 150), "100x180": (100, 180), "a6": (105, 148)}
@@ -41,7 +54,8 @@ PAPER_ZH = {"100x150": "100×150 毫米（热敏 4×6 寸）", "100x180": "100×
 PAPER_TH = {"100x150": "100×150 มม. (กระดาษความร้อน 4×6 นิ้ว)", "100x180": "100×180 มม. (กระดาษความร้อนแบบยาว)", "a6": "A6 105×148 มม."}
 DEFAULT = {"enabled": False, "layout": "below", "paper": "100x150", "info_mm": 12, "font": 9,
            "fields": ["order_no", "items", "spec", "loc", "total", "buyer_note", "custom_note", "count"],
-           "sort": "loc", "text": "", "crop": True, "rotate": True}
+           "sort": "loc", "text": "", "crop": True, "rotate": True,
+           "style": "table", "cols": DEFAULT_COLS, "qty_circle": True, "name_lines": 2}
 
 
 def _int(v, lo, hi, d):
@@ -67,16 +81,49 @@ def clean(d):
     t["fields"] = [x for x in FIELD_IDS if x in f] if isinstance(f, (list, tuple)) else list(DEFAULT["fields"])
     t["sort"] = d.get("sort") if d.get("sort") in ("loc", "sku") else "loc"
     t["text"] = str(d.get("text") or "").strip()[:80]
-    for k in ("crop", "rotate"):
+    for k in ("crop", "rotate", "qty_circle"):
         t[k] = DEFAULT[k] if d.get(k) is None else d.get(k) in (True, 1, "1", "true", "on")
+    t["style"] = d.get("style") if d.get("style") in STYLES else DEFAULT["style"]
+    t["name_lines"] = _int(d.get("name_lines"), 1, 3, DEFAULT["name_lines"])
+    cols, seen = [], set()
+    for c in d.get("cols") if isinstance(d.get("cols"), list) else []:
+        cid = c.get("id") if isinstance(c, dict) else c
+        if cid in COL_IDS and cid not in seen:
+            seen.add(cid)
+            cols.append({"id": cid, "on": bool(c.get("on", True)) if isinstance(c, dict) else True})
+    cols += [dict(c) for c in DEFAULT_COLS if c["id"] not in seen]       # 新加的列补在后面
+    if not any(c["on"] for c in cols):
+        cols = [dict(c) for c in DEFAULT_COLS]
+    t["cols"] = cols
     return t
 
 
-def load(cfg=None):
-    return clean({**DEFAULT, **((cfg or load_config()).get("waybill_tpl") or {})})
+def load(cfg=None, platform=None):
+    """模板。platform 给了且这个平台单独设过内容（waybill_tpl_by），内容用它的，纸张 / 版式用通用的。"""
+    cfg = cfg or load_config()
+    base = clean({**DEFAULT, **(cfg.get("waybill_tpl") or {})})
+    over = ((cfg.get("waybill_tpl_by") or {}).get(platform) or {}) if platform else {}
+    if not over:
+        return base
+    return clean({**base, **{k: v for k, v in over.items() if k in CONTENT_KEYS}})
 
 
-def save(d):
-    t = clean({**load(), **(d or {})})
-    save_config({"waybill_tpl": t})
-    return t
+def plat_key(platform):
+    return platform if platform in PLATFORMS else "manual"
+
+
+def save(d, platform=None):
+    """保存通用模板；platform 给了就只存这个平台的内容（d 为 None / {"same": True} 时去掉单独设置，跟通用一样）。"""
+    cfg = load_config()
+    if not platform:
+        t = clean({**load(cfg), **(d or {})})
+        save_config({"waybill_tpl": t})
+        return t
+    by = dict(cfg.get("waybill_tpl_by") or {})
+    if not d or d.get("same"):
+        by.pop(platform, None)
+    else:
+        t = clean({**load(cfg), **d})
+        by[platform] = {k: t[k] for k in CONTENT_KEYS}
+    save_config({"waybill_tpl_by": by})
+    return load(load_config(), platform)

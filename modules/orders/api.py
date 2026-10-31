@@ -376,10 +376,14 @@ def labels_check():
     from modules.orders.waybill import sources as _wbs
     ids = [int(x) for x in (request.get_json(force=True) or {}).get("ids") or []]
     have, missing, blocked = [], [], []
+    ok_orders = []
     for o in _printable(ids, blocked):
         ok = bool(_wbs.ensure(o)[0])
         (have if ok else missing).append(o["id"])
-    return jsonify({"have": have, "missing": missing, "blocked": blocked})
+        if ok:
+            ok_orders.append(o)
+    over = [{"id": o["id"], "order_no": o["order_no"]} for o in waybill.overflow_orders(ok_orders)]      # v2.46：商品多放不下
+    return jsonify({"have": have, "missing": missing, "blocked": blocked, "overflow": over})
 
 
 def _printable(ids, blocked=None):
@@ -676,7 +680,7 @@ def labels_print():
         return err("选中的订单都已取消 / 退货，不能打面单：" + "、".join(f"{b['order_no']}（{b['status_zh']}）" for b in blocked), 409)
     if kind == "platform":
         if waybill.enabled() and request.args.get("raw") != "1":     # v2.34：按自定义模板排（加信息区）
-            html, have, _miss = waybill.print_html(ids, _uname(), blocked=blocked)
+            html, have, _miss = waybill.print_html(ids, _uname(), blocked=blocked, layout=request.args.get("layout"))
             if not have:
                 return err("选中的订单都还没有平台面单", 404)
             return app.response_class(html, mimetype="text/html")
@@ -711,7 +715,9 @@ def waybill_status():
 
 @bp.post("/api/waybill/template")
 def waybill_template_save():
-    return jsonify({"ok": True, "template": waybill.save_template(request.get_json(force=True) or {})})
+    b = request.get_json(force=True) or {}
+    plat = request.args.get("platform") or None              # v2.46：按平台单独设内容
+    return jsonify({"ok": True, "template": waybill.save_template(b, plat if plat in waybill.T.PLATFORMS else None)})
 
 
 @bp.get("/print/waybill")
@@ -722,7 +728,7 @@ def waybill_print():
         return err("请先勾选订单")
     if not waybill.render.available():
         return err("缺少 PDF 转图片组件（pypdfium2）。NAS 重启容器会自动安装；Windows 重新双击 1_setup.bat", 500)
-    html, have, _miss = waybill.print_html(ids, _uname())
+    html, have, _miss = waybill.print_html(ids, _uname(), layout=request.args.get("layout"))
     if not have:
         return err("选中的订单都还没有平台面单", 404)
     return app.response_class(html, mimetype="text/html")
@@ -736,7 +742,9 @@ def waybill_preview():
         tpl = _json.loads(request.args.get("tpl") or "{}")
     except ValueError:
         tpl = {}
-    return app.response_class(waybill.preview_html(tpl if isinstance(tpl, dict) else {}), mimetype="text/html")
+    plat = request.args.get("platform") or None
+    return app.response_class(waybill.preview_html(tpl if isinstance(tpl, dict) else {}, plat if plat in waybill.T.PLATFORMS else None),
+                              mimetype="text/html")
 
 
 @bp.get("/api/waybill/awb/<int:oid>/<int:page>.png")

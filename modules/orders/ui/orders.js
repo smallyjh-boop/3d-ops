@@ -106,7 +106,9 @@
   async function printLabels(ids) {
     const r = await api("/api/labels/check", { json: { ids } });
     if ((r.blocked || []).length) alert(`这些订单已取消 / 退货，不打面单、不要发货：\n${r.blocked.map((b) => `${b.order_no}（${b.status_zh}）`).join("\n")}`);
-    if (r.have.length) window.open(`/print/labels?type=platform&ids=${r.have.join(",")}`, "_blank");
+    let lay = "";
+    if ((r.overflow || []).length && confirm(`${r.overflow.length} 个订单商品太多，面单下面放不下商品清单（${r.overflow.slice(0, 5).map((x) => x.order_no).join("、")}${r.overflow.length > 5 ? "…" : ""}）。\n这次改成「面单 + 单独一张商品清单」打印吗？（只这一次，不改设置）`)) lay = "&layout=page";
+    if (r.have.length) window.open(`/print/labels?type=platform&ids=${r.have.join(",")}${lay}`, "_blank");
     if (r.missing.length) {
       const msg = r.have.length ? `另外 ${r.missing.length} 个订单没有平台面单，打印自制面单吗？` :
         `选中的 ${r.missing.length} 个订单没有平台面单（还没上传平台面单 PDF）。打印自制面单吗？`;

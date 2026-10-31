@@ -64,6 +64,14 @@ class Texts:
             return col[3]
         return ""
 
+    def image(self, it):
+        """商品图（面单商品清单的图片列）：对上的产品的第一张图；对不上返回空。"""
+        p = self._product(it) or {}
+        im = next((x for x in p.get("images") or [] if x.get("file")), None)
+        if not im:
+            return ""
+        return f"/files/{p['id']}/{'out' if im.get('processed') else 'raw'}/{im['file']}"
+
     def spec(self, it):
         """规格（v2.44.2 缩写）：对得上 ERP 产品就用 ERP 的颜色 / 规格（泰文，颜色在前）；
         对不上就整理平台的写法（去掉「Variation1:」这种前缀、颜色排前、去掉括号说明和默认规格）。每段最多 16 个字。"""

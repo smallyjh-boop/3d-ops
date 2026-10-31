@@ -71,7 +71,7 @@ C.post("/api/inv/locations/bulk", json={"zone": "C", "shelf": 1, "layers": 2, "p
 production.stock_add(sku, 3, "备货打印", "t", sku.split("-")[0], "测试", "白色")
 h = C.get(f"/print/labels?type=platform&ids={o1['id']},{o2['id']},{o3['id']}").get_data(as_text=True)
 ok(f"/api/waybill/awb/{o1['id']}/0.png" in h and f"/api/waybill/awb/{o2['id']}/0.png" in h, "composed page uses awb images")
-ok("WB-1001" in h and sku in h and "×2" in h and "C1-01-01" in h and "ขอกล่องสวยๆ" in h and "刻字 MALI" in h and "易碎品" in h, "info area content")
+ok("WB-1001" in h and sku in h and ("×2" in h or 'class="qc">2<' in h) and "C1-01-01" in h and "ขอกล่องสวยๆ" in h and "刻字 MALI" in h and "易碎品" in h, "info area content")
 ok("Reprint #2" in h and "#1" in h and "WB-1003" in h and "没有平台面单" in h, "raw print counted, second print warns; missing listed")
 ok(h.count('class="wb"') == 2 and "100mm 150mm" in h, "one label per order (below layout)")
 h = C.get(f"/print/labels?type=platform&ids={o1['id']}").get_data(as_text=True)
@@ -87,7 +87,7 @@ ok(C.get(f"/api/waybill/awb/{o3['id']}/0.png").status_code == 404, "no awb -> 40
 # 另起一张信息
 C.post("/api/waybill/template", json={"layout": "page", "paper": "100x180"})
 h = C.get(f"/print/waybill?ids={o1['id']}").get_data(as_text=True)
-ok(h.count('class="wb"') == 2 and 'class="info full"' in h and "100mm 180mm" in h, "page layout: awb + info page")
+ok(h.count('class="wb"') == 2 and ('class="info full"' in h or 'class="info tbl full"' in h) and "100mm 180mm" in h, "page layout: awb + info page")
 # 预览（不记打印）
 n0 = waybill.counts([o1["id"]])[o1["id"]]
 h = C.get("/print/waybill-preview?tpl=" + json.dumps({"layout": "below", "fields": ["order_no", "items", "count"]})).get_data(as_text=True)

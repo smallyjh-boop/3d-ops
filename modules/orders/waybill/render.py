@@ -110,7 +110,81 @@ def _items(o, tpl, where, sort_key):
     return items
 
 
+def _head_html(o, tpl, n_print, total, now, extra=True):
+    f = set(tpl["fields"])
+    head = []
+    if "order_no" in f:
+        head.append(f'<b class="ono">{h(o.get("order_no") or "")}</b>')
+    if "total" in f:
+        head.append(f'<span>รวม {total} ชิ้น/pcs</span>')
+    if "count" in f:
+        head.append(f'<span class="reprint">พิมพ์ซ้ำ/Reprint #{n_print}</span>' if n_print > 1 else f'<span class="pc">#{n_print}</span>')
+    if extra and "shop" in f and (o.get("shop") or o.get("platform")):
+        head.append(f'<span>{h(o.get("shop") or o.get("platform") or "")}</span>')
+    if extra and "time" in f:
+        head.append(f'<span>{time.strftime("%m-%d %H:%M", time.localtime(now or time.time()))}</span>')
+    return f'<div class="ihd">{"".join(head)}</div>'
+
+
+def _cod_html(o):
+    from core.labels import cod_txt
+    return f'<span class="cod-tag">COD ฿{h(cod_txt(o["cod"]))}</span>' if o.get("cod") else ""
+
+
+def _row_mm(tpl):
+    line_mm = tpl["font"] * 0.3528 * 1.3
+    img = any(c["id"] == "img" and c["on"] for c in tpl["cols"])
+    return max(line_mm * tpl["name_lines"] + 1.8, 10.2 if img else 0)       # 加上格子的内边距和线
+
+
+def table_html(o, tpl, n_print, where, sort_key, full=False, now=None, tx=None, info_h=None):
+    """v2.46 商品清单表格（像 BigSeller 的拣货清单）：表头 → 一个商品一行（图片 / 商品名 / 规格 / SKU / 数量画圈 / 货位，
+    列可以开关、调顺序）→ 留言 / 定制要求 → 自定义文字。放不下的行合成「+N」，打印前会提示改成单独打一张。"""
+    f = set(tpl["fields"])
+    items = _items(o, tpl, where, sort_key)
+    total = sum(int(it.get("qty") or 1) for it in items)
+    cols = [c["id"] for c in tpl["cols"] if c["on"]]
+    title = {c[0]: c[3] for c in T.COLS}
+    line_mm = tpl["font"] * 0.3528 * 1.3
+    notes = [(k, f'<div class="nt"><b>{tag}</b> {h(o.get(k))}</div>')
+             for k, tag in (("buyer_note", "ข้อความ Note"), ("custom_note", "สั่งทำ Custom"), ("seller_note", "หมายเหตุ Remark"))
+             if k in f and o.get(k)]
+    room = (T.PAPERS[tpl["paper"]][1] - 6 if full else (info_h or tpl["info_mm"]) - 2.5)
+    fixed = line_mm * (2.4 + len(notes) + (1.1 if tpl["text"] else 0)) + 1
+    cap = max(1, int((room - fixed) / _row_mm(tpl) + 0.1))
+    rows = []
+    for i, it in enumerate(items):
+        q = int(it.get("qty") or 1)
+        cell = {"img": (f'<img src="{h(tx.image(it))}" alt="">' if tx.image(it) else '<span class="noimg"></span>'),
+                "name": f'<div class="cl" style="-webkit-line-clamp:{tpl["name_lines"]}">{h(tx.name(it))}</div>',
+                "spec": f'<b>{h(tx.spec(it))}</b>', "sku": f'<span class="mono">{h(it.get("sku") or "")}</span>',
+                "psku": h(it.get("product_id") or ""),
+                "qty": (f'<span class="qc">{q}</span>' if q > 1 and tpl["qty_circle"] else f'<b>{q}</b>'),
+                "loc": h(" ".join(c for c, _q in it["_loc"][:2]))}
+        rows.append(f'<tr><td class="n">{i + 1}</td>' + "".join(f'<td class="c-{c}">{cell[c]}</td>' for c in cols) + "</tr>")
+    if len(rows) > cap:
+        rest = len(rows) - (cap - 1)
+        rows = rows[:cap - 1] + [f'<tr><td colspan="{len(cols) + 1}" class="more">+{rest} รายการ / items (ดูใบหยิบสินค้า / see pick list)</td></tr>']
+    table = (f'<table class="itb"><thead><tr><th>#</th>{"".join(f"<th class=c-{c}>{title[c]}</th>" for c in cols)}</tr></thead>'
+             f'<tbody>{"".join(rows)}</tbody></table>')
+    bc = (f'<div class="obc">{code128_svg(o.get("order_no") or "", height=30, module=1)}</div>'
+          if "order_bc" in f and o.get("order_no") and full else "")
+    txt = f'<div class="txt">{h(tpl["text"])}</div>' if tpl["text"] else ""
+    st = f' style="flex-basis:{info_h:.1f}mm;font-size:{tpl["font"]}pt"' if info_h and not full else f' style="font-size:{tpl["font"]}pt"'
+    return (f'<div class="info tbl{" full" if full else ""}"{st}>{_head_html(o, tpl, n_print, total, now)}{_cod_html(o) if full else ""}{bc}'
+            f'{table}{"".join(n[1] for n in notes)}{txt}</div>')
+
+
 def info_html(o, tpl, n_print, where, sort_key, full=False, now=None, tx=None, info_h=None):
+    if tpl.get("style") == "table":
+        if tx is None:
+            from core.config import load_config
+            tx = Texts(load_config())
+        return table_html(o, tpl, n_print, where, sort_key, full, now, tx, info_h)
+    return list_html(o, tpl, n_print, where, sort_key, full, now, tx, info_h)
+
+
+def list_html(o, tpl, n_print, where, sort_key, full=False, now=None, tx=None, info_h=None):
     """信息区：订单号 · 店铺 · 共 N 件 · 第 N 次打印；商品一行一个（□ SKU ×数量 名称 规格 [货位]）；留言 / 定制要求 / 备注；自定义文字。
     v2.42：印出来的只有泰文 / 英文（商品名、规格是中文时换成产品的泰文，见 labeltext）。"""
     if tx is None:
@@ -228,6 +302,18 @@ body {{ margin: 0; font-family: 'Leelawadee UI', Tahoma, 'Microsoft YaHei', 'Pin
 .nt {{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis }} .nt b {{ border: .3mm solid #000; padding: 0 .8mm; font-size: .85em }}
 .txt {{ text-align: center; font-weight: 700; border-top: .3mm solid #000; margin-top: .5mm }}
 .pg2 {{ position: absolute; right: 2mm; bottom: 1mm; font-size: 8pt }}
+.itb {{ width: 100%; border-collapse: collapse; margin: .5mm 0; table-layout: fixed }}
+.itb th, .itb td {{ border: .25mm solid #000; padding: .3mm .8mm; vertical-align: middle; text-align: left; overflow: hidden }}
+.itb th {{ font-size: .85em; background: #eee }} .itb td.n, .itb th:first-child {{ width: 4mm; text-align: center }}
+.itb .c-img {{ width: 10mm }} .itb .c-img img {{ width: 9mm; height: 9mm; object-fit: cover; display: block }}
+.itb .noimg {{ display: block; width: 9mm; height: 9mm; border: .2mm dashed #999 }}
+.itb .c-qty {{ width: 8mm; text-align: center }} .itb .c-loc {{ width: 11mm; font-size: .85em }} .itb .c-sku {{ width: 19mm; word-break: break-all; font-size: .85em }}
+.itb .c-psku {{ width: 12mm; font-size: .85em }} .itb .c-spec {{ width: 16mm }}
+.itb .cl {{ display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden }}
+.itb .qc {{ display: inline-block; min-width: 1.5em; height: 1.5em; line-height: 1.4em; border: .35mm solid #000; border-radius: 50%; font-weight: 800; text-align: center }}
+.itb td.more {{ font-style: italic; text-align: center }}
+.cod-tag {{ border: .4mm solid #000; padding: 0 1.5mm; font-weight: 800; margin-left: 2mm }}
+.info.tbl {{ padding: 1mm 1.5mm }}
 @media screen {{ body {{ background: #ddd }} .wb {{ background: #fff; margin: 8px auto; box-shadow: 0 1px 4px #0003 }}
   .noprint {{ text-align: center; padding: 8px; font-size: 14px }} .noprint .miss {{ color: #b91c1c; text-align: left; max-width: 520px; margin: 6px auto }} }}
 @media print {{ .noprint {{ display: none }} }}"""
@@ -287,16 +373,27 @@ def _compact_lines(toks, per_line):
 
 
 def need_mm(o, tpl, tx):
-    """这单信息区必须印的高度（毫米）：表头一行 + 全部商品（3 个以内一个一行，多了紧凑排）+ 买家留言 + 定制要求。"""
+    """这单信息区必须印的高度（毫米）：表头一行 + 全部商品（3 个以内一个一行，多了紧凑排；表格样式一行一个）+ 买家留言 + 定制要求。"""
     f = set(tpl["fields"])
     items = o.get("items") or []
     line_mm = tpl["font"] * 0.3528 * 1.3
+    if tpl.get("style") == "table":
+        n_notes = sum(1 for k in ("buyer_note", "custom_note") if k in f and o.get(k))
+        return 3.5 + line_mm * (2.4 + n_notes) + _row_mm(tpl) * len(items) + 0.5
     n_items = len(items) if len(items) <= 3 else min(len(items), _compact_lines(_tokens(items, f, tx), _per_line(tpl)))
     n_notes = sum(1 for k in ("buyer_note", "custom_note") if k in f and o.get(k))
     return 2.5 + line_mm * (1 + n_items + n_notes) + 0.5
 
 
-def compose(entries, tpl, where, sort_key, missing=(), title="Waybill", autoprint=True, aspects=None):
+LABEL_MIN_MM = 100        # 面单区缩到比这还小就看不清了：打印前提示这次改成单独打一张商品清单
+
+
+def overflow(o, tpl, tx):
+    """面单下面加商品清单时放不下（面单会被缩到 LABEL_MIN_MM 以下）→ True。"""
+    return tpl["layout"] == "below" and need_mm(o, tpl, tx) > T.PAPERS[tpl["paper"]][1] - LABEL_MIN_MM
+
+
+def compose(entries, tpl, where, sort_key, missing=(), title="Waybill", autoprint=True, aspects=None, tpl_of=None):
     """entries: [(订单, [面单图片地址...], 第几次打印)]。missing: [(订单号, 原因)] 显示在页面上方（不打印）。
     aspects: {订单 id: 面单第一页的 高 / 宽}（v2.42，用来让面单宽度占满纸）。"""
     out = [f"<!doctype html><html><head><meta charset='utf-8'><title>{h(title)} ใบปะหน้า</title><style>{_css(tpl)}</style></head><body>",
@@ -311,16 +408,17 @@ def compose(entries, tpl, where, sort_key, missing=(), title="Waybill", autoprin
     tx = Texts(load_config())
     for o, imgs, n in entries:
         imgs = imgs or [SAMPLE_AWB]
+        ot = tpl_of(o) if tpl_of else tpl         # v2.46：每单按平台用自己的模板内容（纸张 / 版式共用）
         for i, src in enumerate(imgs):
             more = f'<div class="pg2">{i + 1}/{len(imgs)}</div>' if len(imgs) > 1 else ""
             if tpl["layout"] == "below" and i == 0:
-                awb_h, inf_h = split_mm(tpl, (aspects or {}).get(o.get("id")), need_mm(o, tpl, tx))
-                inf = info_html(o, tpl, n, where, sort_key, now=now, tx=tx, info_h=inf_h)
+                awb_h, inf_h = split_mm(tpl, (aspects or {}).get(o.get("id")), need_mm(o, ot, tx))
+                inf = info_html(o, ot, n, where, sort_key, now=now, tx=tx, info_h=inf_h)
                 out.append(f'<div class="wb"><div class="awb" style="flex-basis:{awb_h:.1f}mm"><img src="{h(src)}" alt=""></div>{inf}{more}</div>')
             else:
                 out.append(f'<div class="wb"><div class="awb"><img src="{h(src)}" alt=""></div>{more}</div>')
         if tpl["layout"] == "page":
-            out.append(f'<div class="wb">{info_html(o, tpl, n, where, sort_key, full=True, now=now, tx=tx)}</div>')
+            out.append(f'<div class="wb">{info_html(o, ot, n, where, sort_key, full=True, now=now, tx=tx)}</div>')
     if autoprint:                                     # 面单图片都加载好再弹打印
         out.append("<script>(function(){var im=[].slice.call(document.images),left=im.length;"
                    "function go(){if(--left<=0)setTimeout(function(){print()},200)}"

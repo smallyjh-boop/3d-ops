@@ -54,12 +54,35 @@ def load_template(cfg=None):
     return T.load(cfg)
 
 
-def save_template(d):
-    return T.save(d)
+def save_template(d, platform=None):
+    return T.save(d, platform)
+
+
+def tpl_of_order(o, cfg=None):
+    """这单用的模板（按平台的内容 + 通用的纸张 / 版式）。"""
+    return T.load(cfg, T.plat_key(o.get("platform")))
+
+
+def overflow_orders(orders):
+    """v2.46：面单下面加商品清单时放不下的订单（打印前提示这次改成单独打一张）。"""
+    from core.config import load_config
+    from ..labeltext import Texts
+    cfg = load_config()
+    if not T.load(cfg)["enabled"]:
+        return []
+    tx = Texts(cfg)
+    return [o for o in orders if render.overflow(o, tpl_of_order(o, cfg), tx)]
 
 
 def status():
+    from core.config import load_config
+    cfg = load_config()
+    by = cfg.get("waybill_tpl_by") or {}
     return {"sources": sources.status(), "template": load_template(), "renderer": render.available(),
+            "by_platform": {k: (T.load(cfg, k) if k in by else None) for k in T.PLATFORMS},
+            "platforms": [{"id": k, "zh": v} for k, v in T.PLATFORMS.items()],
+            "styles": [{"id": k, "zh": v[0], "th": v[1]} for k, v in T.STYLES.items()],
+            "cols": [{"id": c[0], "zh": c[1], "th": c[2]} for c in T.COLS],
             "fields": [{"id": k, "zh": zh, "th": th} for k, zh, th in T.FIELDS],
             "layouts": [{"id": k, "zh": v[0], "th": v[1]} for k, v in T.LAYOUTS.items()],
             "papers": [{"id": k, "zh": T.PAPER_ZH[k], "th": T.PAPER_TH[k]} for k in T.PAPERS]}
@@ -82,10 +105,15 @@ def enabled(cfg=None):
 
 
 # ---------------- 打印 ----------------
-def print_html(ids, user="", blocked=()):
-    """勾选的订单 → 平台面单打印页。没有面单的列在页面上方（不打印）。返回 (html, 打了的订单id, 没面单的订单id)。"""
+def print_html(ids, user="", blocked=(), layout=None):
+    """勾选的订单 → 平台面单打印页。没有面单的列在页面上方（不打印）。返回 (html, 打了的订单id, 没面单的订单id)。
+    layout：这次打印临时用的版式（v2.46：商品多放不下时「这次单独打一张」），不改设置。"""
     from core import labels as core_labels, orders as orders_mod
-    tpl = load_template()
+    from core.config import load_config
+    cfg = load_config()
+    tpl = load_template(cfg)
+    if layout in T.LAYOUTS:
+        tpl = {**tpl, "layout": layout}
     inv = _inv()
     entries, have = [], []
     missing = [(b["order_no"], f"订单{b['status_zh']}，不打 / ยกเลิกแล้ว ไม่พิมพ์") for b in blocked]      # v2.42
@@ -116,7 +144,8 @@ def print_html(ids, user="", blocked=()):
         ids_have = [o["id"] for o in have]
         record(ids_have, user, "平台面单（自定义）")
         core_labels.mark_printed(ids_have, user, "平台面单（自定义）")
-    html = render.compose(entries, tpl, where, _sort_key(), missing, aspects=aspects)
+    html = render.compose(entries, tpl, where, _sort_key(), missing, aspects=aspects,
+                          tpl_of=lambda o: {**tpl_of_order(o, cfg), "layout": tpl["layout"]})
     return html, [o["id"] for o in have], [o["order_no"] for o in orders if o not in have]
 
 
@@ -131,8 +160,8 @@ def _aspect(path, tpl):
         return None
 
 
-def preview_html(tpl=None):
-    return render.preview_html(T.clean({**load_template(), **(tpl or {})}), _sort_key())
+def preview_html(tpl=None, platform=None):
+    return render.preview_html(T.clean({**T.load(None, platform), **(tpl or {})}), _sort_key())
 
 
 def awb_image(oid, page=0):
