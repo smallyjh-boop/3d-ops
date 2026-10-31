@@ -34,9 +34,42 @@ def on_order_status(oid, new, old=None, user=""):
             return {"rts": False}
         conn.rts(pkgs)
         orders.log(oid, user, "Lazada 安排发货", "、".join(pkgs))
+        _tag(oid, False)
+        _resync(sh["id"])
         return {"rts": True, "packages": pkgs}
     except Exception as e:  # noqa: BLE001  平台报错不影响 ERP 发货
         orders.log(oid, user, "Lazada 安排发货失败", str(e)[:300])
+        _tag(oid, True)
         return {"rts": False, "error": str(e)}
     finally:
         integrations._store_creds(sh["id"], conn)
+
+
+FAIL_TAG = "⚠ Lazada 未安排发货"
+
+
+def _tag(oid, on):
+    """v2.44.2：安排发货失败 → 订单打个醒目的标签（订单列表一眼看到，原因在操作记录里）；成功了去掉。"""
+    from core import db
+    r = db.conn().execute("SELECT tags FROM orders WHERE id=?", (oid,)).fetchone()
+    tags = [t for t in str((r and r["tags"]) or "").split(",") if t and t != FAIL_TAG]
+    if on:
+        tags.append(FAIL_TAG)
+    c = db.conn()
+    c.execute("UPDATE orders SET tags=? WHERE id=?", (",".join(tags), oid))
+    c.commit()
+
+
+def _resync(shop_id):
+    """安排发货成功后，在后台从 Lazada 拉一次订单，ERP 里的状态马上跟平台一致。"""
+    import threading
+
+    def go():
+        from core import db, integrations
+        try:
+            integrations.sync_shop(shop_id)
+        except Exception:  # noqa: BLE001  拉不下来下次定时同步再拉
+            pass
+        finally:
+            db.release()
+    threading.Thread(target=go, daemon=True, name="lz-rts-resync").start()

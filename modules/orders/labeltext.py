@@ -65,11 +65,42 @@ class Texts:
         return ""
 
     def spec(self, it):
-        v = str(it.get("variation") or "").strip()
-        if v and not has_cjk(v):
-            return v
+        """规格（v2.44.2 缩写）：对得上 ERP 产品就用 ERP 的颜色 / 规格（泰文，颜色在前）；
+        对不上就整理平台的写法（去掉「Variation1:」这种前缀、颜色排前、去掉括号说明和默认规格）。每段最多 16 个字。"""
         p, var = self._variant(it)
         if var:
-            parts = [self._opt(p, var.get(k)) for k in ("opt1_zh", "opt2_zh")]
-            return " ".join(x for x in parts if x)
-        return self._opt(p, it.get("color"))
+            parts = [short(self._opt(p, var.get(k))) for k in ("opt1_zh", "opt2_zh")]
+            out = " / ".join(x for x in parts if x)
+            if out:
+                return out
+        v = str(it.get("variation") or "").strip()
+        if v and not has_cjk(v):
+            return platform_spec(v)
+        return short(self._opt(p, it.get("color")))
+
+
+DEFAULT_SPEC = {"มาตรฐาน", "standard", "default", "ปกติ", "ทั่วไป", "-", "none", "no", "n/a", "one size", "free size"}
+COLOR_KEY = re.compile(r"colou?r|สี|色", re.I)
+
+
+def short(v, n=16):
+    """一段规格缩短：去掉括号里的补充说明，默认规格（标准 / Standard）不印，太长截断。"""
+    v = re.sub(r"\s*[\(（\[][^)）\]]*[\)）\]]", "", str(v or "")).strip(" ,;/")
+    if v.lower() in DEFAULT_SPEC:
+        return ""
+    return v if len(v) <= n else v[:n - 1].rstrip() + "…"
+
+
+def platform_spec(v):
+    """平台带回来的规格文字 → 缩写：
+    「Variation2:มาตรฐาน, Variation1:สีสุ่ม (คละสี)」→「สีสุ่ม」；「Color Family:Black, Size:L」→「Black / L」。"""
+    parts = [x.strip() for x in re.split(r"[,;，；]\s*", v) if x.strip()]
+    kv = []
+    for i, x in enumerate(parts):
+        m = re.match(r"^([^:：]{1,30})\s*[:：]\s*(.+)$", x)
+        key, val = (m.group(1).strip(), m.group(2)) if m else ("", x)
+        num = re.search(r"(\d+)\s*$", key)
+        order = int(num.group(1)) if num else (0 if COLOR_KEY.search(key) else 50 + i)
+        kv.append((order, val))
+    vals = [short(val) for _o, val in sorted(kv, key=lambda t: t[0])]
+    return " / ".join(x for x in vals if x)

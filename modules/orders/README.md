@@ -41,3 +41,4 @@
 - 1.9 补充：打面单（/api/labels/check、/print/labels）、打包核对、发货交接前先 integrations.refresh_platforms 拉一次平台最新状态，orders.BLOCK_SHIP（已取消 / 退货 / 拒收）拦下。测试 tests/t_v242ship.py（含 10 / 20 / 50 单批量打印）。
 - 1.9 补充：信息区按必须印的内容定高度（render.need_mm / split_mm(need)），放不下按优先级减、商品多紧凑排；.wb 高度比纸短 0.4 毫米、break-inside: avoid，不会挤到下一张。
 - 2.0（系统 v2.43.0）：订单详情的生产任务加操作（用库存、已打好、已打包、退回重打、换打印机；接口在生产模块），订单详情带每个任务现在可用的成品数（stock_free）；订单列表批量「用库存发 / 标记已打好 / 标记已打包」（/api/jobs/bulk）。
+- 2.1（系统 v2.45.0）：面单规格缩写（labeltext.short / platform_spec：ERP 规格优先、颜色在前、去前缀 / 括号 / 默认规格、每段 16 字），规格排在商品名前面。

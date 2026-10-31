@@ -50,13 +50,38 @@ ZH_NAMES = {
 }
 
 
+# 已知要泰国 TISI 等许可证才能上的类目（夜灯、解压玩具……；模板 / 接口里看得出来的会自动加进来）
+LICENSE_KNOWN = {"12298", "14221"}
+
+
+def needs_license(cat_id):
+    """这个类目上架要不要 TISI 等许可证（v2.45：AI 匹配类目时避开）。"""
+    cid = str(cat_id or "")
+    if cid in LICENSE_KNOWN:
+        return True
+    with _lib_lock:
+        hit = next((c for c in _library() if c.get("cat_id") == cid), None)
+    if hit and hit.get("needs_license"):
+        return True
+    from . import lazada_cats
+    return lazada_cats.needs_license(cid)
+
+
+def reset_tree():
+    global _tree
+    _tree = None
+    _lib_memo["key"] = None
+
+
 def tree():
-    """完整类目树：{id: (路径, 是否禁用)}"""
+    """完整类目树：{id: (路径, 是否禁用)}。v2.45：接口拉过最新的类目树就用它（core/lazada_cats），不然用内置的。"""
     global _tree
     if _tree is None:
         t = {}
-        if os.path.exists(TREE_PATH):
-            with open(TREE_PATH, encoding="utf-8") as f:
+        from . import lazada_cats
+        path = lazada_cats.tree_path() or TREE_PATH
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
                 for line in f:
                     parts = line.rstrip("\n").split("\t")
                     if len(parts) == 3:
@@ -177,8 +202,17 @@ _lib_lock = threading.Lock()
 
 
 def library():
+    """可以选的类目。v2.45：店铺接了 Lazada 接口时，类目树里的所有类目都能选（没有模板的 id 是 "api|类目ID"，属性从接口拉）。"""
     with _lib_lock:
-        return _library()
+        lib = _library()
+    from . import lazada_cats
+    if not lazada_cats.enabled():
+        return lib
+    have = {c["cat_id"] for c in lib}
+    extra = [{"id": lazada_cats.id_of(cid), "template": "", "sheet": "", "cat_id": cid, "name": display_name(cid),
+              "path": path, "needs_license": False, "attr_labels": [], "source": "api"}
+             for cid, (path, disabled) in tree().items() if cid not in have and not disabled and cid.isdigit()]
+    return sorted(lib + extra, key=lambda c: c["name"])
 
 
 def _library():
@@ -213,23 +247,41 @@ def _library():
 
 
 def by_cat_id(cat_id):
-    """Lazada 类目 ID → 有模板的类目（library 里的一项），没有返回 None。"""
+    """Lazada 类目 ID → 类目（library 里的一项）：有模板用模板；没模板、接了接口时是 "api|类目ID"；都没有返回 None。"""
     cid = str(cat_id or "")
-    return next((c for c in library() if c.get("cat_id") == cid), None)
+    with _lib_lock:
+        hit = next((c for c in _library() if c.get("cat_id") == cid), None)
+    if hit:
+        return hit
+    from . import lazada_cats
+    if cid.isdigit() and lazada_cats.enabled():
+        return {"id": lazada_cats.id_of(cid), "template": "", "sheet": "", "cat_id": cid, "name": display_name(cid),
+                "path": path_of(cid), "needs_license": False, "attr_labels": [], "source": "api"}
+    return None
 
 
-def get(cat_id_str):
-    """按 '模板文件|工作表' 取类目完整信息（含字段）。"""
+def get(cat_id_str, for_export=False):
+    """按 '模板文件|工作表'（或 v2.45 的 'api|类目ID'）取类目完整信息（含字段）。
+    v2.45：店铺接了 Lazada 接口时，字段（属性、选项、必填）优先用接口拉的（core/lazada_cats），模板文件和工作表名照旧带着；
+    导出 Excel（for_export=True）一定用模板本身的字段（要按模板的列写）。"""
     if not cat_id_str or "|" not in cat_id_str:
         return None
+    from . import lazada_cats
+    if cat_id_str.startswith("api|"):
+        return None if for_export else lazada_cats.get(cat_id_str)
     f, sheet = cat_id_str.split("|", 1)
     path = os.path.join(TEMPLATE_DIR, os.path.basename(f))
     if not os.path.exists(path):
         return None
     for s in parse_cached(path):
         if s["sheet"] == sheet:
-            return {**s, "template": os.path.basename(f), "path": path, "id": cat_id_str,
-                    "name": display_name(s["cat_id"], sheet)}
+            out = {**s, "template": os.path.basename(f), "path": path, "id": cat_id_str,
+                   "name": display_name(s["cat_id"], sheet)}
+            if not for_export and s.get("cat_id") and lazada_cats.enabled():
+                api = lazada_cats.as_sheet(s["cat_id"])
+                if api and api["fields"]:
+                    out.update(fields=api["fields"], source="api")
+            return out
     return None
 
 

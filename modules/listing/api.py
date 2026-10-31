@@ -191,9 +191,11 @@ def export():
         name = f"{p['id']} {p.get('name_zh', '')}"
         errors += [f"{name}：{x}" for x in e]
         warnings += [f"{name}：{x}" for x in w]
-        cat = categories.get((p.get("category") or {}).get("id"))
+        cat = categories.get((p.get("category") or {}).get("id"), for_export=True)
         if cat:
             groups.setdefault(cat["template"], {}).setdefault(cat["sheet"], []).append(p)
+        elif str((p.get("category") or {}).get("id") or "").startswith("api|"):      # v2.45：接口类目没有 Excel 模板
+            errors.append(f"{name}：这个类目还没有 Excel 模板（类目属性是从 Lazada 接口拉的），请用「⚡ 推送到 Lazada」上架")
     if errors and not body.get("force"):
         return jsonify({"ok": False, "errors": errors, "warnings": warnings})
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -202,7 +204,7 @@ def export():
         rows_by_sheet = {}
         for sheet, plist in sheets.items():
             pr = {p["id"]: pricing.price_product(cfg, p) for p in plist}
-            cat = categories.get(f"{tpl}|{sheet}")
+            cat = categories.get(f"{tpl}|{sheet}", for_export=True)
             rows_by_sheet[sheet] = lazada_template.build_rows(plist, pr, cfg, cat)
         label = "_".join(sheets)[:60]
         out_name = f"lazada_upload_{label}_{stamp}.xlsx"

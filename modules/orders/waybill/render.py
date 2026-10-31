@@ -129,12 +129,12 @@ def info_html(o, tpl, n_print, where, sort_key, full=False, now=None, tx=None, i
             bits = ['<span class="bx"></span>']
             if "items" in f:
                 bits.append(f'<b>{h(it.get("sku") or "")}</b><span class="q">×{int(it.get("qty") or 1)}</span>')
+            sp = tx.spec(it) if "spec" in f else ""        # v2.44.2：规格（颜色）放在商品名前面，放不下时截的是商品名
+            if sp:
+                bits.append(f'<span class="sp">{h(sp)}</span>')
             nm = tx.name(it) if use_name else ""
             if nm:
                 bits.append(f'<span class="nm">{h(nm)}</span>')
-            sp = tx.spec(it) if "spec" in f else ""
-            if sp:
-                bits.append(f'<span class="sp">{h(sp)}</span>')
             if "loc" in f and it["_loc"]:
                 bits.append(f'<span class="lc">{h(" ".join(c for c, _q in it["_loc"][:2]))}</span>')
             if len(bits) > 1:
@@ -222,7 +222,7 @@ body {{ margin: 0; font-family: 'Leelawadee UI', Tahoma, 'Microsoft YaHei', 'Pin
 .obc {{ height: 6mm; margin: .3mm 0 }} .obc svg {{ height: 100%; width: 60% }}
 .it {{ display: flex; gap: 1.5mm; align-items: center; white-space: nowrap; overflow: hidden }}
 .it .bx {{ flex: 0 0 auto; width: .9em; height: .9em; border: .3mm solid #000 }}
-.it .q {{ font-weight: 800 }} .it .nm {{ overflow: hidden; text-overflow: ellipsis; min-width: 0 }} .it .sp {{ flex: 0 0 auto }}
+.it .q {{ font-weight: 800 }} .it .nm {{ overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto }} .it .sp {{ flex: 0 0 auto; font-weight: 700 }}
 .it .lc {{ margin-left: auto; flex: 0 0 auto; border: .3mm solid #000; padding: 0 1mm; font-weight: 700; font-family: monospace }}
 .it.more {{ font-style: italic }} .more1 {{ order: 9; margin-left: 1mm; background: #000; color: #fff; padding: 0 1mm; border-radius: 1mm; flex: 0 0 auto }}
 .nt {{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis }} .nt b {{ border: .3mm solid #000; padding: 0 .8mm; font-size: .85em }}

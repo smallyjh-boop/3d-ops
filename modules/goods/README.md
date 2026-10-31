@@ -29,3 +29,4 @@
 - 2.0（系统 v2.43.1）：上传图床同时传 4 张、先压缩（core/imghost.prepare）、传好一张记一张、失败单独列出；Lazada 检查里「没传图床」改成提醒（推送不需要，导出表格时单独拦）。测试 tests/t_imghost2431.py。
 - 2.1（系统 v2.44.0）：图片「★ 设为主图」；产品库显示在哪些店铺在线（modules.public("listing").online_shops()）和对应筛选。
 - 2.2（系统 v2.44.1）：编辑页「详情图片」选择（P.desc_images，至少 1 张，预览里显示）。
+- 2.3（系统 v2.45.0）：类目字段接口优先（core/lazada_cats：类目树、类目属性生成字段表；categories.get / library / by_cat_id 接上；api|类目ID）；编辑页显示属性来源和许可证提醒；AI 匹配类目避开要许可证的类目（categories.needs_license）。测试 tests/cases/t_cats245.py。

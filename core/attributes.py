@@ -66,6 +66,11 @@ category tree: product-type words AND category-level words as Lazada names them 
     if not cands:
         res["reason"] = "类目树里没找到匹配的候选，请手动选择"
         return res
+    # v2.45：要 TISI 等许可证的类目不给 AI 选（我们没有许可证）；全是这种才留着，选了也要人工确认
+    lic = {cid for cid, _p in cands if categories.needs_license(cid)}
+    if len(lic) < len(cands):
+        cands = [(cid, path) for cid, path in cands if cid not in lic]
+        lic = set()
     have = {c["cat_id"] for c in lib}
     lst = "\n".join(f"- {cid} | {path}" + ("" if cid in have else " (no template yet)") for cid, path in cands)
     user2 = f"""Product:
@@ -75,6 +80,9 @@ Candidate Lazada Thailand leaf categories (id | Thai path):
 {lst}
 
 Pick the most specific leaf category that describes what the product physically is.
+Categories that need a Thai TISI / industrial-standard licence were removed from this list (the seller has none):
+if the product's natural category needs a licence, pick the closest category from this list where the product
+can legitimately be listed (e.g. a decorative / ornament / accessory category instead of a regulated electrical or toy one).
 Return JSON {{"cat_id": "<id exactly as listed>", "confidence": <0..1>, "reason_zh": "<one sentence Chinese>",
  "reason_th": "<same in Thai>", "path_zh": "<the chosen path translated to Chinese>"}}"""
     d2 = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user2))
@@ -90,7 +98,9 @@ Return JSON {{"cat_id": "<id exactly as listed>", "confidence": <0..1>, "reason_
         return res
     hit = categories.by_cat_id(cid)
     if hit:
-        res.update(id=hit["id"], confidence=round(conf, 2), status="ai" if conf >= 0.75 else "check")
+        res.update(id=hit["id"], confidence=round(conf, 2), status="ai" if conf >= 0.75 and cid not in lic else "check")
+        if cid in lic:
+            res["reason"] = (res["reason"] + "（注意：这个类目要 TISI 许可证，没有合适的替代类目，请人工确认）").strip()
     else:
         res.update(suggest_id=cid, suggest_path=categories.path_of(cid), suggest_path_zh=d2.get("path_zh", ""))
     return res
@@ -100,10 +110,8 @@ def match_category(cfg, product):
     lib = categories.library()
     if len(lib) > BIG_LIBRARY:
         return _match_big(cfg, product, lib)
-    lines = "\n".join(
-        f"- id: {c['id']} | {c['path'] or c['name']}"
-        + (" | REQUIRES Thai TISI licence" if c.get("needs_license") else "")
-        for c in lib) or "(none yet)"
+    ok_lib = [c for c in lib if not (c.get("needs_license") or categories.needs_license(c.get("cat_id")))]   # v2.45：避开要许可证的类目
+    lines = "\n".join(f"- id: {c['id']} | {c['path'] or c['name']}" for c in (ok_lib or lib)) or "(none yet)"
     user = f"""Product:
 {_product_brief(product)}
 
@@ -118,7 +126,8 @@ Return JSON:
  "reason_th": "<same sentence in Thai>",
  "search_keywords_th": ["5-10 short Thai words to find the ideal leaf category in the full Lazada TH category tree: product-type words AND category-level words (e.g. ข้อต่อ, ท่อ, ประปา, อะไหล่, ที่วาง, ตกแต่ง, ของเล่น)"]
 }}
-Avoid categories that require a TISI licence unless nothing else fits."""
+Categories that require a Thai TISI licence are not offered (the seller has none): if the natural category needs one,
+choose the closest listed category where the product can legitimately be sold."""
     data = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user))
     ids = {c["id"] for c in lib}
     best = data.get("best_id") or ""
@@ -139,6 +148,7 @@ Avoid categories that require a TISI licence unless nothing else fits."""
     # 第二步：没有合适的已下载类目时，从完整类目树里挑理想类目
     if not best or conf < 0.75:
         cands = categories.search_tree(data.get("search_keywords_th") or [])
+        cands = [x for x in cands if not categories.needs_license(x[0])] or cands      # v2.45：避开要许可证的
         if cands:
             lst = "\n".join(f"- {cid} | {path}" for cid, path in cands)
             have = "\n".join(f"- {c['cat_id']} | {c['path'] or c['name']} (template already downloaded)" for c in lib)

@@ -266,6 +266,11 @@ class LazadaConnector(Connector):
         return self._with_items([o]) if o else None
 
     # ---------- 商品（v2.41.2：ERP 产品推到 Lazada，modules/listing/lazada_push.py）----------
+    def category_tree(self):
+        """类目树（泰文）：[{category_id, name, leaf, var, children:[…]}]"""
+        self._ensure_token()
+        return self._call("/category/tree/get", {"language_code": "th_TH"}).get("data") or []
+
     def category_attributes(self, cat_id):
         """类目属性：[{id, name, label, input_type, is_mandatory, attribute_type(normal / sku), options:[{id, name}]}]"""
         self._ensure_token()

@@ -121,6 +121,18 @@ C2.post("/api/orders/batch", json={"ids": [oid], "action": "status", "value": "s
 rts = [json.loads(c[1]["readyToShipReq"]) for c in calls if c[0] == "/order/package/rts"]
 ok(rts == [{"packages": [{"package_id": "FP001"}]}], f"RTS when marked shipped in ERP {rts}")
 ok(any(x["action"] == "Lazada 安排发货" for x in orders_mod.get_log(oid)), "order log")
+# 安排发货失败：订单打标签，原因在操作记录里
+def rts_fail(self, path, params, base=LZ.API, token=True, method="GET", files=None):
+    if path == "/order/package/rts":
+        return {"code": "0", "result": {"success": "false", "error_msg": "package status not allow"}}
+    return fake_call2(self, path, params, base, token, method)
+LZ.LazadaConnector._call = rts_fail
+orders_mod.upsert([{"platform": "lazada", "shop": "LZ", "order_no": "RTS-3", "status": "to_ship", "items": [{"sku": "X", "qty": 1}], "raw": {"order_id": 779}}], source="test")
+oid3 = db.conn().execute("SELECT id FROM orders WHERE order_no='RTS-3'").fetchone()["id"]
+C2.post("/api/orders/batch", json={"ids": [oid3], "action": "status", "value": "shipped"})
+o3 = orders_mod.get_order(oid3)
+ok("Lazada 未安排发货" in (o3.get("tags") or "") and any("not allow" in (x.get("detail") or "") for x in orders_mod.get_log(oid3)), f"failure tagged {o3.get('tags')}")
+LZ.LazadaConnector._call = fake_call2
 calls.clear()
 orders_mod.upsert([{"platform": "lazada", "shop": "LZ", "order_no": "RTS-2", "status": "to_ship", "items": [{"sku": "X", "qty": 1}], "raw": {"order_id": 778}}], source="test")
 orders_mod.upsert([{"platform": "lazada", "shop": "LZ", "order_no": "RTS-2", "status": "shipped", "items": [{"sku": "X", "qty": 1}], "raw": {"order_id": 778}}], source="sync")

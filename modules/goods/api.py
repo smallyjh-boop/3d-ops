@@ -915,7 +915,8 @@ def category_fields():
     if not cat:
         return err("找不到类目", 404)
     fields = lazada_template.attribute_fields(cat)
-    return jsonify({"id": cat["id"], "name": cat["name"], "cat_id": cat["cat_id"],
+    return jsonify({"id": cat["id"], "name": cat["name"], "cat_id": cat["cat_id"], "source": cat.get("source") or "template",
+                    "needs_license": categories.needs_license(cat["cat_id"]),
                     "fields": [{k: f[k] for k in ("key", "label", "required", "options", "tip", "kind")}
                                for f in fields]})
 

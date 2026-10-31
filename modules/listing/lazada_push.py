@@ -294,8 +294,9 @@ def push(pids, user="", force=False):
                 cat = categories.get((p.get("category") or {}).get("id"))
                 if not cat or not cat.get("cat_id"):
                     raise PushError("还没有选择 Lazada 类目")
-                if cat["cat_id"] not in attr_cache:
-                    attr_cache[cat["cat_id"]] = conn.category_attributes(cat["cat_id"])
+                if cat["cat_id"] not in attr_cache:          # v2.45：和编辑页、检查用同一份缓存（core/lazada_cats）
+                    from core import lazada_cats
+                    attr_cache[cat["cat_id"]] = lazada_cats.attrs(cat["cat_id"]) or conn.category_attributes(cat["cat_id"])
                 rows = lazada_template.build_rows([p], {p["id"]: pricing.price_product(cfg, p)}, cfg, cat)
                 body = payload(p, rows, cat, attr_cache[cat["cat_id"]], conn, state)
                 state["last_payload"] = json.dumps(body, ensure_ascii=False)[:30000]      # 排查用：最后一次发出去的内容
@@ -425,6 +426,11 @@ def _loop():
     last = last_status = 0
     while True:
         time.sleep(60)
+        try:                                                    # v2.45：类目树每周从接口刷新一次（没到时间什么都不做）
+            from core import lazada_cats
+            lazada_cats.refresh_tree()
+        except Exception as e:  # noqa: BLE001
+            diag.log.warning("Lazada 类目树刷新失败：%s", e)
         if time.time() - last_status >= STATUS_EVERY:          # v2.43：每 30 分钟同步一次审核结果
             last_status = time.time()                           # v2.44：整店拉在线商品（顺带对上 ERP、更新上架状态）
             try:

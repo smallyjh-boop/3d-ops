@@ -30,19 +30,25 @@ async function renderCategory() {
   $("#cat-select").classList.toggle("is-red", P.category.status === "check" || !cur);
   const c = P.category;
   let info = "";
-  if (!CATS.length) info = '<span class="bad">还没有类目模板，请先到「导出 Lazada 表格」页上传模板。</span>';
+  if (!CATS.length) info = '<span class="bad">还没有类目：在 设置 → AI 与对接 → 店铺对接 授权 Lazada 店铺（类目从接口拉），或者上传类目模板。</span>';
   else if (c.status === "manual") info = '<span class="st st-manual">手动选择</span>';
   else if (c.id) info = `<span class="st ${c.status === "check" ? "st-check" : "st-ai"}">AI 匹配 · 把握 ${Math.round((c.confidence || 0) * 100)}%</span>`;
   if (c.id && c.status === "check") info += ` <button class="mini" id="btn-cat-ok">✓ 确认类目</button>`;
   const reason = LANG === "th" ? (c.reason_th || "") : c.reason;
   if (reason) info += `<div data-notr>${esc(reason)}</div>`;
-  if (c.suggest_id && !CATS.some((x) => x.cat_id === c.suggest_id)) {
+  if (c.suggest_id && !CATS.some((x) => x.cat_id === c.suggest_id)) {      // 没接 Lazada 接口时才会有（接了接口所有类目都能选）
     info += `<div class="warn">AI 建议的理想类目还没有模板：<b data-notr>${esc(LANG === "th" ? c.suggest_path : (c.suggest_path_zh || ""))}</b><br><span class="muted">${esc(c.suggest_path)}（类目ID ${esc(c.suggest_id)}）</span><br>全部类目模板下载完以后（进度在「导出上架表格」页）重新点 AI 匹配类目就行。</div>`;
   }
   $("#cat-info").innerHTML = info;
   FIELDS = null;
   if (c.id && known) {
-    try { FIELDS = (await api(`/api/category-fields?id=${encodeURIComponent(c.id)}`)).fields; } catch { FIELDS = null; }
+    try {
+      const cf = await api(`/api/category-fields?id=${encodeURIComponent(c.id)}`);
+      FIELDS = cf.fields;
+      // v2.45：属性来自哪里；要许可证的类目提醒
+      $("#cat-info").insertAdjacentHTML("beforeend", (cf.source === "api" ? ' <span class="pill tag-pill" title="类目属性、选项、必填项是从 Lazada 接口拉的最新的">属性来自 Lazada 接口</span>' : "") +
+        (cf.needs_license ? '<div class="bad small">⚠ 这个类目上架要 TISI 等许可证：没有许可证请换一个相近的类目（再点一次 AI 匹配会避开）</div>' : ""));
+    } catch { FIELDS = null; }
   }
   renderAttrs();
 }
