@@ -33,6 +33,9 @@ function libFiltered() {
     if (st === "todo" && !p.errors) return false;
     if (st === "exported" && !p.exported) return false;
     if (st === "new" && p.exported) return false;
+    if (st === "online" && !(p.online || []).length) return false;          // v2.44：在线商品（从店铺拉回来的）
+    if (st === "online_live" && !(p.online || []).some((o) => o.status === "live")) return false;
+    if (st === "offline" && (p.online || []).length) return false;
     if (st === "seo_low" && !(p.seo != null && p.seo < 80)) return false;
     if (st === "seo_prop" && !p.seo_prop) return false;
     if (pr === "nomodel" && p.has_model) return false;
@@ -57,7 +60,7 @@ function renderLibrary() {
         ${p.draft ? '<div><span class="pill warn-pill" title="选品工具推过来的，填好颜色、核对售价后再导出">草稿·待完善</span></div>' : p.from_curator ? '<div class="small muted">来自选品工具</div>' : ""}</td>
       <td class="lib-name"><span data-notr>${esc(p.name_zh)}</span>${window.SEO ? SEO.badge(p) : ""}${p.title_th ? `<div class="small muted clamp2" data-notr title="${esc(p.title_th)}">${esc(p.title_th)}</div>` : ""}</td>
       <td>${(p.groups || []).map((g) => gname[g] ? `<span class="pill tag-pill" data-notr>${esc(gname[g])}</span>` : "").join(" ")}
-        <div class="small">${p.lz && p.lz.status !== "none" ? `LZ ${lstBadge(p.lz, "lazada")}` : ""} ${p.sp && p.sp.status !== "none" ? `SP ${lstBadge(p.sp, "shopee")}` : ""}</div></td>
+        <div class="small">${p.lz && p.lz.status !== "none" ? `LZ ${lstBadge(p.lz, "lazada")}` : ""} ${p.sp && p.sp.status !== "none" ? `SP ${lstBadge(p.sp, "shopee")}` : ""}</div>${onlineBadges(p)}</td>
       <td class="small">${skuCell(p)}</td>
       <td>${p.category ? `<span data-notr>${esc(LANG === "th" ? p.category_th || p.category : p.category)}</span>` : '<span class="bad small">未选</span>'}</td>
       <td>${statusBadge(p.errors, p.warnings)}</td>
@@ -169,4 +172,11 @@ function skuCell(p) {
   const colTxt = cols.length ? ` · ${cols.slice(0, 4).map((c) => esc(typeof colorLabel === "function" ? colorLabel(c) : c)).join(" / ")}${cols.length > 4 ? " …" : ""}` : "";
   return `<div class="nowrap"><b>${skus.length}</b> 个 SKU<span class="muted">${colTxt}</span></div>${skus.slice(0, 2).map(one).join("")}
     <details class="sku-more"><summary class="muted">全部 ${skus.length} 个</summary><div class="sku-grid">${skus.map(one).join("")}</div></details>`;
+}
+// v2.44：在哪些店铺在线（在线商品页从店铺拉回来的）
+function onlineBadges(p) {
+  const o = p.online || [];
+  if (!o.length) return "";
+  const z = { live: "在售", uploaded: "审核中", rejected: "不通过", inactive: "已下架" };
+  return `<div class="small">${o.map((x) => `<span class="pill ${x.status === "live" ? "ok-pill" : x.status === "rejected" ? "bad-pill" : "tag-pill"}" title="${esc(x.shop)}">${x.platform === "lazada" ? "LZ" : x.platform === "shopee" ? "SP" : esc(x.platform)} <span data-notr>${esc(x.shop.slice(0, 10))}</span> ${z[x.status] || ""}</span>`).join(" ")}</div>`;
 }

@@ -9,6 +9,10 @@
 - `api.py`
 - `lazada_push.py`  ERP 产品直接推到 Lazada（接口）、库存推送
 - `module.py`
+- `online.py`  在线商品：从店铺拉商品、对上 ERP、改价改库存、上下架
+- `public.py`  给别的模块用：online_shops()
+- `ui/online.js`
+- `tests/t_online244.py`
 - `workbench.py`  上架工作台：缺什么和怎么修、原地确认、AI 补齐
 - `ui/page.css`
 - `tests/t_lw243.py`
@@ -27,3 +31,4 @@
 - 1.5（系统 v2.43.0）：「导出上架表格」页改成上架工作台（平台切换、流程条、分组栏、分页、底部操作条、批次 / 库存同步分页）；缺什么原地展开修（workbench.py：/api/listing/issues、/api/listing/fix、/api/listing/ai-fill）；推送走后台任务（?async=1）；Lazada 审核结果自动同步（lazada_push.sync_status，每 30 分钟，/api/listing/lazada/status-sync）。测试 tests/t_lw243.py。
 - 1.6（系统 v2.43.1）：推送按 Lazada 官方文档改格式（值用字符串、variation1/2、saleProp、hasImage 规则、标准 color_family 或自定义变体、ASCII JSON）；图片直接传本地文件（/image/upload，不用图床）；记下最后一次推送内容（/api/listing/lazada/last/<产品>）；工作台「上传图床」修复按钮。测试 tests/t_lzpush2412.py。
 - 1.7（系统 v2.43.2）：属性 / 变体选项发英文选项名（_opt_out：en_name），按选项 id 或泰文 / 英文名对；选项 id 是 0 时按名字对。
+- 1.8（系统 v2.44.0）：在线商品（online.py、ui/online.js、/api/online…）：Lazada /products/get 拉全店商品存 online_items，按 SellerSku 对上 ERP 并记下 item_id / sku_id、上架状态跟平台走；改价改库存（/product/price_quantity/update，写回 ERP manual_price / stock）、上下架（/product/deactivate、/product/update）；定时同步改成整店拉；public.online_shops() 给产品库。测试 tests/t_online244.py。

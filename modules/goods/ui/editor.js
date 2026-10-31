@@ -627,7 +627,7 @@ function renderImages() {
       <div><span class="tag">${i === 0 ? "主图" : "图 " + (i + 1)}</span>${im.edited ? '<span class="tag">已修图</span>' : ""}${im.scene ? '<span class="tag">场景图</span>' : ""}${im.ad ? '<span class="tag ad-tag">卖点图</span>' : ""}${im.processed ? '<span class="ok">已处理</span>' : '<span class="warn">原图</span>'}
         ${im.url ? '<span class="ok"> · 有网址</span>' : ""}</div>
       <div class="acts">
-        <button data-act="left" title="前移">◀</button><button data-act="right" title="后移">▶</button>
+        <button data-act="left" title="前移">◀</button><button data-act="right" title="后移">▶</button>${i > 0 ? '<button data-act="main" title="挪到第一张（平台上的主图）">★ 设为主图</button>' : ""}
         ${im.ad ? '<button data-act="ad-edit">✏ 改卖点图</button>' : '<button data-act="edit" title="裁剪尺寸、调色、去背景、去水印 / 杂物、换背景加阴影、批量处理">🎨 修图</button><button data-act="ad-new" title="用这张图做卖点图">✨ 加卖点</button><button data-act="white">设为白底图</button>'}${im.has_orig ? '<button data-act="restore" title="恢复修图前的原图">↺ 原图</button>' : ""}<button data-act="url">网址</button>
         <button data-act="del" class="danger">删</button>
       </div>
@@ -660,7 +660,12 @@ async function imageAction(e) {
     return act === "ad-new" ? window.ADIMG.open({ base: raw }) : window.ADIMG.edit(P.images[idx]);
   }
   try {
-    if (act === "left" || act === "right") {
+    if (act === "main") {               // v2.44：一键挪到第一张（主图）
+      if (idx <= 0) return;
+      order.splice(idx, 1); order.unshift(raw);
+      P = await api(`/api/products/${P.id}/images/reorder`, { json: { order } });
+      toast("已设为主图");
+    } else if (act === "left" || act === "right") {
       const j = act === "left" ? idx - 1 : idx + 1;
       if (j < 0 || j >= order.length) return;
       [order[idx], order[j]] = [order[j], order[idx]];

@@ -1,11 +1,11 @@
 /* v2.43：上架工作台 */
-#tab-export .lw-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px }
-#tab-export .lw-top h2 { margin: 0 }
-#tab-export .seg { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden }
-#tab-export .seg button { border: 0; border-radius: 0; background: #fff; padding: 6px 14px; margin: 0; cursor: pointer }
-#tab-export .seg button + button { border-left: 1px solid #cbd5e1 }
-#tab-export .seg button.on { background: #1d4ed8; color: #fff; font-weight: 700 }
-#tab-export #exp-tplbar { margin-left: auto }
+#tab-export .lw-top, #tab-online .lw-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px }
+#tab-export .lw-top h2, #tab-online .lw-top h2 { margin: 0 }
+#tab-export .seg, #tab-online .seg { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden }
+#tab-export .seg button, #tab-online .seg button { border: 0; border-radius: 0; background: #fff; padding: 6px 14px; margin: 0; cursor: pointer }
+#tab-export .seg button + button, #tab-online .seg button + button { border-left: 1px solid #cbd5e1 }
+#tab-export .seg button.on, #tab-online .seg button.on { background: #1d4ed8; color: #fff; font-weight: 700 }
+#tab-export #exp-tplbar, #tab-online #ol-synced { margin-left: auto }
 .lw-flow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; margin-bottom: 10px }
 .lw-chip { border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 999px; padding: 4px 12px; cursor: pointer; margin: 0 }
 .lw-chip b { margin-left: 4px } .lw-chip.on { background: #1d4ed8; border-color: #1d4ed8; color: #fff }

@@ -81,3 +81,25 @@
     </div>
   </div>
 </section>
+
+<!-- v2.44：在线商品（从店铺拉回来的商品；按平台分，现在接了 Lazada） -->
+<section id="tab-online" class="panel hidden">
+  <div class="lw-top">
+    <h2>在线商品</h2>
+    <div class="seg" id="ol-plat"><button data-plat="lazada" class="on">Lazada</button><button data-plat="shopee">Shopee</button></div>
+    <select id="ol-shop" class="small" style="width:auto"></select>
+    <span class="small muted" id="ol-synced"></span>
+    <button class="mini primary-lite" id="ol-sync" title="把店铺里的全部商品拉一次（平时每 30 分钟自动拉）">🔄 立即同步</button>
+  </div>
+  <div class="lw-flow" id="ol-flow"></div>
+  <div class="row gap wrap lw-filter">
+    <input id="ol-q" placeholder="搜索标题 / SKU / ERP 编号 / 商品编号" style="width:260px">
+    <label class="small row gap"><input type="checkbox" id="ol-unlinked"> 只看没对上 ERP 的</label>
+    <label class="small row gap"><input type="checkbox" id="ol-stock0"> 只看库存为 0</label>
+    <label class="small row gap"><input type="checkbox" id="ol-pending"> 只看 ERP 有修改待同步</label>
+    <span id="ol-sum" class="small muted"></span>
+  </div>
+  <div id="ol-list"></div>
+  <p class="small muted">价格 / 促销价 / 库存直接改到平台，同时写回 ERP（售价两边一致；开了「按耗材算库存」的产品，库存还是按耗材算）。
+    改标题、详情、图片、属性：点「编辑资料」在 ERP 里改，改完点「更新到店铺」。</p>
+</section>

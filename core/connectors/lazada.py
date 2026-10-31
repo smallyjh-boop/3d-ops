@@ -268,3 +268,15 @@ class LazadaConnector(Connector):
     def get_item(self, item_id):
         self._ensure_token()
         return self._call("/product/item/get", {"item_id": item_id}).get("data") or {}
+
+    # ---------- 在线商品（v2.44：modules/listing/online.py）----------
+    def list_products(self, offset=0, limit=50, status="all"):
+        """店铺商品（GetProducts）：{total_products, products:[…]}，一次最多 50 个。"""
+        self._ensure_token()
+        return self._call("/products/get", {"filter": status, "offset": offset, "limit": limit}).get("data") or {}
+
+    def deactivate(self, item_id):
+        """下架整个商品（DeactivateProduct）。"""
+        self._ensure_token()
+        body = f"<Request><Product><ItemId>{int(item_id)}</ItemId></Product></Request>"
+        return self._call("/product/deactivate", {"apiRequestBody": body}, method="POST")

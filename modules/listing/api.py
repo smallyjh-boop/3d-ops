@@ -4,7 +4,54 @@ from flask import Blueprint
 from web.common import *  # noqa: F401,F403
 
 bp = Blueprint("m_listing", __name__)
-PREFIXES = ['/api/export', '/api/listing']
+PREFIXES = ['/api/export', '/api/listing', '/api/online']
+
+
+# ---------------- v2.44：在线商品（从店铺拉回来的商品，按平台分） ----------------
+def _online():
+    from . import online
+    online.init()
+    return online
+
+
+@bp.get("/api/online")
+def online_list():
+    a = request.args
+    return jsonify(_online().items(a.get("platform") or "", a.get("shop") or None, a.get("status") or "", a.get("q") or "",
+                                   a.get("linked") or "", a.get("stock0") == "1", a.get("pending") == "1"))
+
+
+@bp.post("/api/online/sync")
+def online_sync():
+    from . import lazada_push
+    b = request.get_json(force=True, silent=True) or {}
+    user, sid = _uname(), b.get("shop_id")
+
+    def run():
+        try:
+            return jsonify(_online().sync(sid, user))
+        except lazada_push.PushError as e:
+            return err(str(e))
+    return maybe_async("同步在线商品", run, "lz_push")
+
+
+@bp.post("/api/online/sku")
+def online_sku():
+    b = request.get_json(force=True, silent=True) or {}
+    try:
+        return jsonify(_online().update_sku(b.get("platform") or "lazada", b.get("shop_id"), b.get("item_id"), b.get("seller_sku") or "",
+                                            b.get("price"), b.get("special_price"), b.get("qty"), _uname()))
+    except (ValueError, RuntimeError) as e:
+        return err(str(e))
+
+
+@bp.post("/api/online/active")
+def online_active():
+    b = request.get_json(force=True, silent=True) or {}
+    try:
+        return jsonify(_online().set_active(b.get("platform") or "lazada", b.get("shop_id"), b.get("item_id"), bool(b.get("active")), _uname()))
+    except (ValueError, RuntimeError) as e:
+        return err(str(e))
 
 
 # ---------------- v2.41.2：直接推到 Lazada（接口） ----------------

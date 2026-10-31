@@ -413,9 +413,11 @@ def _loop():
     while True:
         time.sleep(60)
         if time.time() - last_status >= STATUS_EVERY:          # v2.43：每 30 分钟同步一次审核结果
-            last_status = time.time()
+            last_status = time.time()                           # v2.44：整店拉在线商品（顺带对上 ERP、更新上架状态）
             try:
-                sync_status()
+                from . import online
+                online.init()
+                online.sync()
             except PushError:
                 pass
             except Exception as e:  # noqa: BLE001

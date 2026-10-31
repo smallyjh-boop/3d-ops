@@ -17,6 +17,9 @@ def products():
     names = {c["id"]: c["name"] for c in lib}
     names_th = {c["id"]: " > ".join(c["path"].split(" > ")[-2:]) for c in lib if c["path"]}
     out = []
+    from core import modules as _mods
+    pub = _mods.public("listing")
+    online = pub.online_shops() if pub else {}         # v2.44：在哪些店铺在线（上架模块的在线商品）
     for item in store.list_products():
         p = store.load(item["id"])
         errs, warns = _check(cfg, p)
@@ -32,6 +35,7 @@ def products():
             "exported": bool(p.get("exported_at") or p.get("shopee_exported_at")),
             "lz": _lst(p, "lazada"), "sp": _lst(p, "shopee"), "active": p.get("active", True) is not False,
             "lz_item": (p.get("lazada_api") or {}).get("item_id"),       # v2.41.2：用接口推到 Lazada 的商品编号
+            "online": online.get(p["id"], []),
             "updated_at": p.get("updated_at") or 0,
             "groups": p.get("groups") or [], "material": p.get("material") or "",
             "has_model": bool(p.get("model")), "keywords": p.get("keywords") or "",
