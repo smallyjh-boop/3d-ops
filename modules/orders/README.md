@@ -13,6 +13,7 @@
 - `packbox.py`       订单用哪个纸箱（产品设的邮政纸箱里最大的，打包时可改）
 - `scanning.py`      打包核对 / 交接扫什么码
 - `waybill/`         平台面单框架（来源、模板、排版）
+- `tests/t_label_barcode.py`  上传图片型面单 PDF 读条码
 - `i18n/th.json`
 - `ui/aftersales.js`
 - `ui/labels.js`
@@ -34,3 +35,4 @@
 - 1.6（系统 v2.40.0）：订单离开「待发货」（发货、完成、改回未付款）→ 还没开始的生产任务停下；报价单打完不再自动变成已发货；交接扫码拒收未付款 / 报价单；表格没有平台列时按订单号找已有订单，不重复建；重新导入商品没变就不重建任务（保留指定打印机、任务备注）；Lazada 新版（驼峰列名）、Shopee 英文导出的自动对列修正（整词匹配 + 排除词）；打包核对拒绝已取消 / 退货的订单、显示订单状态；导入结果的新生产任务数修正；售后补发数量不超过原订单、金额不能是负数。测试 tests/cases/t_v240.py。
 - 1.7（系统 v2.41.0）：代收货款金额统一写法；改发货时限时校验格式、只记真正改了的字段；坏表格、乱填的商品明细、批量 id 报清楚的错；批量操作有失败时提示哪几单没成；改成「退货」也要取消订单权限；扫码框可以翻译；生产角色看不到用不了的按钮；字段名泰文翻译。测试 tests/cases/t_v241.py。
 - 1.8（系统 v2.41.2）：Lazada 面单接通：打印面单时自动从 Lazada 接口取（waybill/sources.fetch 把订单的平台原始编号 raw 带给连接器）。测试 modules/orders/tests/t_waybill.py、modules/link/tests/t_lazada2412.py。
+- 1.8 补充：上传平台面单 PDF 时，页面文字里找不到订单号就读条码（core/labels._page_barcodes，pypdfium2 + zxing-cpp），图片型 PDF（Lazada 卖家中心打印的）也能对上订单。测试 modules/orders/tests/t_label_barcode.py。

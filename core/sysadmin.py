@@ -24,7 +24,7 @@ IN_DOCKER = os.environ.get("LH_DOCKER") == "1"
 
 # requirements.txt 里的包名 → import 名
 IMPORT_NAME = {"pillow": "PIL", "pypdf": "pypdf", "flask": "flask", "openpyxl": "openpyxl",
-               "requests": "requests", "waitress": "waitress", "numpy": "numpy"}
+               "requests": "requests", "waitress": "waitress", "numpy": "numpy", "zxing-cpp": "zxingcpp"}
 
 
 def _item(group, name, status, detail="", fix=""):

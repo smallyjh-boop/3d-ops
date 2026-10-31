@@ -6,3 +6,4 @@ waitress>=3.0
 pypdf>=4.0
 numpy>=1.26
 pypdfium2>=4.20
+zxing-cpp>=2.2

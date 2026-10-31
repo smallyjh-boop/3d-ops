@@ -35,6 +35,24 @@ def _norm(s):
     return re.sub(r"[\s\-]", "", str(s or "")).upper()
 
 
+def _page_barcodes(data, i):
+    """PDF 第 i 页上的条码（订单号、运单号）。没装 zxing-cpp / pypdfium2 时返回空。"""
+    try:
+        import pypdfium2 as pdfium
+        import zxingcpp
+    except ImportError:
+        return []
+    try:
+        pdf = pdfium.PdfDocument(data)
+        try:
+            img = pdf[i].render(scale=300 / 72).to_pil().convert("L")
+        finally:
+            pdf.close()
+        return [_norm(b.text) for b in zxingcpp.read_barcodes(img) if b.text]
+    except Exception:  # noqa: BLE001  读不出就当没有
+        return []
+
+
 def import_pdf(fileobj, user="", via=""):
     """拆分平台面单 PDF，按页面文字里的订单号/运单号对应订单。返回 {matched, unmatched_pages, pages, order_nos}
     via：从哪来的（例如「插件 · Shopee」，v2.35 浏览器扩展转交），写进订单日志。"""
@@ -63,6 +81,9 @@ def import_pdf(fileobj, user="", via=""):
         except Exception:  # 图片型 PDF
             text = ""
         oid = next((o for k, o in keys if k in text), None)
+        if oid is None:                       # v2.41.2：图片型 PDF（Lazada 卖家中心打印的）→ 读页面上的条码
+            codes = _page_barcodes(data, i)
+            oid = next((o for k, o in keys if any(k == b or (len(b) >= 10 and k in b) for b in codes)), None)
         if oid is None:
             unmatched.append(i + 1)
             continue
@@ -81,7 +102,7 @@ def import_pdf(fileobj, user="", via=""):
     c.commit()
     return {"pages": len(reader.pages), "matched": len(matched), "unmatched_pages": unmatched,
             "order_nos": [nos.get(o, "") for o in matched],
-            "hint": "" if not unmatched else "有的页面没找到订单号/运单号：可能是图片型 PDF，或这些订单还没导入系统"}
+            "hint": "" if not unmatched else "有的页面没找到订单号/运单号（文字和条码都没认出）：可能这些订单还没导入系统，或面单不清楚"}
 
 
 def merged_pdf(order_ids):
