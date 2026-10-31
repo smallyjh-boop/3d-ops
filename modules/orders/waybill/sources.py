@@ -10,6 +10,7 @@
 对外：awb_path(order)  ensure(order)  status()  save_doc(order, doc, source)
 """
 import io
+import json
 import os
 
 from core import connectors, db
@@ -86,8 +87,15 @@ def fetch(order):
         raise connectors.NotReady("没有对应的已启用店铺")
     s = integrations.get_shop_raw(sid)
     conn = connectors.make(s["platform"], s["creds"])
+    o = dict(order)
+    if "raw" not in o and o.get("id"):       # v2.41.2：平台自己的编号（Lazada order_id）在 raw 里，订单详情不带
+        r = db.conn().execute("SELECT raw FROM orders WHERE id=?", (o["id"],)).fetchone()
+        try:
+            o["raw"] = json.loads(r["raw"]) if r and r["raw"] else {}
+        except ValueError:
+            o["raw"] = {}
     try:
-        doc = conn.fetch_label(order)
+        doc = conn.fetch_label(o)
     finally:
         integrations._store_creds(sid, conn)
     return save_doc(order, doc, f"{cls.LABEL} 接口")

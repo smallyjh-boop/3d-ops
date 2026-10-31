@@ -97,17 +97,20 @@ png = io.BytesIO(); Image.new("L", (600, 900), 255).save(png, "PNG")
 integrations.save_shop({"platform": "lazada", "name": "Lazada TH", "enabled": True, "creds": {"app_key": "k"}})
 orders_mod.upsert([{"platform": "lazada", "shop": "Lazada TH", "order_no": "LZ-777", "status": "to_ship", "items": [{"sku": sku, "qty": 1}]}], source="test")
 lz = db.conn().execute("SELECT id FROM orders WHERE order_no='LZ-777'").fetchone()["id"]
+Lz = connectors.REGISTRY["lazada"]
+LZ_READY, LZ_FETCH = Lz.LABEL_READY, Lz.fetch_label
+Lz.LABEL_READY = False
 r = C.post("/api/labels/check", json={"ids": [lz]}).get_json(); ok(r["missing"] == [lz], "api not connected -> missing")
 p, why = sources.ensure(orders_mod.get_order(lz)); ok(p is None and "上传" in why, f"ensure explains {why}")
-Lz = connectors.REGISTRY["lazada"]
 Lz.LABEL_READY = True
+p, why = sources.ensure(orders_mod.get_order(lz)); ok(p is None and "取面单失败" in why and "App Secret" in why, f"no token explains {why}")
 Lz.fetch_label = lambda self, o: {"kind": "png", "data": png.getvalue(), "tracking_no": "LEX0001"}
 ok(any(s["id"] == "lazada" and s["ready"] for s in sources.status()), "lazada source ready when connected + shop enabled")
 r = C.post("/api/labels/check", json={"ids": [lz]}).get_json()
 oz = orders_mod.get_order(lz)
 ok(r["have"] == [lz] and oz["label_file"] == f"{lz}.pdf" and oz["tracking_no"] == "LEX0001", f"fetched from api {r} {oz['tracking_no']}")
 ok(any(x["action"] == "取平台面单" for x in orders_mod.get_log(lz)), "order log")
-Lz.LABEL_READY = False
+Lz.LABEL_READY, Lz.fetch_label = LZ_READY, LZ_FETCH
 # 连接器默认：取面单没接通
 try:
     connectors.make("shopee", {}).fetch_label({}); ok(False, "base fetch_label")

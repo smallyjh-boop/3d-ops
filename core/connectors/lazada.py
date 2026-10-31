@@ -64,9 +64,10 @@ class LazadaConnector(Connector):
               ("callback_url", "Callback URL（回调地址）", False),
               ("access_token", "Access Token", True), ("refresh_token", "Refresh Token", True)]
     OPTIONAL = ("callback_url",)   # v2.41.2：Lazada 只认 https 回调；不填就用系统自己的地址
-    # v2.34 面单：等联调。订单先「打包 / 准备发货」拿到包裹号和运单号 → 用取面单（document）接口按包裹取 PDF → fetch_label 返回
-    LABEL_NOTE = "未接入：接通后打印时自动从 Lazada 取面单（订单要先打包 / 准备发货）"
-    LABEL_NOTE_TH = "ยังไม่เชื่อมต่อ: เชื่อมแล้วจะดึงใบปะหน้าจาก Lazada อัตโนมัติ (ต้องแพ็ก / พร้อมส่งก่อน)"
+    # v2.41.2 面单：订单在 Lazada 打包后有包裹号（package_id）→ /order/package/document/get 按包裹取 PDF
+    LABEL_READY = True
+    LABEL_NOTE = "打印时自动从 Lazada 取面单（订单要先在 Lazada 打包）"
+    LABEL_NOTE_TH = "ดึงใบปะหน้าจาก Lazada อัตโนมัติตอนพิมพ์ (ต้องแพ็กใน Lazada ก่อน)"
 
     # ---------- 授权 ----------
     def authorize_url(self, redirect_uri):
@@ -144,7 +145,8 @@ class LazadaConnector(Connector):
         status = next((STATUS[s] for s in sts if s in STATUS), "other") if sts else "other"
         # Lazada 每件商品单独一行，同 SKU 合并
         merged = {}
-        tracking = ""
+        tracking = carrier = ""
+        packages = []
         for it in order_items:
             key = (it.get("sku") or it.get("shop_sku") or "", it.get("variation") or "")
             m = merged.setdefault(key, {"sku": key[0], "name": it.get("name") or "", "variation": key[1], "qty": 0,
@@ -152,6 +154,9 @@ class LazadaConnector(Connector):
             m["qty"] += 1
             m["item_total"] += float(it.get("paid_price") or it.get("item_price") or 0)
             tracking = tracking or it.get("tracking_code") or ""
+            carrier = carrier or it.get("shipment_provider") or ""
+            if it.get("package_id") and it["package_id"] not in packages:
+                packages.append(it["package_id"])
         buyer = " ".join(x for x in (o.get("customer_first_name"), o.get("customer_last_name")) if x)
         ship_by = None
         pst = o.get("promised_shipping_times")
@@ -163,8 +168,37 @@ class LazadaConnector(Connector):
             "buyer": buyer, "buyer_note": o.get("remarks") or "",
             "order_total": o.get("price"), "shipping_fee": o.get("shipping_fee"),
             "tracking_no": tracking, "items": list(merged.values()),
-            "raw": {"order_id": o.get("order_id"), "statuses": o.get("statuses")},
+            "payment": o.get("payment_method") or "", "carrier": carrier,
+            "cod": o.get("price") if str(o.get("payment_method") or "").upper() == "COD" else None,
+            "raw": {"order_id": o.get("order_id"), "statuses": o.get("statuses"), "packages": packages},
         }
+
+    # ---------- 面单 ----------
+    def fetch_label(self, order):
+        """按包裹取 Lazada 面单 PDF。包裹号现取（订单导入时可能还没打包）。"""
+        self.check()
+        self._ensure_token()
+        raw = order.get("raw") or {}
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except ValueError:
+                raw = {}
+        oid = raw.get("order_id") or order.get("order_no")
+        d = self._call("/orders/items/get", {"order_ids": json.dumps([int(oid)])}).get("data") or []
+        items = next((r.get("order_items") or [] for r in d if str(r.get("order_id")) == str(oid)), [])
+        pkgs = list(dict.fromkeys(it.get("package_id") for it in items if it.get("package_id")))
+        if not pkgs:
+            raise NotReady("这个订单在 Lazada 还没打包（没有包裹号），先在 Lazada 打包再打印")
+        req = {"doc_type": "PDF", "packages": [{"package_id": p} for p in pkgs], "print_item_list": False}
+        r = self._call("/order/package/document/get", {"getDocumentReq": json.dumps(req)}, method="POST")
+        res = r.get("result") or {}
+        if res.get("success") is False or not (res.get("data") or {}).get("pdf_url"):
+            raise RuntimeError(f"Lazada 没有返回面单：{res.get('error_msg') or res.get('error_code') or json.dumps(r)[:300]}")
+        pdf = requests.get(res["data"]["pdf_url"], timeout=60)
+        pdf.raise_for_status()
+        tracking = next((it.get("tracking_code") for it in items if it.get("tracking_code")), "")
+        return {"kind": "pdf", "data": pdf.content, "tracking_no": tracking}
 
     # ---------- 推送（Lazada Push Mechanism）----------
     def handle_webhook(self, headers, body, url=""):
