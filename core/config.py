@@ -59,6 +59,7 @@ DEFAULT_CONFIG = {
     "fin_settle_days": 14,               # 发货 / 完成多少天还没回款算「超时未回款」
     "fin_settle_tolerance": 5,           # 平台实际扣费比按扣点估算的多出多少铢才列出来
     "fin_import_remind_days": 14,        # v2.49：没接口的平台多少天没导入结算报表就进今日待办
+    "fin_ship_tolerance": 5,             # v2.50：运费核对：平台扣的运费和订单运费差多少铢以上才算异常
     "fin_fixed_cats": ["房租", "人工工资", "设备折旧"],   # 这些支出分类算固定费用（本期没记账时按成本设置估算）
     "fin_expense_cats": [],              # 自己加的支出分类
     "accel_on": True,                    # 电脑加速（v2.20）：有电脑在线时把切片、读大模型、抠图交给电脑做
