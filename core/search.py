@@ -8,6 +8,7 @@
 
 对外：search(q, user, limit=8) → {q, groups:[{type, zh, th, items:[…]}], total}
 """
+import json
 import os
 import re
 import threading
@@ -84,6 +85,14 @@ def _goods(q, limit):
     return [h[1] for h in hits[:limit]]
 
 
+def _summary_th(analysis):
+    """AI 分析里的泰文摘要（泰文界面显示它，见 static/shell.js）。"""
+    try:
+        return str((json.loads(analysis) if analysis else {}).get("summary_th") or "")
+    except (ValueError, TypeError, AttributeError):
+        return ""
+
+
 def _convs(q, limit):
     from . import modules
     if modules.is_loaded() and not modules.enabled("cs"):
@@ -93,12 +102,12 @@ def _convs(q, limit):
         return []
     like = f"%{q}%"
     rows = c.execute(
-        "SELECT id, buyer, platform, order_no, summary, status, needs_human, updated_at FROM cs_conv "
+        "SELECT id, buyer, platform, order_no, summary, analysis, status, needs_human, updated_at FROM cs_conv "
         "WHERE buyer LIKE ? OR order_no LIKE ? OR summary LIKE ? "
         "OR id IN (SELECT conv_id FROM cs_msg WHERE text LIKE ? OR text_zh LIKE ? ORDER BY id DESC LIMIT 200) "
         "ORDER BY updated_at DESC LIMIT ?", (like, like, like, like, like, limit)).fetchall()
     return [{"id": r["id"], "buyer": r["buyer"] or "", "platform": r["platform"] or "", "order_no": r["order_no"] or "",
-             "summary": (r["summary"] or "")[:120], "status": r["status"] or "", "needs_human": bool(r["needs_human"]),
+             "summary": (r["summary"] or "")[:120], "summary_th": _summary_th(r["analysis"])[:120], "status": r["status"] or "", "needs_human": bool(r["needs_human"]),
              "updated_at": r["updated_at"]} for r in rows]
 
 

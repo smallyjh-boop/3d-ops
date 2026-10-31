@@ -300,10 +300,22 @@ const COLORS_CARD = () => `<div class="card cfg-group"><h3>颜色代码表</h3>
 // 设置页按模块分开（v2.18）：结构来自服务器 /api/settings/schema，以后加模块 / 加设置不用改这里
 let CFG_SCHEMA = null, CFG_MOD = "general", INV_ITEMS_CFG = [];
 try { CFG_MOD = localStorage.getItem("cfg_mod") || "general"; } catch { /* 忽略 */ }
+// 设置里下拉选项的代码 → 显示的名字（v2.49.1：界面不直接显示英文代码）
+const OPT_NAMES = {
+  auto: ["自动", "อัตโนมัติ"], confirm: ["人工确认", "ยืนยันเอง"], both: ["订单号或快递单号", "เลขออเดอร์หรือเลขพัสดุ"],
+  tracking: ["只认快递单号", "เลขพัสดุเท่านั้น"], order: ["只认订单号", "เลขออเดอร์เท่านั้น"], tap: ["点一下确认", "กดยืนยัน"],
+  scan: ["扫商品码", "สแกนรหัสสินค้า"], none: ["只核对订单", "ตรวจแค่ออเดอร์"], zero: ["显示 0", "แสดง 0"], real: ["显示真实件数", "แสดงจำนวนจริง"],
+  low: ["低", "ต่ำ"], medium: ["中", "กลาง"], high: ["高", "สูง"], pickup: ["上门揽收", "เรียกรถเข้ารับ"], dropoff: ["送到网点", "ส่งที่จุดรับ"],
+  anthropic: ["Anthropic", "Anthropic"], openai_compatible: ["OpenAI 兼容接口", "API แบบ OpenAI"], openai: ["OpenAI", "OpenAI"], gemini: ["Gemini", "Gemini"],
+  generic: ["通用版", "แบบทั่วไป"], flash: ["Flash Express", "Flash Express"], kerry: ["Kerry", "Kerry"], jt: ["J&T", "J&T"], spx: ["SPX", "SPX"],
+  lex: ["LEX (Lazada)", "LEX (Lazada)"], best: ["BEST Express", "BEST Express"], ninja: ["Ninja Van", "Ninja Van"], dhl: ["DHL", "DHL"], thpost: ["泰国邮政", "ไปรษณีย์ไทย"],
+  a6: ["A6", "A6"],
+};
+function optName(o) { const n = OPT_NAMES[o]; return n ? (I18N.lang === "th" ? n[1] : n[0]) : o; }
 function cfgField(f) {
   const k = f.key, lab = f.label, t = f.type;
   if (t === "bool") return `<label>${lab}<select data-c="${k}"><option value="true" ${CFG[k] ? "selected" : ""}>是</option><option value="false" ${CFG[k] ? "" : "selected"}>否</option></select></label>`;
-  if (Array.isArray(t)) return `<label>${lab}<select data-c="${k}">${t.map((o) => `<option ${o === CFG[k] ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
+  if (Array.isArray(t)) return `<label>${lab}<select data-c="${k}">${t.map((o) => `<option value="${esc(o)}" ${o === CFG[k] ? "selected" : ""}>${esc(optName(o))}</option>`).join("")}</select></label>`;
   if (t === "list") return `<label>${lab}<input data-c="${k}" value="${esc(Array.isArray(CFG[k]) ? CFG[k].join(", ") : String(CFG[k] ?? ""))}" data-notr></label>`;
   return `<label>${lab}<input data-c="${k}" type="${t === "password" ? "password" : "text"}" value="${esc(CFG[k] ?? "")}"></label>`;
 }

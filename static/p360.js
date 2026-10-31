@@ -146,8 +146,8 @@
     const head = `<div class="p360-head">
       ${p.image ? `<img class="p360-img" src="${E(p.image)}" alt="" data-zoom data-full="${E(p.image)}">` : `<div class="p360-img p360-noimg">📦</div>`}
       <div class="p360-h-main">
-        <div class="p360-name" title="${E(name)}">${E(name)}</div>
-        ${sub && sub !== name ? `<div class="p360-sub" title="${E(sub)}">${E(sub)}</div>` : ""}
+        <div class="p360-name" title="${E(name)}" data-notr>${E(name)}</div>
+        ${sub && sub !== name ? `<div class="p360-sub" title="${E(sub)}" data-notr>${E(sub)}</div>` : ""}
         <div class="p360-chips">
           <span class="p360-chip p360-id ${f == null ? "on" : ""}" data-p360="${E(p.id)}" title="${E(Z("整个产品", "ทั้งสินค้า"))}">${E(p.id)}</span>
           ${vs.filter((v) => v.sku).slice(0, 12).map((v) => `<span class="p360-chip p360-sku ${fv && fv.sku === v.sku ? "on" : ""}" data-p360="${E(v.sku)}" title="${E(varName(v))}">${E(v.sku.replace(p.id + "-", "-"))}</span>`).join("")}
@@ -310,7 +310,7 @@
     const bad = ["cancelled", "returned", "delivery_failed"];
     const rows = o.map((x) => `<div class="p360-li p360-ord" data-p360-order="${x.id}" title="${E(Z("打开订单", "เปิดออเดอร์"))}">
       <div class="p360-li-m"><span class="mono">${E(x.order_no)}</span> <span class="small muted">${E(PLAT[x.platform] || x.platform || "")} · ${md(x.order_time)}</span>
-        <div class="small"><span class="mono">${E(x.sku || "")}</span> ×${x.qty}${x.variation ? ` <span class="muted">${E(x.variation)}</span>` : ""}</div></div>
+        <div class="small"><span class="mono">${E(x.sku || "")}</span> ×${x.qty}${x.variation ? ` <span class="muted" data-notr>${E(col(x.variation))}</span>` : ""}</div></div>
       <div class="p360-li-r">${chip(Z(x.status_zh, ORD[x.status] || x.status_zh), bad.includes(x.status) ? "bad" : x.status === "to_ship" ? "warn" : "")}
         ${x.item_total != null ? `<div class="small">${money(x.item_total)}</div>` : ""}</div></div>`).join("");
     return card(Z("最近订单", "ออเดอร์ล่าสุด"), rows, { n: o.length });

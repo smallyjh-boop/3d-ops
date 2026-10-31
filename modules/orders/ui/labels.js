@@ -16,7 +16,7 @@
       <div class="lt-grid" id="lt-grid"></div></div>`;
     const draw = () => {
       const sz = $("#lt-size").value;
-      $("#lt-grid").innerHTML = r.carriers.map((c) => `<div class="lt-card"><div class="row between"><b data-notr>${esc(c.name)}</b>
+      $("#lt-grid").innerHTML = r.carriers.map((c) => `<div class="lt-card"><div class="row between"><b ${c.id === "generic" ? "" : "data-notr"}>${esc(c.name)}</b>
           <a class="mini btn" target="_blank" href="/print/label-preview?carrier=${c.id}&size=${sz}">打开 / 测试打印</a></div>
         <div class="lt-fr"><iframe loading="lazy" src="/print/label-preview?carrier=${c.id}&size=${sz}" title="${esc(c.name)}"></iframe></div></div>`).join("");
     };

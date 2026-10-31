@@ -70,7 +70,7 @@
     let ext = null;
     try { ext = await api("/api/cs/extension/info"); } catch { ext = null; }
     box.innerHTML = `<table class="grid small sys-tbl"><tbody>${items.map((x) => `<tr class="st-${x.status}"><td class="nowrap">${ICON[x.status]} ${esc(x.name)}</td>
-        <td data-notr>${esc(x.detail)}</td><td>${x.fix ? `<span class="muted">怎么处理：</span>${esc(x.fix)}` : ""}
+        <td>${esc(x.detail)}</td><td>${x.fix ? `<span class="muted">怎么处理：</span>${esc(x.fix)}` : ""}
         ${x.action ? ` <button class="mini primary" data-sys-act="${esc(x.action)}">安装</button>` : ""}</td></tr>`).join("")}
       ${ext ? `<tr class="st-ok"><td class="nowrap">✅ 浏览器 AI 客服扩展</td><td>最新版本 ${esc(ext.latest)}${ext.in_use && ext.in_use.length ? " · 在用：" + ext.in_use.map((u) => `<span data-notr>${esc(u.name)}</span> ${esc(u.version || "?")}`).join("，") : ""}</td><td>下载和安装方法在下面</td></tr>` : ""}
       </tbody></table>`;
@@ -130,7 +130,7 @@
     r.items.forEach((x) => (groups[x.group] = groups[x.group] || []).push(x));
     $("#sys-items").innerHTML = Object.entries(groups).map(([g, xs]) => `<div class="card"><h3>${esc(g)}</h3>
       <table class="grid small sys-tbl"><tbody>${xs.map((x) => `<tr class="st-${x.status}"><td class="nowrap">${ICON[x.status]} ${esc(x.name)}</td>
-        <td data-notr>${esc(x.detail)}</td><td>${x.fix ? `<span class="muted">怎么处理：</span>${esc(x.fix)}` : ""}
+        <td>${esc(x.detail)}</td><td>${x.fix ? `<span class="muted">怎么处理：</span>${esc(x.fix)}` : ""}
         ${x.action ? ` <button class="mini primary" data-sys-act="${esc(x.action)}">安装</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`).join("");
   }
 

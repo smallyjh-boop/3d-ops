@@ -204,7 +204,7 @@
           <span class="gs-side small">${it.draft ? Z("草稿", "ฉบับร่าง") : it.active ? "" : `<span class="muted">${Z("已下架", "ปิดการขายแล้ว")}</span>`}</span></a>`;
       }
       return `<a href="#" class="gs-it" data-gs-i="${i}"><span class="gs-ic">💬</span><span class="gs-main"><b data-notr>${E(it.buyer || "#" + it.id)}</b>
-        <span class="small muted" data-notr>${E(PLAT(it.platform))}${it.order_no ? " · " + E(it.order_no) : ""}${it.summary ? " · " + E(it.summary) : ""}</span></span>
+        <span class="small muted" data-notr>${E(PLAT(it.platform))}${it.order_no ? " · " + E(it.order_no) : ""}${it.summary || it.summary_th ? " · " + E((TH() && it.summary_th) || it.summary) : ""}</span></span>
         <span class="gs-side small">${it.needs_human ? `<span class="warn">${Z("需人工", "ต้องตอบเอง")}</span><br>` : ""}<span class="muted">${it.updated_at ? fmtTime(it.updated_at).slice(5) : ""}</span></span></a>`;
     }).join("")}</div>`).join("");
     mark();

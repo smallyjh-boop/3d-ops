@@ -67,7 +67,8 @@ function renderFlow(base) {
 }
 function renderGroupsLW() {
   const all = PRODUCT_LIST.length, none = PRODUCT_LIST.filter((p) => !(p.groups || []).length).length;
-  const g = (id, name, n) => `<div class="grp ${LW.group === id && !LW.autoStage ? "on" : ""}" data-g="${id}"><span data-notr>${esc(name)}</span> <span class="muted">${n}</span></div>`;
+  // 自己建的分组名是原始数据（不翻译）；「全部产品」「未分组」是系统文字
+  const g = (id, name, n, sys) => `<div class="grp ${LW.group === id && !LW.autoStage ? "on" : ""}" data-g="${id}"><span ${sys ? "" : "data-notr"}>${esc(name)}</span> <span class="muted">${n}</span></div>`;
   // v2.44.1：按状态自动分组（推送、平台审核结果回来后自动换组，不用手动挪）
   const cnt = {};
   PRODUCT_LIST.forEach((p) => { const k = stageOf(p); cnt[k] = (cnt[k] || 0) + 1; });
@@ -75,7 +76,7 @@ function renderGroupsLW() {
   const a = (k, zh, n) => `<div class="grp ${LW.autoStage === k ? "on" : ""}" data-auto="${k}"><span>${zh}</span> <span class="muted">${n}</span></div>`;
   $("#lw-grp").innerHTML = `<div class="small muted lw-grp-h">按状态（自动）</div>` +
     LW_STAGES.map(([k, zh]) => a(k, zh, cnt[k] || 0)).join("") + a("issues", "需处理", issues) +
-    `<div class="small muted lw-grp-h">我的分组</div>` + g("", "全部产品", all) + g("none", "未分组", none) + EXP_GROUPS.map((x) => g(String(x.id), x.name, x.count)).join("");
+    `<div class="small muted lw-grp-h">我的分组</div>` + g("", "全部产品", all, 1) + g("none", "未分组", none, 1) + EXP_GROUPS.map((x) => g(String(x.id), x.name, x.count)).join("");
 }
 function renderExpList() {
   $("#exp-plat").value = LW.plat;

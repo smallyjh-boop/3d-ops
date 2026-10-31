@@ -234,11 +234,11 @@ Review this listing from two angles: (1) the BUYER - would a Thai shopper search
 variation names, Shopee hashtags, no keyword stuffing / repetition, no banned or IP words, title length well used.
 Be concrete: for each problem give a short fix and, when useful, the full improved text for that field (Thai for Thai fields).
 Never use brand / character / anime names or words about 3D printing / made to order. Never invent sizes or numbers.
-Write the explanations in Simplified Chinese (problem_zh, suggestion_zh) and Thai (problem_th). Output ONLY JSON."""
+Write the explanations in Simplified Chinese (problem_zh, suggestion_zh) and Thai (problem_th, suggestion_th). Output ONLY JSON."""
 
 
 def review(cfg, p):
-    """AI 打分 + 具体建议（每条可以一键采用）。返回 {score, summary_zh, summary_th, items: [{field, level, problem_zh, problem_th, suggestion_zh, new_value}]}。"""
+    """AI 打分 + 具体建议（每条可以一键采用）。返回 {score, summary_zh, summary_th, items: [{field, level, problem_zh, problem_th, suggestion_zh, suggestion_th, new_value}]}。"""
     import json as _json
     c = p.get("copy") or {}
     plan = p.get("keyword_plan") or {}
@@ -249,7 +249,7 @@ def review(cfg, p):
             "rule_checks_failed": [x["zh"] for x in score(p)["items"] if not x["ok"]]}
     user = (_json.dumps(info, ensure_ascii=False) + "\n\nReturn JSON: {\"score\": 0-100, \"summary_zh\": \"一两句总评\", \"summary_th\": \"...\", "
             "\"items\": [{\"field\": \"title_th|title_shopee_th|title_en|description_th|hashtags_shopee|package_content_th|variation1_name_th|variation2_name_th|other\", "
-            "\"level\": \"高|中|低\", \"problem_zh\": \"问题\", \"problem_th\": \"...\", \"suggestion_zh\": \"怎么改\", "
+            "\"level\": \"高|中|低\", \"problem_zh\": \"问题\", \"problem_th\": \"...\", \"suggestion_zh\": \"怎么改\", \"suggestion_th\": \"...\", "
             "\"new_value\": \"改好的完整内容（字段是 description_th 时用简单 HTML；只是建议、不好直接替换时留空）\"}]} — at most 8 items, most important first.")
     d = ai_copy.extract_json(ai_copy.call(cfg, REVIEW_SYSTEM, user))
     ok_fields = {"title_th", "title_shopee_th", "title_en", "description_th", "hashtags_shopee", "package_content_th",
@@ -266,7 +266,7 @@ def review(cfg, p):
             nv = nv[:SHOPEE_MAX]
         items.append({"field": f, "label": LABELS.get(f, "其他"), "level": x.get("level") if x.get("level") in ("高", "中", "低") else "中",
                       "problem_zh": str(x.get("problem_zh") or "")[:300], "problem_th": str(x.get("problem_th") or "")[:300],
-                      "suggestion_zh": str(x.get("suggestion_zh") or "")[:400], "new_value": nv if f != "other" else ""})
+                      "suggestion_zh": str(x.get("suggestion_zh") or "")[:400], "suggestion_th": str(x.get("suggestion_th") or "")[:400], "new_value": nv if f != "other" else ""})
     try:
         sc = max(0, min(100, int(float(d.get("score") or 0))))
     except (TypeError, ValueError):
