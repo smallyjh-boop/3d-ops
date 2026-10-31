@@ -35,3 +35,4 @@
 - 1.9（系统 v2.44.1）：推送时详情后面接产品图（lazada_push.desc_images：desc_images 或前 3 张）；工作台「按状态（自动）」分组。
 - 2.0（系统 v2.46.0）：详情里自己插的图片推送时换成 Lazada 图片空间的网址（desc_img_urls：本系统产品图上传、外站图 migrate、Lazada 的不动、换不了的去掉），有图片就不再自动接图。测试 tests/t_desc246.py。
 - 2.1（系统 v2.47.0）：public 加 online_skus()（每个 SellerSku 在哪些店铺、平台状态、建品时间、实际售价）、online_item_ids()、online_item_names()，给运营分析模块（商品生命周期、售价低于最低价、按商品拉评价）用。测试 modules/ops/tests/t_ops246.py。
+- 2.1+：`public.product_online(产品编号, SKU 列表)`：一个产品在各店铺的在线商品（商品 360 抽屉用）；工作台 / 在线商品 / 库存待同步的产品编号、SKU 带 `data-p360`（点开商品 360）。

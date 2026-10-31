@@ -71,7 +71,7 @@
     const head = `<tr><th>编码</th><th>名称</th>${CAT ? "" : "<th>分类</th>"}${has("brand") ? "<th>品牌 / 规格</th>" : ""}<th>库存</th>
       ${has("transit") ? "<th>在途</th>" : ""}${has("reorder") ? "<th>补货线</th>" : ""}${has("cost") ? "<th>平均单价</th>" : ""}${has("value") ? "<th>金额</th>" : ""}
       ${has("loc") ? "<th>货位</th>" : ""}${catalog ? "<th>状态</th>" : ""}<th></th></tr>`;
-    const row = (it) => `<tr class="${it.low ? "inv-low" : ""} ${it.active ? "" : "muted"}"><td class="mono" data-notr>${esc(it.code)}</td>
+    const row = (it) => `<tr class="${it.low ? "inv-low" : ""} ${it.active ? "" : "muted"}"><td class="mono" data-notr${it.category === "goods" ? ` data-p360="${esc(it.code)}"` : ""}>${esc(it.code)}</td>
         <td data-notr>${it.category === "filament" ? `<span class="sw" style="background:${esc(colorHex(it.color))}"></span>` : ""}${esc(itName(it))}</td>
         ${CAT ? "" : `<td>${esc(catName(it.category))}</td>`}${has("brand") ? `<td class="muted" data-notr>${esc([it.brand, it.spec].filter(Boolean).join(" · "))}</td>` : ""}
         <td class="nowrap">${qtyText(it)}${it.low ? ' <span class="bad">⚠</span>' : ""}</td>

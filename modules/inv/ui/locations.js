@@ -186,7 +186,7 @@
       .sort((a, b) => (a.location ? 1 : 0) - (b.location ? 1 : 0) || String(a.code).localeCompare(String(b.code)));
     const m = MODAL.open(`<h3>货位 <span class="mono" data-notr>${esc(L.code)}</span> <span class="small" data-notr>${esc(human(L.code))}</span> <span class="muted small" data-notr>${esc(L.note || "")}</span></h3>
       ${d.items.length ? `<table class="grid small"><thead><tr><th>编码</th><th>名称</th><th>库存</th><th></th><th>换到</th></tr></thead><tbody>
-        ${d.items.map((it) => `<tr data-iid="${it.id}" class="${it.low ? "inv-low" : ""}"><td class="mono" data-notr>${esc(it.code)}</td><td data-notr>${esc(itName(it))}</td>
+        ${d.items.map((it) => `<tr data-iid="${it.id}" class="${it.low ? "inv-low" : ""}"><td class="mono" data-notr${it.category === "goods" ? ` data-p360="${esc(it.code)}"` : ""}>${esc(it.code)}</td><td data-notr>${esc(itName(it))}</td>
           <td class="nowrap"><b>${num(it.qty)}</b> <span data-notr>${esc(uLab(it.unit))}</span>${it.low ? ' <span class="bad">⚠</span>' : ""}</td>
           <td class="nowrap">${can("inv.in") ? '<button class="mini" data-dk="purchase">＋ 入库</button>' : ""}${can("inv.out") ? '<button class="mini" data-dk="issue">− 出库</button>' : ""}</td>
           <td class="nowrap">${can("inv.in") ? `<select data-to class="loc-to" data-notr>${locOpts(L.code, Z("拿下来（没有货位）", "เอาออก (ไม่มีช่องเก็บ)"))}</select><button class="mini" data-mv>${Z("换", "ย้าย")}</button>` : ""}</td></tr>`).join("")}</tbody></table>`

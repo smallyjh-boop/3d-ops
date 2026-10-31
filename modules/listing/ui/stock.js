@@ -15,7 +15,7 @@
         <button class="mini primary-lite" id="stk-mark-sel">${TR("stk.mark_sel")}</button><button class="mini" id="stk-mark-all">${TR("stk.mark_all")}</button></div>
       <table class="grid small"><thead><tr><th><input type="checkbox" id="stk-all"></th><th>SKU</th><th>${TR("stk.h.product")}</th><th>${TR("stk.h.color")}</th><th>${TR("stk.h.spec")}</th>
         <th>${TR("stk.h.last")}</th><th>${TR("stk.h.now")}</th><th>${TR("stk.h.why")}</th></tr></thead><tbody>` +
-      items.map((x) => `<tr><td><input type="checkbox" data-sku="${esc(x.sku)}"></td><td class="mono" data-notr>${esc(x.sku)}</td>
+      items.map((x) => `<tr><td><input type="checkbox" data-sku="${esc(x.sku)}"></td><td class="mono" data-notr data-p360="${esc(x.sku)}">${esc(x.sku)}</td>
         <td data-notr>${esc(x.product_id)} ${esc(x.name)}</td><td data-notr>${esc(typeof colorLabel === "function" ? colorLabel(x.color) : x.color)}</td><td data-notr>${esc(x.spec)}</td>
         <td>${x.last == null ? `<span class="muted">${TR("stk.no_record")}</span>` : x.last}</td>
         <td><b class="${x.stock === 0 ? "bad" : ""}">${x.stock}</b></td><td class="muted">${esc(window.stockWhy ? window.stockWhy(x) : x.reason)}</td></tr>`).join("") +

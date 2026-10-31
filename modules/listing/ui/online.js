@@ -42,14 +42,14 @@
       it.url ? `<a class="btn mini-btn" href="${esc(it.url)}" target="_blank" rel="noopener">看商品页 ↗</a>` : "",
     ].join("");
     const skus = OL.open.has(key) ? `<tr class="lw-iss-row"><td></td><td colspan="7"><table class="grid small ol-skus" data-key="${esc(key)}"><thead><tr><th>SKU</th><th>原价</th><th>促销价</th><th>库存</th><th></th></tr></thead><tbody>` +
-      it.skus.map((s) => `<tr data-sku="${esc(s.seller_sku)}"><td class="mono" data-notr>${esc(s.seller_sku)}</td>
+      it.skus.map((s) => `<tr data-sku="${esc(s.seller_sku)}"><td class="mono" data-notr${it.product_id ? ` data-p360="${esc(s.seller_sku)}"` : ""}>${esc(s.seller_sku)}</td>
         <td><input type="number" step="0.01" min="0" data-f="price" value="${s.price ?? ""}" style="width:90px"></td>
         <td><input type="number" step="0.01" min="0" data-f="special_price" value="${s.special_price ?? ""}" style="width:90px" placeholder="无"></td>
         <td><input type="number" step="1" min="0" data-f="qty" value="${s.qty ?? ""}" style="width:70px"></td>
         <td><button class="mini primary" data-save="1">保存到平台</button></td></tr>`).join("") + "</tbody></table></td></tr>" : "";
     return `<tr><td>${it.image ? `<img class="thumb" src="${esc(it.image)}" alt="" loading="lazy">` : ""}</td>
       <td class="lib-name"><div class="clamp2" data-notr title="${esc(it.name)}">${esc(it.name)}</div>
-        <div class="small">${it.product_id ? `<span class="pill tag-pill" data-notr>${esc(it.product_id)}</span>` : '<span class="pill warn-pill">没对上 ERP</span>'}
+        <div class="small">${it.product_id ? `<span class="pill tag-pill" data-notr data-p360="${esc(it.product_id)}">${esc(it.product_id)}</span>` : '<span class="pill warn-pill">没对上 ERP</span>'}
         <span class="muted mono" data-notr>${esc(it.item_id)}</span> · ${it.skus.length} SKU</div></td>
       <td class="small" data-notr>${esc(it.shop)}</td>
       <td><span class="lst lst-${esc(it.status)}">${esc(STZ[it.status] || it.raw_status || "")}</span>${it.reason ? `<div class="small bad clamp2" data-notr title="${esc(it.reason)}">${esc(it.reason)}</div>` : ""}</td>

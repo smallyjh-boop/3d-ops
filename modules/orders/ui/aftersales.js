@@ -171,7 +171,7 @@
           ${a.inspect_note ? ` · <span data-notr>${esc(a.inspect_note)}</span>` : ""}</p>`
         : canInspect ? `<p class="small muted">包裹退回来后逐个检查：完好能再卖的「入库」（加到成品库存），坏了的「报废」（按生产成本记损失）。拒收件验完会自动关闭。</p>
           <table class="grid small"><thead><tr><th>SKU</th><th>商品</th><th>原数量</th><th>入库</th><th>报废</th></tr></thead><tbody>
-          ${a.items.map((i) => `<tr><td class="mono" data-notr>${esc(i.sku)}</td><td data-notr>${esc(i.name || "")} ${H().colorTxt(i.color)}</td><td>${i.qty}</td>
+          ${a.items.map((i) => `<tr><td class="mono" data-notr${i.sku ? ` data-p360="${esc(i.sku)}"` : ""}>${esc(i.sku)}</td><td data-notr>${esc(i.name || "")} ${H().colorTxt(i.color)}</td><td>${i.qty}</td>
             <td><input type="number" min="0" max="${i.qty}" value="${i.qty}" data-rs="${i.id}" style="width:64px"></td>
             <td><input type="number" min="0" max="${i.qty}" value="0" data-sc="${i.id}" style="width:64px"></td></tr>`).join("")}</tbody></table>
           <label>验货说明<input id="asx-inote" data-notr></label><button id="asx-inspect">✔ 验货完成</button>`

@@ -56,7 +56,7 @@ function renderLibrary() {
     <tr class="clickable ${LIB_SEL.has(p.id) ? "sel" : ""}" data-id="${esc(p.id)}">
       <td><input type="checkbox" data-lsel="${esc(p.id)}" ${LIB_SEL.has(p.id) ? "checked" : ""}></td>
       <td>${p.thumb ? `<img class="thumb" src="${esc(p.thumb)}" alt="" loading="lazy">` : ""}</td>
-      <td><b data-notr>${esc(p.id)}</b>${p.exported ? ' <span class="muted small" title="已导出过，SKU 已锁定">🔒</span>' : ""}
+      <td><b data-notr data-p360="${esc(p.id)}">${esc(p.id)}</b>${p.exported ? ' <span class="muted small" title="已导出过，SKU 已锁定">🔒</span>' : ""}
         ${p.draft ? '<div><span class="pill warn-pill" title="选品工具推过来的，填好颜色、核对售价后再导出">草稿·待完善</span></div>' : p.from_curator ? '<div class="small muted">来自选品工具</div>' : ""}</td>
       <td class="lib-name"><span data-notr>${esc(p.name_zh)}</span>${window.SEO ? SEO.badge(p) : ""}${p.title_th ? `<div class="small muted clamp2" data-notr title="${esc(p.title_th)}">${esc(p.title_th)}</div>` : ""}</td>
       <td>${(p.groups || []).map((g) => gname[g] ? `<span class="pill tag-pill" data-notr>${esc(gname[g])}</span>` : "").join(" ")}
@@ -167,7 +167,7 @@ async function openProduct(id, edit = false) {
 function skuCell(p) {
   const skus = (p.skus || []).filter(Boolean);
   const cols = [...new Set((p.colors || []).filter(Boolean))];
-  const one = (x) => `<div class="mono nowrap" data-notr>${esc(x)}</div>`;
+  const one = (x) => `<div class="mono nowrap" data-notr><span data-p360="${esc(x)}">${esc(x)}</span></div>`;
   if (skus.length <= 3) return skus.map(one).join("");
   const colTxt = cols.length ? ` · ${cols.slice(0, 4).map((c) => esc(typeof colorLabel === "function" ? colorLabel(c) : c)).join(" / ")}${cols.length > 4 ? " …" : ""}` : "";
   return `<div class="nowrap"><b>${skus.length}</b> 个 SKU<span class="muted">${colTxt}</span></div>${skus.slice(0, 2).map(one).join("")}

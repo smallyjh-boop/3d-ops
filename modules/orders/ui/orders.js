@@ -37,7 +37,7 @@
     fill("#ord-tag", r.tags, "全部标签");
     fill("#ord-carrier", r.carriers || [], "全部物流");
     $("#ord-table tbody").innerHTML = r.orders.map((o) => {
-      const items = o.items.map((i) => `<div class="${i.product_id ? "" : "bad"}"><span class="mono" data-notr>${esc(i.sku || "?")}</span> ×${i.qty} ${colorTxt(i.color)}</div>`).join("");
+      const items = o.items.map((i) => `<div class="${i.product_id ? "" : "bad"}"><span class="mono" data-notr${i.product_id ? ` data-p360="${esc(i.sku)}"` : ""}>${esc(i.sku || "?")}</span> ×${i.qty} ${colorTxt(i.color)}</div>`).join("");
       const notes = (o.custom_note ? `<div class="note-flag" data-notr>✎ ${esc(o.custom_note)}</div>` : "") +
         (o.buyer_note ? `<div class="small muted" data-notr>💬 ${esc(o.buyer_note)}</div>` : "");
       const tags = (o.tags || "").split(",").filter(Boolean).map((t) => `<span class="pill tag-pill" data-notr>${esc(t)}</span>`).join(" ");
@@ -536,7 +536,7 @@
       ${o.buyer_note ? `<p class="small">买家留言：<b data-notr>${esc(o.buyer_note)}</b></p>` : ""}
       ${o.seller_note ? `<p class="small">卖家备注：<span data-notr>${esc(o.seller_note)}</span></p>` : ""}
       <table class="grid small"><thead><tr><th>SKU</th><th>商品</th><th>颜色</th><th>数量</th><th class="c-final">金额</th><th>克数/时长</th></tr></thead><tbody>
-      ${o.items.map((i) => `<tr><td class="mono" data-notr>${esc(i.sku)}</td><td data-notr>${esc(i.name || "")}${i.variation ? ` <span class="muted">(${esc(i.variation)})</span>` : ""}</td>
+      ${o.items.map((i) => `<tr><td class="mono" data-notr${i.product_id ? ` data-p360="${esc(i.sku)}"` : ""}>${esc(i.sku)}</td><td data-notr>${esc(i.name || "")}${i.variation ? ` <span class="muted">(${esc(i.variation)})</span>` : ""}</td>
         <td>${colorTxt(i.color)}</td><td>${i.qty}</td><td class="c-final">${money(i.item_total)}</td>
         <td>${i.product_id ? (i.grams ? `${num(i.grams, 1)}g / ${num(i.hours)}h` : '<span class="warn">缺克数，请切片</span>') : '<span class="bad">没对上产品</span>'}</td></tr>`).join("")}
       </tbody></table>
@@ -574,7 +574,7 @@
       </div>
       <h4>生产任务</h4>
       ${o.jobs.length ? `<table class="grid small od-jobs"><thead><tr><th>#</th><th>SKU</th><th>颜色</th><th>数量</th><th>已打盘数</th><th>打印机</th><th>状态</th><th>预计完成</th></tr></thead><tbody>
-        ${o.jobs.map((j) => `<tr><td>${j.id}</td><td class="mono" data-notr>${esc(j.sku)}</td><td>${colorTxt(j.color)}</td><td>${j.qty}</td><td>${j.plates_done || 0}</td>
+        ${o.jobs.map((j) => `<tr><td>${j.id}</td><td class="mono" data-notr${j.sku ? ` data-p360="${esc(j.sku)}"` : ""}>${esc(j.sku)}</td><td>${colorTxt(j.color)}</td><td>${j.qty}</td><td>${j.plates_done || 0}</td>
           <td data-notr>${esc(printerName(j.printer))}</td><td><span class="jst jst-${j.status}">${esc(JOB_ZH[j.status] || j.status)}</span>${j.fails ? ` <span class="bad small">失败 ${j.fails} 次</span>` : ""}${j.stock_n ? ` <span class="pill tag-pill">📦 ${(window.I18N && I18N.lang === "th") ? "ใช้สต็อก" : "用库存"} ×${j.stock_n}</span>` : ""}</td>
           <td class="small">${j.status === "todo" || j.status === "printing" ? short(j.planned_end) : ""}</td></tr>` +
           (jobActs(j) ? `<tr class="od-job-acts"><td></td><td colspan="7"><div class="row gap wrap">${jobActs(j)}</div></td></tr>` : "")).join("")}</tbody></table>
@@ -667,7 +667,7 @@
     const rate = (p, rv) => (rv ? (p / rv * 100).toFixed(1) + "%" : "-");
     $("#pf-plat tbody").innerHTML = r.platforms.map((p) => `<tr><td>${esc(PLAT[p.platform] || p.platform)}</td><td>${p.orders}</td>
       <td>${money(p.revenue)}</td><td>${money(p.profit)}</td><td>${rate(p.profit, p.revenue)}</td></tr>`).join("");
-    $("#pf-sku tbody").innerHTML = r.skus.map((s) => `<tr><td class="mono" data-notr>${esc(s.sku)}</td><td data-notr>${esc(s.name)}</td>
+    $("#pf-sku tbody").innerHTML = r.skus.map((s) => `<tr><td class="mono" data-notr data-p360="${esc(s.sku)}">${esc(s.sku)}</td><td data-notr>${esc(s.name)}</td>
       <td>${s.qty}</td><td>${money(s.revenue)}</td><td class="${s.profit < 0 ? "bad" : ""}">${money(s.profit)}</td><td>${rate(s.profit, s.revenue)}</td></tr>`).join("");
     if (!window.MODKIT || MODKIT.enabled("fin")) loadExpenses().catch(() => {});   // v2.30：其他支出属于财务模块
   }
