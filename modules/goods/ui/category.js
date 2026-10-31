@@ -68,7 +68,7 @@ function renderAttrs() {
     let input;
     if (f.options.length) {
       const has = !a.value || f.options.includes(a.value);
-      input = `<select data-attr="${esc(f.key)}"><option value="">（留空）</option>` +
+      input = `<select data-attr="${esc(f.key)}" data-i18n-ok><option value="">（留空）</option>` +  // 选项是 Lazada 的泰文原值
         (has ? "" : `<option selected>${esc(a.value)}</option>`) +
         f.options.map((o) => `<option ${o === a.value ? "selected" : ""}>${esc(o)}</option>`).join("") + "</select>";
     } else {
