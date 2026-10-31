@@ -64,7 +64,8 @@ def conv_new():
 @bp.get("/api/cs/convs/<int:cid>")
 @_wrap
 def conv_get(cid):
-    data.update_conv(cid, unread=0)
+    from . import chat
+    chat.mark_read(cid)          # v2.49：打开会话 = 清未读，Lazada 上也标已读（后台做，不拖慢打开）
     return jsonify(service.conv_full(cid))
 
 
@@ -195,12 +196,13 @@ def leads():
 @_wrap
 def weekly():
     from . import report
+    lang = "th" if request.args.get("lang") == "th" else "zh"      # v2.49：按界面语言出周报
     if request.args.get("last") == "1":
         r = report.last()
         if r:
-            return jsonify(dict(r, text=report.as_text(r)))
+            return jsonify(dict(r, text=report.as_text(r, lang)))
     r = report.weekly(with_ai=request.args.get("ai") == "1")
-    return jsonify(dict(r, text=report.as_text(r)))
+    return jsonify(dict(r, text=report.as_text(r, lang)))
 
 
 @bp.post("/api/cs/weekly/send")
@@ -230,7 +232,10 @@ def mail_test():
 @bp.get("/api/cs/kb")
 @_wrap
 def kb():
-    return jsonify({"kb": [k for k in data.kb_list() if (k.get("status") or "active") != "pending"], "examples": data.examples(200),
+    kb_rows = [k for k in data.kb_list() if (k.get("status") or "active") != "pending"]
+    for k in kb_rows:                  # v2.49：回答里还有「生产 / 打印」这类不能对买家说的词
+        k["prod_hit"] = brain.production_hit(k.get("a") or "")
+    return jsonify({"kb": kb_rows, "examples": data.examples(200),
                     "settings": data.public_settings(), "intents": brain.INTENTS, "presets_missing": data.presets_missing(),
                     "tiers": data.tiers(), "tier_names": data.TIER_NAMES, "pending": data.kb_pending(), "unanswered": data.unanswered()})
 
@@ -438,10 +443,20 @@ def x_capture():
             n = service.add_messages(c["id"], b.get("messages") or [], "extension", _u(), replace_tail=True)
     c = data.get_conv(c["id"])
     msgs = data.messages(c["id"])
+    from . import notice
+    if c.get("kind") != notice.KIND and notice.conv_is_system(c, msgs):      # v2.49：平台通知 / 官方账号
+        notice.mark(c["id"])
+        c = data.get_conv(c["id"])
+    if c.get("kind") == notice.KIND:
+        out = service.conv_full(c["id"])
+        out.update(added=n, drafted=False, auto={"ok": False, "reason": "平台通知，不回复"})
+        return jsonify(out)
     last = next((m for m in reversed(msgs) if m["role"] in ("buyer", "seller")), None)
     if n and last and last["role"] == "buyer":
         from . import chat
         chat.auto_tags(c["id"], last["text"])         # v2.46：询价 / 催单 / 售后 / 定制 / 闲聊
+        from . import jobs
+        jobs.enqueue("tr", c["id"], delay=1)          # v2.49：买家的话翻成中文
     need_draft = last and last["role"] == "buyer" and (n > 0 or not c.get("draft")) and b.get("draft", True)
     if need_draft:
         out = service.make_draft(c["id"], "", _u())

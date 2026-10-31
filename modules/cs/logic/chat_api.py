@@ -55,10 +55,14 @@ def cs_inbox():
                            shop=a.get("shop", ""), shops=sh, mine=mine)
     if st == "unreplied":
         rows = [c for c in rows if (c.get("last") or {}).get("role") == "buyer"]
-    # 排序：需人工 → 等得最久的未回复 → 其它按时间
-    rows.sort(key=lambda c: (0 if c.get("needs_human") and c["status"] != "closed" else 1,
-                             0 if (c.get("last") or {}).get("role") == "buyer" and c["status"] == "open" else 1,
-                             -(c.get("wait_min") or 0) if (c.get("last") or {}).get("role") == "buyer" else 0, -(c.get("updated_at") or 0)))
+        rows.sort(key=lambda c: -(c.get("wait_min") or 0))           # v2.49：未回复 = 等得最久的在最上面
+    elif st == "system":
+        rows.sort(key=lambda c: (0 if c.get("unread") else 1, -(c.get("updated_at") or 0)))
+    else:
+        # 排序：需人工 → 等得最久的未回复 → 其它按时间
+        rows.sort(key=lambda c: (0 if c.get("needs_human") and c["status"] != "closed" else 1,
+                                 0 if (c.get("last") or {}).get("role") == "buyer" and c["status"] == "open" else 1,
+                                 -(c.get("wait_min") or 0) if (c.get("last") or {}).get("role") == "buyer" else 0, -(c.get("updated_at") or 0)))
     for c in rows:
         c["ai_mode"] = shopcfg.mode_of(c)
         c.pop("draft_zh", None)
@@ -66,7 +70,8 @@ def cs_inbox():
     st_all = data.list_convs("active", limit=1000, shops=sh)
     counts = {"active": len(st_all), "unreplied": sum(1 for c in st_all if (c.get("last") or {}).get("role") == "buyer" and c["status"] == "open"),
               "human": sum(1 for c in st_all if c.get("needs_human")), "taken": sum(1 for c in st_all if c.get("mode") == "human"),
-              "mine": sum(1 for c in st_all if _u() in (c.get("assigned"), c.get("taken_by")))}
+              "mine": sum(1 for c in st_all if _u() in (c.get("assigned"), c.get("taken_by"))),
+              "system": sum(1 for c in data.list_convs("system", limit=1000, shops=sh) if c.get("unread"))}   # v2.49：没读的平台通知
     unread = sum(int(c.get("unread") or 0) for c in st_all)
     return jsonify({"convs": rows, "counts": counts, "unread": unread, "newest_buyer": max([c.get("last_buyer_at") or 0 for c in st_all] or [0]),
                     "shops": sh if sh is not None else crm.known_shops(), "agents": _agents(), "me": _u(),
@@ -156,16 +161,23 @@ def cs_assign(cid):
 @bp.post("/api/cs/convs/<int:cid>/read")
 @_wrap
 def cs_read(cid):
-    c = _conv_ok(cid)
-    data.update_conv(cid, unread=0)
-    try:
-        from . import channels
-        ch = channels.of(c)
-        if ch and c.get("unread"):
-            ch.mark_read(c)
-    except Exception:  # noqa: BLE001  平台标已读失败不要紧
-        pass
-    return jsonify({"ok": True})
+    _conv_ok(cid)
+    return jsonify({"ok": True, "platform": chat.mark_read(cid, background=False)})
+
+
+@bp.post("/api/cs/notices/read")
+@_wrap
+def cs_notices_read():
+    """v2.49：平台通知全部标已读（Lazada 上也标）。"""
+    return jsonify({"ok": True, "n": chat.read_all_notices(crm.allowed(g.get("user")))})
+
+
+@bp.get("/api/cs/convs/<int:cid>/suggest")
+@_wrap
+def cs_suggest(cid):
+    """v2.49：买家提到的产品 → 1–3 个可以发的商品卡片。"""
+    _conv_ok(cid)
+    return jsonify({"items": service.suggest_products(cid)})
 
 
 @bp.post("/api/cs/convs/<int:cid>/discard")

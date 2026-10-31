@@ -45,7 +45,49 @@ def conv_full(cid):
     c["can_send"] = channels.of(c) is not None
     c["ai_mode"] = shopcfg.mode_of(c)
     c["shop_mode"] = shopcfg.get(c.get("shop") or "")["mode"]
+    if c.get("kind") == "system":             # v2.49：平台通知只读
+        c["can_send"] = False
+        c["suggestions"] = []
     return c
+
+
+def suggest_products(cid, n=3):
+    """买家提到了某个产品（名字、编号、SKU、发来的商品卡片）：推荐 1–3 个可以发的商品卡片（v2.49）。"""
+    msgs = [m for m in data.messages(cid, 20) if m["role"] == "buyer"][-6:]
+    if not msgs:
+        return []
+    text = " ".join(m["text"] for m in msgs if (m.get("kind") or "text") == "text")
+    item_ids = {str((m.get("extra") or {}).get("item_id")) for m in msgs if m.get("kind") == "item" and (m.get("extra") or {}).get("item_id")}
+    try:
+        ps = erp_link.products()
+    except Exception:  # noqa: BLE001
+        return []
+    up = text.upper()
+    scored = []
+    for p in ps:
+        hay = " ".join([p["id"], p["name_zh"], p["title_th"], p["title_en"], p.get("keywords") or ""])
+        sc = brain.sim(text, hay) if text.strip() else 0
+        if p["id"].upper() in up or any((v.get("sku") or "").upper() in up for v in p["variants"] if v.get("sku")):
+            sc += 5
+        scored.append((sc, p))
+    scored.sort(key=lambda x: -x[0])
+    out = []
+    for sc, p in scored:
+        if len(out) >= n or sc < 0.18:
+            break
+        try:
+            out.append(dict(erp_link.product_card(p["id"]), score=round(sc, 2)))
+        except Exception:  # noqa: BLE001
+            continue
+    if item_ids:          # 买家发来的商品卡片对应的产品排最前
+        for p in ps:
+            try:
+                card = erp_link.product_card(p["id"])
+            except Exception:  # noqa: BLE001
+                continue
+            if str(card.get("lazada_item_id")) in item_ids and all(x["id"] != card["id"] for x in out):
+                out.insert(0, dict(card, score=9))
+    return out[:n]
 
 
 def suggestions(c):
@@ -55,19 +97,21 @@ def suggestions(c):
     o = c.get("order")
     if a.get("custom_request_zh"):
         txt = a["custom_request_zh"] + (f"｜{a['custom_request_th']}" if a.get("custom_request_th") else "")
-        out.append({"type": "custom_note", "label": "把定制要求写进订单（生产工单会显示）", "text": txt, "need_order": not o})
+        out.append({"type": "custom_note", "label": "把定制要求写进订单（生产工单会显示）", "label_th": "บันทึกรายละเอียดสั่งทำลงคำสั่งซื้อ", "text": txt, "need_order": not o})
     if a.get("order_note_zh"):
-        out.append({"type": "seller_note", "label": "记到订单的卖家备注", "text": a["order_note_zh"], "need_order": not o})
+        out.append({"type": "seller_note", "label": "记到订单的卖家备注", "label_th": "บันทึกเป็นโน้ตผู้ขายในคำสั่งซื้อ", "text": a["order_note_zh"], "need_order": not o})
     q = a.get("quote")
     if q and q.get("lines"):
         out.append({"type": "quote", "label": f"生成报价单（{q['total_qty']} 个，合计 {q['total']} 铢，约 {q['ship_days']} 天发货）",
+                    "label_th": f"สร้างใบเสนอราคา ({q['total_qty']} ชิ้น รวม {q['total']} บาท ส่งประมาณ {q['ship_days']} วัน)",
                     "items": [{"sku": x["sku"], "qty": x["qty"], "unit_price": x["unit_price"]} for x in q["lines"]]})
     if a.get("intent") in ("complaint", "refund") and o:
-        out.append({"type": "aftersales", "label": "去订单登记售后（退款 / 补发）", "order_id": o["id"]})
+        out.append({"type": "aftersales", "label": "去订单登记售后（退款 / 补发）", "label_th": "ไปบันทึกหลังการขายที่คำสั่งซื้อ", "order_id": o["id"]})
     if a.get("intent") == "order_status" and o and o.get("status") == "to_ship" and not o.get("priority"):
-        out.append({"type": "priority", "label": "买家在催：把订单设为加急"})
+        out.append({"type": "priority", "label": "买家在催：把订单设为加急", "label_th": "ลูกค้าเร่ง: ตั้งคำสั่งซื้อเป็นด่วน"})
     if o and o.get("status") == "quote":
-        out.append({"type": "quote_confirm", "label": f"买家确认了：把报价单 {o['order_no']} 转成正式订单（开始排产）", "order_id": o["id"]})
+        out.append({"type": "quote_confirm", "label": f"买家确认了：把报价单 {o['order_no']} 转成正式订单（开始排产）",
+                    "label_th": f"ลูกค้ายืนยันแล้ว: เปลี่ยนใบเสนอราคา {o['order_no']} เป็นคำสั่งซื้อ", "order_id": o["id"]})
     return out
 
 
@@ -159,6 +203,8 @@ def add_messages(cid, msgs, source="paste", user="", replace_tail=False):
 
 def make_draft(cid, instruction="", user=""):
     c = data.get_conv(cid)
+    if c and c.get("kind") == "system":
+        raise ValueError("这是平台通知，不用回复")
     msgs = data.messages(cid)
     if not any(m["role"] == "buyer" for m in msgs):
         raise ValueError("还没有买家消息")
@@ -385,8 +431,12 @@ def auto_decision(c):
     from . import shopcfg
     if shopcfg.get(c.get("shop") or "")["mode"] == "off":
         return {"ok": False, "reason": "这个店铺设置为只人工回复"}
+    if c.get("kind") == "system":
+        return {"ok": False, "reason": "平台通知，不回复"}
     if not c.get("draft"):
         return {"ok": False, "reason": "没有回复草稿"}
+    if brain.production_hit(c.get("draft") or ""):          # v2.49：提到生产 / 打印的不能自动发
+        return {"ok": False, "reason": f"回复里提到了生产 / 打印（{brain.production_hit(c['draft'])}），请改一下再发"}
     if c.get("needs_human"):
         return {"ok": False, "reason": "需要人工：" + (c.get("human_reason") or "")}
     tier = data.tiers(s).get(a.get("intent"), "confirm")

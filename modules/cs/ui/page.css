@@ -1,5 +1,5 @@
 /* v2.46 客服聊天三栏 + 客服工作台 */
-.cs3{display:grid;grid-template-columns:300px minmax(0,1fr) 300px;gap:10px;height:calc(100vh - 160px);min-height:520px}
+.cs3{display:grid;grid-template-columns:270px minmax(0,1fr) 290px;gap:10px;height:calc(100vh - 160px);min-height:520px}
 .cs3>.card{margin:0;min-height:0}
 .cs3-list{display:flex;flex-direction:column;gap:6px;padding:10px}
 .cs3-list #cs-items{gap:2px}
@@ -54,3 +54,78 @@
 .csd-mode{display:flex;gap:2px}.csd-mode button{font-size:12px;padding:2px 8px;border:1px solid var(--line);background:#fff;cursor:pointer}
 .csd-mode button.on{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
 .csd-mode button:first-child{border-radius:6px 0 0 6px}.csd-mode button:last-child{border-radius:0 6px 6px 0}
+/* v2.49 聊天页效率：不横向滚动、一行头部、图标工具条、/ 快捷回复、连续处理、平台通知、右边订单 / 推荐商品 */
+.cs3-chat .cs-msgs{overflow-x:hidden;overflow-y:auto}
+.cs3 .cs-bubble,.cs3 .cs-dtext,.cs3 .cs-last,.cs3-side{overflow-wrap:anywhere;word-break:break-word;min-width:0}
+.cs3 .cs-msg{min-width:0}
+.cs-text a,.cs-dtext a{color:#1d4ed8;text-decoration:underline}
+.cs-himg{display:block;max-width:min(320px,100%);height:auto;border-radius:8px;margin:2px 0}
+.cs3-chat .cs-head{flex-wrap:nowrap;gap:8px;padding:6px 10px;min-height:44px}
+.cs3-chat .cs-head .cs-av{flex:0 0 32px;width:32px;height:32px;font-size:13px}
+.cs-hmain{flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden;white-space:nowrap}
+.cs-hmain .cs-name{font-size:15px;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.cs-hmain .pill{flex:0 0 auto}.cs-hmain input,.cs-hmain select{padding:3px 6px;font-size:13px}
+.cs-chst .ux-dot{font-size:12px}
+.cs-hbtn{display:flex;gap:4px;align-items:center;flex:0 0 auto}
+.cs-hbtn .mini{padding:3px 8px}
+.cs-assign{width:92px;font-size:12px;padding:3px 4px}
+.cs-hint{margin:4px 10px 0;padding:4px 8px;border-radius:6px;background:#fef2f2;color:#991b1b;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;gap:6px;align-items:center}
+.cs-hint span{overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}.cs-hint .linkbtn{flex:0 0 auto}
+.cs3-chat .cs-summary{margin:4px 10px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cs-comp{padding:6px 10px}
+.cs-tools{display:flex;align-items:center;gap:2px;margin-bottom:4px;flex-wrap:nowrap}
+.cs-ib{min-width:30px;height:28px;padding:0 6px;border:1px solid transparent;background:transparent;border-radius:6px;cursor:pointer;font-size:15px;line-height:26px;display:inline-flex;align-items:center;justify-content:center}
+.cs-ib:hover{background:#eef2ff;border-color:#c7d2fe}.cs-ib.on{background:#1d4ed8;color:#fff}
+.cs-ib[data-cs="tr"]{font-size:12px;color:#475569}
+.cs-tsp{flex:1}
+.cs-aiw{position:relative;display:inline-flex}
+.cs-pop{position:absolute;bottom:34px;left:0;z-index:20;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px #0002;padding:8px;display:flex;gap:6px;width:min(420px,70vw)}
+.cs-pop input{flex:1;min-width:0}
+.cs-send{position:relative}
+.cs-send textarea{min-height:56px}
+.cs-slash{position:absolute;left:0;right:90px;bottom:100%;margin-bottom:4px;z-index:20;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px #0002;max-height:240px;overflow:auto}
+.cs-sl{padding:6px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #f1f5f9}
+.cs-sl.on,.cs-sl:hover{background:#eff6ff}
+.cs-flowbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:4px 10px 0;padding:5px 10px;border-radius:8px;background:#1e3a8a;color:#fff;font-size:13px}
+.cs-flowbar .small{color:#dbeafe}.cs-flowbar kbd{background:#ffffff26;border-radius:4px;padding:0 5px;font-family:inherit}
+.cs-flowbar .mini{margin-left:auto}
+.cs-ro{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#f8fafc}
+.cs-tab.sys{background:#f1f5f9;color:#475569}.cs-tab.sys.on{background:#64748b;border-color:#64748b;color:#fff}
+.cs3 .cs-item.sys{background:#f8fafc;color:#64748b}.cs3 .cs-item.sys.on{background:#e2e8f0}
+.cs3 .cs-item.sys b{color:#475569}
+.cs-av.sysav{background:#e2e8f0;color:#475569;font-size:16px}
+.cs-msgs.sys{background:#f8fafc}.cs-msgs.sys .cs-bubble{background:#fff;border-color:#e2e8f0;color:#334155}
+.cs-sysbar{display:flex;gap:6px;align-items:center;justify-content:space-between;padding:6px 4px;border-bottom:1px solid var(--line)}
+@keyframes csflash{0%{background:#fde68a}100%{background:transparent}}
+.cs3 .cs-item.flash{animation:csflash 1.6s ease-out 2}
+.cs-sidebox{border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
+.cs-sh{font-weight:600;font-size:13px;margin-bottom:6px}
+.cs-ord{border-top:1px solid #f1f5f9;padding:6px 0;display:flex;flex-direction:column;gap:3px}.cs-ord:first-of-type{border-top:0}
+.cs-ord-items span{margin-right:6px}
+.cs-pick.sm{padding:6px;cursor:default}.cs-pick.sm img,.cs-pick.sm .noimg{width:40px;height:40px;flex-basis:40px}
+.cs-pi{min-width:0;display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+[data-p360]{cursor:pointer;text-decoration:underline dotted #94a3b8}
+.cs-prodwarn{margin:6px 0;padding:8px 10px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-size:13px}
+tr.cs-prodrow td{background:#fff7f7}
+.csd-ell{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.csd-scroll{overflow-x:auto}
+.csd-notice{cursor:pointer;margin:-6px 0 10px}.csd-notice:hover{color:#1d4ed8}
+#tab-csdash .csd-grid{margin-bottom:12px}#tab-csdash .ux-card{margin:0}
+#tab-csdash .ux-kpis+.ux-kpis{margin-top:-2px}
+.cs-hmain .cs-name{flex:0 1 auto;min-width:60px}
+.cs-hmain>*{flex-shrink:0}.cs-hmain>.cs-name{flex-shrink:1}
+.cs-sysbar .mini{white-space:nowrap;flex:0 0 auto}
+.csd-scroll label{display:inline-flex;gap:4px;align-items:center;white-space:nowrap}
+.csd-scroll label input{width:auto;margin:0}
+
+.cs-hmain .cs-intent{max-width:140px;overflow:hidden;text-overflow:ellipsis}
+.cs-chst{display:inline-flex}
+.cs-sidebtn{display:none}
+@media (max-width:1200px){.cs-sidebtn{display:inline-block}
+  .cs3-side.open{display:flex;position:fixed;right:10px;top:120px;bottom:10px;width:330px;z-index:40;box-shadow:0 10px 30px #0003}}
+.cs-sideclose{display:none}
+@media (max-width:1200px){.cs3-side.open .cs-sideclose{display:flex;justify-content:flex-end;position:sticky;top:-10px;background:#fff;z-index:1;padding:2px 0}}
+.cs3 .cs-it>.row>b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.cs3 .cs-it>.row>span{flex:0 0 auto;white-space:nowrap;margin-left:6px}
+.cs-hmain>.cs-name{flex-shrink:0;max-width:200px}
+.cs-hmain>.cs-intent{flex-shrink:1;min-width:0}

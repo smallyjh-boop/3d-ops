@@ -4,6 +4,8 @@
   const PLAT = { lazada: "Lazada", shopee: "Shopee", tiktok: "TikTok", line: "LINE", facebook: "Facebook", manual: "其他" };
   const ROLE = { buyer: "买家", seller: "我们", note: "内部备注" };
   let CUR = null, CONV = null, TIMER = null, KB = null, SHOPS = [], ST = "active", AGENTS = [], ME = "", NEWEST = 0, FIRST = true;
+  const LASTB = {};          // 每个会话上次看到的买家消息时间（新消息进来时列表里闪一下）
+  let FLOW = null;           // v2.49 连续处理：{ids, i}
   const isOwner = () => window.OPSH && OPSH.isOwner();
   const TH = () => window.I18N && I18N.lang === "th";
   const Z = (zh, th) => (TH() ? th : zh);
@@ -13,7 +15,59 @@
   const MODE = { off: ["只人工", "คนตอบเอง", "👤"], draft: ["AI 出草稿", "AI ร่างให้", "✍"], auto: ["AI 自动回复", "AI ตอบอัตโนมัติ", "🤖"] };
   const CH = { lazada_im: ["Lazada 接口", "Lazada API"], extension: ["浏览器扩展", "ส่วนขยาย"], manual: ["手工", "บันทึกเอง"] };
   const TABS = [["active", "全部", "ทั้งหมด"], ["unreplied", "未回复", "ยังไม่ตอบ"], ["human", "需人工", "ต้องใช้คน"], ["mine", "我的", "ของฉัน"],
-    ["taken", "已接管", "คนรับช่วง"], ["leads", "线索", "โอกาสขาย"], ["closed", "已结束", "ปิดแล้ว"]];
+    ["taken", "已接管", "คนรับช่วง"], ["leads", "线索", "โอกาสขาย"], ["closed", "已结束", "ปิดแล้ว"], ["system", "平台通知", "แจ้งเตือนระบบ"]];
+  // v2.49：标签 / 问题类型的名字按界面语言显示（知识库里的 product / custom… 和会话的 询价 / 催单…）
+  const TAGN = { greeting: ["打招呼", "ทักทาย"], product: ["产品", "สินค้า"], price: ["价格", "ราคา"], stock: ["现货 / 发货", "สต็อก / จัดส่ง"],
+    order_status: ["订单 / 物流", "สถานะคำสั่งซื้อ"], custom: ["定制", "สั่งทำ"], wholesale: ["批发", "ขายส่ง"], complaint: ["投诉 / 破损", "ร้องเรียน"],
+    refund: ["退款", "คืนเงิน"], change_order: ["改订单", "แก้คำสั่งซื้อ"], thanks: ["感谢 / 好评", "ขอบคุณ"], other: ["其他", "อื่นๆ"],
+    "询价": ["询价", "ถามราคา"], "催单": ["催单", "ตามของ"], "售后": ["售后", "หลังการขาย"], "定制": ["定制", "สั่งทำ"], "闲聊": ["闲聊", "คุยทั่วไป"],
+    "咨询": ["咨询", "สอบถาม"], "批发": ["批发", "ขายส่ง"], "送礼": ["送礼", "ของขวัญ"], "企业团购": ["企业团购", "องค์กร"], "回头客": ["回头客", "ลูกค้าเก่า"],
+    "急单": ["急单", "ด่วน"], "价格敏感": ["价格敏感", "เน้นราคา"], "比价": ["比价", "เทียบราคา"], "要样品": ["要样品", "ขอตัวอย่าง"],
+    "新品询问": ["新品询问", "ถามสินค้าใหม่"], "差评风险": ["差评风险", "เสี่ยงรีวิวไม่ดี"], "好评": ["好评", "รีวิวดี"], "海外 / 外地": ["海外 / 外地", "ต่างประเทศ"] };
+  const tagName = (t) => { t = String(t || "").trim(); const x = TAGN[t] || TAGN[t.toLowerCase()]; return x ? Z(x[0], x[1]) : (TH() && /[一-鿿]/.test(t) ? "" : t); };
+  const tagsOf = (s) => String(s || "").split(/[,，]/).map((x) => tagName(x)).filter(Boolean).join(", ");
+  // 知识库的问题写成「中文 | ไทย」：只显示界面语言那一半
+  const qPart = (q) => { const p = String(q || "").split("|"); if (p.length < 2) return q || ""; return (TH() ? p.slice(1).join("|") : p[0]).trim(); };
+  // 内部备注（系统写的中文）在泰文界面换成泰文
+  const NOTE_TH = [[/^(.+) 接管了会话（AI 不再自动回复）$/, "$1 รับช่วงแชท (AI หยุดตอบเอง)"], [/^已交回 AI(?:（(.+)）)?$/, "คืนให้ AI แล้ว $1"],
+    [/^分配给 (.+)$/, "มอบหมายให้ $1"], [/^取消分配$/, "ยกเลิกการมอบหมาย"], [/^接管超过 (\d+) 分钟没有回复，已自动交回 AI$/, "รับช่วงแล้วไม่ตอบเกิน $1 นาที คืนให้ AI อัตโนมัติ"],
+    [/^主动提醒：订单已发货/, "แจ้งลูกค้า: จัดส่งแล้ว ร่างข้อความไว้แล้ว"], [/^主动提醒：订单超过 48 小时/, "แจ้งลูกค้า: เกิน 48 ชม. ยังไม่ส่ง ร่างข้อความไว้แล้ว"],
+    [/^已写入订单.*?：(.*)$/, "บันทึกลงคำสั่งซื้อแล้ว: $1"], [/^已生成报价单 (\S+).*$/, "สร้างใบเสนอราคา $1 แล้ว"], [/^跟进：.*$/, "อัปเดตการติดตามแล้ว"],
+    [/^报价单 (\S+) 已转成正式订单.*$/, "ใบเสนอราคา $1 เป็นคำสั่งซื้อแล้ว"]];
+  const noteText = (t) => { if (!TH()) return t; for (const [re, th] of NOTE_TH) if (re.test(t)) return t.replace(re, th).trim(); return /[一-鿿]/.test(t) ? "📝" : t; };
+  const isSys = (c) => c && c.kind === "system";
+  // 快捷回复的变量：泰文界面显示泰文变量名（服务器两种都认）；系统自带的标题 / 分类显示泰文
+  const VAR_TH = { "买家名": "ชื่อลูกค้า", "订单号": "เลขคำสั่งซื้อ", "运单号": "เลขพัสดุ", "预计发货日": "วันจัดส่ง", "店铺名": "ชื่อร้าน" };
+  const varDisp = (t) => (TH() ? String(t || "").replace(/\{([^{}]{1,12})\}/g, (m, k) => (VAR_TH[k] ? `{${VAR_TH[k]}}` : m)) : t || "");
+  const QT_TH = { "问候": "ทักทาย", "已发货": "จัดส่งแล้ว", "备货中": "กำลังเตรียมสินค้า", "制作中": "กำลังเตรียมสินค้า", "请稍等": "รอสักครู่", "感谢好评": "ขอบคุณรีวิว", "请拍照": "ขอรูปถ่าย",
+    "常用": "ใช้บ่อย", "物流": "ขนส่ง", "售后": "หลังการขาย" };
+  const qtx = (t) => (TH() && QT_TH[t] ? QT_TH[t] : t || "");
+  // v2.49：消息里的 HTML（Lazada 官方通知：<img> <a> <br>）安全地显示——只认图片、链接、换行，别的标签只留文字，绝不直接插 HTML
+  const HTML_RE = /<\s*\/?\s*(img|a|br|p|div|span|b|strong|i|em|font|u|table|tr|td|ul|li|h\d)\b[^>]*>/i;
+  const safeUrl = (u) => { u = String(u || "").trim(); return /^https?:\/\//i.test(u) ? u : /^\/\//.test(u) ? "https:" + u : ""; };
+  function safeHtml(text) {
+    let doc;
+    try { doc = new DOMParser().parseFromString(String(text || ""), "text/html"); } catch { return esc(text); }
+    const walk = (node) => {
+      let out = "";
+      node.childNodes.forEach((n) => {
+        if (n.nodeType === 3) { out += esc(n.nodeValue); return; }
+        if (n.nodeType !== 1) return;
+        const tag = n.tagName.toLowerCase();
+        if (["script", "style", "iframe", "object", "embed", "noscript", "template", "svg", "math", "head", "title"].includes(tag)) return;
+        if (tag === "img") { const u = safeUrl(n.getAttribute("src")); if (u) out += `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer"><img class="cs-himg" src="${esc(u)}" loading="lazy" alt=""></a>`; return; }
+        if (tag === "br") { out += "<br>"; return; }
+        if (tag === "a") { const u = safeUrl(n.getAttribute("href")), inner = walk(n) || esc(u); out += u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${inner}</a>` : inner; return; }
+        const inner = walk(n);
+        out += ["p", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6"].includes(tag) ? (inner ? inner + "<br>" : "") : inner;
+      });
+      return out;
+    };
+    return walk(doc.body).replace(/(<br>\s*){3,}/g, "<br><br>").replace(/^(<br>)+|(<br>)+$/g, "");
+  }
+  // 普通文字：网址变成可点的链接（长网址会自动折行）
+  const linkify = (t) => esc(t).replace(/https?:\/\/[^\s<>"']+/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`).replace(/\n/g, "<br>");
+  const msgBody = (t) => (HTML_RE.test(t || "") ? safeHtml(t) : linkify(t));
   const stageTxt = (k) => (STAGE[k] ? Z(STAGE[k][0], STAGE[k][1]) : "");
   const sumOf = (c) => (TH() && c.analysis && c.analysis.summary_th) || c.summary || "";
   const reasonOf = (c) => (TH() && c.analysis && c.analysis.human_reason_th) || c.human_reason || "";
@@ -54,7 +108,9 @@
     const d = await api(`/api/cs/inbox?status=${encodeURIComponent(ST)}&q=${encodeURIComponent(q.trim())}&shop=${encodeURIComponent(sf ? sf.value : "")}`);
     SHOPS = d.shops || []; AGENTS = d.agents || []; ME = d.me || "";
     if (sf) { const cur = sf.value; sf.innerHTML = `<option value="">${Z("全部店铺", "ทุกร้าน")}</option>` + SHOPS.map((x) => `<option value="${esc(x)}" ${x === cur ? "selected" : ""} data-notr>${esc(x)}</option>`).join(""); }
-    $("#cs-tabs").innerHTML = TABS.map(([k, zh, th]) => `<button class="cs-tab ${k === ST ? "on" : ""}" data-st="${k}">${Z(zh, th)}${d.counts[k] ? ` <b class="${k === "unreplied" || k === "human" ? "bad" : ""}">${d.counts[k]}</b>` : ""}</button>`).join("");
+    $("#cs-tabs").innerHTML = TABS.map(([k, zh, th]) => `<button class="cs-tab ${k === ST ? "on" : ""} ${k === "system" ? "sys" : ""}" data-st="${k}">${k === "system" ? "📢 " : ""}${Z(zh, th)}${d.counts[k] ? ` <b class="${k === "unreplied" || k === "human" ? "bad" : ""}">${d.counts[k]}</b>` : ""}</button>`).join("");
+    const fb = $("#cs-flow");
+    if (fb) { fb.disabled = !d.counts.unreplied; fb.title = Z("连续处理：按等待时间一个个过有 AI 草稿的未回复会话（Enter 发送 · Tab 改 · → 跳过 · Esc 退出）", "ทำต่อเนื่อง: Enter ส่ง · Tab แก้ · → ข้าม · Esc ออก"); }
     $("#cs-sound").textContent = ls("cs_sound") === "0" ? "🔕" : "🔔";
     if (!FIRST && d.newest_buyer > NEWEST) {
       const c = d.convs.find((x) => (x.last_buyer_at || 0) >= d.newest_buyer - 0.5) || {};
@@ -62,22 +118,36 @@
     }
     NEWEST = Math.max(NEWEST, d.newest_buyer || 0); FIRST = false;
     const AM = d.alert_minutes || 5;
-    $("#cs-items").innerHTML = d.convs.map((c) => {
+    const flash = new Set();
+    d.convs.forEach((c) => { const t = c.last_buyer_at || 0; if (LASTB[c.id] != null && t > LASTB[c.id] + 0.5) flash.add(c.id); LASTB[c.id] = t; });
+    const sysHead = ST === "system" ? `<div class="cs-sysbar small"><span class="muted">${Z("Lazada 官方账号发的卖家通知 / 活动推送：不算未回复，不用回", "ประกาศจาก Lazada ถึงผู้ขาย ไม่ต้องตอบ")}</span>
+      ${d.counts.system ? `<button class="mini" data-cs-all-read>✓ ${Z("全部标记已读", "อ่านทั้งหมดแล้ว")}</button>` : ""}</div>` : "";
+    $("#cs-items").innerHTML = sysHead + d.convs.map((c) => {
+      if (isSys(c)) {
+        return `<div class="cs-item sys ${c.id === CUR ? "on" : ""} ${flash.has(c.id) ? "flash" : ""}" data-cid="${c.id}">
+          <div class="cs-av sysav">📢${c.unread ? `<i>${c.unread > 99 ? "99+" : c.unread}</i>` : ""}</div>
+          <div class="cs-it"><div class="row between"><b data-notr>${esc(c.buyer || "Lazada")}</b><span class="small muted">${fmtTime(c.updated_at).slice(5, 16)}</span></div>
+            <div class="small muted cs-last" data-notr>${c.last ? esc(c.last.text.slice(0, 60)) : ""}</div>
+            <div class="cs-badges"><span class="pill">${Z("平台通知", "แจ้งเตือนระบบ")}</span>${c.shop ? `<span class="pill" data-notr>${esc(c.shop)}</span>` : ""}</div></div></div>`;
+      }
       const waiting = c.last && c.last.role === "buyer" && c.status === "open";
       const m = MODE[c.mode === "human" ? "off" : c.ai_mode] || MODE.draft;
-      return `<div class="cs-item ${c.id === CUR ? "on" : ""} st-${c.status} ${c.needs_human ? "need" : ""}" data-cid="${c.id}">
+      const w = c.wait_min || 0, over = d.alert_minutes && w >= AM;
+      const waitPill = !waiting ? "" : over ? `<span class="pill w-bad" title="${Z("超时没回复", "เกินเวลาตอบ")}">⏱ ${Z("超时", "เกิน")} ${ago(w)}</span>`
+        : `<span class="pill ${waitCls(w)}" title="${Z(`${AM} 分钟内要回复`, `ต้องตอบภายใน ${AM} นาที`)}">⏳ ${Z(`还剩 ${Math.max(0, Math.round(AM - w))} 分`, `เหลือ ${Math.max(0, Math.round(AM - w))} น.`)}</span>`;
+      return `<div class="cs-item ${c.id === CUR ? "on" : ""} st-${c.status} ${c.needs_human ? "need" : ""} ${flash.has(c.id) ? "flash" : ""}" data-cid="${c.id}">
         <div class="cs-av" style="${c.avatar ? `background-image:url('${esc(c.avatar)}')` : ""}">${c.avatar ? "" : initial(c.buyer)}${c.unread ? `<i>${c.unread > 99 ? "99+" : c.unread}</i>` : ""}</div>
         <div class="cs-it">
           <div class="row between"><b data-notr>${esc(c.buyer || Z("（未填买家）", "(ไม่มีชื่อ)"))}</b><span class="small muted">${fmtTime(c.updated_at).slice(5, 16)}</span></div>
           <div class="small muted cs-last" data-notr>${c.last ? (c.last.role === "seller" ? "↩ " : "") + esc(c.last.text.slice(0, 50)) : ""}</div>
           <div class="cs-badges"><span class="pill plat-${esc(c.platform || "manual")}">${esc(PLAT[c.platform] || c.platform || "其他")}</span>${c.shop ? `<span class="pill" data-notr>${esc(c.shop)}</span>` : ""}
-            ${waiting ? `<span class="pill ${waitCls(c.wait_min)}">⏱ ${ago(c.wait_min || 0)}</span>` : ""}
+            ${waitPill}
             ${c.needs_human ? `<span class="pill bad-pill">${Z("需人工", "ต้องใช้คน")}</span>` : ""}
             ${c.mode === "human" ? `<span class="pill tag-pill">👤 <span data-notr>${esc(c.taken_by || "")}</span></span>` : `<span class="pill" title="${esc(Z(m[0], m[1]))}">${m[2]}</span>`}
             ${c.has_draft && waiting ? `<span class="pill ok-pill">${Z("草稿", "ร่าง")}</span>` : ""}
             ${c.lead_stage ? `<span class="pill tag-pill">💼 ${esc(stageTxt(c.lead_stage))}</span>` : ""}
-            ${(c.tag_list || []).slice(0, 2).map((t) => `<span class="pill" data-notr>${esc(t)}</span>`).join("")}</div></div></div>`;
-    }).join("") || `<p class="muted small" style="padding:12px">${Z("没有会话。Lazada 接了接口的店铺会自动收进来；其它平台用浏览器扩展，或者点「＋」粘贴。", "ยังไม่มีแชท")}</p>`;
+            ${(c.tag_list || []).slice(0, 2).map((t) => tagName(t)).filter(Boolean).map((t) => `<span class="pill" data-notr>${esc(t)}</span>`).join("")}</div></div></div>`;
+    }).join("") || `<p class="muted small" style="padding:12px">${ST === "system" ? Z("没有平台通知", "ไม่มีแจ้งเตือน") : Z("没有会话。Lazada 接了接口的店铺会自动收进来；其它平台用浏览器扩展，或者点「＋」粘贴。", "ยังไม่มีแชท")}</p>`;
     if (quiet && CUR) {
       const cur = d.convs.find((c) => c.id === CUR);
       if (cur && CONV && cur.updated_at > CONV.updated_at + 0.5) openConv(CUR, true);
@@ -89,7 +159,8 @@
       <li>${Z("AI 按店铺设置：只出草稿（点发送）/ 自动回复能答的；需要人工的会标红置顶", "AI ตามการตั้งค่าร้าน: ร่างให้ / ตอบอัตโนมัติ")}</li>
       <li>${Z("「接管」后 AI 不会自动回复，别的客服也不会同时回", "「รับช่วง」แล้ว AI จะไม่ตอบเอง")}</li>
       <li>${Z("Shopee 等没接口的店铺：用浏览器扩展，消息也会进这个列表", "ร้านที่ไม่มี API ใช้ส่วนขยายเบราว์เซอร์")}</li>
-      <li>${Z("快捷键：Enter 发送，Shift+Enter 换行，Alt+↑/↓ 切换会话", "Enter ส่ง, Shift+Enter ขึ้นบรรทัด")}</li></ul></div>`;
+      <li>${Z("快捷键：Enter 发送，Shift+Enter 换行，Alt+↑/↓ 切换会话，回复框里输入 / 搜快捷回复", "Enter ส่ง, Shift+Enter ขึ้นบรรทัด, Alt+↑/↓ เปลี่ยนแชท, พิมพ์ / ค้นหาข้อความด่วน")}</li>
+      <li>${Z("「▶ 连续处理」：按等待时间一个个过有 AI 草稿的未回复会话，Enter 发送、Tab 改、→ 跳过、Esc 退出", "「▶ ทำต่อเนื่อง」: ไล่ตอบแชทที่มีร่าง AI ทีละแชท Enter ส่ง · Tab แก้ · → ข้าม · Esc ออก")}</li></ul></div>`;
   }
 
   // ---------------- 一个会话 ----------------
@@ -97,118 +168,176 @@
     const same = CUR === cid;
     CUR = cid;
     $$("#cs-items .cs-item").forEach((x) => x.classList.toggle("on", +x.dataset.cid === cid));
+    const unr = $(`#cs-items .cs-item[data-cid="${cid}"] .cs-av i`); if (unr) unr.remove();      // 打开就算读过了
     const draftText = same && $("#cs-reply") ? $("#cs-reply").value : null;
-    CONV = await api(`/api/cs/convs/${cid}`);
+    CONV = await api(`/api/cs/convs/${cid}`);       // 服务器打开时就清未读，并在 Lazada 上标已读（v2.49）
     render(keep && same ? draftText : null);
-    if (CONV.unread) api(`/api/cs/convs/${cid}/read`, { json: {} }).catch(() => {});
+    if (!same) loadSide(CONV);
   }
+  const p360 = (sku) => (sku ? ` data-p360="${esc(sku)}"` : "");
   function orderBox(c) {
     const o = c.order;
     if (o) {
+      // 生产进度只给员工看（不会出现在发给买家的卡片 / 话术里）
       const prog = Object.entries(o.production || {}).map(([k, v]) => `${esc(k)} ${v}`).join(" · ");
-      return `<div class="cs-order"><div class="row between"><b>订单 <span class="mono" data-notr>${esc(o.order_no)}</span></b>
-          <span><button class="mini" data-cs="open-order" data-oid="${o.id}">在订单里打开</button> <button class="mini" data-cs="unlink">取消关联</button></span></div>
-        <div class="small">${esc(o.status_zh || "")} · ${o.ship_by ? "最晚发货 " + fmtTime(o.ship_by).slice(5, 16) : ""} ${o.tracking_no ? ` · 运单 <span class="mono" data-notr>${esc(o.tracking_no)}</span>` : ""}
-          ${prog ? ` · 生产：${prog}` : ""}</div>
-        <div class="small" data-notr>${(o.items || []).map((i) => `${esc(i.sku || "")} ${esc(i.color || "")} ×${i.qty}`).join("，")}</div>
+      return `<div class="cs-order"><div class="row between"><b>${Z("订单", "คำสั่งซื้อ")} <span class="mono" data-notr>${esc(o.order_no)}</span></b>
+          <span class="nowrap"><button class="mini" data-cs="open-order" data-oid="${o.id}">${Z("打开", "เปิด")}</button> <button class="mini" data-cs="unlink">${Z("取消关联", "ยกเลิก")}</button></span></div>
+        <div class="small">${esc(o.status_zh || "")}${o.ship_by ? ` · ${Z("最晚发货", "ส่งภายใน")} ${fmtTime(o.ship_by).slice(5, 16)}` : ""}${o.tracking_no ? ` · ${Z("运单", "พัสดุ")} <span class="mono" data-notr>${esc(o.tracking_no)}</span>` : ""}
+          ${prog ? `<div class="muted">🔒 ${Z("内部进度（不告诉买家）", "ความคืบหน้าภายใน (ไม่บอกลูกค้า)")}：${prog}</div>` : ""}</div>
+        <div class="small">${(o.items || []).map((i) => `<span${p360(i.sku)} data-notr>${esc(i.sku || "")} ${esc(i.color || "")} ×${i.qty}</span>`).join("，")}</div>
         ${o.custom_note ? `<div class="small note-flag" data-notr>✎ ${esc(o.custom_note)}</div>` : ""}</div>`;
     }
-    return `<div class="cs-order none"><div class="row gap wrap small"><span class="muted">没有关联订单</span>
-        <input id="cs-ono" placeholder="订单号" style="width:180px" data-notr><button class="mini" data-cs="link">关联</button></div>
-      ${(c.order_candidates || []).length ? `<div class="small">可能是：${c.order_candidates.map((o) => `<button class="mini" data-cs="link-id" data-oid="${o.id}"><span data-notr>${esc(o.order_no)}</span> ${esc(o.status_zh || "")}</button>`).join(" ")}</div>` : ""}</div>`;
+    return `<div class="cs-order none"><div class="row gap small"><span class="muted nowrap">${Z("没有关联订单", "ยังไม่ผูกคำสั่งซื้อ")}</span>
+        <input id="cs-ono" placeholder="${Z("订单号", "เลขคำสั่งซื้อ")}" style="flex:1;min-width:0" data-notr><button class="mini" data-cs="link">${Z("关联", "ผูก")}</button></div>
+      ${(c.order_candidates || []).length ? `<div class="small">${Z("可能是", "อาจเป็น")}：${c.order_candidates.map((o) => `<button class="mini" data-cs="link-id" data-oid="${o.id}"><span data-notr>${esc(o.order_no)}</span> ${esc(o.status_zh || "")}</button>`).join(" ")}</div>` : ""}</div>`;
   }
   function cardHtml(m) {
     const x = m.extra || {};
-    if (m.kind === "image") return `<a href="${esc(x.local_url || x.url)}" target="_blank"><img class="cs-img" src="${esc(x.local_url || x.url)}" loading="lazy"></a>`;
-    if (m.kind === "item") return `<div class="cs-card">${x.image ? `<img src="${esc(x.image)}">` : ""}<div><b data-notr>${esc(x.name || "")}</b>${x.price ? `<div class="small">฿${esc(x.price)}</div>` : ""}<div class="small muted">🛍 ${Z("商品", "สินค้า")}</div></div></div>`;
+    if (m.kind === "image") return `<a href="${esc(x.local_url || x.url)}" target="_blank" rel="noopener noreferrer"><img class="cs-img" src="${esc(x.local_url || x.url)}" loading="lazy"></a>`;
+    if (m.kind === "item") return `<div class="cs-card"${x.product_id ? p360(x.product_id) : ""}>${x.image ? `<img src="${esc(x.image)}">` : ""}<div><b data-notr>${esc(x.name || "")}</b>${x.price ? `<div class="small">฿${esc(x.price)}</div>` : ""}<div class="small muted">🛍 ${Z("商品", "สินค้า")}</div></div></div>`;
     if (m.kind === "order") return `<div class="cs-card"><div>📦 <b class="mono" data-notr>${esc(x.order_no || "")}</b>${x.status ? `<div class="small">${esc(x.status)}</div>` : ""}</div></div>`;
-    return `<div data-notr>${esc(m.text).replace(/\n/g, "<br>")}</div>`;
+    return `<div class="cs-text" data-notr>${msgBody(m.text)}</div>`;
   }
   function msgHtml(m) {
-    if (m.role === "note") return `<div class="cs-sys" data-mid="${m.id}"><span data-notr>${esc(m.text)}</span> · ${fmtTime(m.created_at).slice(5, 16)}</div>`;
+    if (m.role === "note") return `<div class="cs-sys" data-mid="${m.id}"><span data-notr>${esc(noteText(m.text))}</span> · ${fmtTime(m.created_at).slice(5, 16)}</div>`;
     const who = m.role === "seller" ? (m.source === "auto" ? "🤖 AI" : String(m.username || "").replace(/^api:/, "")) : "";
+    // 买家消息的中文翻译只在中文界面显示（泰文界面不多显示东西）
+    const zh = !TH() && m.text_zh && m.role === "buyer" ? `<div class="cs-zh" data-notr>${esc(m.text_zh)}</div>` : "";
     return `<div class="cs-msg r-${m.role} ${m.status === "failed" ? "failed" : ""}" data-mid="${m.id}">
-      <div class="cs-bubble">${cardHtml(m)}${m.text_zh ? `<div class="cs-zh" data-notr>${esc(m.text_zh)}</div>` : ""}</div>
+      <div class="cs-bubble">${cardHtml(m)}${zh}</div>
       <div class="cs-meta small muted">${fmtTime(m.created_at).slice(5, 16)}${who ? ` · <span data-notr>${esc(who)}</span>` : ""}${m.role === "seller" && m.ai_draft && m.source !== "auto" ? (m.ai_draft.trim() === (m.text || "").trim() ? ` · ${Z("用了 AI 稿", "ใช้ร่าง AI")}` : ` · ${Z("改过 AI 稿", "แก้ร่าง AI")}`) : ""}
-        ${m.source === "screenshot" ? " · 截图" : m.source === "extension" ? " · 扩展" : ""}
+        ${m.source === "screenshot" ? ` · ${Z("截图", "ภาพหน้าจอ")}` : m.source === "extension" ? ` · ${Z("扩展", "ส่วนขยาย")}` : ""}
         ${m.status === "failed" ? ` · <span class="bad">${Z("没发出去", "ส่งไม่สำเร็จ")}</span> <button class="linkbtn" data-cs="resend" data-id="${m.id}">${Z("重发", "ส่งใหม่")}</button>` : ""}
-        ${CAN("cs.delete") ? '<button class="linkbtn" data-cs="del-msg" title="删除">✕</button>' : ""}</div></div>`;
+        ${CAN("cs.delete") ? `<button class="linkbtn" data-cs="del-msg" title="${Z("删除", "ลบ")}">✕</button>` : ""}</div></div>`;
   }
   function headHtml(c) {
     const ch = CH[c.channel] || CH.manual, m = MODE[c.ai_mode] || MODE.draft;
     const taken = c.mode === "human";
-    const editable = c.channel !== "lazada_im";
+    const editable = c.channel !== "lazada_im" && !isSys(c);
+    const intent = c.intent ? (TH() ? tagName(c.intent) : (c.analysis || {}).intent_zh || tagName(c.intent)) : "";
+    const chTone = c.channel === "lazada_im" ? "ok" : "";
     return `<div class="cs-head">
-      <div class="cs-av big" style="${c.avatar ? `background-image:url('${esc(c.avatar)}')` : ""}">${c.avatar ? "" : initial(c.buyer)}</div>
-      <div class="cs-hmain">
-        <div class="row gap wrap">${editable ? `<input id="cs-buyer" value="${esc(c.buyer || "")}" placeholder="${Z("买家名字", "ชื่อลูกค้า")}" data-notr style="width:150px">
+      <div class="cs-av ${isSys(c) ? "sysav" : ""}" style="${c.avatar && !isSys(c) ? `background-image:url('${esc(c.avatar)}')` : ""}">${isSys(c) ? "📢" : c.avatar ? "" : initial(c.buyer)}</div>
+      <div class="cs-hmain">${editable ? `<input id="cs-buyer" value="${esc(c.buyer || "")}" placeholder="${Z("买家名字", "ชื่อลูกค้า")}" data-notr style="width:130px">
             <select id="cs-plat">${Object.entries(PLAT).map(([k, v]) => `<option value="${k}" ${k === (c.platform || "manual") ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>
-            <input id="cs-shop" value="${esc(c.shop || "")}" placeholder="${Z("店铺", "ร้าน")}" data-notr style="width:110px" list="cs-shop-list"><datalist id="cs-shop-list">${(SHOPS || []).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>`
-          : `<b class="cs-name" data-notr>${esc(c.buyer || "")}</b><span class="pill plat-${esc(c.platform)}">${esc(PLAT[c.platform] || c.platform)}</span><span class="pill" data-notr>${esc(c.shop || "")}</span>`}</div>
-        <div class="small muted">${esc(Z(ch[0], ch[1]))} · ${taken ? `👤 ${Z("接管中", "รับช่วงโดย")} <b data-notr>${esc(c.taken_by || "")}</b>` : `${m[2]} ${esc(Z(m[0], m[1]))}`}
-          ${c.intent ? ` · <span class="pill tag-pill">${esc((c.analysis || {}).intent_zh || c.intent)}</span>` : ""}</div></div>
-      <div class="row gap wrap cs-hbtn">
-        ${taken ? `<button class="mini" data-cs="release">🤖 ${Z("交回 AI", "คืนให้ AI")}</button>` : `<button class="mini primary" data-cs="takeover">👤 ${Z("接管", "รับช่วง")}</button>`}
-        <select id="cs-assign" title="${Z("分配给", "มอบหมายให้")}"><option value="">${Z("分配给…", "มอบหมาย…")}</option>${AGENTS.map((a) => `<option value="${esc(a.agent)}" ${c.assigned === a.agent ? "selected" : ""} data-notr>${esc(a.name)}</option>`).join("")}</select>
-        ${c.status === "closed" ? `<button class="mini" data-cs="reopen">${Z("重新打开", "เปิดใหม่")}</button>` : `<button class="mini" data-cs="close">✓ ${Z("结束", "ปิด")}</button>`}
-        ${CAN("cs.delete") ? `<button class="mini danger" data-cs="del-conv">${Z("删除", "ลบ")}</button>` : ""}</div></div>`;
+            <input id="cs-shop" value="${esc(c.shop || "")}" placeholder="${Z("店铺", "ร้าน")}" data-notr style="width:100px" list="cs-shop-list"><datalist id="cs-shop-list">${(SHOPS || []).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>`
+          : `<b class="cs-name" data-notr title="${esc(c.buyer || "")}">${esc(c.buyer || "")}</b><span class="pill plat-${esc(c.platform)}">${esc(PLAT[c.platform] || c.platform || "")}</span>${c.shop ? `<span class="pill" data-notr>${esc(c.shop)}</span>` : ""}`}
+        <span class="small muted cs-chst nowrap" title="${esc(Z("消息渠道：", "ช่องทาง: ") + Z(ch[0], ch[1]))}">${UX.dot(chTone, "")}</span>
+        ${isSys(c) ? `<span class="pill">📢 ${Z("平台通知 · 只读", "แจ้งเตือนระบบ · อ่านอย่างเดียว")}</span>`
+          : `<span class="small nowrap" title="${esc(taken ? Z("接管中", "รับช่วงโดย") + " " + (c.taken_by || "") : Z(m[0], m[1]))}">${taken ? `👤 <b data-notr>${esc(c.taken_by || "")}</b>` : m[2]}</span>${intent ? `<span class="pill tag-pill cs-intent">${esc(intent)}</span>` : ""}`}</div>
+      <div class="cs-hbtn">${isSys(c) ? "" : `
+        ${taken ? `<button class="mini" data-cs="release" title="${Z("交回 AI", "คืนให้ AI")}">🤖 ${Z("交回", "คืน AI")}</button>` : `<button class="mini primary" data-cs="takeover" title="${Z("接管：AI 不再自动回复", "รับช่วง: AI หยุดตอบเอง")}">👤 ${Z("接管", "รับช่วง")}</button>`}
+        <select id="cs-assign" class="cs-assign" title="${Z("分配给", "มอบหมายให้")}"><option value="">${Z("分配…", "มอบหมาย…")}</option>${AGENTS.map((a) => `<option value="${esc(a.agent)}" ${c.assigned === a.agent ? "selected" : ""} data-notr>${esc(a.name)}</option>`).join("")}</select>
+        ${c.status === "closed" ? `<button class="mini" data-cs="reopen">${Z("重开", "เปิดใหม่")}</button>` : `<button class="mini" data-cs="close" title="${Z("结束会话", "ปิดแชท")}">✓ ${Z("结束", "ปิด")}</button>`}`}
+        ${CAN("cs.delete") ? `<button class="mini danger" data-cs="del-conv" title="${Z("删除会话", "ลบแชท")}">🗑</button>` : ""}
+        <button class="mini cs-sidebtn" data-cs="side-toggle" title="${Z("订单与买家", "คำสั่งซื้อและลูกค้า")}">📋</button></div></div>`;
   }
   function draftHtml(c) {
+    if (isSys(c)) return "";
     const a = c.analysis || {};
     const waiting = (c.messages || []).filter((m) => m.role === "buyer" || m.role === "seller").slice(-1)[0];
     if (!c.draft) {
       return waiting && waiting.role === "buyer" ? `<div class="cs-draftbar muted small">🤖 ${c.ai_mode === "off" ? Z("这个店铺设置为只人工回复", "ร้านนี้ตั้งให้คนตอบเอง") : Z("AI 草稿还没好", "AI ยังร่างไม่เสร็จ")}
         <button class="mini" data-cs="ai-now">${Z("让 AI 写", "ให้ AI ร่าง")}</button></div>` : "";
     }
+    const sugg = (c.suggestions || []).map((s, i) => [s, i]).filter(([s]) => (TH() ? s.label_th : s.label))
+      .map(([s, i]) => `<button class="mini" data-cs="sugg" data-i="${i}" ${s.need_order ? "disabled" : ""} title="${esc(TH() ? "" : s.text || "")}">${esc(TH() ? s.label_th : s.label)}${s.need_order ? Z("（先关联订单）", " (ผูกคำสั่งซื้อก่อน)") : ""}</button>`);
     return `<div class="cs-draftbar">
-      <div class="row between"><b class="small">🤖 ${Z("AI 草稿", "ร่างจาก AI")}${a.tier ? ` <span class="pill ${TIER_CLS[a.tier] || ""}">${esc(Z(...(TIER_TXT[a.tier] || ["", ""])))}</span>` : ""}${a.confidence != null ? ` <span class="muted">${Z("把握", "มั่นใจ")} ${Math.round(a.confidence * 100)}%</span>` : ""}</b>
-        <span class="row gap"><button class="mini primary" data-cs="use-draft">${Z("用这个", "ใช้อันนี้")}</button>${c.can_send ? `<button class="mini" data-cs="send-draft">${Z("直接发送", "ส่งเลย")}</button>` : ""}
-          <button class="mini" data-cs="ai-now">${Z("重新写", "ร่างใหม่")}</button><button class="mini" data-cs="discard">${Z("丢弃", "ทิ้ง")}</button></span></div>
-      <div class="cs-dtext" data-notr>${esc(c.draft)}</div>${c.draft_zh ? `<div class="small cs-zh" data-notr>${esc(c.draft_zh)}</div>` : ""}
-      ${(c.suggestions || []).length ? `<div class="cs-sugg">${c.suggestions.map((s, i) => `<button class="mini" data-cs="sugg" data-i="${i}" ${s.need_order ? "disabled" : ""} title="${esc(s.text || "")}">${esc(s.label)}${s.need_order ? Z("（先关联订单）", "") : ""}</button>`).join(" ")}</div>` : ""}</div>`;
+      <div class="row between gap"><b class="small nowrap">🤖 ${Z("AI 草稿", "ร่างจาก AI")}${a.tier ? ` <span class="pill ${TIER_CLS[a.tier] || ""}">${esc(Z(...(TIER_TXT[a.tier] || ["", ""])))}</span>` : ""}${a.confidence != null ? ` <span class="muted">${Z("把握", "มั่นใจ")} ${Math.round(a.confidence * 100)}%</span>` : ""}</b>
+        <span class="row gap nowrap"><button class="mini primary" data-cs="use-draft">${Z("用这个", "ใช้อันนี้")}</button>${c.can_send ? `<button class="mini" data-cs="send-draft">${Z("直接发送", "ส่งเลย")}</button>` : ""}
+          <button class="mini" data-cs="ai-now" title="${Z("重新写", "ร่างใหม่")}">↻</button><button class="mini" data-cs="discard" title="${Z("丢弃", "ทิ้ง")}">✕</button></span></div>
+      <div class="cs-dtext" data-notr>${linkify(c.draft)}</div>${c.draft_zh && !TH() ? `<div class="small cs-zh" data-notr>${esc(c.draft_zh)}</div>` : ""}
+      ${sugg.length ? `<div class="cs-sugg">${sugg.join(" ")}</div>` : ""}</div>`;
   }
   function composerHtml(c) {
+    if (isSys(c)) {
+      return `<div class="cs-comp cs-ro small"><span class="muted">📢 ${Z("这是平台发给卖家的通知，只读，不用回复。", "นี่คือประกาศจากแพลตฟอร์ม อ่านอย่างเดียว ไม่ต้องตอบ")}</span>
+        <button class="mini" data-cs-all-read>✓ ${Z("全部平台通知标记已读", "อ่านแจ้งเตือนทั้งหมดแล้ว")}</button></div>`;
+    }
+    const tb = (act, ic, zh, th, on) => `<button class="cs-ib ${on ? "on" : ""}" data-cs="${act}" title="${esc(Z(zh, th))}">${ic}</button>`;
     return `<div class="cs-comp">
-      <div class="cs-tools row gap wrap">
-        <button class="mini" data-cs="quick">⚡ ${Z("快捷回复", "ข้อความด่วน")}</button>
-        <button class="mini" data-cs="pick-item">🛍 ${Z("商品", "สินค้า")}</button>
-        <button class="mini" data-cs="pick-order">📦 ${Z("订单", "คำสั่งซื้อ")}</button>
-        <label class="mini filebtn">🖼 ${Z("图片", "รูป")}<input type="file" id="cs-img" accept="image/*" hidden></label>
-        <button class="mini ${ls("cs_zh") === "1" ? "on" : ""}" data-cs="zh-toggle">🀄 ${Z("中文输入", "พิมพ์จีน")}</button>
-        <input id="cs-instr" placeholder="${Z("给 AI 的要求（可空），例如：告诉他明天发货", "คำสั่งให้ AI (ไม่ใส่ก็ได้)")}" style="flex:1;min-width:160px">
-        <button class="mini" data-cs="draft">🤖 ${Z("AI 写回复", "AI เขียน")}</button></div>
+      <div class="cs-tools">
+        ${tb("quick", "⚡", "快捷回复（也可以在回复框里输入 / 搜索）", "ข้อความด่วน (พิมพ์ / ในช่องตอบก็ได้)")}
+        ${tb("pick-item", "🛍", "发商品", "ส่งสินค้า")}
+        ${tb("pick-order", "📦", "发订单", "ส่งคำสั่งซื้อ")}
+        <label class="cs-ib filebtn" title="${Z("发图片", "ส่งรูป")}">🖼<input type="file" id="cs-img" accept="image/*" hidden></label>
+        ${tb("zh-toggle", "🀄", "中文输入（自动翻成泰语）", "พิมพ์จีน แปลไทยให้", ls("cs_zh") === "1")}
+        <span class="cs-aiw">${tb("ai-pop", "🤖", "AI 写回复（可以给 AI 要求）", "ให้ AI เขียน")}
+          <div class="cs-pop hidden" id="cs-aipop"><input id="cs-instr" placeholder="${Z("给 AI 的要求（可空），例如：告诉他明天发货", "คำสั่งให้ AI (ไม่ใส่ก็ได้)")}">
+            <button class="mini primary" data-cs="draft">🤖 ${Z("写回复", "เขียน")}</button></div></span>
+        <span class="cs-tsp"></span>
+        <button class="cs-ib" data-cs="tr" title="${Z("把回复框里的话译成中文看看", "แปลข้อความเป็นภาษาจีน")}">${Z("译", "แปล")}</button>
+      </div>
       ${ls("cs_zh") === "1" ? `<div class="cs-zhin"><textarea id="cs-zhin" rows="1" data-notr placeholder="${Z("用中文写，自动翻成泰语填到下面", "พิมพ์จีน แปลไทยให้อัตโนมัติ")}"></textarea><span class="small muted" id="cs-tr-st"></span></div>` : ""}
-      <div class="cs-send"><textarea id="cs-reply" rows="3" data-notr placeholder="${c.can_send ? Z("输入回复，Enter 发送，Shift+Enter 换行", "พิมพ์ข้อความ Enter ส่ง") : Z("回复（复制后到平台 / 扩展里发送）", "ข้อความตอบ (คัดลอกไปส่งในแพลตฟอร์ม)")}"></textarea>
+      <div class="cs-send"><div class="cs-slash hidden" id="cs-slash"></div><textarea id="cs-reply" rows="3" data-notr placeholder="${c.can_send ? Z("输入回复，Enter 发送，Shift+Enter 换行，/ 搜快捷回复", "พิมพ์ข้อความ Enter ส่ง · / ค้นหาข้อความด่วน") : Z("回复（复制后到平台 / 扩展里发送）", "ข้อความตอบ (คัดลอกไปส่งในแพลตฟอร์ม)")}"></textarea>
         <div class="cs-sendbtns">${c.can_send ? `<button class="primary" data-cs="send">${Z("发送", "ส่ง")}</button>`
-          : `<button class="primary" data-cs="copy-sent">📋 ${Z("复制并记录", "คัดลอก+บันทึก")}</button><button class="mini" data-cs="sent">✓ ${Z("只记录", "บันทึกอย่างเดียว")}</button>`}
-          <button class="mini" data-cs="tr">${Z("译成中文", "แปลจีน")}</button></div></div>
+          : `<button class="primary" data-cs="copy-sent">📋 ${Z("复制并记录", "คัดลอก+บันทึก")}</button><button class="mini" data-cs="sent">✓ ${Z("只记录", "บันทึกอย่างเดียว")}</button>`}</div></div>
       <div class="small cs-zh" id="cs-reply-zh" data-notr></div></div>`;
   }
   function pasteHtml(c) {
-    if (c.channel === "lazada_im") return "";
+    if (c.channel === "lazada_im" || isSys(c)) return "";
     return `<details class="cs-add"><summary class="small">＋ ${Z("粘贴买家消息 / 聊天截图（没有接口的平台）", "วางข้อความลูกค้า / ภาพหน้าจอ")}</summary>
       <textarea id="cs-text" rows="2" placeholder="${Z("粘贴买家的消息，也可以 Ctrl+V 粘贴截图", "วางข้อความ")}" data-notr></textarea>
       <div class="row gap wrap"><select id="cs-role"><option value="buyer">${Z("买家说的", "ลูกค้า")}</option><option value="seller">${Z("我们回复的", "เรา")}</option><option value="note">${Z("内部备注", "โน้ตภายใน")}</option></select>
         <button class="mini" data-cs="add">${Z("添加", "เพิ่ม")}</button><label class="filebtn mini">📷 ${Z("上传截图", "อัปโหลดภาพ")}<input type="file" id="cs-shot" accept="image/*" hidden></label></div></details>`;
   }
   function sideHtml(c) {
+    if (isSys(c)) {
+      return `<div class="cs-info small"><b>📢 ${Z("平台通知", "แจ้งเตือนระบบ")}</b><p class="muted">${Z("Lazada 官方账号发给卖家的通知（活动报名、规则、推广）。不是买家，不算未回复 / 超时，AI 不会回复，也不会进今日待办。链接点开会在新窗口打开。",
+        "ประกาศจาก Lazada ถึงผู้ขาย ไม่ใช่ลูกค้า ไม่นับเป็นแชทค้างตอบ AI จะไม่ตอบ")}</p></div>`;
+    }
     const a = c.analysis || {};
-    return `${orderBox(c)}${infoBox(c)}${custBox(c)}
+    return `${orderBox(c)}
+      <div class="cs-sidebox" id="cs-orders"><div class="cs-sh">📦 ${Z("这个买家的订单", "คำสั่งซื้อของลูกค้า")}</div><p class="muted small">${Z("加载中…", "กำลังโหลด…")}</p></div>
+      <div class="cs-sidebox hidden" id="cs-sugg"></div>
+      ${infoBox(c)}${custBox(c)}
       ${a.quote && a.quote.lines && a.quote.lines.length ? quoteHtml(a.quote) : ""}
       <div class="cs-sideact small">${c.messages.some((m) => m.role === "seller") ? `<button class="linkbtn" data-cs="kb">${Z("把这次的问答存为常见问答", "บันทึกเป็นคำถามที่พบบ่อย")}</button> · ` : ""}
         <button class="linkbtn" data-cs="qa">${Z("让 AI 给这次服务打分", "ให้ AI ให้คะแนน")}</button></div>`;
   }
+  // v2.49 右边：自动列出这个买家最近的订单（一键发订单卡片 / 关联）；买家提到产品时推荐 1–3 个商品卡片
+  const SIDE = {};
+  async function loadSide(c, force) {
+    if (!c || isSys(c)) return;
+    const cid = c.id, lastB = (c.messages || []).filter((m) => m.role === "buyer").slice(-1)[0];
+    const key = `${cid}:${lastB ? lastB.id : 0}:${c.order_id || 0}`;
+    let d = SIDE[cid];
+    if (force || !d || d.key !== key || Date.now() - d.t > 120000) {
+      try {
+        const [o, s] = await Promise.all([api(`/api/cs/convs/${cid}/orders`), api(`/api/cs/convs/${cid}/suggest`).catch(() => ({ items: [] }))]);
+        d = SIDE[cid] = { key, t: Date.now(), orders: o.items || [], sugg: s.items || [] };
+      } catch (e) { if ($("#cs-orders")) $("#cs-orders").innerHTML = `<p class="bad small">${esc(e.message)}</p>`; return; }
+    }
+    if (CUR !== cid) return;
+    const linked = c.order_id;
+    if ($("#cs-orders")) $("#cs-orders").innerHTML = `<div class="cs-sh">📦 ${Z("这个买家的订单", "คำสั่งซื้อของลูกค้า")} <span class="muted">${d.orders.length || ""}</span></div>` + (d.orders.map((o) => `<div class="cs-ord">
+        <div class="row between gap"><b class="mono small" data-notr>${esc(o.order_no)}</b><span class="pill ${o.status === "to_ship" ? "warn-pill" : o.status === "shipped" || o.status === "completed" ? "ok-pill" : ""}">${esc(o.status_zh || o.status || "")}</span></div>
+        <div class="small muted">${o.order_time ? fmtTime(o.order_time).slice(5, 10) : ""}${o.total ? ` · ฿${Math.round(o.total)}` : ""}${o.tracking_no ? ` · ${Z("运单", "พัสดุ")} <span class="mono" data-notr>${esc(o.tracking_no)}</span>` : ""}</div>
+        <div class="small cs-ord-items">${(o.items || []).map((i) => `<span${p360(i.sku)} data-notr>${esc(i.sku || i.name || "")} ×${i.qty}</span>`).join(" ")}</div>
+        <div class="row gap">${c.can_send ? `<button class="mini" data-cs="send-order" data-oid="${o.id}">📦 ${Z("发订单卡片", "ส่งการ์ดคำสั่งซื้อ")}</button>` : ""}
+          ${linked === o.id ? `<span class="small ok">✓ ${Z("已关联", "ผูกแล้ว")}</span>` : `<button class="mini" data-cs="link-id" data-oid="${o.id}">🔗 ${Z("关联", "ผูก")}</button>`}</div></div>`).join("")
+      || `<p class="muted small">${Z("没找到这个买家的订单", "ไม่พบคำสั่งซื้อของลูกค้านี้")}</p>`);
+    const sb = $("#cs-sugg");
+    if (sb) {
+      sb.classList.toggle("hidden", !d.sugg.length);
+      sb.innerHTML = d.sugg.length ? `<div class="cs-sh">🛍 ${Z("买家提到的商品", "สินค้าที่ลูกค้าพูดถึง")}</div>` + d.sugg.map((p) => `<div class="cs-pick sm">${p.image ? `<img src="${esc(p.image)}"${p360(p.id)}>` : "<span class='noimg'></span>"}
+        <div class="cs-pi"><b class="small"${p360(p.id)} data-notr>${esc(TH() ? p.name : p.name_zh || p.name)}</b><div class="small muted"><span data-notr>${esc(p.id)}</span>${p.price ? ` · ฿${p.price}` : ""}</div>
+          ${c.can_send && p.lazada_item_id ? `<button class="mini" data-cs="send-item" data-pid="${esc(p.id)}">🛍 ${Z("发商品卡片", "ส่งการ์ดสินค้า")}</button>` : `<button class="mini" data-cs="ins-item" data-name="${esc(p.name)}">${Z("插入名字", "ใส่ชื่อ")}</button>`}</div></div>`).join("") : "";
+    }
+  }
   function render(keepText) {
     const c = CONV;
-    $("#cs-main").innerHTML = `${headHtml(c)}
-      ${c.needs_human ? `<div class="alert-box">⚠ ${Z("需要人工处理", "ต้องให้คนจัดการ")}：<span data-notr>${esc(reasonOf(c))}</span> <button class="mini" data-cs="human-done">${Z("已处理", "จัดการแล้ว")}</button></div>` : ""}
-      ${sumOf(c) ? `<div class="small cs-summary" data-notr>📝 ${esc(sumOf(c))}</div>` : ""}
-      <div class="cs-msgs">${c.messages.map(msgHtml).join("") || `<p class="muted small">${Z("还没有消息", "ยังไม่มีข้อความ")}</p>`}</div>
+    const hint = c.needs_human && !isSys(c) ? `<div class="cs-hint" title="${esc(reasonOf(c))}">⚠ <b>${Z("要人工", "ต้องใช้คน")}</b> <span data-notr>${esc(reasonOf(c))}</span><button class="linkbtn" data-cs="human-done">${Z("已处理", "จัดการแล้ว")}</button></div>` : "";
+    $("#cs-main").innerHTML = `${headHtml(c)}${flowBar()}${hint}
+      ${sumOf(c) && !isSys(c) ? `<div class="small cs-summary" data-notr>📝 ${esc(sumOf(c))}</div>` : ""}
+      <div class="cs-msgs ${isSys(c) ? "sys" : ""}">${c.messages.map(msgHtml).join("") || `<p class="muted small">${Z("还没有消息", "ยังไม่มีข้อความ")}</p>`}</div>
       ${pasteHtml(c)}${draftHtml(c)}${composerHtml(c)}`;
-    $("#cs-side").innerHTML = sideHtml(c);
-    if (keepText) $("#cs-reply").value = keepText;
+    $("#cs-side").innerHTML = `<div class="cs-sideclose"><button class="mini" data-cs="side-toggle">✕ ${Z("关闭", "ปิด")}</button></div>` + sideHtml(c);
+    if (keepText && $("#cs-reply")) $("#cs-reply").value = keepText;
     const box = $(".cs-msgs", $("#cs-main"));
     box.scrollTop = box.scrollHeight;
+    $$("img", box).forEach((im) => im.addEventListener("load", () => { if (box.scrollHeight - box.scrollTop - box.clientHeight < 400) box.scrollTop = box.scrollHeight; }, { once: true }));
+    if (SIDE[c.id]) loadSide(c);
   }
   // v2.24：客户档案 + 登记（备注 / 待办 / 售后 / 投诉 / 特殊需求）
   function custBox(c) {
@@ -219,14 +348,14 @@
     return `<details class="cs-cust" ${recs.some((r) => r.status === "open") ? "open" : ""}><summary class="small"><b>📒 ${Z("客户档案与登记", "ประวัติลูกค้าและบันทึก")}</b>
         ${cu ? ` · ${Z(`第 ${cu.visits} 次来`, `มาครั้งที่ ${cu.visits}`)}${cu.orders.length ? ` · ${Z("订单", "ออเดอร์")} <span data-notr>${esc(cu.orders.join("、"))}</span>` : ""}` : ` · ${Z("填了买家名字和店铺后自动建档", "ใส่ชื่อลูกค้าและร้านแล้วจะสร้างประวัติให้")}`}
         ${recs.length ? ` · ${Z(`${recs.length} 条登记`, `${recs.length} รายการ`)}${recs.some((r) => r.overdue) ? ` <span class="bad">⏰ ${Z("有到期的", "ถึงกำหนด")}</span>` : ""}` : ""}</summary>
-      ${cu ? `<div class="row gap small">${Z("标签", "แท็ก")} <input id="cs-ctags" value="${esc(cu.tags || "")}" data-notr placeholder="${Z("例如 VIP、批发、爱砍价", "เช่น VIP ขายส่ง")}" style="flex:1">
+      ${cu ? `<div class="row gap small">${Z("标签", "แท็ก")} <input id="cs-ctags" value="${esc(cu.tags || "")}" data-notr placeholder="${Z("例如 VIP、批发、爱砍价", "เช่น VIP ขายส่ง")}" style="flex:1;min-width:0">
         ${(cu.convs || []).length ? `<span class="muted">${Z("以前的会话", "แชทก่อนหน้า")}：${cu.convs.slice(0, 5).map((x) => `<a href="#" data-cs="goconv" data-id="${x.id}">${fmtTime(x.updated_at).slice(5, 10)}</a>`).join(" ")}</span>` : ""}</div>` : ""}
       <div class="cs-recs">${recs.map((r) => `<div class="cs-rec ${r.status} ${r.overdue ? "od" : ""}"><span class="pill">${esc(TH() ? KT[r.kind] || r.kind_zh : r.kind_zh)}</span>
           <span data-notr>${esc(r.text)}</span>${r.result ? ` <span class="muted" data-notr>→ ${esc(r.result)}</span>` : ""}
           <span class="muted"> · <span data-notr>${esc(r.agent || "")}</span>${r.shop ? ` · <span data-notr>${esc(r.shop)}</span>` : ""} · ${fmtTime(r.created_at).slice(5, 16)}${r.due_at ? ` · ${Z("到期", "กำหนด")} ${fmtTime(r.due_at).slice(5, 16)}` : ""}</span>
           ${r.kind !== "note" ? (r.status === "open" ? `<button class="mini" data-cs="rec-done" data-id="${r.id}">✓ ${Z("完成", "เสร็จ")}</button>` : `<span class="ok small">✓</span>`) : ""}</div>`).join("")}</div>
       <div class="row gap wrap"><select id="cs-rkind">${Object.entries(K).map(([k, v]) => `<option value="${k}">${esc(TH() ? KT[k] || v : v)}</option>`).join("")}</select>
-        <input id="cs-rtext" placeholder="${Z("登记内容，例如：她要 50 个粉色，下周三前要", "รายละเอียด")}" data-notr style="flex:1;min-width:200px">
+        <input id="cs-rtext" placeholder="${Z("登记内容，例如：她要 50 个粉色，下周三前要", "รายละเอียด")}" data-notr style="flex:1;min-width:140px">
         <input id="cs-rdue" type="datetime-local" title="${Z("到期时间（待办 / 售后可选）", "กำหนดเวลา")}">
         <button class="mini primary" data-cs="rec-add">${Z("登记", "บันทึก")}</button></div></details>`;
   }
@@ -235,19 +364,19 @@
     const h = c.buyer_history, a = c.analysis || {};
     const needs = c.needs || [];
     const due = c.next_follow_at && c.next_follow_at * 1000 <= Date.now();
+    const tags = (c.tag_list || []).map(tagName).filter(Boolean);
     return `<div class="cs-info small">
-      ${h ? `<div>👤 ${h.repeat ? `<b class="ok">${Z("老顾客", "ลูกค้าเก่า")}</b> · ` : ""}${Z(`买过 ${h.orders} 单，共 ฿${Math.round(h.spent)}`, `ซื้อ ${h.orders} ครั้ง รวม ฿${Math.round(h.spent)}`)}${h.last_order ? ` · ${Z("上次", "ล่าสุด")} ${h.last_order}` : ""}${h.level ? ` · ${esc(h.level)}` : ""}${h.past_chats ? ` · ${Z(`以前聊过 ${h.past_chats} 次`, `เคยคุย ${h.past_chats} ครั้ง`)}` : ""}
-        ${(h.recent || []).length ? `<details><summary>${Z("最近的订单", "คำสั่งซื้อล่าสุด")}</summary>${h.recent.map((o) => `<div data-notr>${esc(o.day)} <span class="mono">${esc(o.order_no)}</span> ${esc(o.status)} ฿${o.total ?? ""} — ${esc((o.items || []).join("，"))}</div>`).join("")}</details>` : ""}</div>` : ""}
-      <div class="row gap wrap">🏷 ${(c.tag_list || []).map((t) => `<span class="pill" data-notr>${esc(t)}</span>`).join("") || `<span class="muted">${Z("没有标签", "ไม่มีแท็ก")}</span>`}
+      ${h ? `<div>👤 ${h.repeat ? `<b class="ok">${Z("老顾客", "ลูกค้าเก่า")}</b> · ` : ""}${Z(`买过 ${h.orders} 单，共 ฿${Math.round(h.spent)}`, `ซื้อ ${h.orders} ครั้ง รวม ฿${Math.round(h.spent)}`)}${h.last_order ? ` · ${Z("上次", "ล่าสุด")} ${h.last_order}` : ""}${h.level ? ` · ${esc(h.level)}` : ""}${h.past_chats ? ` · ${Z(`以前聊过 ${h.past_chats} 次`, `เคยคุย ${h.past_chats} ครั้ง`)}` : ""}</div>` : ""}
+      <div class="row gap wrap">🏷 ${tags.map((t) => `<span class="pill" data-notr>${esc(t)}</span>`).join("") || `<span class="muted">${Z("没有标签", "ไม่มีแท็ก")}</span>`}
         <button class="linkbtn" data-cs="tags">${Z("改标签", "แก้แท็ก")}</button></div>
-      ${needs.length ? `<div>📌 ${Z("客户需求", "ความต้องการ")}：${needs.map((n) => `<span data-notr>${n.type ? `<b>${esc(n.type)}</b> ` : ""}${esc(n.detail_zh)}</span>`).join("；")}</div>` : ""}
+      ${needs.length ? `<div>📌 ${Z("客户需求", "ความต้องการ")}：${needs.map((n) => (TH() ? `<b>${esc(tagName(n.type) || "•")}</b>` : `<span data-notr>${n.type ? `<b>${esc(n.type)}</b> ` : ""}${esc(n.detail_zh)}</span>`)).join("；")}</div>` : ""}
       <div class="row gap wrap cs-lead">💼 <select data-cs-lead="stage"><option value="">${Z("不是销售线索", "ไม่ใช่โอกาสขาย")}</option>
           ${Object.keys(STAGE).map((k) => `<option value="${k}" ${c.lead_stage === k ? "selected" : ""}>${esc(stageTxt(k))}</option>`).join("")}</select>
         ${c.lead_stage ? `<span class="${due ? "bad" : "muted"}">${c.next_follow_at ? `${Z("下次跟进", "ติดตามครั้งต่อไป")} ${fmtTime(c.next_follow_at).slice(5, 16)}${due ? " ⏰" : ""}` : ""}</span>
           <select data-cs-lead="days"><option value="">${Z("改跟进时间…", "เลื่อนเวลาติดตาม…")}</option><option value="1">${Z("明天", "พรุ่งนี้")}</option><option value="3">${Z("3 天后", "อีก 3 วัน")}</option><option value="7">${Z("一周后", "อีก 1 สัปดาห์")}</option><option value="0">${Z("不用提醒", "ไม่ต้องเตือน")}</option></select>
           ${c.lead_value ? `<span>≈ ฿${Math.round(c.lead_value)}</span>` : ""}` : ""}
-        ${c.follow_note ? `<span class="muted" data-notr>→ ${esc(c.follow_note)}</span>` : ""}</div>
-      ${a.unknown_question_zh ? `<div class="warn">❓ ${Z("AI 答不上来", "AI ตอบไม่ได้")}：<span data-notr>${esc(a.unknown_question_zh)}</span>（${Z("已记到「待补充的知识」", "บันทึกไว้ใน「ความรู้ที่ต้องเพิ่ม」")}）</div>` : ""}
+        ${c.follow_note && !TH() ? `<span class="muted" data-notr>→ ${esc(c.follow_note)}</span>` : ""}</div>
+      ${a.unknown_question_zh ? `<div class="warn">❓ ${Z("AI 答不上来", "AI ตอบไม่ได้")}${TH() ? "" : `：<span data-notr>${esc(a.unknown_question_zh)}</span>`}（${Z("已记到「待补充的知识」", "บันทึกไว้ใน「ความรู้ที่ต้องเพิ่ม」")}）</div>` : ""}
     </div>`;
   }
   // 实时翻译：中文打字 → 泰语（停顿 0.8 秒就翻）
@@ -266,11 +395,11 @@
     } catch (e) { if (seq === TR_SEQ) $("#cs-tr-st").textContent = e.message; }
   }
   function quoteHtml(q) {
-    return `<details class="small"><summary>报价明细（批发折扣 ${q.discount_pct}% · 约 ${q.ship_days} 天发货）</summary>
-      <table class="tbl"><tr><th>SKU</th><th>款式</th><th>数量</th><th>原价</th><th>报价单价</th><th>小计</th></tr>
-      ${q.lines.map((l) => `<tr><td class="mono" data-notr>${esc(l.sku)}</td><td data-notr>${esc(l.name)} ${esc(l.option)}</td><td>${l.qty}</td><td>${l.price}</td>
-        <td>${l.unit_price}${l.floor_hit ? ' <span class="warn">（已是最低价）</span>' : ""}</td><td>${l.total}</td></tr>`).join("")}
-      <tr><td colspan="5"><b>合计</b></td><td><b>${q.total}</b></td></tr></table></details>`;
+    return `<details class="small"><summary>${Z(`报价明细（批发折扣 ${q.discount_pct}% · 约 ${q.ship_days} 天发货）`, `รายละเอียดราคา (ส่วนลด ${q.discount_pct}% · ส่งประมาณ ${q.ship_days} วัน)`)}</summary>
+      <table class="tbl"><tr><th>SKU</th><th>${Z("款式", "แบบ")}</th><th>${Z("数量", "จำนวน")}</th><th>${Z("原价", "ราคาเดิม")}</th><th>${Z("报价单价", "ราคาต่อชิ้น")}</th><th>${Z("小计", "รวม")}</th></tr>
+      ${q.lines.map((l) => `<tr><td class="mono"${p360(l.sku)} data-notr>${esc(l.sku)}</td><td data-notr>${esc(TH() ? l.name_th || l.option : l.name + " " + l.option)}</td><td>${l.qty}</td><td>${l.price}</td>
+        <td>${l.unit_price}${l.floor_hit ? ` <span class="warn">${Z("（已是最低价）", "(ราคาต่ำสุดแล้ว)")}</span>` : ""}</td><td>${l.total}</td></tr>`).join("")}
+      <tr><td colspan="5"><b>${Z("合计", "รวม")}</b></td><td><b>${q.total}</b></td></tr></table></details>`;
   }
 
   async function upShot(file) {
@@ -314,7 +443,7 @@
       }
     };
     const okSent = btn ? await busy(btn, () => go(false)) : await go(false);
-    if (okSent) { render(); loadList(true); }
+    if (okSent) { render(); loadList(true); if (FLOW && !body.kind) flowNext(true); }
     return okSent;
   }
   // ---------------- 弹出：快捷回复 / 商品 / 订单 ----------------
@@ -322,8 +451,8 @@
     const d = await api(`/api/cs/quick?shop=${encodeURIComponent(CONV.shop || "")}`);
     const el = MODAL.open(`<div class="row between"><h3>⚡ ${Z("快捷回复", "ข้อความด่วน")}</h3><button class="mini" data-mclose>${Z("关闭", "ปิด")}</button></div>
       <input id="qk-q" placeholder="${Z("搜索", "ค้นหา")}" style="width:100%">
-      <div class="cs-quick">${d.items.map((x) => `<div class="cs-qi" data-q="${x.id}" data-s="${esc((x.title + " " + x.text).toLowerCase())}"><b>${esc(x.title)}</b>${x.cat ? ` <span class="pill">${esc(x.cat)}</span>` : ""}${x.shop ? ` <span class="pill" data-notr>${esc(x.shop)}</span>` : ""}<div class="small" data-notr>${esc(x.text)}</div></div>`).join("")}</div>
-      <p class="small muted">${Z("变量", "ตัวแปร")}：${d.vars.map((v) => `{${esc(v)}}`).join(" ")} · ${Z("在「知识库与话术」页管理快捷回复", "จัดการได้ที่หน้าคลังความรู้")}</p>`);
+      <div class="cs-quick">${d.items.map((x) => `<div class="cs-qi" data-q="${x.id}" data-s="${esc((x.title + " " + qtx(x.title) + " " + x.text).toLowerCase())}"><b data-notr>${esc(qtx(x.title))}</b>${x.cat ? ` <span class="pill" data-notr>${esc(qtx(x.cat))}</span>` : ""}${x.shop ? ` <span class="pill" data-notr>${esc(x.shop)}</span>` : ""}<div class="small" data-notr>${esc(varDisp(x.text))}</div></div>`).join("")}</div>
+      <p class="small muted">${Z("变量", "ตัวแปร")}：<span data-notr>${d.vars.map((v) => `{${esc(TH() ? VAR_TH[v] || v : v)}}`).join(" ")}</span> · ${Z("在「知识库与话术」页管理快捷回复，回复框里输入 / 也能搜", "จัดการได้ที่หน้าคลังความรู้ · พิมพ์ / ในช่องตอบเพื่อค้นหา")}</p>`);
     $("#qk-q", el).focus();
     $("#qk-q", el).oninput = () => { const q = $("#qk-q", el).value.toLowerCase(); $$(".cs-qi", el).forEach((x) => (x.style.display = x.dataset.s.includes(q) ? "" : "none")); };
     el.onclick = async (e) => {
@@ -370,12 +499,80 @@
     catch (e) { toast(e.message, true); }
   }
 
+  // ---------------- v2.49 连续处理：按等待时间一个个过有 AI 草稿的未回复会话 ----------------
+  function flowBar() {
+    if (!FLOW) return "";
+    return `<div class="cs-flowbar"><b>▶ ${Z("连续处理", "ทำต่อเนื่อง")} ${FLOW.i + 1} / ${FLOW.ids.length}</b>
+      <span class="small"><kbd>Enter</kbd> ${Z("发送草稿", "ส่งร่าง")} · <kbd>Tab</kbd> ${Z("改了再发", "แก้แล้วส่ง")} · <kbd>→</kbd> ${Z("跳过", "ข้าม")} · <kbd>Esc</kbd> ${Z("退出", "ออก")}</span>
+      <button class="mini" data-cs="flow-exit">${Z("退出", "ออก")}</button></div>`;
+  }
+  async function flowStart() {
+    const d = await api("/api/cs/inbox?status=unreplied");
+    const ids = d.convs.filter((c) => c.has_draft && c.status === "open").map((c) => c.id);   // 服务器已按等待时间排好（等最久的在前）
+    if (!ids.length) { toast(Z("没有带 AI 草稿的未回复会话", "ไม่มีแชทค้างตอบที่มีร่าง AI"), true); return; }
+    FLOW = { ids, i: 0, done: 0 };
+    await flowOpen();
+  }
+  async function flowOpen() {
+    if (!FLOW) return;
+    if (FLOW.i >= FLOW.ids.length) { const n = FLOW.done; FLOW = null; toast(Z(`处理完了：发了 ${n} 条`, `เสร็จแล้ว ส่ง ${n} ข้อความ`)); if (CONV) render(); return; }
+    await openConv(FLOW.ids[FLOW.i]);
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+  function flowNext(sent) { if (!FLOW) return; if (sent) FLOW.done++; FLOW.i++; flowOpen().catch((e) => toast(e.message, true)); }
+  function flowExit() { FLOW = null; if (CONV) render($("#cs-reply") ? $("#cs-reply").value : null); }
+
+  // ---------------- v2.49 回复框里输入 / 搜快捷回复 ----------------
+  let QK = null, SL = { on: false, i: 0, items: [], start: 0 };
+  async function quickItems() {
+    const shop = (CONV && CONV.shop) || "";
+    if (!QK || QK.shop !== shop || Date.now() - QK.t > 60000) QK = { shop, t: Date.now(), items: (await api(`/api/cs/quick?shop=${encodeURIComponent(shop)}`)).items };
+    return QK.items;
+  }
+  function slashHide() { SL.on = false; const b = $("#cs-slash"); if (b) b.classList.add("hidden"); }
+  async function slashCheck(ta) {
+    const pos = ta.selectionStart, before = ta.value.slice(0, pos);
+    const m = before.match(/(^|\s)\/([^\s/]{0,20})$/);
+    if (!m) return slashHide();
+    const q = m[2].toLowerCase();
+    const items = (await quickItems()).filter((x) => !q || (x.title + " " + x.text + " " + (x.cat || "")).toLowerCase().includes(q)).slice(0, 8);
+    const box = $("#cs-slash"); if (!box) return;
+    SL = { on: !!items.length, i: 0, items, start: pos - m[2].length - 1 };
+    box.innerHTML = items.map((x, i) => `<div class="cs-sl ${i === 0 ? "on" : ""}" data-sl="${i}"><b data-notr>${esc(qtx(x.title))}</b> <span class="small muted" data-notr>${esc(varDisp(x.text).slice(0, 70))}</span></div>`).join("")
+      || `<div class="small muted cs-sl">${Z("没有这样的快捷回复", "ไม่พบข้อความด่วน")}</div>`;
+    box.classList.toggle("hidden", !items.length && !q);
+  }
+  function slashMove(d) {
+    SL.i = (SL.i + d + SL.items.length) % SL.items.length;
+    $$("#cs-slash .cs-sl").forEach((x, i) => x.classList.toggle("on", i === SL.i));
+  }
+  async function slashPick(i) {
+    const x = SL.items[i]; if (!x) return;
+    const ta = $("#cs-reply"), end = ta.selectionStart;
+    slashHide();
+    const r = await api(`/api/cs/convs/${CUR}/quick/${x.id}`);
+    ta.value = ta.value.slice(0, SL.start) + r.text + ta.value.slice(end);
+    ta.focus(); ta.selectionStart = ta.selectionEnd = SL.start + r.text.length;
+  }
+
   // ---------------- 事件 ----------------
   document.addEventListener("click", async (e) => {
     const tab = e.target.closest("#cs-tabs [data-st]");
     if (tab) { ST = tab.dataset.st; loadList().catch((err) => toast(err.message, true)); return; }
+    if (e.target.closest("[data-cs-all-read]")) {
+      try {
+        const r = await api("/api/cs/notices/read", { json: {} });
+        toast(Z(`已标记 ${r.n} 个平台通知为已读`, `อ่านแล้ว ${r.n} รายการ`)); loadList(true);
+      } catch (err) { toast(err.message, true); }
+      return;
+    }
+    if (e.target.id === "cs-flow") { flowStart().catch((err) => toast(err.message, true)); return; }
+    const sl = e.target.closest("#cs-slash [data-sl]");
+    if (sl) { slashPick(+sl.dataset.sl).catch((err) => toast(err.message, true)); return; }
+    if (!e.target.closest(".cs-aiw") && $("#cs-aipop")) $("#cs-aipop").classList.add("hidden");
+    if (!e.target.closest(".cs-send")) slashHide();
     const it = e.target.closest("#cs-items .cs-item");
-    if (it) { openConv(+it.dataset.cid).catch((err) => toast(err.message, true)); return; }
+    if (it) { if (FLOW) FLOW = null; openConv(+it.dataset.cid).catch((err) => toast(err.message, true)); return; }
     if (e.target.id === "cs-new") { newDialog(); return; }
     if (e.target.id === "cs-sync") {
       const r = await busy(e.target, () => api("/api/cs/poll", { json: {} }));
@@ -400,6 +597,12 @@
         await doSend({ text: t }, b); return;
       }
       if (act === "send-draft") { await doSend({ text: CONV.draft }, b); return; }
+      if (act === "ai-pop") { const pop = $("#cs-aipop"); pop.classList.toggle("hidden"); if (!pop.classList.contains("hidden")) $("#cs-instr").focus(); return; }
+      if (act === "flow-exit") return flowExit();
+      if (act === "side-toggle") { $("#cs-side").classList.toggle("open"); return; }
+      if (act === "send-order") { if (CONV.can_send) await doSend({ kind: "order", order_id: +b.dataset.oid }, b); return; }
+      if (act === "send-item") { await doSend({ kind: "item", product_id: b.dataset.pid }, b); return; }
+      if (act === "ins-item") { const ta = $("#cs-reply"); if (ta) { ta.value += (ta.value ? " " : "") + b.dataset.name; ta.focus(); } return; }
       if (act === "use-draft") { $("#cs-reply").value = CONV.draft; $("#cs-reply-zh").textContent = CONV.draft_zh ? Z("中文意思：", "ความหมาย: ") + CONV.draft_zh : ""; $("#cs-reply").focus(); return; }
       if (act === "discard") { CONV = await api(`/api/cs/convs/${CUR}/discard`, { json: {} }); render($("#cs-reply").value); return; }
       if (act === "ai-now") { await busy(b, () => api(`/api/cs/convs/${CUR}/draft`, { json: { instruction: ($("#cs-instr") || {}).value || "" } }).then((c) => { CONV = c; render($("#cs-reply").value); })); return; }
@@ -445,7 +648,9 @@
         await post(`/api/cs/convs/${CUR}/messages`, { role: $("#cs-role").value, text: t });
       }
       if (act === "draft") {
-        await busy(b, () => post(`/api/cs/convs/${CUR}/draft`, { instruction: $("#cs-instr").value.trim() }));
+        const ins = ($("#cs-instr") || {}).value || "";
+        if ($("#cs-aipop")) $("#cs-aipop").classList.add("hidden");
+        await busy(b, () => post(`/api/cs/convs/${CUR}/draft`, { instruction: ins.trim() }));
       }
       if (act === "copy") {
         const t = $("#cs-reply").value;
@@ -518,6 +723,25 @@
     else upShot(f).catch((err) => toast(err.message, true));
   });
   document.addEventListener("keydown", (e) => {
+    const csOn = $("#tab-cs") && !$("#tab-cs").classList.contains("hidden");
+    // 「/」快捷回复的下拉：↑↓ 选，Enter / Tab 用，Esc 关
+    if (e.target.id === "cs-reply" && SL.on && !e.isComposing) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); slashMove(e.key === "ArrowDown" ? 1 : -1); return; }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); slashPick(SL.i).catch((err) => toast(err.message, true)); return; }
+      if (e.key === "Escape") { e.preventDefault(); slashHide(); return; }
+    }
+    if (e.target.id === "cs-instr" && e.key === "Enter" && !e.isComposing) { e.preventDefault(); const b = $('#cs-main [data-cs="draft"]'); if (b) b.click(); return; }
+    // 连续处理的快捷键（不在输入框里时）：Enter 发草稿 · Tab 改 · → 跳过 · Esc 退出
+    const modalOpen = $("#modal") && !$("#modal").classList.contains("hidden");
+    if (FLOW && csOn && !e.isComposing && !modalOpen) {
+      const typing = e.target.closest && e.target.closest("input, textarea, select");
+      if (e.key === "Escape") { e.preventDefault(); flowExit(); return; }
+      if (!typing) {
+        if (e.key === "Enter" && CONV && CONV.draft && CONV.can_send) { e.preventDefault(); const b = $('#cs-main [data-cs="send-draft"]'); doSend({ text: CONV.draft }, b).catch((err) => toast(err.message, true)); return; }
+        if (e.key === "Tab" && CONV && CONV.draft) { e.preventDefault(); const ta = $("#cs-reply"); if (ta) { ta.value = CONV.draft; ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; } return; }
+        if (e.key === "ArrowRight") { e.preventDefault(); flowNext(false); return; }
+      }
+    }
     if (e.target.id === "cs-reply" && e.key === "Enter" && !e.shiftKey && !e.isComposing && CONV) {
       e.preventDefault();
       const btn = $(CONV.can_send ? '#cs-main [data-cs="send"]' : '#cs-main [data-cs="copy-sent"]');
@@ -534,6 +758,7 @@
   document.addEventListener("input", (e) => {
     if (e.target.id === "cs-q") { clearTimeout(QT); QT = setTimeout(() => loadList(), 300); }
     if (e.target.id === "cs-zhin") { clearTimeout(TR_T); TR_T = setTimeout(liveTranslate, 800); }
+    if (e.target.id === "cs-reply") slashCheck(e.target).catch(() => {});
   });
 
   // ---------------- 知识库与话术 ----------------
@@ -609,16 +834,22 @@
     loadPerf();
     renderLearn();
     loadWeekly(false);
-    $("#cskb-presets").innerHTML = KB.presets_missing ? `<button data-kb="presets">＋ 补充标准话术（${KB.presets_missing} 条）</button>` : '<span class="small muted">标准话术已全部加入</span>';
-    $("#cskb-list").innerHTML = KB.kb.map((k) => `<tr><td data-notr>${esc(k.q)}</td><td data-notr>${esc(k.a)}${k.a_zh ? `<div class="small muted">${esc(k.a_zh)}</div>` : ""}</td>
-      <td class="small">${esc(k.tags || "")}</td><td class="small" data-notr>${esc(k.shop || Z("通用", "ทุกร้าน"))}</td><td>${k.uses || 0}</td><td>${k.active ? "✅" : "停用"}</td>
-      <td class="nowrap"><button class="mini" data-kb="edit" data-id="${k.id}">编辑</button> <button class="mini danger" data-kb="del" data-id="${k.id}">删除</button></td></tr>`).join("")
-      || '<tr><td colspan="7" class="muted small">还没有。在会话里点「存为常见问答」，或者点上面的「添加」。</td></tr>';
+    $("#cskb-presets").innerHTML = KB.presets_missing ? `<button data-kb="presets">＋ ${Z(`补充标准话术（${KB.presets_missing} 条）`, `เพิ่มคำตอบมาตรฐาน (${KB.presets_missing})`)}</button>` : `<span class="small muted">${Z("标准话术已全部加入", "เพิ่มคำตอบมาตรฐานครบแล้ว")}</span>`;
+    // v2.49：问题只显示界面语言那一半；中文意思只在中文界面显示；标签显示名字；回答里还有「生产 / 打印」的标红（老板改过的）
+    const prodN = KB.kb.filter((k) => k.prod_hit).length;
+    const pw = $("#cskb-prodwarn");
+    if (pw) pw.innerHTML = prodN ? `<div class="cs-prodwarn">⚠ ${Z(`有 ${prodN} 条回答里还提到「生产 / 打印」这类词（标红的行）。发给买家的话不能提生产、3D 打印、接单后制作，请改成「备货 / 打包 / 尽快发货」；AI 用到这些词时不会自动发送。`,
+      `มี ${prodN} คำตอบที่ยังมีคำว่า「ผลิต / พิมพ์」(แถวสีแดง) ห้ามบอกลูกค้าเรื่องการผลิต ให้ใช้「เตรียมสินค้า / แพ็กสินค้า / จัดส่งให้เร็วที่สุด」 AI จะไม่ส่งอัตโนมัติเมื่อมีคำเหล่านี้`)}</div>` : "";
+    $("#cskb-list").innerHTML = KB.kb.map((k) => `<tr class="${k.prod_hit ? "cs-prodrow" : ""}"><td data-notr>${esc(qPart(k.q))}</td><td data-notr>${esc(k.a)}${k.a_zh && !TH() ? `<div class="small muted">${esc(k.a_zh)}</div>` : ""}
+        ${k.prod_hit ? `<div class="small bad">⚠ ${Z(`含「${esc(k.prod_hit)}」：不能对买家说生产 / 打印，请改`, `มีคำว่า「${esc(k.prod_hit)}」 ห้ามพูดเรื่องการผลิต กรุณาแก้`)}</div>` : ""}</td>
+      <td class="small" data-notr>${esc(tagsOf(k.tags))}</td><td class="small" data-notr>${esc(k.shop || Z("通用", "ทุกร้าน"))}</td><td>${k.uses || 0}</td><td>${k.active ? "✅" : Z("停用", "ปิดใช้")}</td>
+      <td class="nowrap"><button class="mini" data-kb="edit" data-id="${k.id}">${Z("编辑", "แก้ไข")}</button> <button class="mini danger" data-kb="del" data-id="${k.id}">${Z("删除", "ลบ")}</button></td></tr>`).join("")
+      || `<tr><td colspan="7" class="muted small">${Z("还没有。在会话里点「存为常见问答」，或者点上面的「添加」。", "ยังไม่มี")}</td></tr>`;
     $("#cskb-ex").innerHTML = KB.examples.slice(0, 100).map((x) => `<tr><td class="small" data-notr>${esc(x.question.slice(0, 200))}</td>
       <td class="small" data-notr>${x.ai_reply && x.ai_reply !== x.final_reply ? `<div class="muted"><s>${esc(x.ai_reply.slice(0, 200))}</s></div>` : ""}${esc(x.final_reply.slice(0, 300))}</td>
       <td class="small">${fmtTime(x.created_at).slice(0, 10)} ${esc(x.username || "")}</td>
-      <td>${own ? `<button class="mini danger" data-kb="del-ex" data-id="${x.id}">删除</button>` : ""}</td></tr>`).join("")
-      || '<tr><td colspan="4" class="muted small">每次点「已发送」都会记下来，AI 下次遇到类似问题会参考。</td></tr>';
+      <td>${own ? `<button class="mini danger" data-kb="del-ex" data-id="${x.id}">${Z("删除", "ลบ")}</button>` : ""}</td></tr>`).join("")
+      || `<tr><td colspan="4" class="muted small">${Z("每次点「已发送」都会记下来，AI 下次遇到类似问题会参考。", "ทุกครั้งที่ส่งจะบันทึกไว้ให้ AI ใช้อ้างอิง")}</td></tr>`;
     loadQuick();
   }
   // v2.46 快捷回复
@@ -626,7 +857,7 @@
   async function loadQuick() {
     const box = $("#cskb-quick"); if (!box) return;
     QUICK = (await api("/api/cs/quick")).items;
-    box.innerHTML = QUICK.map((x) => `<tr><td>${esc(x.title)}</td><td class="small" data-notr>${esc(x.text)}</td><td class="small">${esc(x.cat || "")}</td>
+    box.innerHTML = QUICK.map((x) => `<tr><td data-notr>${esc(qtx(x.title))}</td><td class="small" data-notr>${esc(varDisp(x.text))}</td><td class="small" data-notr>${esc(qtx(x.cat || ""))}</td>
       <td class="small" data-notr>${esc(x.shop || Z("通用", "ทุกร้าน"))}</td><td>${x.uses || 0}</td>
       <td class="nowrap"><button class="mini" data-kb="q-edit" data-id="${x.id}">${Z("编辑", "แก้")}</button> <button class="mini danger" data-kb="q-del" data-id="${x.id}">${Z("删除", "ลบ")}</button></td></tr>`).join("")
       || `<tr><td colspan="6" class="muted small">${Z("还没有", "ยังไม่มี")}</td></tr>`;
@@ -634,9 +865,9 @@
   function quickEdit(x) {
     x = x || { title: "", text: "", cat: "", shop: "" };
     const el = MODAL.open(`<div class="row between"><h3>${x.id ? Z("编辑", "แก้ไข") : Z("添加", "เพิ่ม")}${Z("快捷回复", "ข้อความด่วน")}</h3><button class="mini" data-mclose>${Z("关闭", "ปิด")}</button></div>
-      <div class="form2"><label>${Z("标题（自己看）", "หัวข้อ")}<input id="qe-t" value="${esc(x.title)}"></label><label>${Z("分类", "หมวด")}<input id="qe-c" value="${esc(x.cat || "")}" placeholder="${Z("常用 / 物流 / 售后", "")}"></label></div>
-      <label>${Z("内容（发给买家的，一般用泰语）", "ข้อความ (ภาษาไทย)")}<textarea id="qe-x" rows="4" data-notr>${esc(x.text)}</textarea></label>
-      <div class="small muted">${Z("点一下插入变量：", "แทรกตัวแปร: ")}${["买家名", "订单号", "运单号", "预计发货日", "店铺名"].map((v) => `<button class="linkbtn" data-var="${v}">{${v}}</button>`).join(" ")}</div>
+      <div class="form2"><label>${Z("标题（自己看）", "หัวข้อ")}<input id="qe-t" value="${esc(x.id ? qtx(x.title) : x.title)}" data-notr></label><label>${Z("分类", "หมวด")}<input id="qe-c" value="${esc(x.cat || "")}" placeholder="${Z("常用 / 物流 / 售后", "")}"></label></div>
+      <label>${Z("内容（发给买家的，一般用泰语；不要提生产 / 打印）", "ข้อความ (ภาษาไทย ห้ามพูดเรื่องการผลิต)")}<textarea id="qe-x" rows="4" data-notr>${esc(varDisp(x.text))}</textarea></label>
+      <div class="small muted">${Z("点一下插入变量：", "แทรกตัวแปร: ")}<span data-notr>${["买家名", "订单号", "运单号", "预计发货日", "店铺名"].map((v) => TH() ? VAR_TH[v] : v).map((v) => `<button class="linkbtn" data-var="${v}">{${v}}</button>`).join(" ")}</span></div>
       <label>${Z("只给这个店铺用（空 = 所有店铺）", "เฉพาะร้าน (ว่าง = ทุกร้าน)")}<input id="qe-s" value="${esc(x.shop || "")}" data-notr list="qe-shops"><datalist id="qe-shops">${(SHOPS || []).map((s) => `<option value="${esc(s)}">`).join("")}</datalist></label>
       <button class="primary" id="qe-ok">${Z("保存", "บันทึก")}</button>`);
     el.addEventListener("click", (e) => { const v = e.target.dataset && e.target.dataset.var; if (v) { const ta = $("#qe-x", el); ta.setRangeText(`{${v}}`, ta.selectionStart, ta.selectionEnd, "end"); ta.focus(); } });
@@ -650,41 +881,39 @@
     const days = +($("#cskb-perf-days") || {}).value || 7;
     const r = await api(`/api/cs/perf?days=${days}`), p = r.perf;
     const n = (v, u = "") => (v == null ? "-" : v + u);
-    box.innerHTML = `<div class="row between"><h3>客服效果统计</h3><select id="cskb-perf-days">
-        ${[1, 7, 30].map((x) => `<option value="${x}" ${x === days ? "selected" : ""}>最近 ${x} 天</option>`).join("")}</select></div>
-      <div class="tiles">
-        <div class="tile"><span>有买家消息的会话</span><b>${p.convs}</b></div>
-        <div class="tile"><span>发出的回复</span><b>${p.sent}</b></div>
-        <div class="tile"><span>其中自动发送</span><b>${p.auto}</b></div>
-        <div class="tile"><span>AI 草稿直接采用率</span><b>${n(p.adopt_pct, "%")}</b><small>${p.with_draft} 条里改了 ${p.edited} 条</small></div>
-        <div class="tile"><span>平均回复用时</span><b>${n(p.avg_reply_min)}<small> 分钟</small></b><small>中位数 ${n(p.median_reply_min)} 分钟</small></div>
-        <div class="tile ${p.over_alert ? "warn" : ""}"><span>超时才回复</span><b>${p.over_alert}</b></div>
-        <div class="tile ${r.overdue.length ? "bad" : ""}"><span>现在超时未回复</span><b>${r.overdue.length}</b></div>
-      </div>
-      <p class="small muted">采用率高、改得少的问题类型，可以放心在「自动回复」里打开全自动；被改得多的，看「学到的回复」找原因，补充到常见问答。</p>`;
+    box.innerHTML = `<div class="row between"><h3>${Z("客服效果统计", "สถิติแชทลูกค้า")}${UX.help(Z("采用率高、改得少的问题类型，可以放心在「自动回复」里打开全自动；被改得多的，看「学到的回复」找原因，补充到常见问答。", "ประเภทคำถามที่ใช้ร่าง AI ได้เลยบ่อย เปิดตอบอัตโนมัติได้"))}</h3><select id="cskb-perf-days" style="width:auto">
+        ${[1, 7, 30].map((x) => `<option value="${x}" ${x === days ? "selected" : ""}>${Z(`最近 ${x} 天`, `${x} วันล่าสุด`)}</option>`).join("")}</select></div>
+      ${UX.kpis([
+        { label: Z("有买家消息的会话", "แชทที่มีข้อความลูกค้า"), value: p.convs, icon: "💬" },
+        { label: Z("发出的回复", "ข้อความที่ตอบ"), value: p.sent, sub: Z(`其中自动 ${p.auto}`, `อัตโนมัติ ${p.auto}`) },
+        { label: Z("AI 草稿直接采用率", "ใช้ร่าง AI ตรงๆ"), value: n(p.adopt_pct, "%"), sub: Z(`${p.with_draft} 条里改了 ${p.edited} 条`, `แก้ ${p.edited} จาก ${p.with_draft}`), tone: p.adopt_pct == null ? "" : p.adopt_pct >= 70 ? "ok" : "warn" },
+        { label: Z("平均回复用时", "เวลาตอบเฉลี่ย"), value: n(p.avg_reply_min, Z(" 分钟", " นาที")), sub: Z(`中位数 ${n(p.median_reply_min)} 分钟`, `มัธยฐาน ${n(p.median_reply_min)} นาที`) },
+        { label: Z("超时才回复", "ตอบช้าเกินเวลา"), value: p.over_alert, tone: p.over_alert ? "warn" : "" },
+        { label: Z("现在超时未回复", "ค้างตอบเกินเวลาตอนนี้"), value: r.overdue.length, tone: r.overdue.length ? "bad" : "ok" },
+      ])}`;
     $("#cskb-perf-days").onchange = loadPerf;
   }
   function kbEdit(k, pending) {
     k = k || { q: "", a: "", a_zh: "", tags: "", active: 1 };
-    const el = MODAL.open(`<div class="row between"><h3>${k.id ? "编辑" : "添加"}常见问答</h3><button class="mini" data-mclose>关闭</button></div>
-      <label>买家常问的问题（可以写几种问法）<textarea id="kb-q" rows="3" data-notr>${esc(k.q)}</textarea></label>
-      <label>标准回答（泰语，发给买家的）<textarea id="kb-a" rows="4" data-notr>${esc(k.a)}</textarea></label>
-      <label>中文意思（给自己看）<textarea id="kb-azh" rows="2" data-notr>${esc(k.a_zh || "")}</textarea></label>
-      <label>标签（可空）<input id="kb-tags" value="${esc(k.tags || "")}" data-notr></label>
+    const el = MODAL.open(`<div class="row between"><h3>${k.id ? Z("编辑常见问答", "แก้ไขคำถามที่พบบ่อย") : Z("添加常见问答", "เพิ่มคำถามที่พบบ่อย")}</h3><button class="mini" data-mclose>${Z("关闭", "ปิด")}</button></div>
+      <label>${Z("买家常问的问题（可以写几种问法；「中文 | ไทย」）", "คำถามของลูกค้า (เขียนได้หลายแบบ)")}<textarea id="kb-q" rows="3" data-notr>${esc(k.q)}</textarea></label>
+      <label>${Z("标准回答（泰语，发给买家的；不要提生产 / 打印）", "คำตอบมาตรฐาน (ภาษาไทย ห้ามพูดเรื่องการผลิต / พิมพ์)")}<textarea id="kb-a" rows="4" data-notr>${esc(k.a)}</textarea></label>
+      ${TH() ? `<input type="hidden" id="kb-azh" value="${esc(k.a_zh || "")}">` : `<label>中文意思（给自己看）<textarea id="kb-azh" rows="2" data-notr>${esc(k.a_zh || "")}</textarea></label>`}
+      <label>${Z("标签（可空）", "แท็ก (ไม่ใส่ก็ได้)")}<input id="kb-tags" value="${esc(k.tags || "")}" data-notr></label>
       <label>${Z("只给这个店铺用（空 = 所有店铺通用）", "เฉพาะร้าน (ว่าง = ทุกร้าน)")}<input id="kb-shop" value="${esc(k.shop || "")}" data-notr></label>
-      <label class="row"><input type="checkbox" id="kb-active" ${k.active ? "checked" : ""}> 启用</label>
-      <div class="row gap"><button class="primary" id="kb-ok">保存</button><button id="kb-tr">把中文意思翻成泰语回答</button></div>`);
-    $("#kb-tr", el).onclick = () => busy($("#kb-tr", el), async () => { const r = await api("/api/cs/translate", { json: { text: $("#kb-azh", el).value, to: "th" } }); $("#kb-a", el).value = r.text; });
+      <label class="row"><input type="checkbox" id="kb-active" ${k.active ? "checked" : ""}> ${Z("启用", "เปิดใช้")}</label>
+      <div class="row gap"><button class="primary" id="kb-ok">${Z("保存", "บันทึก")}</button>${TH() ? "" : '<button id="kb-tr">把中文意思翻成泰语回答</button>'}</div>`);
+    if ($("#kb-tr", el)) $("#kb-tr", el).onclick = () => busy($("#kb-tr", el), async () => { const r = await api("/api/cs/translate", { json: { text: $("#kb-azh", el).value, to: "th" } }); $("#kb-a", el).value = r.text; });
     $("#kb-ok", el).onclick = () => busy($("#kb-ok", el), async () => {
       if (pending) await api(`/api/cs/kb/${k.id}/review`, { json: { ok: true, q: $("#kb-q", el).value, a: $("#kb-a", el).value, a_zh: $("#kb-azh", el).value, tags: $("#kb-tags", el).value } });
       else await api("/api/cs/kb", { json: { id: k.id, q: $("#kb-q", el).value, a: $("#kb-a", el).value, a_zh: $("#kb-azh", el).value, tags: $("#kb-tags", el).value, shop: $("#kb-shop", el).value.trim(), active: $("#kb-active", el).checked } });
-      MODAL.close(); loadKb(); toast("已保存");
+      MODAL.close(); loadKb(); toast(Z("已保存", "บันทึกแล้ว"));
     });
   }
   function uaEdit(u) {
     const el = MODAL.open(`<div class="row between"><h3>${Z("给这个问题写答案（加进知识库）", "เขียนคำตอบ (เพิ่มเข้าคลังความรู้)")}</h3><button class="mini" data-mclose>${Z("关闭", "ปิด")}</button></div>
       <label>${Z("买家的问题", "คำถามลูกค้า")}<textarea id="ua-q" rows="3" data-notr>${esc(u.question)}</textarea></label>
-      ${u.question_zh ? `<p class="small muted" data-notr>${esc(u.question_zh)}</p>` : ""}
+      ${u.question_zh && !TH() ? `<p class="small muted" data-notr>${esc(u.question_zh)}</p>` : ""}
       <label>${Z("答案（用中文写，自动翻成泰语）", "คำตอบ (เขียนจีน แปลไทยอัตโนมัติ)")}<textarea id="ua-zh" rows="2" data-notr></textarea></label>
       <label>${Z("泰语答案（发给买家的）", "คำตอบภาษาไทย")}<textarea id="ua-a" rows="3" data-notr></textarea></label>
       <div class="row gap"><button id="ua-tr">${Z("翻成泰语", "แปลเป็นไทย")}</button><button class="primary" id="ua-ok">${Z("保存到知识库", "บันทึก")}</button></div>`);
@@ -699,7 +928,7 @@
     const box = $("#cskb-weekly"); if (!box) return;
     box.innerHTML = `<p class="muted small">${Z("生成中…", "กำลังสร้าง…")}</p>`;
     try {
-      const r = await api(`/api/cs/weekly?${ai ? "ai=1" : "last=1"}`);
+      const r = await api(`/api/cs/weekly?${ai ? "ai=1" : "last=1"}&lang=${TH() ? "th" : "zh"}`);     // v2.49：按界面语言
       box.innerHTML = `<div class="row between"><h3>${Z("客服周报", "รายงานรายสัปดาห์")} <span class="muted small">${esc(r.from)} ~ ${esc(r.to)}</span></h3>
         <div class="row gap"><button class="mini" data-kb="weekly">${Z("重新生成（含 AI 建议）", "สร้างใหม่ (มีคำแนะนำ AI)")}</button>${isOwner() ? `<button class="mini" data-kb="weekly-send">${Z("发到邮箱", "ส่งทางอีเมล")}</button>` : ""}</div></div>
         <pre class="cs-weekly" data-notr>${esc(r.text)}</pre>`;
@@ -711,11 +940,11 @@
     box.innerHTML = `<h3>${Z("AI 学到的新知识（待确认）", "ความรู้ใหม่ที่ AI เรียนรู้ (รอยืนยัน)")} <span class="muted small">${KB.pending.length}</span></h3>
       <p class="small muted">${Z("员工改过 AI 的回复、或者自己写回复时，AI 会看有没有以后能复用的新知识（店铺做法、产品细节、政策），整理成问答放在这里。确认后加进知识库，以后 AI 就会了。",
         "เมื่อพนักงานแก้คำตอบของ AI หรือเขียนเอง AI จะดูว่ามีความรู้ใหม่ที่ใช้ซ้ำได้ไหม แล้วสรุปเป็นถามตอบไว้ที่นี่ ยืนยันแล้วจะเข้าคลังความรู้")}</p>
-      <table class="grid small"><tbody>${KB.pending.map((k) => `<tr><td data-notr>${esc(k.q)}</td><td data-notr>${esc(k.a)}${k.a_zh ? `<div class="muted">${esc(k.a_zh)}</div>` : ""}<div class="muted">${esc(k.note || "")}</div></td>
+      <table class="grid small"><tbody>${KB.pending.map((k) => `<tr><td data-notr>${esc(qPart(k.q))}</td><td data-notr>${esc(k.a)}${k.a_zh && !TH() ? `<div class="muted">${esc(k.a_zh)}</div>` : ""}<div class="muted">${esc(TH() ? String(k.note || "").replace(/从会话 #(\d+) 学到.*/, "เรียนรู้จากแชท #$1") : k.note || "")}</div></td>
         <td class="nowrap">${own ? `<button class="mini primary" data-kb="learn-ok" data-id="${k.id}">✓ ${Z("加入", "เพิ่ม")}</button> <button class="mini" data-kb="learn-edit" data-id="${k.id}">${Z("改一改", "แก้")}</button> <button class="mini danger" data-kb="learn-no" data-id="${k.id}">${Z("不要", "ไม่เอา")}</button>` : ""}</td></tr>`).join("")
         || `<tr><td class="muted">${Z("没有待确认的", "ไม่มีรายการรอยืนยัน")}</td></tr>`}</tbody></table>
       <h3>${Z("AI 答不上来的问题（待补充）", "คำถามที่ AI ตอบไม่ได้ (ต้องเพิ่ม)")} <span class="muted small">${KB.unanswered.length}</span></h3>
-      <table class="grid small"><tbody>${KB.unanswered.map((u) => `<tr><td data-notr>${esc(u.question)}${u.question_zh ? `<div class="muted">${esc(u.question_zh)}</div>` : ""}</td><td>${u.count} ${Z("次", "ครั้ง")}</td>
+      <table class="grid small"><tbody>${KB.unanswered.map((u) => `<tr><td data-notr>${esc(TH() ? u.question || u.question_zh : u.question_zh || u.question)}${!TH() && u.question_zh && u.question !== u.question_zh ? `<div class="muted">${esc(u.question)}</div>` : ""}</td><td>${u.count} ${Z("次", "ครั้ง")}</td>
         <td class="nowrap"><button class="mini primary" data-kb="ua-answer" data-id="${u.id}">${Z("写答案", "เขียนคำตอบ")}</button> <button class="mini" data-kb="ua-ignore" data-id="${u.id}">${Z("忽略", "ข้าม")}</button></td></tr>`).join("")
         || `<tr><td class="muted">${Z("没有", "ไม่มี")}</td></tr>`}</tbody></table>`;
   }
@@ -754,14 +983,14 @@
       await api("/api/cs/alert/test", { json: { tg_token: $('#cskb-settings [data-set="tg_token"]').value, tg_chat: $('#cskb-settings [data-set="tg_chat"]').value } });
       toast("已发送，看看手机 Telegram 有没有收到"); return;
     }
-    if (a === "presets") { const r = await busy(b, () => api("/api/cs/kb/presets", { json: {} })); toast(`已加入 ${r ? r.added : 0} 条标准话术`); loadKb(); }
+    if (a === "presets") { const r = await busy(b, () => api("/api/cs/kb/presets", { json: {} })); toast(Z(`已加入 ${r ? r.added : 0} 条标准话术`, `เพิ่มแล้ว ${r ? r.added : 0} รายการ`)); loadKb(); }
     if (a === "q-add") return quickEdit();
     if (a === "q-edit") return quickEdit(QUICK.find((x) => x.id === id));
     if (a === "q-del") { if (!confirm(Z("删除这条快捷回复？", "ลบข้อความด่วนนี้?"))) return; await api(`/api/cs/quick/${id}`, { method: "DELETE" }); loadQuick(); return; }
     if (a === "add") kbEdit();
     if (a === "edit") kbEdit(KB.kb.find((k) => k.id === id));
-    if (a === "del") { if (!confirm("删除这条问答？")) return; await api(`/api/cs/kb/${id}`, { method: "DELETE" }); loadKb(); }
-    if (a === "del-ex") { if (!confirm("删除这条示例回复？")) return; await api(`/api/cs/examples/${id}`, { method: "DELETE" }); loadKb(); }
+    if (a === "del") { if (!confirm(Z("删除这条问答？", "ลบคำถามนี้?"))) return; await api(`/api/cs/kb/${id}`, { method: "DELETE" }); loadKb(); }
+    if (a === "del-ex") { if (!confirm(Z("删除这条示例回复？", "ลบตัวอย่างนี้?"))) return; await api(`/api/cs/examples/${id}`, { method: "DELETE" }); loadKb(); }
   }
 
   window.CS = { show, openConv, reload: () => loadList(true).catch(() => {}) };

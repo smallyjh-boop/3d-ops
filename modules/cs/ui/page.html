@@ -1,14 +1,14 @@
 <!-- AI 客服模块的页面（v2.30 从 index.html 搬过来）。每页一个 section，id 和菜单的 tab 对应。 -->
 <section id="tab-csdash" class="panel hidden">
-  <div class="row between wrap gap"><h2>客服工作台</h2><div class="row gap"><span class="small muted" id="csd-time"></span><button class="mini" id="csd-sync">⟳ 立即拉取新消息</button><button class="mini primary" id="csd-chat">💬 打开客服聊天</button></div></div>
+  <div class="ux-head"><h2>客服工作台</h2><div class="ux-head-r"><span class="small muted" id="csd-time"></span><button class="mini" id="csd-sync">⟳ 立即拉取新消息</button><button class="mini primary" id="csd-chat">💬 打开客服聊天</button></div></div>
   <div id="csd-body"><p class="muted">加载中…</p></div>
 </section>
 <section id="tab-cs" class="panel hidden">
-  <div id="cs-presence" class="cs-presence"></div>
+  <div id="cs-presence" class="cs-presence hidden"></div>
   <div class="cs3">
     <aside class="cs3-list card">
       <div class="row gap"><input id="cs-q" placeholder="搜索买家 / 订单号 / 内容" style="flex:1;min-width:0">
-        <button class="mini" id="cs-sync" title="立即拉取平台新消息">⟳</button><button class="mini" id="cs-sound" title="新消息提示音 / 桌面通知">🔔</button><button class="mini primary" id="cs-new" title="手工新建会话（粘贴消息 / 截图）">＋</button></div>
+        <button class="mini primary" id="cs-flow" title="连续处理">▶</button><button class="mini" id="cs-sync" title="立即拉取平台新消息">⟳</button><button class="mini" id="cs-sound" title="新消息提示音 / 桌面通知">🔔</button><button class="mini primary" id="cs-new" title="手工新建会话（粘贴消息 / 截图）">＋</button></div>
       <div class="cs-tabs" id="cs-tabs"></div>
       <select id="cs-shopf"><option value="">全部店铺</option></select>
       <div id="cs-items"></div>
@@ -46,10 +46,11 @@
   <div class="card" id="cskb-weekly"></div>
   <div class="card" id="cskb-learn"></div>
   <div class="card"><div class="row between"><h3>常见问答</h3><div class="row gap"><span id="cskb-presets"></span><button data-kb="add">＋ 添加</button></div></div>
-    <p class="small muted">已内置 3D 打印网店常见情况的标准话术（现货与 24–48 小时发货时效、材料与耐热、纹路色差、定制刻字、版权、批发、物流、改单取消、破损少件发错、退款、差评、平台规则等）。可以直接改成你们自己的说法；AI 回复时会参考。</p>
+    <p class="small muted">已内置网店常见情况的标准话术（现货与 24–48 小时发货时效、材料与耐热、纹路色差、定制刻字、版权、批发、物流、改单取消、破损少件发错、退款、差评、平台规则等）。可以直接改成你们自己的说法；AI 回复时会参考。发给买家的话不提生产 / 3D 打印，只说备货、打包、尽快发货。</p>
+    <div id="cskb-prodwarn"></div>
     <table class="grid"><thead><tr><th>问题</th><th>回答</th><th>标签</th><th>店铺</th><th>用过</th><th>状态</th><th></th></tr></thead><tbody id="cskb-list"></tbody></table></div>
   <div class="card"><div class="row between"><h3>快捷回复</h3><button data-kb="q-add">＋ 添加</button></div>
-    <p class="small muted">聊天页点「⚡ 快捷回复」一键填入。可以用变量：{买家名} {订单号} {运单号} {预计发货日} {店铺名}，发送前自动换成这个会话的值。可以只给某个店铺用。</p>
+    <p class="small muted">聊天页点「⚡」或者在回复框里输入 / 搜索，一键填入。可以用变量：{买家名} {订单号} {运单号} {预计发货日} {店铺名}，发送前自动换成这个会话的值。可以只给某个店铺用。</p>
     <table class="grid"><thead><tr><th>标题</th><th>内容</th><th>分类</th><th>店铺</th><th>用过</th><th></th></tr></thead><tbody id="cskb-quick"></tbody></table></div>
   <div class="card"><h3>学到的回复（员工实际发出去的）</h3>
     <table class="grid"><thead><tr><th>买家问</th><th>实际回复（划线的是 AI 原稿）</th><th>时间</th><th></th></tr></thead><tbody id="cskb-ex"></tbody></table></div>

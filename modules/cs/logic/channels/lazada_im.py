@@ -7,7 +7,7 @@
 import json
 import time
 
-from .. import data, erp_link
+from .. import data, erp_link, notice
 
 CHANNEL = "lazada_im"
 FIRST_DAYS = 3
@@ -30,7 +30,7 @@ def parse(m, buyer_id=""):
     tpl = str(m.get("template_id") or m.get("type") or "1")
     fat = str(m.get("from_account_type") or "")
     if fat:
-        who = "buyer" if fat == "1" else "seller"
+        who = "seller" if fat == "2" else "buyer"        # 1 买家；2 卖家；其它（平台 / 系统账号）放在对方那边
     else:
         who = "buyer" if buyer_id and str(m.get("from_account_id")) == str(buyer_id) else "seller"
     txt = str(c.get("txt") or c.get("text") or "").strip()
@@ -47,6 +47,11 @@ def parse(m, buyer_id=""):
         kind = "order"
         extra = {"order_no": str(c.get("orderId") or c.get("order_id") or ""), "status": c.get("status") or ""}
         txt = txt or f"[คำสั่งซื้อ] {extra['order_no']}"
+    if not txt and kind == "text":       # v2.49：平台通知的内容可能在 content / desc / title 里（常是 HTML）
+        for k in ("content", "desc", "summary", "title", "body"):
+            if isinstance(c.get(k), str) and c[k].strip():
+                txt = c[k].strip()
+                break
     if not txt:
         return None
     if str(m.get("auto_reply") or "").lower() in ("true", "1"):
@@ -65,6 +70,9 @@ def _conv_for(shop, s):
         c = data.get_conv(c["id"])
     elif s.get("head_url") and c.get("avatar") != s.get("head_url"):
         c = data.update_conv(c["id"], avatar=s["head_url"])
+    if c.get("kind") != notice.KIND and notice.session_is_system(s):     # v2.49：Lazada 官方账号 / 系统通知
+        notice.mark(c["id"])
+        c = data.get_conv(c["id"])
     return c
 
 
@@ -133,6 +141,11 @@ def _messages(cn, conv, s, since):
         start, last_mid = d.get("next_start_time"), d.get("last_message_id")
     out.sort(key=lambda m: _ms(m.get("send_time")))
     nb = 0
+    if out and conv.get("kind") != notice.KIND:
+        other = [m for m in out if str(m.get("from_account_type") or "") != "2"]
+        if other and all(notice.msg_is_system(m) for m in other):      # 对方不是买家（系统账号）
+            notice.mark(conv["id"])
+            conv = data.get_conv(conv["id"])
     for m in out:
         p = parse(m, s.get("buyer_id"))
         if not p:
@@ -144,7 +157,10 @@ def _messages(cn, conv, s, since):
             nb += p["from"] == "buyer"
     if out:
         data.update_conv(conv["id"], ext_last_id=str(out[-1].get("message_id") or ""))
-    return nb
+    if nb and conv.get("kind") != notice.KIND and notice.conv_is_system(conv, data.messages(conv["id"], 40)):
+        notice.mark(conv["id"])          # 「买家」发的全是通知格式（HTML 图片 / 链接）
+        conv = data.get_conv(conv["id"])
+    return 0 if conv.get("kind") == notice.KIND else nb
 
 
 def send(conv, msg):
