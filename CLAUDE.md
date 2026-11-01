@@ -35,7 +35,7 @@
 - 页面布局：数字卡片 → 图表 → 明细表（用 static/ux.js 的 UX.kpis / bars / meter …）
 - 新功能附带测试（modules/<id>/tests/t_*.py，参考现有写法）
 - 发版：改 app.py VERSION + static/app.js APP_JS_VERSION + static/api-docs.html 示例，README.txt 写更新说明，模块 README 写「系统 vX」条目
-- 提交信息说明改了什么；代码、提交里不写 AI 模型名
+- 提交信息说明改了什么；代码、注释、提交正文里不写 AI 模型名（提交末尾固定的 Co-Authored-By 署名行除外，照常保留）
 
 ## 禁止
 - 不要让老板在聊天里贴 App Secret / 密码（只在系统里填）
