@@ -6,6 +6,8 @@
 - moonraker  Creality K1 系列 root 后装了 Fluidd/Mainsail（Klipper Moonraker 接口，端口 7125 / 4408 / 4409）。
 - creality   Creality K1 系列原厂固件（Creality Print 用的局域网接口，WebSocket 9999）。读状态可用；
              传文件（HTTP 上传）是按 Creality Print 的做法写的，需要在你的打印机上实测。
+v2.54：连接由 core/printer_manager.py 管（一个事件循环管几千台，不再一台一个线程）；对外的函数不变：
+get_status / command / send_file / test / match_tray / loaded_colors / on_change。状态缓存仍按序号（_status）。
 """
 import json
 import os
@@ -22,8 +24,9 @@ STATE_ZH = {"idle": "空闲", "printing": "打印中", "paused": "已暂停", "f
             "offline": "连不上", "unknown": "未知", "none": "未连接"}
 _status = {}          # 打印机序号 → 状态
 _lock = threading.Lock()
-_bambu = {}           # 序号 → BambuLink
 _events = []          # 状态变化回调 (idx, old, new)
+_mgr = None           # v2.54 连接管理（core/printer_manager.py）：一个事件循环管所有打印机
+_remote = {"on": False, "at": 0.0, "marks": {}, "ids": (None, {})}   # 后台进程模式：从数据库读状态
 
 
 def on_change(fn):
@@ -36,21 +39,32 @@ def conn_cfg(p):
     return c
 
 
-def _set(idx, st):
-    st["updated"] = time.time()
+def _store(idx, st):
+    """只记状态，返回 (旧状态, 状态是否变了)。通知由调用的人决定（连接管理在单独的线程里通知）。"""
+    st["updated"] = st.get("updated") or time.time()
     with _lock:
         old = _status.get(idx) or {}
         _status[idx] = st
-    if old.get("state") != st.get("state"):
-        from . import db
-        for fn in _events:
-            try:
-                fn(idx, old, st)
-            except Exception:  # 回调出错不影响读取
-                import traceback
-                traceback.print_exc()
-            finally:
-                db.release()
+    return old, old.get("state") != st.get("state")
+
+
+def _fire(idx, old, st):
+    from . import db
+    for fn in _events:
+        try:
+            fn(idx, old, st)
+        except Exception:  # 回调出错不影响读取
+            import traceback
+            traceback.print_exc()
+        finally:
+            db.release()
+
+
+def _set(idx, st):
+    st["updated"] = time.time()
+    old, changed = _store(idx, st)
+    if changed:
+        _fire(idx, old, st)
 
 
 def mark_sent(idx, name):
@@ -59,19 +73,109 @@ def mark_sent(idx, name):
         st = dict(_status.get(idx) or {})
         st.update(state="printing", file=name, progress=0, updated=time.time())
         _status[idx] = st
+        _remote["marks"][idx] = st["updated"]
 
 
 def reset_status():
     """打印机列表改了（序号变了）：清空缓存的状态，下一轮重新读取。"""
     with _lock:
         _status.clear()
+    if _mgr:
+        _mgr.kick()
+
+
+def remap_status(mapping):
+    """v2.54：删了打印机、序号变了 → 状态跟着挪到新序号（不清空，几百台不用全部重新读）。mapping：旧序号 → 新序号 / None。"""
+    with _lock:
+        old = dict(_status)
+        _status.clear()
+        for i, st in old.items():
+            j = mapping.get(i, i) if isinstance(i, int) else i
+            if j is not None:
+                _status[j] = st
+    if _mgr:
+        _mgr.kick()
 
 
 def get_status(idx=None):
+    if _remote["on"]:
+        _pull_remote()
     with _lock:
         if idx is None:
             return dict(_status)
         return dict(_status.get(idx) or {})
+
+
+# ---------------- 后台进程模式（PRINTER_WORKER=external）：ERP 从数据库读状态、把指令交给后台进程 ----------------
+def _id_index():
+    """id → 序号（按设置文件的修改时间缓存）。"""
+    from .config import CONFIG_PATH, load_config
+    try:
+        mt = os.path.getmtime(CONFIG_PATH)
+    except OSError:
+        mt = 0
+    if _remote["ids"][0] != mt:
+        _remote["ids"] = (mt, {p.get("id"): i for i, p in enumerate(load_config().get("printers") or []) if p.get("id")})
+    return _remote["ids"][1]
+
+
+def _pull_remote(force=False):
+    if not force and time.time() - _remote["at"] < 1.0:
+        return
+    _remote["at"] = time.time()
+    from . import db, printer_manager
+    try:
+        c = db.conn()
+        printer_manager.ensure_tables(c)
+        rows = c.execute("SELECT pid, idx, data, updated FROM printer_state").fetchall()
+        ids = _id_index()
+    except Exception:  # noqa: BLE001  数据库忙：下次再读
+        return
+    local = set(_mgr.links) if _mgr else set()
+    with _lock:
+        for r in rows:
+            if r["pid"] in local:
+                continue
+            i = ids.get(r["pid"], None)
+            if i is None:
+                continue
+            if (_remote["marks"].get(i) or 0) > (r["updated"] or 0):
+                continue           # 刚发送过：还没读到新状态前先当作打印中
+            try:
+                _status[i] = json.loads(r["data"] or "{}")
+            except ValueError:
+                pass
+
+
+def _remote_call(p, op, payload=None, wait=12):
+    """交给后台进程执行（拓竹的指令要走它一直连着的 MQTT）。等结果，超时报错。"""
+    from . import db, printer_manager
+    c = db.conn()
+    printer_manager.ensure_tables(c)
+    cur = c.execute("INSERT INTO printer_cmds(pid, op, payload, status, created) VALUES(?,?,?, 'new', ?)",
+                    (p.get("id"), op, json.dumps(payload or {}, ensure_ascii=False), time.time()))
+    c.commit()
+    cid = cur.lastrowid
+    if not wait:
+        return None
+    end = time.time() + wait
+    while time.time() < end:
+        r = c.execute("SELECT status, result FROM printer_cmds WHERE id=?", (cid,)).fetchone()
+        if r and r["status"] == "done":
+            return r["result"]
+        if r and r["status"] == "error":
+            raise ConnectionError(r["result"] or "打印机后台进程执行失败")
+        time.sleep(0.2)
+    c.execute("UPDATE printer_cmds SET status='timeout' WHERE id=? AND status='new'", (cid,))
+    c.commit()
+    raise ConnectionError("打印机后台进程没有回应（PRINTER_WORKER=external：确认 python -m core.printer_worker 在运行）")
+
+
+def _link(idx, p):
+    """这台打印机在本进程里的拓竹连接（没有返回 None）。"""
+    if not _mgr:
+        return None
+    return _mgr.links.get(p.get("id") or f"#{idx}")
 
 
 def _hex_from_bambu(c):
@@ -80,113 +184,40 @@ def _hex_from_bambu(c):
 
 
 # ---------------- 拓竹 ----------------
-class BambuLink:
-    def __init__(self, idx, host, serial, code):
-        self.idx, self.host, self.serial, self.code = idx, host, serial.strip(), code.strip()
-        self.raw = {}
-        self.stop = threading.Event()
-        self.client = None
-        self.error = ""
-        self.thread = threading.Thread(target=self._run, daemon=True, name=f"bambu-{idx}")
-        self.thread.start()
+def bambu_normalize(r):
+    """拓竹 MQTT 推送（合并后的 print 部分）→ 统一的状态。"""
+    gs = str(r.get("gcode_state") or "").upper()
+    state = {"IDLE": "idle", "RUNNING": "printing", "PREPARE": "printing", "SLICING": "printing",
+             "PAUSE": "paused", "FINISH": "finished", "FAILED": "failed"}.get(gs, "unknown")
+    trays = []
+    ams = r.get("ams") if isinstance(r.get("ams"), dict) else {}
+    for unit in ams.get("ams") or []:
+        for t in unit.get("tray") or []:
+            if t.get("tray_type"):
+                trays.append({"slot": int(unit.get("id", 0)) * 4 + int(t.get("id", 0)), "type": t.get("tray_type"),
+                              "hex": _hex_from_bambu(t.get("tray_color")), "remain": t.get("remain"),
+                              "label": f"AMS{int(unit.get('id', 0)) + 1}-{int(t.get('id', 0)) + 1}"})
+    vt = r.get("vt_tray")
+    if isinstance(vt, dict) and vt.get("tray_type"):
+        trays.append({"slot": 254, "type": vt.get("tray_type"), "hex": _hex_from_bambu(vt.get("tray_color")),
+                      "remain": vt.get("remain"), "label": "外挂料盘"})
+    err = r.get("print_error") or 0
+    return {"state": state, "state_raw": gs, "progress": r.get("mc_percent"),
+            "remaining_min": r.get("mc_remaining_time"), "file": r.get("subtask_name") or r.get("gcode_file") or "",
+            "layer": r.get("layer_num"), "total_layers": r.get("total_layer_num"),
+            "nozzle": r.get("nozzle_temper"), "bed": r.get("bed_temper"), "trays": trays,
+            "tray_now": ams.get("tray_now"), "error": f"错误码 {err}" if err else "", "conn": "bambu"}
 
-    def _run(self):
-        while not self.stop.is_set():
-            try:
-                self.client = net.MiniMQTT(self.host, 8883, "bblp", self.code)
-                self.client.on_message = self._msg
-                self.client.connect()
-                self.client.subscribe(f"device/{self.serial}/report")
-                self.pushall()
-                self.error = ""
-                t = threading.Thread(target=self._periodic, daemon=True)
-                t.start()
-                self.client.loop(self.stop)
-            except Exception as e:  # 断线重连
-                self.error = _human_err(e)          # v2.53：不再显示 [Errno 113] 这类原始英文
-                _set(self.idx, {"state": "offline", "error": self.error, "conn": "bambu"})
-            finally:
-                try:
-                    self.client and self.client.close()
-                except Exception:  # 已断开
-                    pass
-            self.stop.wait(15)
 
-    def _periodic(self):
-        while not self.stop.is_set() and self.client and self.client.connected:
-            self.stop.wait(300)
-            try:
-                self.pushall()
-            except Exception:  # 下次重连
-                return
-
-    def pushall(self):
-        self.publish({"pushing": {"sequence_id": "0", "command": "pushall"}})
-
-    def publish(self, payload):
-        if not self.client or not self.client.connected:
-            raise ConnectionError("打印机还没连上")
-        self.client.publish(f"device/{self.serial}/request", payload)
-
-    def _msg(self, topic, payload):
-        try:
-            d = json.loads(payload)
-        except ValueError:
-            return
-        p = d.get("print")
-        if not isinstance(p, dict):
-            return
-        for k, v in p.items():          # P1 系列只推送变化的部分，合并
-            if k == "ams" and isinstance(v, dict) and isinstance(self.raw.get("ams"), dict):
-                self.raw["ams"].update(v)
-            else:
-                self.raw[k] = v
-        _set(self.idx, self.normalize())
-
-    def normalize(self):
-        r = self.raw
-        gs = str(r.get("gcode_state") or "").upper()
-        state = {"IDLE": "idle", "RUNNING": "printing", "PREPARE": "printing", "SLICING": "printing",
-                 "PAUSE": "paused", "FINISH": "finished", "FAILED": "failed"}.get(gs, "unknown")
-        trays = []
-        ams = r.get("ams") if isinstance(r.get("ams"), dict) else {}
-        for unit in ams.get("ams") or []:
-            for t in unit.get("tray") or []:
-                if t.get("tray_type"):
-                    trays.append({"slot": int(unit.get("id", 0)) * 4 + int(t.get("id", 0)), "type": t.get("tray_type"),
-                                  "hex": _hex_from_bambu(t.get("tray_color")), "remain": t.get("remain"),
-                                  "label": f"AMS{int(unit.get('id', 0)) + 1}-{int(t.get('id', 0)) + 1}"})
-        vt = r.get("vt_tray")
-        if isinstance(vt, dict) and vt.get("tray_type"):
-            trays.append({"slot": 254, "type": vt.get("tray_type"), "hex": _hex_from_bambu(vt.get("tray_color")),
-                          "remain": vt.get("remain"), "label": "外挂料盘"})
-        err = r.get("print_error") or 0
-        return {"state": state, "state_raw": gs, "progress": r.get("mc_percent"),
-                "remaining_min": r.get("mc_remaining_time"), "file": r.get("subtask_name") or r.get("gcode_file") or "",
-                "layer": r.get("layer_num"), "total_layers": r.get("total_layer_num"),
-                "nozzle": r.get("nozzle_temper"), "bed": r.get("bed_temper"), "trays": trays,
-                "tray_now": ams.get("tray_now"), "error": f"错误码 {err}" if err else "", "conn": "bambu"}
-
-    def command(self, cmd):
-        self.publish({"print": {"sequence_id": str(int(time.time())), "command": cmd}})
-
-    def start(self, local_path, remote_name, plate=1, ams_slot=None):
-        net.bambu_upload(self.host, self.code, local_path, remote_name)
-        use_ams = ams_slot is not None and ams_slot != 254
-        self.publish({"print": {
-            "sequence_id": str(int(time.time())), "command": "project_file",
-            "param": f"Metadata/plate_{plate}.gcode", "url": f"file:///sdcard/{remote_name}",
-            "subtask_name": os.path.splitext(remote_name)[0], "project_id": "0", "profile_id": "0", "task_id": "0",
-            "subtask_id": "0", "md5": "", "timelapse": False, "bed_type": "auto", "bed_levelling": True,
-            "flow_cali": False, "vibration_cali": False, "layer_inspect": False,
-            "use_ams": use_ams, "ams_mapping": [int(ams_slot)] if use_ams else []}})
-
-    def close(self):
-        self.stop.set()
-        try:
-            self.client and self.client.close()
-        except Exception:  # 已断开
-            pass
+def bambu_start_payload(remote_name, plate=1, ams_slot=None):
+    use_ams = ams_slot is not None and ams_slot != 254
+    return {"print": {
+        "sequence_id": str(int(time.time())), "command": "project_file",
+        "param": f"Metadata/plate_{plate}.gcode", "url": f"file:///sdcard/{remote_name}",
+        "subtask_name": os.path.splitext(remote_name)[0], "project_id": "0", "profile_id": "0", "task_id": "0",
+        "subtask_id": "0", "md5": "", "timelapse": False, "bed_type": "auto", "bed_levelling": True,
+        "flow_cali": False, "vibration_cali": False, "layer_inspect": False,
+        "use_ams": use_ams, "ams_mapping": [int(ams_slot)] if use_ams else []}}
 
 
 # ---------------- Moonraker（root 过的 K1）----------------
@@ -205,7 +236,10 @@ def _mr_base(c):
 
 def moonraker_status(base):
     q = "print_stats&display_status&extruder&heater_bed&virtual_sdcard"
-    d = requests.get(f"{base}/printer/objects/query?{q}", timeout=5).json()["result"]["status"]
+    return moonraker_normalize(requests.get(f"{base}/printer/objects/query?{q}", timeout=5).json()["result"]["status"])
+
+
+def moonraker_normalize(d):
     ps = d.get("print_stats") or {}
     st = {"standby": "idle", "printing": "printing", "paused": "paused", "complete": "finished",
           "cancelled": "failed", "error": "failed"}.get(ps.get("state"), "unknown")
@@ -262,7 +296,10 @@ def _creality_err(err):
 
 
 def creality_status(host):
-    d = creality_raw(host)
+    return creality_normalize(creality_raw(host))
+
+
+def creality_normalize(d):
     stt = d.get("state")
     prog = d.get("printProgress")
     st = {0: "idle", 1: "printing", 2: "finished", 3: "failed", 4: "failed", 5: "paused"}.get(stt, "unknown")
@@ -324,29 +361,19 @@ def _type(c):
 
 
 def poll_once(idx, p):
+    """设置改了 / 点了测试：马上重新读这一台（v2.54 交给连接管理，不在网页请求里连打印机）。"""
     c = conn_cfg(p)
     t = _type(c)
     if t == "none":
         _set(idx, {"state": "none", "conn": "none"})
         return
-    if t == "bambu":
-        link = _bambu.get(idx)
-        key = (c.get("host"), c.get("serial"), c.get("access_code"))
-        if not link or (link.host, link.serial, link.code) != key:
-            if link:
-                link.close()
-            _bambu[idx] = BambuLink(idx, *key)
-        return
-    try:
-        if t == "moonraker":
-            base = _mr_base(c)
-            if not base:
-                raise ConnectionError("Moonraker 没有回应")
-            _set(idx, moonraker_status(base))
-        elif t == "creality":
-            _set(idx, creality_status(c["host"]))
-    except Exception as e:  # 打印机关机等
-        _set(idx, {"state": "offline", "error": _human_err(e), "conn": t})
+    if _mgr:
+        _mgr.kick(p.get("id") or f"#{idx}")
+    elif _remote["on"]:
+        try:
+            _remote_call(p, "kick", wait=0)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def test(p):
@@ -371,9 +398,7 @@ def test(p):
         cl.close()
         if not got:
             raise ValueError("连上了，但没收到打印机状态：请检查序列号是否正确")
-        link = BambuLink.__new__(BambuLink)
-        link.raw = got
-        return t, link.normalize()
+        return t, bambu_normalize(got)
     if t == "moonraker":
         base = _mr_base(c)
         if not base:
@@ -391,10 +416,14 @@ def command(idx, cmd):
     c = conn_cfg(p)
     t = _type(c)
     if t == "bambu":
-        link = _bambu.get(idx)
-        if not link:
+        payload = {"print": {"sequence_id": str(int(time.time())), "command": cmd}}
+        link = _link(idx, p)
+        if link:
+            _mgr.call(link.publish(payload))
+        elif _remote["on"]:
+            _remote_call(p, "publish", payload)
+        else:
             raise ConnectionError("打印机还没连上")
-        link.command(cmd)
     elif t == "moonraker":
         base = _mr_base(c)
         requests.post(f"{base}/printer/print/{'cancel' if cmd == 'stop' else cmd}", timeout=8).raise_for_status()
@@ -419,11 +448,16 @@ def send_file(idx, local_path, remote_name, kind, ams_slot=None):
         if t == "bambu":
             if kind != "3mf":
                 raise ValueError("拓竹打印机要用切片好的 .gcode.3mf 文件")
-            link = _bambu.get(idx)
-            if not link or not link.client or not link.client.connected:
+            link = _link(idx, p)
+            if not _remote["on"] and (not link or not link.connected):
                 raise ConnectionError("拓竹打印机还没连上（检查 IP / 访问码 / 局域网模式）")
             name = remote_name if remote_name.endswith(".3mf") else remote_name + ".gcode.3mf"
-            link.start(local_path, name, 1, ams_slot)
+            net.bambu_upload(c["host"].strip(), c.get("access_code", "").strip(), local_path, name)
+            payload = bambu_start_payload(name, 1, ams_slot)
+            if link and link.connected:
+                _mgr.call(link.publish(payload))
+            else:
+                _remote_call(p, "publish", payload)
             return name
         # Klipper / Creality 要 G-code
         if kind == "3mf":
@@ -493,31 +527,28 @@ def loaded_colors(idx, p):
     return out, [x.strip() for x in str(conn_cfg(p).get("loaded") or "").replace("，", ",").split(",") if x.strip()]
 
 
-# ---------------- 后台轮询 ----------------
-_started = False
+# ---------------- 后台连接（v2.54：core/printer_manager.py 一个事件循环管所有打印机） ----------------
+def start(worker=False, worker_id=None):
+    """ERP 启动时调：默认在本进程里连打印机。PRINTER_WORKER=external：本进程不连，从数据库读后台进程写的状态。
+    worker=True：自己就是后台进程（python -m core.printer_worker），状态写进数据库。"""
+    global _mgr
+    if _mgr:
+        return _mgr
+    wid = os.environ.get("PRINTER_WORKER_ID", "") if worker_id is None else worker_id
+    if not worker and os.environ.get("PRINTER_WORKER") == "external":
+        _remote["on"] = True
+        return None
+    from . import printer_manager
+    _mgr = printer_manager.Manager(worker_id=wid, persist=worker).start()
+    # 分组分给别的后台进程的打印机：从数据库读它们的状态
+    try:
+        from .config import load_config
+        if load_config().get("printer_workers"):
+            _remote["on"] = True
+    except Exception:  # noqa: BLE001
+        pass
+    return _mgr
 
 
-def _loop():
-    while True:
-        try:
-            cfg = load_config()
-            printers = cfg.get("printers") or []
-            for i, p in enumerate(printers):
-                poll_once(i, p)
-            for i in list(_bambu):
-                if i >= len(printers) or _type(conn_cfg(printers[i])) != "bambu":
-                    _bambu.pop(i).close()
-        except Exception:
-            import traceback
-            traceback.print_exc()
-        finally:
-            from . import db
-            db.release()
-        time.sleep(10)
-
-
-def start():
-    global _started
-    if not _started:
-        _started = True
-        threading.Thread(target=_loop, daemon=True, name="printer-poll").start()
+def manager():
+    return _mgr

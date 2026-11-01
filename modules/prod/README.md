@@ -49,3 +49,20 @@
 - （系统 v2.53.0）复审修复：改切片文件的规格 / 盘不再重算缩放比例（切片时就定了，没记录的当 100%），并回到草稿、要重新复核（已验证的主模型文件改到缩放规格后不能再开始打印）；上传 / 替换没写缩放比例的缩放规格文件，检查项里提示「请确认切片时已缩放」。测试 modules/model/tests/t_display253.py。
 - 1.14（系统 v2.54.0）：生产单（core/po.py，ui/po.js，接口 /api/porders*，打印 /print/po/<id>，测试 modules/prod/tests/t_po254.py）：来源 手工 / 成品备货补货 / 订单汇总（今天没开始的订单任务挂到一张单上，订单任务本身不变）/ 活动；草稿 → 已下达 → 生产中 → 部分完成 → 完成 / 取消，可整张暂停；下达 = 每行建一个备货任务（jobs.po_id，多盘 / 多色照旧）；每行进度、预计完成、用料、成本；打完的成品走原来的流程（开了质检先进待检区）。「➕ 生产」每次操作建并下达一张生产单。
   专用打印机：生产单可指定打印机（编号或序号）；排单 schedule() 读打印机字段 p["paused"]（不接新任务）、p["role"]（any / orders / stock）、p["dedicated_po"]（只接这张单），缺了按默认；手动开始也核对；看板每台显示在做 / 专用的生产单，打不了这张单东西的专用打印机提醒。手机 /m 新增「生产单」（进度 / 暂停 / 恢复 / 扫单号二维码）。
+
+- 1.14（系统 v2.54.0）：打印机管理按几百到几千台重做：
+  ① 生产 → 打印机 = 机群总览：数字卡片（总数 / 在线 / 打印中 / 空闲 / 出错 / 连不上 / 该保养 / 今天利用率）→ 机群地图（按分组每台一个色块）→
+     分页列表（状态 / 机型 / 分组 / 用途筛选，搜编码 / IP / 序列号，服务器分页 GET /api/fleet）；点一台打开右边抽屉：状态和暂停 / 继续 / 取消、
+     基本信息（编码、机型、分组、位置、用途、专用生产单、暂停接单、启用）、按厂家的连接表单（core/fleet.VENDORS：拓竹 IP+序列号+访问码，
+     Creality 原厂只填 IP，Klipper IP+可选端口；以后加厂家只加一项）、测试连接（拓竹列出 局域网模式 8883/990、访问码、序列号、开发者模式 检查）、
+     🧪 打印测试、网络诊断、单独设置、保养、打印记录、二维码标签。代码 ui/fleet.js、fleet_api.py。
+  ② 机型模板：设置 → 生产 只剩「机型模板」（cfg printer_models：喷嘴、热床板、每小时克数、AMS、Orca 三项配置）；每台只存单独设置（ovr）。
+     唯一读法 core/fleet.effective(p)：load_config 读出来的打印机已经是模板 + 覆盖的结果；切片核对、resolve_profiles、is_multicolor 都走它（核对照样严格）。
+  ③ 批量添加：＋ 添加（N 台自动编码 P1S-001…）、🔍 局域网发现（core/printer_discovery.py：拓竹 SSDP 广播 UDP 2021/1990 + 扫服务器网段 8883/9999/7125/4408，
+     最多 1024 个地址、同时 128 个连接，只有老板）、📥 Excel / CSV 导入（先预览每行问题，全部对才添加）；🏷 /print/fleet-labels 二维码标签（扫了打开这台）。
+  ④ 新字段（排单那边只读）：group、location、role（any / orders / stock）、dedicated_po、paused；单台 / 批量设置（POST /api/fleet/bulk）。
+  ⑤ 稳定身份：每台有不变的 id；新加的只往后加（序号不变）；删除时 fleet.remap 按 id 对任务 / 打印记录 / 失败 / 保养的序号，状态缓存跟着挪；改编码不算删除。
+  ⑥ 连接管理 core/printer_manager.py：一个 asyncio 事件循环管所有 MQTT/TLS、WebSocket、HTTP 连接，按状态错开轮询、连不上指数退避、单台出错互不影响；
+     线程固定 2 个。PRINTER_WORKER=external + `python -m core.printer_worker` 拆成单独进程（表 printer_state / printer_cmds），
+     printer_workers = {进程 id: [分组]} 按分组分给多个进程。core/printers 的对外函数不变。
+  ⑦ 迁移：同机型一样的值变成模板，不一样的留作单台覆盖；备注像位置的抄到 location；连接全部保留。测试 tests/t_fleet254.py（含 1000 台假打印机压力测试、TLS、后台进程模式）。

@@ -124,6 +124,8 @@ DEFAULT_CONFIG = {
         {"name": "Creality K1C", "g_per_h": 18, "orca_machine": "", "orca_process": "", "orca_filament": ""},
     ],
     "default_printer": 0,
+    "printer_models": {},                # v2.54 机型模板：{机型: {nozzle, plate, g_per_h, ams, orca_*}}；每台打印机只存单独设置（ovr）
+    "printer_workers": {},               # v2.54 打印机连接分给几个后台进程：{进程 id: [分组, …]}（没分的归默认进程）
     "orca_path": "",                     # 留空自动查找 orca-slicer.exe
     "est_infill": 0.15,                  # 估算用：填充率
     "est_shell_mm": 1.0,                 # 估算用：外壁+顶底等效厚度（毫米）
@@ -178,21 +180,30 @@ def load_config():
                 os.replace(CONFIG_PATH + ".tmp", CONFIG_PATH)
             except (OSError, json.JSONDecodeError):
                 pass
-    # v2.7：每台打印机要有机器编码（P1S-01 …）和启用开关
+    # v2.7：每台打印机要有机器编码（P1S-01 …）和启用开关；v2.54：稳定 id、分组 / 位置 / 用途，机型模板 + 单台覆盖
     prs = cfg.get("printers")
     if isinstance(prs, list) and prs:
         from . import fleet
-        if fleet.ensure_codes(prs) and os.path.exists(CONFIG_PATH):
+        changed = fleet.ensure_codes(prs)
+        changed = fleet.ensure_fields(prs) or changed
+        if not cfg.get("_fleet254"):
+            fleet.migrate254(cfg)          # 一次性：同机型一样的设置变成机型模板
+            changed = True
+        stored = [fleet.to_stored(p, cfg) for p in prs]
+        if changed and os.path.exists(CONFIG_PATH):
             try:
                 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                     raw = json.load(f)
                 if isinstance(raw.get("printers"), list) and len(raw["printers"]) == len(prs):
-                    raw["printers"] = prs
+                    raw["printers"] = stored
+                    raw["printer_models"] = cfg.get("printer_models") or {}
+                    raw["_fleet254"] = True
                     with open(CONFIG_PATH + ".tmp", "w", encoding="utf-8") as f:
                         json.dump(raw, f, ensure_ascii=False, indent=2)
                     os.replace(CONFIG_PATH + ".tmp", CONFIG_PATH)
             except (OSError, json.JSONDecodeError):
                 pass
+        cfg["printers"] = [fleet.effective(p, cfg) for p in stored]
     return _fix_lists(cfg)
 
 
@@ -205,9 +216,16 @@ def save_config(cfg):
     except Exception:  # noqa: BLE001
         pass
     merged.update(cfg)
+    out = merged
+    if isinstance(merged.get("printers"), list):       # v2.54：只存单台覆盖（模板算出来的值不存）
+        from . import fleet
+        fleet.ensure_fields(merged["printers"])
+        stored = [fleet.to_stored(p, merged) for p in merged["printers"]]
+        out = dict(merged, printers=stored)
+        merged["printers"] = [fleet.effective(p, merged) for p in stored]
     tmp = CONFIG_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(merged, f, ensure_ascii=False, indent=2)
+        json.dump(out, f, ensure_ascii=False, indent=2)
     os.replace(tmp, CONFIG_PATH)
     try:                                       # v2.40 复审：同一秒内改两次设置，缓存不能还用旧的
         from . import print_files

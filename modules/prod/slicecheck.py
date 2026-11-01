@@ -27,6 +27,7 @@ def _known_models(cfg=None):
     cfg = cfg or load_config()
     out = []
     for p in cfg.get("printers") or []:
+        p = fleet.effective(p, cfg)           # v2.54：机型模板 + 单台覆盖
         for n in (p.get("name"), p.get("orca_machine")):
             if n:
                 out.append((_norm(n), p.get("name")))
@@ -85,7 +86,7 @@ def check(f, idx, cfg=None):
     if idx is None or not (0 <= int(idx) < len(prs)):
         out.update(ok=False, errors=["没有选打印机"])
         return out
-    p = prs[int(idx)]
+    p = fleet.effective(prs[int(idx)], cfg)    # v2.54：喷嘴 / 热床板 / Orca 配置按机型模板 + 这台的单独设置
     pname = p.get("name") or ""
     out["printer_model"] = pname
     code = p.get("code") or f"#{int(idx) + 1}"

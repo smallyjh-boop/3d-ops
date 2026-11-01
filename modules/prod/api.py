@@ -6,7 +6,7 @@ from web.common import *  # noqa: F401,F403
 from core import trial
 
 bp = Blueprint("m_prod", __name__)
-PREFIXES = ['/api/print-files', '/api/trial', '/api/slicer', '/api/printers', '/api/printer-models', '/api/jobs', '/api/spools', '/api/materials', '/api/files', '/print/spools', '/print/jobs', '/api/sliced', '/api/runs', '/api/quality', '/api/production', '/api/maintenance', '/api/calib', '/api/porders', '/print/po']
+PREFIXES = ['/api/fleet', '/print/fleet-labels', '/api/print-files', '/api/trial', '/api/slicer', '/api/printers', '/api/printer-models', '/api/jobs', '/api/spools', '/api/materials', '/api/files', '/print/spools', '/print/jobs', '/api/sliced', '/api/runs', '/api/quality', '/api/production', '/api/maintenance', '/api/calib', '/api/porders', '/print/po']
 PATTERNS = [r"^/api/stock(/make)?$", '^/api/products/[^/]+/recipe(/slice)?$']
 
 
@@ -1215,3 +1215,6 @@ def po_sheet(pid):
     except ValueError as e:
         return err(str(e), 404)
     return app.response_class(html, mimetype="text/html")
+
+
+from . import fleet_api  # noqa: E402,F401  v2.54 打印机机群（同一个 bp）

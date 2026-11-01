@@ -634,8 +634,8 @@ def resolve_profiles(cfg, printer_index=0, material="PLA", filament_name=None):
     printers = cfg.get("printers") or DEFAULT_PRINTERS
     if printer_index >= len(printers):
         raise SliceError("打印机序号不对")
-    p = printers[printer_index]
     from . import fleet
+    p = fleet.effective(printers[printer_index], cfg)    # v2.54：Orca 配置按机型模板 + 这台的单独设置
     if fleet.tech_of(p) == "resin":
         raise SliceError(f"「{p.get('name')}」是光固化打印机：请在电脑上用 Photon Workshop / Chitubox / Lychee 切好后，"
                          "在打印方案里「上传电脑上切好的文件」")
@@ -793,7 +793,8 @@ def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, ov
     from . import accel
     from . import orca_profiles as op
     exe, idx, machine, process, filament = resolve_profiles(cfg, printer_index, material, filament_name)
-    p = (cfg.get("printers") or DEFAULT_PRINTERS)[printer_index]
+    from . import fleet
+    p = fleet.effective((cfg.get("printers") or DEFAULT_PRINTERS)[printer_index], cfg)
     out_dir = tempfile.mkdtemp(prefix="slice_")
     try:
         try:
