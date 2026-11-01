@@ -10,7 +10,7 @@ bp = Blueprint("m_inv", __name__)
 def _views():
     from modules.inv import views
     return views
-PREFIXES = ['/api/inv/', '/api/v1/finance/events', '/api/v1/finance/inventory', '/print/inv-locations']
+PREFIXES = ['/api/inv/', '/api/v1/finance/events', '/api/v1/finance/inventory', '/print/inv-locations', '/print/gs-labels']
 PATTERNS = []
 
 
@@ -634,3 +634,105 @@ def inv_spool_one(sid):
     """一卷料 + 放在哪（手机扫料卷）。"""
     s = _flows().spool_info(sid)
     return jsonify({"ok": True, "spool": s}) if s else err("没有这卷料", 404)
+
+
+# ---------------- 成品备货（v2.54）：所有成品一张表、目标自动算、缺口一键补货 ----------------
+def _gs_writer():
+    """写操作：老板和生产角色（补货会建生产单 / 采购单草稿）。"""
+    u = auth.current_user() or {"role": "owner"}
+    if u.get("role") not in ("owner", "production"):
+        return err("没有权限：只有老板和生产人员可以改成品备货", 403)
+    return None
+
+
+@bp.get("/api/inv/gs")
+def gs_overview():
+    from core.inventory import goodsstock
+    return _ok(lambda: goodsstock.overview())
+
+
+@bp.post("/api/inv/gs/<act>")
+def gs_act(act):
+    from core.inventory import goodsstock
+    deny = _gs_writer()
+    if deny:
+        return deny
+    b = request.get_json(force=True) or {}
+    u = _uname()
+    if act == "add":
+        return _ok(lambda: goodsstock.add(b.get("skus"), b.get("product_ids"), b.get("group"), b.get("src"), u))
+    if act == "target":
+        return _ok(lambda: {"n": goodsstock.set_target(b.get("skus"), b.get("target"), u)})
+    if act == "src":
+        return _ok(lambda: {"n": goodsstock.set_src(b.get("skus"), b.get("src"), u)})
+    if act == "remove":
+        return _ok(lambda: {"n": goodsstock.remove(b.get("skus"), u)})
+    if act == "plan":
+        return _ok(lambda: {"plan": goodsstock.plan(b.get("skus"), b.get("group"))})
+    if act == "replenish":
+        return _ok(lambda: goodsstock.replenish(b.get("lines"), b.get("skus"), b.get("group"), u, bool(b.get("release")), b.get("priority") or 0,
+                                                b.get("due"), b.get("printers")))
+    return err("没有这个操作", 404)
+
+
+@bp.get("/api/inv/gs/products")
+def gs_products():
+    """加进成品备货的候选：产品库的产品（带规格 SKU、已经在表里几个）。q 搜索。"""
+    from core import store
+    from core.inventory import goodsstock
+    q = (request.args.get("q") or "").strip().lower()
+    have = {r["sku"] for r in db.conn().execute("SELECT sku FROM stock")}
+    out = []
+    for it in store.list_products():
+        try:
+            p = store.load(it["id"])
+        except Exception:  # noqa: BLE001
+            continue
+        skus = [(v.get("sku") or "").strip().upper() for v in p.get("variants") or [] if (v.get("sku") or "").strip()]
+        if not skus:
+            continue
+        cat = goodsstock._cat_of(p)
+        if q and q not in (p["id"] + " " + (p.get("name_zh") or "") + " " + cat).lower() and not any(q in s.lower() for s in skus):
+            continue
+        out.append({"id": p["id"], "name": p.get("name_zh") or "", "category": cat, "img": goodsstock._img(p), "skus": skus,
+                    "in": sum(1 for s in skus if s in have), "tags": [str(x) for x in p.get("groups") or []]})
+    cats = sorted({x["category"] for x in out if x["category"]})
+    try:
+        tags = [{"id": g["id"], "name": g["name"]} for g in db.conn().execute("SELECT id, name FROM product_groups ORDER BY sort, name")]
+    except Exception:  # noqa: BLE001
+        tags = []
+    return _ok(lambda: {"products": out[:300], "total": len(out), "categories": cats, "tags": tags})
+
+
+@bp.get("/api/inv/gs/locs")
+def gs_locs():
+    """一个 SKU 的货位（分开放的几处）+ 上架推荐，快速移库 / 上架用。"""
+    from modules.inv import wms
+    sku = (request.args.get("sku") or "").strip().upper()
+    it = db.conn().execute("SELECT id FROM inv_items WHERE category='goods' AND UPPER(code)=?", (sku,)).fetchone()
+    if not it:
+        return _ok(lambda: {"item_id": None, "locations": [], "unplaced": 0, "plan": []})
+    return _ok(lambda: {"item_id": it["id"], **wms.item_locations(it["id"]), "plan": wms.recommend(it["id"], None)})
+
+
+@bp.get("/print/gs-labels")
+def gs_labels():
+    """成品标签 60×40mm：SKU 条码 + 名称 + 货位。?skus=A,B"""
+    from html import escape as h
+    from core import labels
+    from core.inventory import goodsstock
+    want = [s.strip().upper() for s in (request.args.get("skus") or "").split(",") if s.strip()]
+    rs = {r["sku"]: r for r in goodsstock.rows()}
+    css = ("@page{size:60mm 40mm;margin:0}*{box-sizing:border-box}body{margin:0;font:10px 'Leelawadee UI',Tahoma,'Microsoft YaHei',sans-serif}"
+           ".t{width:60mm;height:40mm;padding:2mm;page-break-after:always;overflow:hidden;display:flex;flex-direction:column;gap:.6mm}"
+           ".sku{font-size:15px;font-weight:800}.big{font-size:12px;font-weight:700}.row{display:flex;justify-content:space-between}"
+           "@media screen{body{background:#ddd}.t{background:#fff;margin:6px auto}}@media print{.np{display:none}}")
+    out = [f"<!doctype html><html><head><meta charset='utf-8'><title>SKU</title><style>{css}</style></head><body>"
+           "<p class='np' style='text-align:center'><button onclick='print()'>打印 / พิมพ์</button> 60×40mm</p>"]
+    for sku in want:
+        r = rs.get(sku) or {"name": "", "color": "", "locs": []}
+        loc = r["locs"][0]["code"] if r.get("locs") else ""
+        out.append(f"<div class='t'><div class='row'><span class='sku'>{h(sku)}</span><span class='big'>{h(loc)}</span></div>"
+                   f"<div class='big'>{h(r.get('color') or '')}</div><div>{h((r.get('name') or '')[:40])}</div><div>{labels.code128_svg(sku, 26, 1)}</div></div>")
+    out.append("</body></html>")
+    return app.response_class("".join(out), mimetype="text/html")

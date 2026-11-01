@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS trials (
   done_at REAL, done_by TEXT
 );
 CREATE INDEX IF NOT EXISTS trials_product ON trials(product_id);
+CREATE TABLE IF NOT EXISTS production_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, no TEXT UNIQUE, source TEXT DEFAULT 'manual', status TEXT DEFAULT 'draft', priority INTEGER DEFAULT 0,
+  due REAL, note TEXT, printers TEXT DEFAULT '[]', paused INTEGER DEFAULT 0, created_at REAL, created_by TEXT, released_at REAL, done_at REAL, updated_at REAL
+);
+CREATE TABLE IF NOT EXISTS po_lines (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, po_id INTEGER, sku TEXT, product_id TEXT, name TEXT, color TEXT, qty INTEGER DEFAULT 1,
+  done INTEGER DEFAULT 0, job_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS po_lines_po ON po_lines(po_id);
 CREATE TABLE IF NOT EXISTS maintenance (
   id INTEGER PRIMARY KEY AUTOINCREMENT, printer INTEGER, item TEXT, ts REAL, hours_at REAL, username TEXT, note TEXT
 );
@@ -85,11 +94,15 @@ def init():
                      ("priority_job", "INTEGER DEFAULT 0"),
                      ("stock_n", "INTEGER DEFAULT 0"),      # v2.35：订单任务里「用库存发」的个数（先占住，发货出库时才扣）
                      ("multi_plate", "INTEGER DEFAULT 0"),  # v2.52：打印方案有几盘（0 = 整件一盘打，照旧）
-                     ("plate_sets", "INTEGER DEFAULT 0")):  # v2.52：几盘凑齐、已经算进 qty_done 的套数
+                     ("plate_sets", "INTEGER DEFAULT 0"),    # v2.52：几盘凑齐、已经算进 qty_done 的套数
+                     ("po_id", "INTEGER")):                  # v2.54：属于哪张生产单（core/po.py）
         if col not in cols:
             c.execute(f"ALTER TABLE jobs ADD COLUMN {col} {typ}")
             if col == "qty_done":     # 老数据：已经打完的任务
                 c.execute("UPDATE jobs SET qty_done=qty WHERE status IN ('post','packed','done')")
+    scols = {r[1] for r in c.execute("PRAGMA table_info(stock)")}
+    if "src" not in scols:       # v2.54：成品备货里手动标的 自产 own / 外购 buy（空 = 按产品库自动判断）
+        c.execute("ALTER TABLE stock ADD COLUMN src TEXT")
     rcols = {r[1] for r in c.execute("PRAGMA table_info(print_runs)")}
     for col, typ in (("colors", "TEXT"),          # v2.52 多色：这一盘每种颜色用多少克（JSON），打完按颜色扣耗材
                      ("plate_id", "TEXT"), ("plate_no", "INTEGER"), ("plate_total", "INTEGER"), ("plate_name", "TEXT")):  # v2.52：几盘的方案里打的哪一盘
@@ -358,13 +371,15 @@ def delete_stock_job(job_id, user=""):
     c.execute("DELETE FROM jobs WHERE id=?", (job_id,))
     c.execute("DELETE FROM job_plates WHERE job_id=?", (job_id,))
     c.commit()
-    from . import db as _db
+    from . import db as _db, po as _po
+    _po.on_job_deleted(job_id, _col(j, "po_id"), user)       # v2.54：生产单里对应的行去掉
     _db.audit(user, "删除备货任务", j["sku"] or "", f"#{job_id} ×{j['qty']}")
     schedule()
 
 
-def create_job(product_id, sku, qty, kind="stock", order_id=None, user="", note="", priority=0, printer=None, file_id=None):
-    """备货任务 / 补发任务 / 试打任务（v2.53：priority=1 加急；printer 指定打印机；file_id 试打用的文件）。"""
+def create_job(product_id, sku, qty, kind="stock", order_id=None, user="", note="", priority=0, printer=None, file_id=None, po_id=None,
+               schedule_now=True):
+    """备货任务 / 补发任务 / 试打任务（v2.53：priority=1 加急；printer 指定打印机；file_id 试打用的文件；v2.54：po_id 属于哪张生产单）。"""
     from . import orders, store
     p = store.load(product_id)
     prs = load_config().get("printers") or []
@@ -381,14 +396,15 @@ def create_job(product_id, sku, qty, kind="stock", order_id=None, user="", note=
     now = _now()
     pin = printer not in (None, "")
     jid = c.execute("""INSERT INTO jobs(order_id, product_id, sku, name, color, material, qty, grams_each, hours_each, status,
-                       kind, note, created_at, updated_at, updated_by, priority_job, printer, pin, file_id)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       kind, note, created_at, updated_at, updated_by, priority_job, printer, pin, file_id, po_id)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (order_id, product_id, sku, info.get("name") or p.get("name_zh"), info.get("color", ""),
                      info.get("material") or "PLA", int(qty), info.get("grams"), info.get("hours"), "todo", kind, note,
                      now, now, user, 1 if (priority or kind == "trial") else 0, int(printer) if pin else None,
-                     1 if pin else 0, int(file_id) if file_id else None)).lastrowid
+                     1 if pin else 0, int(file_id) if file_id else None, int(po_id) if po_id else None)).lastrowid
     c.commit()
-    schedule()
+    if schedule_now:
+        schedule()
     return dict(_job(c, jid))
 
 
@@ -501,10 +517,12 @@ def schedule():
     overhead = float(cfg.get("est_overhead_h") or 0.15)
     no_file_penalty = float(cfg.get("no_file_penalty_h") or 6) * 3600
     cc = {}
+    from . import po as _po
+    allowed = _po.rules(printers, c)          # v2.54：暂停 / 用途 / 专用于某张生产单 / 生产单指定的打印机
     for j in jobs:
         best = None
         need_tech = fleet.job_tech(j["material"])
-        fits = [fleet.tech_of(printers[i]) == need_tech for i in range(len(avail))]
+        fits = [fleet.tech_of(printers[i]) == need_tech and allowed(i, j) for i in range(len(avail))]
         if pviews.get(j["id"]):
             _schedule_plates(c, j, pviews[j["id"]], printers, names, usable, fits, avail, overhead, no_file_penalty)
             continue
@@ -533,6 +551,7 @@ def schedule():
         c.execute("UPDATE jobs SET printer=?, planned_start=?, planned_end=? WHERE id=?", (i, start, fin, j["id"]))
         avail[i] = [fin, {j["color"]}]
     c.commit()
+    _po.sync()          # v2.54：生产单的状态跟着任务进度走
     return len(jobs)
 
 
@@ -590,8 +609,10 @@ def list_jobs(statuses=None, order_id=None):
     out = []
     prs = load_config().get("printers") or []
     cc, pc = {}, {}
+    pono = {r["id"]: r["no"] for r in c.execute("SELECT id, no FROM production_orders")}      # v2.54
     for r in c.execute(sql, args):
         d = dict(r)
+        d["po_no"] = pono.get(d.get("po_id")) if d.get("po_id") else None
         ck = (d.get("product_id"), d.get("sku"), d.get("color"))
         if ck not in cc:
             cc[ck] = job_colours(*ck)
@@ -771,6 +792,30 @@ def stock_set(sku, qty=None, target=None, user=""):
         c.execute("INSERT INTO stock(sku, qty, target, updated_at) VALUES(?,0,?,?) "
                   "ON CONFLICT(sku) DO UPDATE SET target=excluded.target", (sku, int(target) if target != "" else None, _now()))
         c.commit()
+
+
+def sku_per_plate(sku):
+    """这个 SKU 一盘能打几个（按打印方案 / 切片文件；几盘的方案取每盘的套数；不知道 = 1）。成品备货补货按盘数往上取整用。"""
+    try:
+        from . import orders, print_files
+        hit = orders.match_sku(sku, orders.sku_index())
+        if not hit:
+            return 1
+        info = orders._variant_info(*hit) or {}
+        j = {"id": 0, "product_id": hit[0], "sku": sku, "color": info.get("color") or "", "material": info.get("material") or "PLA",
+             "qty": 1000, "qty_done": 0, "grams_each": info.get("grams"), "hours_each": info.get("hours"), "multi_plate": 0}
+        views = job_plates(hit[0], sku, j["color"])
+        if views and len(views) > 1:
+            return max(1, min(int(v.get("sets") or 1) for v in views))
+        names = _printer_names()
+        best = 1
+        for i in range(len(names)):
+            pl = print_files.plan(j, names[i])
+            if pl.get("file"):             # 没有切片文件时 plan 的 per_plate 只是剩余数量，不算
+                best = max(best, int(pl["per_plate"] or 1))
+        return max(1, min(best, 500))
+    except Exception:  # noqa: BLE001
+        return 1
 
 
 def stock_suggest():
@@ -1126,6 +1171,8 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
     if idx is None:
         raise ValueError("请选择打印机")
     names = _printer_names()
+    from . import po as _po
+    _po.check_printer(j, idx)      # v2.54：暂停的打印机 / 别的生产单专用的打印机 / 暂停的生产单不能开始
     busy = c.execute("SELECT id FROM print_runs WHERE printer=? AND status='printing' LIMIT 1", (idx,)).fetchone()
     if busy:      # v2.40：一台打印机同时只能有一盘在打
         raise ValueError(f"「{names[idx] if idx < len(names) else idx}」上还有一盘（批次 #{busy['id']}）在打，"
@@ -1698,8 +1745,19 @@ def board():
                       "hours": round(sum((j.get("plan") or {}).get("hours_left", 0) for j in q), 1),
                       "free_at": max([j["planned_end"] or 0 for j in q] or [0]),
                       "status": st, "status_zh": pr.STATE_ZH.get(st.get("state") or "none", ""),
-                      "conn": (p.get("conn") or {}).get("type", "none")})
+                      "conn": (p.get("conn") or {}).get("type", "none"),
+                      # v2.54：舰队页维护的字段（只读，缺了用默认），和这台现在在做哪张生产单
+                      "paused": p.get("paused") is True, "role": p.get("role") or "any", "dedicated_po": str(p.get("dedicated_po") or ""),
+                      "group": p.get("group") or "", "location": p.get("location") or "",
+                      "po_ids": list(dict.fromkeys([j.get("po_id") for r in runs if r["printer"] == i for j in r.get("jobs", []) if j.get("po_id")]
+                                                   + [j.get("po_id") for j in q if j.get("po_id")]))})
     unassigned = [j for j in cards if j["printer"] is None]
+    from . import po as _po
+    pinfo2 = _po.lane_info([x for l in lanes for x in l["po_ids"]] + [int(l["dedicated_po"]) for l in lanes if l["dedicated_po"].isdigit()])
+    for l in lanes:
+        l["pos"] = [pinfo2[i] for i in l["po_ids"] if i in pinfo2]
+        l["working_po"] = (l["pos"][0] if l["pos"] else None)
+        l["dedicated"] = pinfo2.get(int(l["dedicated_po"])) if l["dedicated_po"].isdigit() else None
     return {"lanes": lanes, "unassigned": unassigned,
             "post": [j for j in jobs if j["status"] == "post"],
             "packed": [j for j in jobs if j["status"] == "packed"],

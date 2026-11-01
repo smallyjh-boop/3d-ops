@@ -8,6 +8,9 @@
 """
 
 
+from . import public
+
+
 def _todo(add):
     from .logic import todo
     todo.provide(add)
@@ -46,6 +49,7 @@ MODULE = {
                          ("GET", r"^/print/pur-labels$")],
     "owner_only": [("POST", r"^/api/inv/pur/costs/\d+/(apply|dismiss)$")],
     "events": {"po.received": _on_received},
+    "public": public,             # v2.54：draft_po / in_transit（成品备货的外购补货）
     "todo": _todo,
     "settings_module": "inventory",
     "settings": [("采购", [

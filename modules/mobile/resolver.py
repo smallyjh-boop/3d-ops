@@ -6,6 +6,7 @@
   物品编码          库存物品的编码（包材、备件……成品的编码就是 SKU）→ item
   货位 / 货架 / 区   货位标签（A1-02-03）、货架牌（A1）→ location / shelf / zone
   料卷编号          料卷标签 → spool
+生产单号（PO260101-01，生产单上的二维码）→ po
 认不出来 → unknown（手机页面提示「不认识这个码」）。
 
 对外：resolve(code, user, prefer="")  order_summary(row_or_id, user)  norm(code)
@@ -209,6 +210,10 @@ def _resolve(code, user=None, prefer="", fresh=False):
     code = norm(code)
     if not code:
         raise ValueError("先扫码或输入")
+    if re.fullmatch(r"PO\d{6}-\d+", code, re.I):         # v2.54：生产单二维码（core/po.py）
+        row = db.conn().execute("SELECT id, no, status FROM production_orders WHERE UPPER(no)=?", (code.upper(),)).fetchone()
+        if row:
+            return {"type": "po", "code": row["no"], "po": {"id": row["id"], "no": row["no"], "status": row["status"]}}
     order = lambda: _find_order(code)                     # noqa: E731
     item = lambda: _find_item(code) if _inv_on() else None    # noqa: E731
     tries = ["location", "item", "order"] if prefer in ("item", "location") else ["order", "location", "item"]

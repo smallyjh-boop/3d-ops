@@ -1,0 +1,19 @@
+/* v2.54 生产单 */
+.po-st { display: inline-block; padding: 0 8px; border-radius: 10px; font-size: 12px; border: 1px solid #cbd5e1; background: #fff; white-space: nowrap }
+.po-draft { color: #64748b }
+.po-released, .po-producing { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff }
+.po-partial { color: #b45309; border-color: #fde68a; background: #fffbeb }
+.po-done { color: #15803d; border-color: #bbf7d0; background: #f0fdf4 }
+.po-cancelled { color: #b91c1c; border-color: #fecaca; background: #fef2f2 }
+.po-paused { color: #7c3aed; border-color: #ddd6fe; background: #f5f3ff }
+.po-bar { height: 8px; border-radius: 4px; background: #e5e7eb; overflow: hidden; margin-bottom: 2px }
+.po-bar i { display: block; height: 100%; background: #3b82f6 }
+.po-bar i.ok { background: #22c55e }
+.po-row-paused { opacity: .75 }
+.po-tools { align-items: center; margin: 8px 0 }
+.po-tools input[type=search] { min-width: 200px }
+.po-prs { margin: 8px 0; padding: 8px 10px; background: #f8fafc; border-radius: 8px }
+.po-pill { display: inline-block; padding: 0 7px; border-radius: 10px; font-size: 11px; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; cursor: pointer }
+.po-pill.paused { background: #f5f3ff; color: #7c3aed; border-color: #ddd6fe }
+.pill.po-badge { background: #eff6ff; color: #1d4ed8; cursor: pointer }
+@media (max-width: 700px) { .po-tools input[type=search] { min-width: 0; flex: 1 } }
