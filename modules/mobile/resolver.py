@@ -184,8 +184,28 @@ def _spool(code):
 
 
 # ---------------- 识别 ----------------
-def resolve(code, user=None, prefer="", fresh=False):
-    """返回 {type, code, ...}。type：order / item / sku / location / shelf / zone / spool / unknown。"""
+def resolve(code, user=None, prefer="", fresh=False, fuzzy=False):
+    """返回 {type, code, ...}。type：order / item / sku / location / shelf / zone / spool / unknown。
+    fuzzy=True（拍照 / 摄像头读出来的文字）：认不出时按文字容错（O/0、I/1、少横杠……，拍照识别模块）找最像的码：
+    把握够（≥0.85）就当成那个码（结果里带 fuzzy: {from, conf}），不够就在 unknown 里给 suggest 候选。"""
+    r = _resolve(code, user, prefer, fresh)
+    if r["type"] != "unknown" or not fuzzy:
+        return r
+    from core import modules as _m
+    rc = _m.public("recog")
+    if not rc:
+        return r
+    cands = [c for c in rc.match_text(r["code"], 5) if c["type"] != "location?"]
+    if cands and cands[0]["conf"] >= 0.85 and cands[0]["code"] != r["code"]:
+        r2 = _resolve(cands[0]["code"], user, prefer, fresh)
+        if r2["type"] != "unknown":
+            r2["fuzzy"] = {"from": r["code"], "conf": cands[0]["conf"]}
+            return r2
+    r["suggest"] = cands
+    return r
+
+
+def _resolve(code, user=None, prefer="", fresh=False):
     code = norm(code)
     if not code:
         raise ValueError("先扫码或输入")

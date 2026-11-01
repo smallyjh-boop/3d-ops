@@ -17,8 +17,8 @@ android {
         applicationId = "com.threedops.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         // 只打包手机 / 平板用的 ARM（条码识别的原生库每种 CPU 一份，去掉模拟器的 x86 小一半）
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -88,4 +88,10 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    // v1.1 文字识别（拉丁字母：货位牌、单号、SKU；模型打包在 App 里，没网也能用）
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    // 本机单元测试（./gradlew testDebugUnitTest）：文字识别挑「像码的文字」（TextCodesTest）
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

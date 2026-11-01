@@ -87,3 +87,6 @@ Kotlin + Gradle Kotlin DSL，minSdk 24 / targetSdk 34，AGP 8.7.3、Kotlin 2.0.2
   成功 / 警告 / 出错不同的声音震动，断网排队补传，中文 / 泰文）、扫码识别接口、打包照片、安卓 App 安装包（GitHub Release / 手动上传、`/apk` 下载）、
   平板触屏样式和 App 里隐藏电脑才有的功能。
 - 1.1（系统 v2.51.0）：手机页加「采购到货」（扫采购单号 / 物流单号 / 物品条码，一件一扫点数，记少发 / 破损，放货位，打印物品标签，断网排队补传；采购模块开着才有）。
+- （系统 v2.52.0，配合拍照识别模块 recog）：扫码输入框旁边「📷 识别」（拍照找产品 / 拍照读文字，认出来的码像扫码一样送给当前页面，脚本在 `modules/recog/ui/`）；
+  App 摄像头认出的文字 `onNativeScan(文字, "text")` 先经 `/api/recog/text` 容错认成系统里的码（`scan.js` 显示「文字」小标）；
+  `GET /api/mobile/resolve?…&fuzzy=1` 认不出时按文字容错（O/0、I/1、少横杠）找最像的码；新接口 `GET /api/mobile/code-patterns`（App 挑「像码的文字」的正则）。

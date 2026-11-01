@@ -49,9 +49,22 @@ def mobile_boot():
 def mobile_resolve():
     a = request.args
     try:
-        return jsonify(resolver.resolve(a.get("code"), auth.current_user(), a.get("prefer") or "", a.get("fresh") == "1"))
+        return jsonify(resolver.resolve(a.get("code"), auth.current_user(), a.get("prefer") or "", a.get("fresh") == "1",
+                                        fuzzy=a.get("fuzzy") == "1"))
     except ValueError as e:
         return err(str(e))
+
+
+@bp.get("/api/mobile/code-patterns")
+def mobile_code_patterns():
+    """安卓 App 的文字识别：哪些文字「像码」（货位、订单号、快递单号、SKU）——像了才送给网页（拍照识别模块关着时只给空表）。"""
+    rc = modules.public("recog")
+    if not rc:
+        return jsonify({"v": 1, "patterns": [], "enabled": False})
+    from core.config import load_config
+    if not load_config().get("recog_on", True):
+        return jsonify({"v": 1, "patterns": [], "enabled": False})
+    return jsonify({**rc.code_patterns(), "enabled": True})
 
 
 @bp.get("/api/mobile/orders")

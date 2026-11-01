@@ -2,6 +2,8 @@
 // 手机页的「扫码枪」：一直开着的摄像头小窗（屏幕上面 1/4）连续识别条码 / 二维码，像扫码枪一样把码送给当前页面。
 // 码从哪来（都走 SCAN.feed）：
 //   native  安卓 App 里：原生摄像头（CameraX + ML Kit）识别，App 调 window.onNativeScan(code)
+//   text    安卓 App 里 ML Kit 认出的像码的文字（onNativeScan(文字, "text")），先经 RECOG.text 认成系统里的码（v2.52 拍照识别模块）
+//   photo   拍照识别（📷 识别 按钮，modules/recog）
 //   cam     普通浏览器：BarcodeDetector（要 https 或 localhost；局域网 http 地址浏览器不给开摄像头 → 提示装 App / 用扫码枪）
 //   wedge   蓝牙 / USB 扫码枪（模拟键盘：很快地打一串字再按回车）
 //   manual  手动输入框
@@ -46,18 +48,35 @@
   function feed(code, src) {
     code = String(code || "").replace(/[\r\n\t]+/g, "").trim();
     if (!code) return;
-    if (src === "cam" || src === "native") {
+    if (src === "cam" || src === "native" || src === "text") {
       const now = Date.now(), last = seen[code] || 0;
       seen[code] = now;
       if (now - last < DEDUP_MS) return;
     }
     const st = document.getElementById("cam-last");
-    if (st) st.textContent = code;
+    if (st) {
+      st.textContent = code;
+      if (src === "text") {                                       // 摄像头认出来的文字（不是条码）：加个小标
+        const t = document.createElement("span");
+        t.className = "txt-tag"; t.removeAttribute("data-notr");
+        t.textContent = TXT();
+        t.style.cssText = "font-size:11px;background:#6366f1;color:#fff;border-radius:5px;padding:0 4px;margin-left:5px";
+        st.appendChild(t);
+      }
+    }
     if (handler) {
       try { handler(code, src); } catch (e) { console.error(e); }
     }
   }
-  window.onNativeScan = (code) => feed(code, "native");
+  // App 的摄像头：条码 onNativeScan(码)；认出来像码的文字 onNativeScan(文字, "text") → 先问服务器是系统里的哪个码（拍照识别模块，O/0、I/1 这类错也认）
+  const TXT = () => { try { return localStorage.getItem("ui_lang") === "th" ? "ข้อความ" : "文字"; } catch { return "文字"; } };
+  window.onNativeScan = (code, kind) => {
+    if (kind === "text") {
+      if (window.RECOG && RECOG.text) RECOG.text(code).then((c) => { if (c) feed(c, "text"); });
+      return;
+    }
+    feed(code, "native");
+  };
 
   // ---------------- 扫码枪（键盘输入） ----------------
   // 扫码枪很快（每个字 < 50 毫秒）打一串字再回车；人打字慢。在别的输入框里扫到的也接住（把打进去的字还原）。

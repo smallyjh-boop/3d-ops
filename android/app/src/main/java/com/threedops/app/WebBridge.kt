@@ -6,6 +6,7 @@ import android.webkit.JavascriptInterface
  * 网页里的 window.Android3D（只给自己服务器的页面用）：
  *   isApp()  isTablet()  version()
  *   startScan() / stopScan()   打开 / 关上面的摄像头小窗；读到的码回调 window.onNativeScan(code)
+ *   setTextPatterns(json)      v1.1：哪些文字「像码」（/api/mobile/code-patterns）；像码的文字回调 window.onNativeScan(text, "text")
  *   beep("ok" | "warn" | "error")   扫码结果的声音 + 震动
  *   openSettings()   App 设置（服务器地址、手机版 / 网页版）
  *   print()          打印当前页（网页的 window.print 换成这个）
@@ -36,6 +37,9 @@ class WebBridge(private val a: MainActivity) {
         }
         a.runOnUiThread { a.feedback.play(k) }
     }
+
+    @JavascriptInterface
+    fun setTextPatterns(json: String?) = a.runOnUiThread { a.setTextPatterns(json) }
 
     @JavascriptInterface
     fun openSettings() = a.runOnUiThread { a.openSettings() }

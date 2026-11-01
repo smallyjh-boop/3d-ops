@@ -27,6 +27,7 @@
     <string name="close_cam">关摄像头 · ปิดกล้อง</string>
     <string name="download_started">开始下载：%1$s · เริ่มดาวน์โหลด: %1$s</string>
     <string name="no_print">这台设备不能打印 · อุปกรณ์นี้พิมพ์ไม่ได้</string>
+    <string name="text_tag">🔤 %1$s（文字 · ข้อความ）</string>
     <string name="choose_photo">选照片 · เลือกรูป</string>
     <string name="exit_q">退出 App？· ออกจากแอป?</string>
     <string name="exit">退出 · ออก</string>
