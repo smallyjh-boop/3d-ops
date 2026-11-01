@@ -374,6 +374,8 @@ def view(target, user=None):
                 for s in o["skus"]:
                     s.pop("price", None), s.pop("special_price", None)
         out["online"] = online
+    if lst is not None and staff and hasattr(lst, "stock_sync_recent"):       # v2.53 库存同步记录
+        out["stocksync"] = _safe(lst.stock_sync_recent, skus, 10) or []
     sales, by_sales = _sales(skus, p["id"])
     if not staff:
         sales.pop("revenue_30d", None)

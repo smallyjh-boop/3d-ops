@@ -4,7 +4,7 @@ from flask import Blueprint
 from web.common import *  # noqa: F401,F403
 
 bp = Blueprint("m_listing", __name__)
-PREFIXES = ['/api/export', '/api/listing', '/api/online']
+PREFIXES = ['/api/export', '/api/listing', '/api/online', '/api/stocksync']
 
 
 # ---------------- v2.44：在线商品（从店铺拉回来的商品，按平台分） ----------------
@@ -281,3 +281,7 @@ def _mark_stock(prods, platform):
     except Exception as e:  # noqa: BLE001
         from core import diag
         diag.log.warning("导出后记录库存失败：%s", e)
+
+
+# ---------------- v2.53：库存同步（stocksync.py） ----------------
+from . import stocksync_api  # noqa: E402,F401  路由在这个文件里（同一个 bp）

@@ -69,18 +69,7 @@
     </div>
   </div>
 
-  <div id="lw-stock" class="hidden">
-    <div class="card" id="stk-card">
-      <div class="row between"><h3>库存待同步到平台</h3>
-        <span><select id="stk-plat" class="small"><option value="lazada">Lazada</option><option value="shopee">Shopee</option></select>
-        <button class="mini primary-lite" id="stk-lz-push" title="用接口推送过的产品：把这里的库存直接改到 Lazada（用表格上传的产品还是人工改）">⚡ 推到 Lazada</button>
-        <button class="mini" id="stk-refresh">刷新</button></span></div>
-      <p class="muted small">开了「按耗材自动算库存」的产品：耗材用掉 / 进货后，库存变化够多的 SKU 列在这里。
-        用「直接推送到 Lazada」上架的产品：点「推到 Lazada」或按 设置 → 商品 → Lazada 接口推送 的间隔自动改；
-        用表格上传的产品请到平台后台改好库存后点「已改好」。导出上架表格 / 推送时的库存自动记为已同步。</p>
-      <div id="stk-pending"></div>
-    </div>
-  </div>
+  <div id="lw-stock" class="hidden"><div id="ss-root"></div></div>
 </section>
 
 <!-- v2.44：在线商品（从店铺拉回来的商品；按平台分，现在接了 Lazada） -->
