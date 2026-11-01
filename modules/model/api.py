@@ -1101,3 +1101,85 @@ def print_plan_thumb(pid):
     r = app.response_class(svg, mimetype="image/svg+xml")
     r.headers["Cache-Control"] = "no-cache"
     return r
+
+
+# ---------------- v2.55.1 实物数据：每个规格的成品尺寸、净重、包裹尺寸、包裹重量（值 + 来源 + 确认） ----------------
+from . import physical as _phys  # noqa: E402
+
+
+@bp.get("/api/products/<pid>/physical")
+def physical_get(pid):
+    try:
+        return jsonify(_phys.view(pid))
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+
+
+@bp.post("/api/products/<pid>/physical")
+def physical_post(pid):
+    """{op, spec, ...}：
+    set     {field, value, src: manual / weighed}  手填 / 实称（人工写入 = 已确认）
+    confirm {fields?（默认全部）, specs?（默认 [spec]；all=true 全部规格）}
+    box     {code}  选纸箱（包裹尺寸按纸箱）    qty {qty}  每个包裹几件
+    size    {specs?, force}  按模型 / 组装外框填成品尺寸 + 包裹尺寸（待确认）
+    net     {specs?}  按已有的切片结果算净重（待确认，不切片）"""
+    from core import physical as ph
+    b = request.get_json(force=True, silent=True) or {}
+    op = b.get("op") or ""
+    spec = (b.get("spec") or "").strip()
+    user = _uname()
+    try:
+        p = store.load(pid)
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    keys = ph.spec_keys(p)
+    if op in ("set", "box", "qty") and spec not in keys:
+        return err("没有这个规格（刷新一下）")
+    res = None
+    try:
+        if op == "set":
+            src = b.get("src") if b.get("src") in ("manual", "weighed") else "manual"
+            field = b.get("field")
+            if field == "pkg_g" and b.get("value") in (None, ""):
+                ph.set_item(p, spec, "pkg_g", 1, "calc", user, force=True)          # 清掉手填 → 回到自动算
+            else:
+                ph.set_item(p, spec, field, b.get("value"), src, user, ok=True)
+            store.save(p)
+            db.audit(user, "实物数据", pid, f"{spec or '默认'} {ph.FIELD_ZH.get(field, field)} = {b.get('value')}（{ph.SRC_ZH.get(src)}）")
+        elif op == "confirm":
+            specs = keys if b.get("all") else [s for s in (b.get("specs") or [spec]) if s in keys]
+            done = {s: ph.confirm(p, s, b.get("fields"), user) for s in specs}
+            store.save(p)
+            db.audit(user, "确认实物数据", pid, "；".join(f"{s or '默认'}：{'、'.join(ph.FIELD_ZH[f] for f in d)}" for s, d in done.items() if d))
+            res = done
+        elif op == "box":
+            ph.set_box(p, spec, b.get("code") or "", user)
+            store.save(p)
+        elif op == "qty":
+            ph.set_qty(p, spec, b.get("qty"))
+            store.save(p)
+        elif op == "size":
+            res = _phys.fill_size(pid, b.get("specs"), user, bool(b.get("force")))
+            db.audit(user, "按组装尺寸填入实物数据", pid, "；".join(f"{s or '默认'}：{'需要人工量' if r.get('need') else '×'.join(f'{x:g}' for x in r['v'])}" for s, r in res.items()))
+        elif op == "net":
+            res = _phys.update_net(pid, b.get("specs"), user)
+        else:
+            return err("不支持的操作")
+    except ValueError as e:
+        return err(str(e))
+    out = _phys.view(pid)
+    out["result"] = res
+    return jsonify(out)
+
+
+@bp.post("/api/products/<pid>/physical/slice")
+def physical_slice(pid):
+    """「✂ 切片算重量」：打印方案一键全部切片（后台），切完按方案算每个规格的成品净重（扣支撑、冲刷，待确认）。"""
+    def go():
+        try:
+            r = _phys.slice_and_net(pid, _uname())
+            r["view"] = _phys.view(pid)
+            return jsonify(r)
+        except (ValueError, OSError) as e:
+            return err(str(e))
+    return maybe_async(f"切片算重量 {pid}", go, "slice", pid)

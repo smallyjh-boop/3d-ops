@@ -282,6 +282,12 @@ def _save_from_client(pid, p):
         else:
             p.pop("print_plans", None)
         p["display"] = old.get("display")
+        # v2.55.1 实物数据（尺寸 / 重量 / 确认状态）有单独的接口保存，页面上可能过时；规格改名时跟着改名
+        from core import physical as _phys
+        if isinstance(old.get("physical"), dict):
+            p["physical"] = _phys.rename(old["physical"], renames)
+        else:
+            p.pop("physical", None)
         if renames and isinstance(p["display"], dict) and isinstance(p["display"].get("specs"), dict):   # v2.53 每个规格的展示跟着改名
             p["display"] = dict(p["display"], specs={renames.get(k, k): v for k, v in p["display"]["specs"].items()})
         _cu = {(x.get("sku") or "").upper(): (x.get("colour_usage"), x.get("purge_g")) for x in old.get("variants") or [] if x.get("sku")}

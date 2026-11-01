@@ -129,10 +129,21 @@ def listing_fix(pid):
     from . import workbench
     b = request.get_json(force=True, silent=True) or {}
     try:
-        workbench.fix(pid, b.get("action") or "", _uname())
+        workbench.fix(pid, b.get("action") or "", _uname(), b)
         return jsonify(workbench.issues(pid, b.get("platform") or "lazada"))
     except (ValueError, FileNotFoundError) as e:
         return err(str(e))
+
+
+@bp.post("/api/listing/physical-confirm")
+def listing_physical_confirm():
+    """v2.55.1 批量确认实物数据（尺寸 / 净重 / 包裹尺寸 / 包裹重量）。{product_ids}"""
+    from . import workbench
+    b = request.get_json(force=True, silent=True) or {}
+    ids = b.get("product_ids") or []
+    if not ids:
+        return err("请至少选择一个产品")
+    return jsonify(workbench.confirm_phys_batch(ids, _uname()))
 
 
 @bp.post("/api/listing/ai-fill")

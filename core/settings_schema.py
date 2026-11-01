@@ -24,7 +24,8 @@ MODULES = [
             ("printer_avg_kw", "单台平均功率（千瓦）"), ("monthly_rent", "房租（铢/月）"), ("monthly_labor", "人工（铢/月）"),
             ("monthly_depreciation", "设备折旧（铢/月）"), ("monthly_maintenance", "维护配件（铢/月）"),
             ("printer_count", "打印机台数"), ("hours_per_day_each", "每台每天平均打印小时"),
-            ("failure_rate", "失败率（0.05=5%）"), ("packaging_per_item", "每件包材（铢）"), ("packaging_weight_g", "包材重量（克）")]),
+            ("failure_rate", "失败率（0.05=5%）"), ("packaging_per_item", "每件包材（铢）"), ("packaging_weight_g", "包材重量（克）"),
+            ("filler_weight_g", "纸箱填充物重量（克）")]),
         ("定价", [
             ("platform_fee_rate", "平台扣点（0.2=20%，请按后台核实）"), ("shopee_fee_rate", "Shopee 扣点（0=和 Lazada 一样）"),
             ("default_markup", "默认加价率（1=100%）"), ("min_markup", "最低加价率（低于报警）"), ("price_ending", "价格尾数（-1=不处理）"),

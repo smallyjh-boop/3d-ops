@@ -14,7 +14,7 @@ import re
 import openpyxl
 from openpyxl.utils import get_column_letter
 
-from . import codes
+from . import codes, physical
 
 SPLIT = "####splitter line####"
 DATA_START_ROW = 5
@@ -127,6 +127,7 @@ def attribute_fields(sheet_info):
 def build_rows(products, pricing_by_id, cfg, cat=None):
     """把产品展开成一行一个变体（SKU）。返回 [(product, variant_idx, {key: value})]。"""
     rows = []
+    phys_cache = {}
     today = dt.datetime.now().replace(microsecond=0)
     from . import stockcalc as _sc
     _av = _sc.available(cfg)
@@ -140,13 +141,13 @@ def build_rows(products, pricing_by_id, cfg, cat=None):
         has1 = any((v.get("opt1_zh") or "").strip() for v in variants)
         has2 = any((v.get("opt2_zh") or "").strip() for v in variants)
         img_by_raw = {i.get("raw"): i.get("url") for i in p.get("images", [])}
-        pk = p.get("package", {})
         prices = pricing_by_id[p["id"]]
         attrs = {k: a.get("value") for k, a in (p.get("attributes") or {}).items() if a.get("value") not in (None, "")}
         from . import stockcalc
         stk = stockcalc.stocks(p, cfg, _av)
         for idx, v in enumerate(variants):
             pr = prices[idx]
+            pw = physical.export_vals(p, v, cfg, phys_cache)
             vals = dict(attrs)
             vals.update({
                 "productNoForBatch": p["id"],
@@ -158,10 +159,8 @@ def build_rows(products, pricing_by_id, cfg, cat=None):
                 "packageContent": c.get("package_content_th", ""),
                 "sku.price": pr["list_price"],
                 "sku.SellerSku": v.get("sku") or f"{p['id']}-{idx + 1:02d}",
-                "sku.package_weight": round(max(0.01, (float(v.get("grams") or 0) + float(cfg.get("packaging_weight_g", 50))) / 1000), 3),
-                "sku.package_length": pk.get("length"),
-                "sku.package_width": pk.get("width"),
-                "sku.package_height": pk.get("height"),
+                # v2.55.1：每个规格自己的包裹尺寸 / 包裹重量（实物数据，core/physical）
+                "sku.package_weight": pw[0], "sku.package_length": pw[1], "sku.package_width": pw[2], "sku.package_height": pw[3],
             })
             for i, u in enumerate(imgs):
                 vals[f"mainImage.{i}"] = u
@@ -250,7 +249,10 @@ def check_product(p, prices, cat=None, cfg=None):
                 errors.append(f"包裹{lab}需在 0.01-200cm")
         except (TypeError, ValueError):
             errors.append(f"包裹{lab}不是数字")
-    if p.get("package_status") == "check":
+    phys_err = physical.issues(p, cfg)
+    if phys_err:      # v2.55.1：尺寸 / 重量没确认不能导出 / 推送（包含了包裹尺寸的确认）
+        errors.extend(phys_err)
+    elif p.get("package_status") == "check":
         errors.append("包裹尺寸是 AI 估算的，请确认（改一下数字或点「确认」）")
     opts = set()
     for i, pr in enumerate(prices):

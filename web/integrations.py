@@ -1,5 +1,7 @@
 """对接接口 /api/v1、密钥、店铺、运营写回。"""
 from web.common import *  # noqa: F401,F403
+from core import physical as _physical  # noqa: E402
+
 
 @app.get("/api/catalog")
 def catalog_export():
@@ -127,6 +129,19 @@ def v1_orders_list():
     return jsonify({"ok": True, "orders": out, "count": len(out)})
 
 
+def _pw(phys, v, grams, pack_g):
+    r = phys.get((v.get("opt2_zh") or "").strip()) or {}
+    g = (r.get("pkg_g") or {}).get("v")
+    return g if g else (round(grams + pack_g, 1) if grams else None)
+
+
+def _pcm(phys, v, pk):
+    d = ((phys.get((v.get("opt2_zh") or "").strip()) or {}).get("pkg") or {}).get("v")
+    if d:
+        return {"length": d[0], "width": d[1], "height": d[2]}
+    return {"length": pk.get("length"), "width": pk.get("width"), "height": pk.get("height")}
+
+
 @app.get("/api/v1/skus")
 def v1_skus():
     """所有产品变体。v2.9.1 起多返回：材质、售价、单件成本拆分、预估包裹重量和尺寸、类目、导出时间。
@@ -146,6 +161,7 @@ def v1_skus():
             continue
         p = store.load(item["id"])
         pk = p.get("package") or {}
+        phys = _physical.rows(p, cfg)
         cp = p.get("copy") or {}
         prices = pricing.price_product(cfg, p)
         lst_view = _lst.v1_view(p, bnames)
@@ -166,8 +182,10 @@ def v1_skus():
                 "unit_cost": pr["cost"],                       # 材料/机时/包材/失败损耗/合计（泰铢，不含平台费）
                 "price": pr["final_price"], "suggested_price": pr["suggested_price"], "floor_price": pr["floor_price"],
                 "manual_price": v.get("manual_price"),
-                "est_package_weight_g": round(grams + pack_g, 1) if grams else None,   # 产品克数 + 包材重量
-                "package_cm": {"length": pk.get("length"), "width": pk.get("width"), "height": pk.get("height")},
+                # v2.55.1：按规格的实物数据（包裹重量 = 净重 + 纸箱 + 填充；没有净重时 = 克数 + 包材重量），confirmed = 4 项都已确认
+                "est_package_weight_g": _pw(phys, v, grams, pack_g),
+                "package_cm": _pcm(phys, v, pk),
+                "physical_confirmed": bool((phys.get((v.get("opt2_zh") or "").strip()) or {}).get("ok")),
                 "lazada_category_id": (p.get("category") or {}).get("id"),
                 "shopee_category_id": (p.get("shopee_category") or {}).get("id"),
                 "lead_days": p.get("lead_days"), "exported_at": p.get("exported_at"), "updated_at": p.get("updated_at"),

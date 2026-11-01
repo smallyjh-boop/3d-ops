@@ -14,7 +14,7 @@ import zipfile
 
 import openpyxl
 
-from . import codes
+from . import codes, physical
 from .config import BASE_DIR
 
 TEMPLATE_DIR = os.environ.get("LH_SHOPEE_TEMPLATE_DIR") or os.path.join(BASE_DIR, "templates_shopee")
@@ -223,6 +223,7 @@ def check_product(p, prices, cfg):
 
 def build_rows(products, pricing_by_id, cfg):
     rows = []
+    phys_cache = {}
     from . import stockcalc as _sc
     _av = _sc.available(cfg)
     for p in products:
@@ -241,12 +242,12 @@ def build_rows(products, pricing_by_id, cfg):
         has1 = any((v.get("opt1_zh") or "").strip() for v in vs)
         has2 = any((v.get("opt2_zh") or "").strip() for v in vs)
         all_img = all(img_by_raw.get(v.get("image")) for v in vs) if has1 else False
-        pk = p.get("package", {})
         prices = pricing_by_id[p["id"]]
         from . import stockcalc
         stk = stockcalc.stocks(p, cfg, _av)
         for idx, v in enumerate(vs):
             pr = prices[idx]
+            pw = physical.export_vals(p, v, cfg, phys_cache)
             vals = {
                 "ps_category": int(sc) if str(sc).isdigit() else sc,
                 "ps_product_name": title,
@@ -256,10 +257,8 @@ def build_rows(products, pricing_by_id, cfg):
                 "ps_stock": int(stk[idx]),
                 "ps_sku_short": v.get("sku") or f"{p['id']}-{idx + 1:02d}",
                 "ps_item_cover_image": urls[0] if urls else "",
-                "ps_weight": round(max(0.01, (float(v.get("grams") or 0) + float(cfg.get("packaging_weight_g", 50))) / 1000), 3),
-                "ps_length": pk.get("length"),
-                "ps_width": pk.get("width"),
-                "ps_height": pk.get("height"),
+                # v2.55.1：每个规格自己的包裹尺寸 / 包裹重量（实物数据，core/physical）
+                "ps_weight": pw[0], "ps_length": pw[1], "ps_width": pw[2], "ps_height": pw[3],
                 "channel_id.7000": "On",
             }
             for i, u in enumerate(urls[1:9]):

@@ -160,7 +160,8 @@
         <div class="tr-issues">${ISSUES.map(([zh, th]) => `<label class="row"><input type="checkbox" data-iss="${zh}"> ${Z(zh, th)}</label>`).join("")}</div>
         <label>${Z("说明", "หมายเหตุ")}<input id="tr-note" data-notr></label></div>
       <div class="row gap wrap"><label>${Z("实际克数（含冲刷）", "น้ำหนักจริง (รวมล้างสี)")} g <input id="tr-g" type="number" step="0.1" style="width:90px" value="${t.prefill.grams ?? ""}"></label>
-        <label>${Z("实际时长", "เวลาจริง")} h <input id="tr-h" type="number" step="0.01" style="width:90px" value="${t.prefill.hours ?? ""}"></label></div>
+        <label>${Z("实际时长", "เวลาจริง")} h <input id="tr-h" type="number" step="0.01" style="width:90px" value="${t.prefill.hours ?? ""}"></label>
+        ${t.plate_total > 1 ? "" : `<label title="${Z("去掉支撑后，一件成品放秤上称的克数：写进产品的实物数据（净重 = 实称），上架用", "ชั่งชิ้นงาน 1 ชิ้นหลังแกะซัพพอร์ต: บันทึกเป็นน้ำหนักสุทธิ (ชั่งจริง) ใช้ตอนลงขาย")}">⚖ ${Z("称重（一件成品，克）", "ชั่งน้ำหนัก (1 ชิ้น, กรัม)")} <input id="tr-w" type="number" step="0.1" min="0" style="width:90px"></label>`}</div>
       <div class="small muted">${Z("已按打印批次 / 文件预填，可以改成打印机报告或称重的实际值；成功后会写回款式，成本跟着更新。", "เติมไว้ให้จากรอบพิมพ์ / ไฟล์ แก้เป็นค่าจริงจากเครื่องหรือที่ชั่งได้ เมื่อสำเร็จจะบันทึกกลับไปที่ตัวเลือกสินค้า ต้นทุนจะปรับตาม")}</div>
       <div id="tr-dest" class="tr-box"><b>${Z("这批成品去哪", "ชิ้นงานนี้ไปไหน")}</b>
         ${t.dests.map((d, i) => `<label class="row"><input type="radio" name="tr-dest" value="${d.key}" ${i === 0 ? "checked" : ""}> ${{ stock: Z("合格入库（→ 待检区 → 质检合格才可售）", "ผ่าน เข้าสต็อก (→ โซนรอตรวจ → ผ่านตรวจจึงขายได้)"), sample: Z("当样品（不卖，记录）", "เป็นตัวอย่าง (ไม่ขาย บันทึกไว้)"), scrap: Z("报废", "ทิ้ง") }[d.key]}</label>`).join("")}
@@ -176,6 +177,7 @@
       $$("[data-iss]", el).filter((x) => x.checked).forEach((x) => fd.append("issues", x.dataset.iss));
       fd.append("note", $("#tr-note", el).value);
       fd.append("grams", $("#tr-g", el).value); fd.append("hours", $("#tr-h", el).value);
+      if ($("#tr-w", el) && ok) fd.append("weighed", $("#tr-w", el).value);
       if (ok) fd.append("dest", ($('input[name="tr-dest"]:checked', el) || {}).value || "");
       [...$("#tr-ph", el).files].forEach((f) => fd.append("photo", f));
       const r = await api(`/api/trial/job/${jobId}/result`, { method: "POST", body: fd });

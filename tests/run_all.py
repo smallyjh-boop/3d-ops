@@ -68,7 +68,8 @@ def main():
     T = tempfile.mkdtemp(prefix="3dops-test-")
     print(f"测试数据目录：{T}")
     prepare(T)
-    env = dict(os.environ, T3D_TMP=T, T3D_APP=APP, PYTHONPATH=APP, PYTHONIOENCODING="utf-8", LH_NO_PRESETS="1", LH_NO_TPL_SYNC="1", LH_NO_UPDATE_CHECK="1", LH_NO_MODULE_STARTUP="1")
+    env = dict(os.environ, T3D_TMP=T, T3D_APP=APP, PYTHONPATH=APP, PYTHONIOENCODING="utf-8", LH_NO_PRESETS="1", LH_NO_TPL_SYNC="1", LH_NO_UPDATE_CHECK="1", LH_NO_MODULE_STARTUP="1",
+               LH_PHYS_BLOCK="0")   # v2.55.1：老测试的产品没有确认过的实物数据；拦截在 model/t_physical2551 里打开测
     env.pop("LH_DOCKER", None)
     results = []
     t0 = time.time()
