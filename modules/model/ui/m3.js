@@ -58,7 +58,10 @@
 
   async function load() {
     if (!M.pid) return;
-    M.st = await api(`/api/products/${enc(M.pid)}/model-status`);
+    const pid = M.pid;
+    const st = await api(`/api/products/${enc(pid)}/model-status`);
+    if (pid !== M.pid) return;          // 等结果时已经换了产品：旧产品的数据不要
+    M.st = st;
     if (!row(M.spec)) M.spec = "";
   }
   function render() {
@@ -135,15 +138,23 @@
   }
 
   let LOADING = null;
+  function switchTo(pid) {     // 打开了另一个产品：上一个产品的组装视图 / 打印方案编辑器要关掉，不能留在页面上
+    M.pid = pid; M.spec = ""; M.asmOpen = false; M.planOpen = false; M.st = null; LOADING = null;
+    if (window.ASM && ASM.current && ASM.current.pid !== pid) ASM.discard();
+    const ab = document.getElementById("asm-box");
+    if (ab && !(window.ASM && ASM.current)) { ab.innerHTML = ""; ab.classList.add("hidden"); }
+    const pb = document.getElementById("plan-box");
+    if (pb) pb.classList.add("hidden");
+  }
   async function ensure(pid) {            // 3D 预览（model.js）要先知道这个规格的展示是什么
-    if (M.pid !== pid) { M.pid = pid; M.spec = ""; M.asmOpen = false; M.planOpen = false; M.st = null; }
+    if (M.pid !== pid) switchTo(pid);
     if (M.st) return M.st;
     if (!LOADING) LOADING = load().finally(() => { LOADING = null; });
     await LOADING;
     return M.st;
   }
   async function mount(pid) {
-    if (M.pid !== pid) { M.pid = pid; M.spec = ""; M.asmOpen = false; M.planOpen = false; M.st = null; }
+    if (M.pid !== pid) switchTo(pid);
     try { if (LOADING) await LOADING; await load(); render(); } catch (e) { const t = document.getElementById("m3-top"); if (t) t.innerHTML = `<p class="bad small">${esc(e.message)}</p>`; }
     const pb = document.getElementById("plan-box");
     if (pb) pb.classList.toggle("hidden", !M.planOpen);

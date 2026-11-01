@@ -62,6 +62,7 @@ class Assembly {
   get readOnly() { return this.d && this.d.mode === "scale"; }
   async open() {
     this.d = await api(`/api/products/${enc(this.pid)}/display?spec=${enc(this.spec)}`);
+    if (!this.alive) return;          // 读的时候已经关掉 / 换了产品
     this.items = JSON.parse(JSON.stringify(this.d.items));
     const cols = (typeof P !== "undefined" && P ? [...new Set((P.variants || []).filter((v) => !this.spec || (v.opt2_zh || "").trim() === this.spec).map((v) => (v.opt1_zh || "").trim()).filter(Boolean))] : []);
     this.colours = cols; this.colour = cols[0] || "";
@@ -559,4 +560,8 @@ function close() {
   const box = A.box, cb = A.opts.onClose; A.dispose(); A = null; box.innerHTML = ""; box.classList.add("hidden");
   if (cb) cb();
 }
-window.ASM = { open, close, get current() { return A; } };
+function discard() {        // 换了产品：不问，直接关掉（不然页面上还是上一个产品的组装视图）
+  if (!A) return;
+  const box = A.box; A.dispose(); A = null; box.innerHTML = ""; box.classList.add("hidden");
+}
+window.ASM = { open, close, discard, get current() { return A; } };

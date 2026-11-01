@@ -13,6 +13,7 @@
     el._opts = opts;
     let d;
     try { d = await api(`/api/products/${encodeURIComponent(pid)}/spec-models`); } catch (e) { el.innerHTML = `<p class="bad small">${esc(e.message)}</p>`; return; }
+    if (el.dataset.pid !== pid) return;     // 等结果时已经换了产品：旧产品的数据不要
     el._d = d;
     const lib = d.library.filter((x) => x.ok);
     const opt = (sel) => `<option value="">${Z("用主模型", "ใช้โมเดลหลัก")}${d.main ? ` · ${esc(d.main.name)}` : ""}</option>` +
