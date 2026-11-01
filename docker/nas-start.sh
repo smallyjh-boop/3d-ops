@@ -46,7 +46,7 @@ if [ ! -f /opt/.deps_ok ]; then
 fi
 if [ "$INSTALL_ORCA" = "1" ] && [ ! -f /opt/.orca_deps_ok ] && [ ! -f /opt/.orca_deps_failed ]; then
   log "安装 OrcaSlicer 需要的图形库…"
-  [ -d /var/lib/apt/lists/partial ] || apt-get update
+  [ -d /var/lib/apt/lists/partial ] || apt-get update || log "apt-get update 失败（网络或软件源问题），先跳过"
   if apt_install libgtk-3-0t64 libgl1 libegl1 libglx0 libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
       libwayland-egl1 libwayland-client0 libwayland-cursor0 libxkbcommon0 libdbus-1-3 libunwind8 \
       libepoxy0 libfontconfig1 libfreetype6 libharfbuzz0b libpango-1.0-0 libcairo2 libgdk-pixbuf-2.0-0; then
@@ -59,7 +59,7 @@ fi
 if [ ! -f /opt/.fonts_ok ] && [ ! -f /opt/.fonts_failed ]; then
   # v2.54.1：商品图上的「随机颜色」角标等要画泰文 / 中文（没有字体会显示成方块）；装不上不影响别的功能
   log "安装泰文 / 中文字体…"
-  [ -d /var/lib/apt/lists/partial ] || apt-get update
+  [ -d /var/lib/apt/lists/partial ] || apt-get update || log "apt-get update 失败（网络或软件源问题），先跳过"
   if apt_install fonts-thai-tlwg fonts-wqy-microhei; then touch /opt/.fonts_ok; else log "字体安装失败：图片上的泰文 / 中文可能显示成方块，其他功能正常"; touch /opt/.fonts_failed; fi
 fi
 rm -rf /var/lib/apt/lists/* 2>/dev/null || true
