@@ -218,16 +218,16 @@
   }
 
   // ---------------- 打印机 🧪 打印测试 ----------------
-  async function printerTest(idx, btn) {
+  async function printerTest(idx, btn, pid) {
     const msg = Z("给这台打印机切一个 20 mm 立方体并打印，用来检查：连接、发送、开始、打完回报。\n\n请确认：热床已经清空、料盘里装了 PLA。\n确定开始？", "สไลซ์ลูกบาศก์ 20 มม. แล้วพิมพ์บนเครื่องนี้ เพื่อทดสอบการเชื่อมต่อ การส่ง การเริ่ม และการรายงานเมื่อเสร็จ\n\nกรุณายืนยัน: ฐานพิมพ์ว่าง และมีเส้น PLA ในเครื่อง\nเริ่มเลยไหม?");
     if (!confirm(msg)) return;
     await busy(btn, async () => {
       try {
-        const r = await apiJob(`/api/printers/${idx}/print-test`, { json: { confirm: { bed_clear: true, material: true } } });
+        const r = await apiJob(`/api/printers/${idx}/print-test`, { json: { confirm: { bed_clear: true, material: true }, printer_id: pid || undefined } });
         toast(Z(`已发送并开始：${r.printer}。打完以后看板上会自动结束这个测试`, `ส่งและเริ่มพิมพ์แล้ว: ${r.printer} เมื่อเสร็จบอร์ดจะปิดงานทดสอบให้เอง`), false, 8000);
       } catch (e) {
         if (/料盘里读到的是/.test(e.message) && confirm(e.message + "\n\n" + Z("料盘读数不准、已经确认装的是对的，仍然发送？", "ค่าที่อ่านจากถาดไม่แม่น ยืนยันว่าถูกแล้ว ส่งต่อไหม?"))) {
-          const r = await apiJob(`/api/printers/${idx}/print-test`, { json: { confirm: { bed_clear: true, material: true, tray_override: true } } });
+          const r = await apiJob(`/api/printers/${idx}/print-test`, { json: { confirm: { bed_clear: true, material: true, tray_override: true }, printer_id: pid || undefined } });
           toast(Z("已发送并开始：", "ส่งและเริ่มพิมพ์แล้ว: ") + r.printer);
         } else throw e;
       }
@@ -293,7 +293,7 @@
     if (d.trCheck !== undefined) { e.preventDefault(); e.stopPropagation(); checkDialog({ pid: d.trCheck, spec: d.trSpec, plate: d.trPlate || "", file: d.trFile || "" }); return; }
     if (d.trRes !== undefined) { e.preventDefault(); e.stopPropagation(); resultForm(+d.trRes); return; }
     if (d.trRetry !== undefined) { e.preventDefault(); e.stopPropagation(); retry(+d.trRetry).catch((x) => toast(x.message, true)); return; }
-    if (d.trPtest !== undefined) { e.preventDefault(); e.stopPropagation(); printerTest(+d.trPtest, t); return; }
+    if (d.trPtest !== undefined) { e.preventDefault(); e.stopPropagation(); printerTest(+d.trPtest, t, d.trPid || ""); return; }
   });
 
   const can = () => typeof ME === "undefined" || !ME || ["owner", "production"].includes(ME.role);
