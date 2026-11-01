@@ -17,6 +17,7 @@
   盘点       按货架 / 货位盘点：docs.stocktake_start(area=…)，只列这些格子里的物品
 对外（public.py）：on_post  where_is  sort_key  area_codes
 """
+import functools
 import re
 import time
 
@@ -76,25 +77,39 @@ def shelf_code(zone, shelf):
     return f"{zone}{int(shelf)}"
 
 
-def norm_code(code):
-    """输入的货位编号 → 标准写法（a1-2-3 → A1-02-03）；不是货位编号的原样大写返回。"""
-    s = str(code or "").strip().upper()
+@functools.lru_cache(maxsize=200000)
+def _norm(s):
     m = LOOSE_RE.match(s)
     if m and 1 <= int(m.group(2)) <= 99 and 1 <= int(m.group(3)) <= 99 and 1 <= int(m.group(4)) <= 99:
         return make_code(m.group(1), m.group(2), m.group(3), m.group(4))
     return s
 
 
-def parse(code):
-    """A1-02-03 → (区, 货架号, 层, 位)；不是标准编号返回 None。"""
+def norm_code(code):
+    """输入的货位编号 → 标准写法（a1-2-3 → A1-02-03）；不是货位编号的原样大写返回。"""
+    return _norm(str(code or "").strip().upper())
+
+
+@functools.lru_cache(maxsize=200000)
+def _parse(code):
     m = CODE_RE.match(norm_code(code))
     return (m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4))) if m else None
 
 
+def parse(code):
+    """A1-02-03 → (区, 货架号, 层, 位)；不是标准编号返回 None。"""
+    return _parse(str(code or ""))
+
+
+@functools.lru_cache(maxsize=200000)
+def _sort_key(code):
+    p = parse(code)
+    return (0, p[0], p[1], p[2], p[3], "") if p else (1, "", 0, 0, 0, code)
+
+
 def sort_key(code):
     """按 区 → 货架号 → 层 → 位 排（A2 排在 A10 前面）；不是标准编号的排最后。"""
-    p = parse(code)
-    return (0, p[0], p[1], p[2], p[3], "") if p else (1, "", 0, 0, 0, str(code or ""))
+    return _sort_key(str(code or ""))
 
 
 def human(code, lang="zh"):
@@ -138,6 +153,8 @@ def init():
         if col not in gcols:
             c.execute(f"ALTER TABLE inv_loc_groups ADD COLUMN {col} {typ}")
     c.commit()
+    from . import locviews          # v2.55：大数据量要的索引
+    locviews.ensure_indexes(c)
     _migrate_codes(c)
     _migrate_one_place(c)
     _migrate_v252(c)
@@ -359,13 +376,25 @@ def _item_brief(it, stocked, here=None):
             "primary": None}
 
 
-def _contents(c):
-    """{货位编号: [物品…]}：这个货位上有数量的物品（qty = 这个货位上的数），加上主货位在这里但已经用完的物品（qty 0）。"""
+def _contents(c, only=None):
+    """{货位编号: [物品…]}：这个货位上有数量的物品（qty = 这个货位上的数），加上主货位在这里但已经用完的物品（qty 0）。
+    v2.55：only = 只查这几个货位编号（点开一个货位时不用读全部）。"""
     stocked = _stocked_ids(c)
-    code_of = {r["id"]: r["code"] for r in c.execute("SELECT id, code FROM inv_locations")}
-    items = {r["id"]: r for r in c.execute("SELECT * FROM inv_items WHERE active=1")}
+    if only is not None:
+        only = list(only)
+        ph = ",".join("?" * len(only)) or "NULL"
+        code_of = {r["id"]: r["code"] for r in c.execute(f"SELECT id, code FROM inv_locations WHERE code IN ({ph})", only)}
+        lids = list(code_of) or [-1]
+        qrows = c.execute(f"SELECT item_id, loc_id, qty FROM inv_loc_qty WHERE qty>0 AND loc_id IN ({','.join('?' * len(lids))})", lids).fetchall()
+        want = {r["item_id"] for r in qrows}
+        items = {r["id"]: r for r in c.execute(f"SELECT * FROM inv_items WHERE active=1 AND (location IN ({ph}) OR id IN ({','.join('?' * len(want)) or 'NULL'}))",
+                                              only + list(want))}
+    else:
+        code_of = {r["id"]: r["code"] for r in c.execute("SELECT id, code FROM inv_locations")}
+        items = {r["id"]: r for r in c.execute("SELECT * FROM inv_items WHERE active=1")}
+        qrows = c.execute("SELECT item_id, loc_id, qty FROM inv_loc_qty WHERE qty>0").fetchall()
     out = {}
-    for r in c.execute("SELECT item_id, loc_id, qty FROM inv_loc_qty WHERE qty>0"):
+    for r in qrows:
         it, code = items.get(r["item_id"]), code_of.get(r["loc_id"])
         if it is not None and code:
             b = _item_brief(it, stocked, r["qty"])
@@ -373,7 +402,7 @@ def _contents(c):
             out.setdefault(code, []).append(b)
     for it in items.values():
         loc = it["location"]
-        if loc and not any(x["id"] == it["id"] for x in out.get(loc, [])):
+        if loc and (only is None or loc in only) and not any(x["id"] == it["id"] for x in out.get(loc, [])):
             b = _item_brief(it, stocked, 0)
             b["primary"] = True
             out.setdefault(loc, []).append(b)
@@ -414,7 +443,8 @@ def get_loc(loc):
 
 
 def items_at(code):
-    return _contents(db.conn()).get(norm_code(code), [])
+    code = norm_code(code)
+    return _contents(db.conn(), [code]).get(code, [])
 
 
 def loc_detail(lid):
@@ -695,8 +725,15 @@ def area_codes(area):
     a = norm_code(area)
     if not (ZONE_RE.match(a) or SHELF_RE.match(a) or CODE_RE.match(a)):
         raise ValueError("写区（A）、货架（A1）或货位（A1-02-03）")
-    rows = [dict(r) for r in db.conn().execute("SELECT code, zone, shelf FROM inv_locations WHERE active=1")]
-    out = sorted((r["code"] for r in rows if _in_area(r, a)), key=sort_key)
+    c = db.conn()
+    if ZONE_RE.match(a):                           # v2.55：直接在数据库里找（货位多的时候不用读全部）
+        rows = c.execute("SELECT code, zone, shelf FROM inv_locations WHERE active=1 AND zone=?", (a,)).fetchall()
+    elif SHELF_RE.match(a):
+        m = SHELF_RE.match(a)
+        rows = c.execute("SELECT code, zone, shelf FROM inv_locations WHERE active=1 AND zone=? AND shelf=?", (m.group(1), int(m.group(2)))).fetchall()
+    else:
+        rows = c.execute("SELECT code, zone, shelf FROM inv_locations WHERE active=1 AND code=?", (a,)).fetchall()
+    out = sorted((r["code"] for r in rows if _in_area(dict(r), a)), key=sort_key)
     if not out:
         raise ValueError(f"没有 {a} 这个区 / 货架 / 货位")
     return out

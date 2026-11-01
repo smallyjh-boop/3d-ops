@@ -35,7 +35,7 @@ MODULE = {
     "public": public,             # 别的模块用：where_is / sort_key / order_out / putaway_batch / pick_route；ledger.post → on_post
     "todo": _todo,                # v2.52：补货任务、待上架
     "production_allow": [("POST", r"^/api/inv/locations(/(assign|assign-all|bulk|add|group|props))?$"), ("GET", r"^/print/inv-locations$"),
-                         ("POST", r"^/api/inv/wms/(putaway|move|tasks/\d+/(do|cancel))$"), ("POST", r"^/api/inv/warehouses$"),
+                         ("POST", r"^/api/inv/wms/(putaway|move|tasks/\d+/(do|cancel))$"), ("POST", r"^/api/inv/warehouses$"), ("POST", r"^/api/inv/loc/bulk$"),
                          # v2.53：料卷上架 / 上机 / 下机 / 称重、质检、退货、次品
                          ("POST", r"^/api/inv/spools/[^/]+/(put|load|unload|weigh)$"), ("POST", r"^/api/inv/spools/count$"),
                          ("POST", r"^/api/inv/(qc|returns|defect)/(pass|fail|act|receive)$"),
@@ -67,6 +67,6 @@ MODULE = {
                         "inv_qc_on": True, "inv_qc_hint253": False, "inv_returns_zone": True, "inv_pack_station": "", "inv_slow_days": 60, "inv_spool_tare_g": 250,
                         "inv_spool_low_g": 150, "inv_spool_expire_days": 365, "inv_spool_dry_days": 0,
                         "gs_sales_days": 30, "gs_safety": 1, "gs_cat_default": "", "gs_over_x": 3},
-    "ui": {"inline": True, "html": "page.html", "eager_js": ["inventory.js", "locations.js", "wms.js", "stocktake.js", "zones.js", "goodsstock.js"], "css": ["page.css"],
+    "ui": {"inline": True, "html": "page.html", "eager_js": ["inventory.js", "locations.js", "wms.js", "stocktake.js", "zones.js", "goodsstock.js", "locviews.js"], "css": ["page.css"],
            "page_js": [], "boot_js": []},
 }

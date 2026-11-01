@@ -47,6 +47,14 @@ def inv_qc_hint():
 @bp.get("/api/inv/items")
 def inv_items():
     a = request.args
+    if a.get("view") and (a.get("page") or a.get("size")):      # v2.55：服务端分页 / 排序 / 搜索
+        from modules.inv import views
+        sort = a.get("sort") or ""
+        if sort in views.MONEY_SORTS and not (_perms().get("inv.pay") or _perms().get("inv.in")):
+            sort = ""
+        r = views.listing_page(a.get("view"), a.get("category") or "", (a.get("q") or "").strip(), a.get("zone") or "", (a.get("loc") or "").strip(),
+                               sort, a.get("dir") == "desc", a.get("page") or 1, int(a.get("size") or 50))
+        return jsonify({"ok": True, **r, "counts": views.counts_sql(), "zones": views.zone_options()})
     if a.get("view"):            # v2.32：库存 / 物品资料 / 没库存 / 已停用
         from modules.inv import views
         return jsonify({"ok": True, "items": views.listing(a.get("view"), a.get("category") or "", (a.get("q") or "").strip(),
@@ -278,13 +286,84 @@ def _ok(fn):
         return err(str(e))
 
 
+BIG_LOCS = 1500        # v2.55：货位多于这个数，/api/inv/locations 不再把所有货位发给页面（页面改成边打边搜）
+
+
 @bp.get("/api/inv/locations")
 def inv_locations():
     a = request.args
-    from modules.inv import wms
-    return jsonify({"ok": True, "locations": _loc.locations(a.get("all") != "1"), "unassigned": wms.pending_count(),
+    from modules.inv import wms, locviews
+    c = db.conn()
+    n = c.execute("SELECT COUNT(*) FROM inv_locations WHERE active=1").fetchone()[0]
+    big = n > BIG_LOCS and a.get("full") != "1"
+    shelves = [r[0] for r in c.execute("SELECT DISTINCT zone || shelf FROM inv_locations WHERE active=1 AND shelf IS NOT NULL ORDER BY zone, shelf")] if big else None
+    mx = {r[0]: r[1] for r in c.execute("SELECT zone, MAX(shelf) FROM inv_locations WHERE shelf IS NOT NULL GROUP BY zone")}
+    return jsonify({"ok": True, "locations": [] if big else _loc.locations(a.get("all") != "1"), "big": big, "total": n,
+                    "zones": [r[0] for r in c.execute("SELECT DISTINCT zone FROM inv_locations WHERE active=1 ORDER BY zone")], "max_shelf": mx,
+                    **({"shelves": shelves} if big else {}), "unassigned": wms.pending_count(),
                     "groups": _loc.groups(), "layer_bottom": _loc.layer_bottom(), "categories": inv.categories(),
                     "warehouses": _loc.warehouses(), "ztypes": wms.ZTYPES, "sizes": wms.SIZES})
+
+
+# ---------------- v2.55：货位页三种看法（服务端筛选 / 排序 / 搜索 / 分页，页面只拿当前一页）----------------
+@bp.get("/api/inv/loc/list")
+def inv_loc_list():
+    """列表：一行一个货位。参数：zone shelf status(empty|partial|full|over|low) has(empty|nonempty) below_min=1 category wh ztype q
+    sort(code|zone|contents|qty|items|capacity|util|state|last_move) dir(asc|desc) page size(50|100|200)"""
+    from modules.inv import locviews
+    return _ok(lambda: locviews.list_locations(request.args.to_dict()))
+
+
+@bp.get("/api/inv/loc/items")
+def inv_loc_items():
+    """按商品：一行一个商品。参数：zone shelf ztype category flag(scattered|unplaced|noloc|low) has q sort(name|code|category|qty|locs|placed|unplaced) dir page size"""
+    from modules.inv import locviews
+    return _ok(lambda: locviews.list_items(request.args.to_dict()))
+
+
+@bp.get("/api/inv/loc/codes")
+def inv_loc_codes():
+    """当前筛选条件下的全部货位编号（最多 3000），批量操作「选中全部」用。"""
+    from modules.inv import locviews
+    return _ok(lambda: locviews.filtered_codes(request.args.to_dict()))
+
+
+@bp.get("/api/inv/loc/suggest")
+def inv_loc_suggest():
+    from modules.inv import locviews
+    return _ok(lambda: {"locations": locviews.suggest(request.args.get("q") or "", min(int(request.args.get("limit") or 30), 100))})
+
+
+@bp.get("/api/inv/loc/summary")
+def inv_loc_summary():
+    from modules.inv import locviews
+    return _ok(lambda: locviews.summary(request.args.get("force") == "1"))
+
+
+@bp.get("/api/inv/loc/map")
+def inv_loc_map():
+    """货位图：zone 空 = 各库区汇总；zone=A = 这个库区的货架汇总 + shelf=A1 展开的格子（expand=all 全部展开）。"""
+    from modules.inv import locviews
+    a = request.args
+    return _ok(lambda: locviews.map_view(a.get("zone") or "", a.get("shelf") or "", a.get("expand") or "", a.get("every") == "1"))
+
+
+@bp.get("/api/inv/loc/<int:lid>/drawer")
+def inv_loc_drawer(lid):
+    from modules.inv import locviews
+    return _ok(lambda: locviews.drawer(lid))
+
+
+@bp.post("/api/inv/loc/bulk")
+def inv_loc_bulk():
+    """批量：{action: "move", codes: [...], to, force} = 这些货位里的东西全部搬到 to（搬不了的会列出原因，别的照搬）。"""
+    if _need("inv.in"):
+        return _need("inv.in")
+    from modules.inv import locviews
+    b = request.get_json(force=True) or {}
+    if b.get("action") != "move":
+        return err("不支持的批量操作")
+    return _ok(lambda: locviews.bulk_move(b.get("codes") or [], b.get("to"), _uname(), bool(b.get("force"))))
 
 
 @bp.post("/api/inv/locations")
@@ -384,7 +463,8 @@ def inv_location_labels():
     ?fmt=qr 二维码标签（v2.52，默认条码）；?lang=th 泰文说明。"""
     a = request.args
     lang = "th" if a.get("lang") == "th" else "zh"
-    locs = _loc.locations()
+    direct = bool((a.get("ids") or "").strip() or (a.get("codes") or "").strip() or a.get("flt") == "1")
+    locs = [] if direct else _loc.locations()      # v2.55：选好了货位就不用先读全部
     if a.get("warehouse"):
         locs = [l for l in locs if str(l.get("warehouse")) == a["warehouse"]]
     if a.get("ztype"):
@@ -397,6 +477,13 @@ def inv_location_labels():
     ids = [x for x in (a.get("ids") or "").split(",") if x.strip()]
     if ids:
         locs = [l for l in (_loc.get_loc(i) for i in ids) if l]
+    codes = [x for x in (a.get("codes") or "").split(",") if x.strip()]
+    if codes:                                    # v2.55：列表里选中的货位
+        locs = [l for l in (_loc.get_loc(i) for i in codes) if l]
+    if a.get("flt") == "1":                      # v2.55：列表当前筛选条件下的全部货位
+        from modules.inv import locviews
+        fc = locviews.filtered_codes({k: v for k, v in a.items() if k not in ("flt", "lang", "fmt", "kind")}, 5000)
+        locs = [l for l in (_loc.get_loc(i) for i in fc["ids"]) if l]
     if a.get("kind") == "shelf":
         codes = list(dict.fromkeys(_loc.shelf_code(l["zone"], l["shelf"]) for l in locs if l.get("shelf") is not None))
         return app.response_class(_loc.shelf_labels_html(codes, lang), mimetype="text/html")

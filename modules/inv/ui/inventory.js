@@ -57,6 +57,10 @@
   // ---------------- 库存 / 物品资料（v2.32：按同行的做法分开，没入过库的不堆在库存里） ----------------
   let SUB = "all";      // 物品资料里：all 全部 / zero 没库存 / inactive 已停用
   let ZONE = "", LOCQ = "";   // v2.53：按区 / 货位筛选
+  let PAGE = 1, PSIZE = 50, SORT = "", DIR = "asc";      // v2.55：服务端分页 / 排序（1 万+ 物品也快）
+  try { PSIZE = +localStorage.getItem("inv_items_size255") || 50; } catch { /* 忽略 */ }
+  if (![50, 100, 200].includes(PSIZE)) PSIZE = 50;
+  const qtyOf = (it) => (it.qty_text ? `<b data-notr${it.units ? ` title="${esc(num(it.qty) + " g")}"` : ""}>${esc(TH() ? it.qty_text_th || it.qty_text : it.qty_text)}</b>` : qtyText(it));   // 数量文字：接口的 qty_text（modules/inv/qtytext.py），没有就用老写法
   const CAT_COLS = {    // 每个分类显示自己需要的列
     filament: ["brand", "qty", "transit", "reorder", "cost", "value", "loc"],
     goods: ["qty", "cost", "value", "loc"],
@@ -67,25 +71,27 @@
     const view = catalog ? SUB : "stock";
     const q = ($("#inv-q") || {}).value || "";
     const r = await api(`/api/inv/items?view=${view}&category=${encodeURIComponent(CAT)}&q=${encodeURIComponent(q)}` +
-      (catalog ? "" : `&zone=${encodeURIComponent(ZONE)}&loc=${encodeURIComponent(LOCQ)}`));
+      (catalog ? "" : `&zone=${encodeURIComponent(ZONE)}&loc=${encodeURIComponent(LOCQ)}`) + `&page=${PAGE}&size=${PSIZE}&sort=${SORT}&dir=${DIR}`);
+    PAGE = r.page || 1;
     const cnt = r.counts || {};
     const key = catalog ? "all" : "stock";
     const sum = (k) => Object.values(cnt).reduce((s, x) => s + (x[k] || 0), 0);
     const chips = [`<span class="chip ${CAT ? "" : "on"}" data-cat="">全部 <span class="muted small">${sum(key)}</span></span>`].concat(
       (META.categories || []).filter((c) => catalog || (cnt[c.id] || {}).stock).map((c) => `<span class="chip ${CAT === c.id ? "on" : ""}" data-cat="${esc(c.id)}">${esc(TH() ? c.th : c.zh)}
         <span class="muted small">${(cnt[c.id] || {})[key] || 0}</span>${!catalog && (cnt[c.id] || {}).low ? ` <span class="bad small">⚠${cnt[c.id].low}</span>` : ""}</span>`)).join("");
-    const total = r.items.reduce((s, x) => s + (x.value || 0), 0);
+    const total = Object.values(cnt).reduce((s, x) => s + (x.value || 0), 0);        // 库存金额 = 全部分类合计（不是只算当前这一页）
     const cols = CAT_COLS[CAT] || CAT_COLS[""];
     const money = !r.items.length || r.items.some((x) => x.avg_cost !== undefined);   // v2.39：没有金额权限时不显示金额列
     const has = (k) => cols.includes(k) && (k !== "transit" || r.items.some((x) => x.transit)) && (money || (k !== "cost" && k !== "value"));
     const zeroN = CAT ? ((cnt[CAT] || {}).zero || 0) : sum("zero");
-    const head = `<tr><th>编码</th><th>名称</th>${CAT ? "" : "<th>分类</th>"}${has("brand") ? "<th>品牌 / 规格</th>" : ""}<th>库存</th>
-      ${has("transit") ? "<th>在途</th>" : ""}${has("reorder") ? "<th>补货线</th>" : ""}${has("cost") ? "<th>平均单价</th>" : ""}${has("value") ? "<th>金额</th>" : ""}
+    const sh = (k, t) => `<th class="lv-th" data-isort="${k}">${t}<i class="lv-arr">${SORT === k ? (DIR === "desc" ? "▼" : "▲") : ""}</i></th>`;      // 点表头排序（服务端）
+    const head = `<tr>${sh("code", "编码")}${sh("name", "名称")}${CAT ? "" : sh("category", "分类")}${has("brand") ? "<th>品牌 / 规格</th>" : ""}${sh("qty", "库存")}
+      ${has("transit") ? "<th>在途</th>" : ""}${has("reorder") ? sh("reorder", "补货线") : ""}${has("cost") ? sh("cost", "平均单价") : ""}${has("value") ? sh("value", "金额") : ""}
       ${has("loc") ? `<th>${catalog || !window.INVZ ? "货位" : "分布在"}</th>` : ""}${catalog ? "<th>状态</th>" : ""}<th></th></tr>`;
     const row = (it) => `<tr class="${it.low ? "inv-low" : ""} ${it.active ? "" : "muted"}"><td class="mono" data-notr${it.category === "goods" ? ` data-p360="${esc(it.code)}"` : ""}>${esc(it.code)}</td>
         <td data-notr>${it.category === "filament" ? `<span class="sw" style="background:${esc(colorHex(it.color))}"></span>` : ""}${esc(itName(it))}</td>
         ${CAT ? "" : `<td>${esc(catName(it.category))}</td>`}${has("brand") ? `<td class="muted" data-notr>${esc([it.brand, it.spec].filter(Boolean).join(" · "))}</td>` : ""}
-        <td class="nowrap">${qtyText(it)}${it.low ? ' <span class="bad">⚠</span>' : ""}</td>
+        <td class="nowrap">${qtyOf(it)}${it.low ? ' <span class="bad">⚠</span>' : ""}</td>
         ${has("transit") ? `<td>${it.transit ? num(it.transit, 1) : ""}</td>` : ""}
         ${has("reorder") ? `<td class="nowrap">${reorderText(it)}</td>` : ""}
         ${has("cost") ? `<td>${it.avg_cost ? "฿" + num(it.avg_cost, it.unit === "g" ? 3 : 2) : ""}</td>` : ""}${has("value") ? `<td>${it.value ? "฿" + num(it.value, 0) : ""}</td>` : ""}
@@ -99,14 +105,24 @@
         ${catalog ? `<select id="inv-sub"><option value="all" ${SUB === "all" ? "selected" : ""}>全部物品</option><option value="zero" ${SUB === "zero" ? "selected" : ""}>没有库存的</option>
           <option value="inactive" ${SUB === "inactive" ? "selected" : ""}>已停用的</option></select>` : money ? `<span class="muted small">库存金额 <b>฿${num(total, 0)}</b></span>` : ""}</div>
       <div class="inv-scroll"><table class="grid small"><thead>${head}</thead><tbody>` +
-      (r.items.map(row).join("") || `<tr><td colspan="12" class="muted">${catalog ? "没有物品（点「＋ 新物品」建档）" : "现在没有库存。买了东西用「＋ 采购入库」，物品资料在「物品资料」里"}</td></tr>`) + "</tbody></table></div>" +
+      (r.items.map(row).join("") || `<tr><td colspan="12" class="muted">${catalog ? "没有物品（点「＋ 新物品」建档）" : "现在没有库存。买了东西用「＋ 采购入库」，物品资料在「物品资料」里"}</td></tr>`) + "</tbody></table></div>" + itemsPager(r) +
       (!catalog && zeroN ? `<p class="small muted"><span>没有库存的物品（从没入过库或已经用完）不显示在这里，请看</span> <a href="#" data-goiv="catalog">物品资料</a>（<b data-notr>${zeroN}</b>）</p>` : "");
     const qi = $("#inv-q"); let t = null;
-    qi.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => renderItems().then(() => { const n = $("#inv-q"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }), 300); });
-    const sb = $("#inv-sub"); if (sb) sb.onchange = () => { SUB = sb.value; renderItems(); };
-    const zs = $("#inv-zone"); if (zs) zs.onchange = () => { ZONE = zs.value; renderItems(); };
-    const lq = $("#inv-locq"); if (lq) lq.onchange = () => { LOCQ = lq.value.trim().toUpperCase(); renderItems(); };
+    qi.addEventListener("input", () => { clearTimeout(t); PAGE = 1; t = setTimeout(() => renderItems().then(() => { const n = $("#inv-q"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }), 300); });
+    const sb = $("#inv-sub"); if (sb) sb.onchange = () => { SUB = sb.value; PAGE = 1; renderItems(); };
+    const zs = $("#inv-zone"); if (zs) zs.onchange = () => { ZONE = zs.value; PAGE = 1; renderItems(); };
+    const lq = $("#inv-locq"); if (lq) lq.onchange = () => { LOCQ = lq.value.trim().toUpperCase(); PAGE = 1; renderItems(); };
+    document.querySelectorAll("#inv-body [data-isort]").forEach((th) => { th.onclick = () => { const k = th.dataset.isort; DIR = SORT === k && DIR === "asc" ? "desc" : "asc"; SORT = k; PAGE = 1; renderItems(); }; });
+    document.querySelectorAll("#inv-body [data-ipg]").forEach((b) => { b.onclick = () => { PAGE = +b.dataset.ipg; renderItems(); }; });
+    const ps = $("#inv-psize"); if (ps) ps.onchange = () => { PSIZE = +ps.value; PAGE = 1; try { localStorage.setItem("inv_items_size255", PSIZE); } catch { /* 忽略 */ } renderItems(); };
     const ov = $("#inv-ov"); if (ov) INVZ.overview(ov).catch(() => {});
+  }
+  function itemsPager(r) {
+    const from = r.total ? (r.page - 1) * r.size + 1 : 0, to = Math.min(r.total, r.page * r.size);
+    const b = (pg, t, dis) => `<button class="mini" data-ipg="${pg}" ${dis ? "disabled" : ""}>${t}</button>`;
+    return `<div class="lv-pager row gap wrap between"><span class="small muted" data-notr>${esc(Z(`共 ${num(r.total)} 条 · 第 ${from}–${to} 条`, `ทั้งหมด ${num(r.total)} รายการ · ${from}–${to}`))}</span>
+      <span class="row gap">${b(1, "«", r.page <= 1)}${b(r.page - 1, "‹", r.page <= 1)}<span class="small" data-notr>${r.page} / ${r.pages}</span>${b(r.page + 1, "›", r.page >= r.pages)}${b(r.pages, "»", r.page >= r.pages)}
+      <select id="inv-psize" data-notr>${[50, 100, 200].map((n) => `<option value="${n}" ${n === r.size ? "selected" : ""}>${esc(Z(`每页 ${n}`, `${n} ต่อหน้า`))}</option>`).join("")}</select></span></div>`;
   }
   function colorHex(zh) { try { return (typeof COLORS !== "undefined" && COLORS[zh] && COLORS[zh].hex) || "#ccc"; } catch { return "#ccc"; } }
 
@@ -316,8 +332,8 @@
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#tab-inventory")) return;
     const gv = e.target.closest("[data-goiv]"); if (gv) { e.preventDefault(); VIEW = gv.dataset.goiv; SUB = "zero"; return render(); }
-    const v = e.target.closest("[data-iv]"); if (v) { VIEW = v.dataset.iv; return render(); }
-    const c = e.target.closest("[data-cat]"); if (c && c.closest("#inv-cats")) { CAT = c.dataset.cat; return renderItems(); }
+    const v = e.target.closest("[data-iv]"); if (v) { VIEW = v.dataset.iv; PAGE = 1; return render(); }
+    const c = e.target.closest("[data-cat]"); if (c && c.closest("#inv-cats")) { CAT = c.dataset.cat; PAGE = 1; return renderItems(); }
     const it = e.target.closest("[data-item]"); if (it) return itemModal(Number(it.dataset.item)).catch((er) => toast(er.message, true));
     const dk = e.target.closest("[data-newdoc]"); if (dk) return docModal(dk.dataset.newdoc).catch((er) => toast(er.message, true));
     const dv = e.target.closest("[data-doc]"); if (dv) return docView(Number(dv.dataset.doc)).catch((er) => toast(er.message, true));

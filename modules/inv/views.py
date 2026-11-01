@@ -8,7 +8,7 @@
 """
 from core import db
 from core import inventory as inv
-from core.inventory import units
+from core.inventory import ledger, units
 
 VIEWS = ("stock", "all", "zero", "inactive")
 
@@ -22,32 +22,58 @@ def is_low(it, stocked):
     return it["id"] in stocked and it.get("reorder_point") is not None and units.below(it)
 
 
-def _split():
+def _split(ids=None):
     """v2.53：每个物品放在哪些货位：{物品id: [{code, qty, ztype, zone}]}（拣货区在前、按走路顺序）。
-    v2.55：耗材每个货位另外带 rolls（几卷）、grams、text_zh / text_th（「A1-01-01：1 卷 · 1.0 kg」「PR2-01-01（打印机上）：1 卷 · 973 g」）。"""
+    v2.55：ids = 只查这些物品（分页时用）；耗材每个货位另外带 rolls（几卷）、grams、text_zh / text_th
+    （「A1-01-01：1 卷 · 1.0 kg」「PR2-01-01（打印机上）：1 卷 · 973 g」）。"""
     from . import locations as L, wms
     c = db.conn()
+    out = {}
     try:
-        locs = wms._locs(c, active=False)
-        rows = wms._qty_rows(c)
+        if ids is not None:
+            if not ids:
+                return {}
+            ids = list(ids)
+            rows = c.execute(f"SELECT q.item_id, q.loc_id, q.qty, l.code, l.zone, COALESCE(NULLIF(g.ztype,''),'pick') ztype FROM inv_loc_qty q JOIN inv_locations l ON l.id=q.loc_id "
+                             f"LEFT JOIN inv_loc_groups g ON g.code=l.zone AND g.kind='zone' WHERE q.qty>1e-9 AND q.item_id IN ({','.join('?' * len(ids))})", ids).fetchall()
+            rows = [{"item_id": r["item_id"], "loc_id": r["loc_id"], "qty": r["qty"], "code": r["code"], "zone": r["zone"], "ztype": r["ztype"]} for r in rows]
+            locs = None
+        else:
+            locs = wms._locs(c, active=False)
+            rows = wms._qty_rows(c)
     except Exception:  # noqa: BLE001  货位表还没建
         return {}
-    lstat = units.loc_stats(c)
-    fil = {r["id"]: (r["material"], r["color"]) for r in c.execute("SELECT id, material, color FROM inv_items WHERE category='filament'")}
-    out = {}
+    # 耗材：只有请求的物品里有耗材才查料卷货位（分页时每页最多几十个物品）
+    item_ids = {r["item_id"] for r in rows}
+    fil = {}
+    try:
+        q = "SELECT id, material, color FROM inv_items WHERE category='filament'"
+        if ids is not None:
+            q += f" AND id IN ({','.join('?' * len(ids))})"
+            fil = {r["id"]: (r["material"], r["color"]) for r in c.execute(q, ids)}
+        else:
+            fil = {r["id"]: (r["material"], r["color"]) for r in c.execute(q)}
+    except Exception:  # noqa: BLE001
+        fil = {}
+    lstat = units.loc_stats(c) if any(i in fil for i in item_ids) else {}
     for r in rows:
-        l = locs.get(r["loc_id"])
-        if l:
-            x = {"code": l["code"], "qty": round(r["qty"], 6), "ztype": l["ztype"], "zone": l["zone"]}
-            k = fil.get(r["item_id"])
-            if k:
-                st = (lstat.get(k) or {}).get(r["loc_id"]) or {"rolls": 0, "grams": r["qty"]}
-                x["rolls"], x["grams"] = st["rolls"], round(st["grams"], 1)
-                zh, th = units.loc_text(k[0], st["rolls"], st["grams"])
-                on = l["ztype"] == "production"
-                x["text_zh"] = f"{l['code']}{'（打印机上）' if on else ''}：{zh}"
-                x["text_th"] = f"{l['code']}{' (บนเครื่องพิมพ์)' if on else ''}: {th}"
-            out.setdefault(r["item_id"], []).append(x)
+        if locs is not None:
+            l = locs.get(r["loc_id"])
+            if not l:
+                continue
+            code, zone, ztype = l["code"], l["zone"], l["ztype"]
+        else:
+            code, zone, ztype = r["code"], r["zone"], r["ztype"]
+        x = {"code": code, "qty": round(r["qty"], 6), "ztype": ztype, "zone": zone}
+        k = fil.get(r["item_id"])
+        if k:
+            st = (lstat.get(k) or {}).get(r["loc_id"]) or {"rolls": 0, "grams": r["qty"]}
+            x["rolls"], x["grams"] = st["rolls"], round(st["grams"], 1)
+            zh, th = units.loc_text(k[0], st["rolls"], st["grams"])
+            on = ztype == "production"
+            x["text_zh"] = f"{code}{'（打印机上）' if on else ''}：{zh}"
+            x["text_th"] = f"{code}{' (บนเครื่องพิมพ์)' if on else ''}: {th}"
+        out.setdefault(r["item_id"], []).append(x)
     for v in out.values():
         v.sort(key=lambda x: (0 if x["ztype"] == "pick" else 1, L.sort_key(x["code"])))
     return out
@@ -148,3 +174,128 @@ def box_stats():
                        days_left=(max(0, round((it["qty"] or 0) / daily)) if daily > 0 else None))
         out.append(row)
     return out
+
+
+# ---------------- v2.55：服务端分页 / 筛选 / 排序 / 搜索（1 万+ 物品也快）----------------
+ITEM_SORTS = {"code": "i.code", "name": "COALESCE(NULLIF(i.name_zh,''), i.name_th), i.code", "category": "i.category, i.code", "qty": "i.qty",
+              "reorder": "i.reorder_point", "cost": "i.avg_cost", "value": "(i.qty*COALESCE(i.avg_cost,0))", "loc": "i.location, i.code",
+              "locs": "COALESCE(p.n,0)"}
+MONEY_SORTS = ("cost", "value")
+_PLACED = "LEFT JOIN (SELECT item_id, SUM(qty) s, COUNT(*) n FROM inv_loc_qty WHERE qty>1e-9 GROUP BY item_id) p ON p.item_id=i.id"
+_STOCKED = "LEFT JOIN (SELECT DISTINCT item_id FROM inv_moves) st ON st.item_id=i.id"
+
+
+def _like(s):
+    return "%" + str(s).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _has_sql(tr_ids):
+    return "(ABS(i.qty)>1e-9" + (f" OR i.id IN ({','.join('?' * len(tr_ids))})" if tr_ids else "") + ")", list(tr_ids)
+
+
+def listing_page(view="stock", category="", q="", zone="", loc="", sort="", desc=False, page=1, size=50):
+    """listing 的分页版：{items, total, page, pages, size}。条件和 listing 一样，只是在数据库里筛、排、分页，每页再补分布 / 货位。"""
+    from . import qtytext
+    from .locviews import _split_order
+    view = view if view in VIEWS else "stock"
+    c = db.conn()
+    trm = inv.in_transit()
+    tr_ids = [k for k, v in trm.items() if (v or 0) > 0]
+    has, has_args = _has_sql(tr_ids)
+    low = "(i.reorder_point IS NOT NULL AND i.qty<=i.reorder_point AND st.item_id IS NOT NULL)"
+    w, args = [("i.active=0" if view == "inactive" else "i.active=1")], []
+    if category:
+        w.append("i.category=?")
+        args.append(category)
+    q = str(q or "").strip()
+    if q:
+        w.append("(i.code LIKE ? ESCAPE '\\' OR i.name_zh LIKE ? ESCAPE '\\' OR i.name_th LIKE ? ESCAPE '\\' OR i.brand LIKE ? ESCAPE '\\' OR i.spec LIKE ? ESCAPE '\\')")
+        args += [_like(q)] * 5
+    if view == "stock":
+        w.append(f"({has} OR {low})")
+        args += has_args
+    elif view == "zero":
+        w.append(f"NOT {has}")
+        args += has_args
+    zone = str(zone or "")
+    zjoin = "JOIN inv_locations l ON l.id=qq.loc_id"
+    if zone.startswith("t:"):
+        w.append(f"i.id IN (SELECT qq.item_id FROM inv_loc_qty qq {zjoin} LEFT JOIN inv_loc_groups g ON g.code=l.zone AND g.kind='zone' "
+                 "WHERE qq.qty>1e-9 AND COALESCE(NULLIF(g.ztype,''),'pick')=?)")
+        args.append(zone[2:])
+    elif zone.startswith("z:"):
+        w.append(f"i.id IN (SELECT qq.item_id FROM inv_loc_qty qq {zjoin} WHERE qq.qty>1e-9 AND l.zone=?)")
+        args.append(zone[2:])
+    elif zone == "unplaced":
+        w.append(f"((i.qty-COALESCE(p.s,0)>1e-9 AND (COALESCE(p.n,0)>0 OR COALESCE(i.location,'')<>'')) OR ({has} AND COALESCE(p.n,0)=0))")
+        args += has_args
+    loc = str(loc or "").strip().upper()
+    if loc:
+        w.append(f"i.id IN (SELECT qq.item_id FROM inv_loc_qty qq {zjoin} WHERE qq.qty>1e-9 AND l.code LIKE ?)")
+        args.append(loc + "%")
+    where = " AND ".join(w)
+    frm = f"FROM inv_items i {_PLACED} {_STOCKED}"
+    total = c.execute(f"SELECT COUNT(*) {frm} WHERE {where}", args).fetchone()[0]
+    size = size if size in (50, 100, 200) else 50
+    pages = max(1, -(-total // size))
+    page = max(1, min(int(page or 1), pages))
+    order = ITEM_SORTS.get(sort) or "i.category, i.code"
+    if desc and sort in ITEM_SORTS:
+        order = ", ".join(f"{p.strip()} DESC" for p in _split_order(order))
+    rows = c.execute(f"SELECT i.* {frm} WHERE {where} ORDER BY {order}, i.id LIMIT ? OFFSET ?", args + [size, (page - 1) * size]).fetchall()
+    ids = [r["id"] for r in rows]
+    stocked = {r[0] for r in c.execute(f"SELECT DISTINCT item_id FROM inv_moves WHERE item_id IN ({','.join('?' * len(ids))})", ids)} if ids else set()
+    split = _split(ids)
+    items = [ledger.item_row(r) for r in rows]
+    for it in items:
+        it["transit"] = trm.get(it["id"], 0)
+    units.decorate(items, c)                      # 耗材：units（几卷）、按补货线单位重算 low、补货线文字
+    qc = qtytext.Ctx(c)
+    out = []
+    for it in items:
+        where_ = split.get(it["id"], [])
+        placed = sum(x["qty"] for x in where_)
+        it["stocked"] = it["id"] in stocked
+        it["loc_n"] = len(where_)
+        it["locs"] = where_
+        it["unplaced"] = round(max(0.0, (it.get("qty") or 0) - placed), 6) if where_ or it.get("location") else 0
+        if it.get("units"):                       # 还没上架的是几卷
+            it["unplaced_rolls"] = max(0, it["units"]["rolls"] - sum(x.get("rolls", 0) for x in where_))
+        it["low"] = is_low(it, stocked)
+        it.update(qtytext.both(it.get("qty") or 0, it.get("unit") or "", it, qc))
+        for x in where_:
+            x.update(qtytext.both(x["qty"], it.get("unit") or "", it, qc))
+        out.append(it)
+    return {"items": out, "total": total, "page": page, "pages": pages, "size": size}
+
+
+def counts_sql():
+    """counts 的数据库版：每个分类 stock / all / zero / low / value。"""
+    c = db.conn()
+    tr_ids = [k for k, v in inv.in_transit().items() if (v or 0) > 0]
+    has, has_args = _has_sql(tr_ids)
+    low = "(i.reorder_point IS NOT NULL AND i.qty<=i.reorder_point AND st.item_id IS NOT NULL)"
+    out = {}
+    for r in c.execute(f"SELECT i.category, COUNT(*) n, SUM(CASE WHEN {has} OR {low} THEN 1 ELSE 0 END) stock, SUM(CASE WHEN {low} THEN 1 ELSE 0 END) low, "
+                       f"COALESCE(SUM(i.qty*COALESCE(i.avg_cost,0)),0) value FROM inv_items i {_STOCKED} WHERE i.active=1 GROUP BY i.category", has_args):
+        out[r["category"]] = {"stock": r["stock"], "all": r["n"], "zero": r["n"] - r["stock"], "low": r["low"], "value": round(r["value"], 2)}
+    # 补货线按「卷」的耗材：用真实卷数比（SQL 只比克数），少数几个物品单独校正
+    rr = [ledger.item_row(r) for r in c.execute("SELECT i.*, (st.item_id IS NOT NULL) stocked FROM inv_items i " + _STOCKED +
+                                                 " WHERE i.active=1 AND i.reorder_unit='roll' AND i.reorder_point IS NOT NULL")] if _has_col(c, "reorder_unit") else []
+    if rr:
+        units.decorate(rr, c)
+        for it in rr:
+            sql_low = bool(it["stocked"] and (it.get("qty") or 0) <= (it.get("reorder_point") or 0))
+            real = bool(it["stocked"] and units.below(it))
+            has_ = abs(it.get("qty") or 0) > 1e-9 or it["id"] in tr_ids
+            o = out[it["category"]]
+            if sql_low != real:
+                o["low"] += 1 if real else -1
+                if not has_:
+                    o["stock"] += 1 if real else -1
+                    o["zero"] -= 1 if real else -1
+    return out
+
+
+def _has_col(c, col):
+    return any(r[1] == col for r in c.execute("PRAGMA table_info(inv_items)"))

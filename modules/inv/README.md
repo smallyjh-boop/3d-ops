@@ -79,3 +79,14 @@
   入库 / 退回 N 卷 = 新建 N 条料卷记录（编号 F0001…，开单后可打印每卷标签 `/print/spools`），领用 / 报废按卷 = 先拿未开封的再拿剩得少的（在机上的先下机）；单据行 `rolls / net_g / opened / spools`，`doc.spool_codes`；打印扣料照旧按克扣在机上那卷；
   盘点三种数法：克 · 数卷（多了建新料卷、少了记用完；整数）· 称重（`{weigh: [{code, gross}]}`，毛重 − 空料盘 inv_spool_tare_g = 剩余）；按货位盘点也包含按卷管的耗材（只能数卷或称重，没数的不算 0）。
   迁移：ledger.init 只加三列、可重复。测试 modules/inv/tests/t_units255.py。
+- 2.3（系统 v2.55.0）：仓库 → 货位页三种看法 + 1 万商品 / 2 万货位也流畅。顶部切换「列表 | 按商品 | 货位图」（默认列表，localStorage `inv_loc_view255` 记住上次选的）。
+  列表（locviews.py + ui/locviews.js）：一行一个货位——编号、库区、货架 / 层 / 位、里面的商品（图 + 名称 + SKU + 数量，先 2 个，「+N 种」展开）、容量 / 占用条、状态（空 / 有货 / 满 / 超容量 / 低于补货线）、最后动的时间；
+  筛选库区 / 货架 / 状态 / 分类 / 空非空 / 低于最低数量，搜索货位编号 / 商品名称 / SKU / 条码（= 物品编码），点表头排序，每页 50 / 100 / 200；勾选后批量：移库（`POST /api/inv/loc/bulk`）、打印标签（`/print/inv-locations?codes=` 或 `flt=1`）、货位设置、加入盘点，可「选中全部 N 个符合条件的」。
+  点一行 → 右边抽屉（`/api/inv/loc/<id>/drawer`：里面的商品、最近 60 条出入库记录、入库 / 出库 / 移库 / 上架 / 设置 / 盘点 / 标签）。
+  按商品：一行一个商品（图、名称、SKU、总数、分布「A1-01-01 ×20 · R2-03-02 ×100」、标记 太分散 / 没上架 / 没货位 / 低于补货线），同样的搜索 / 筛选 / 排序 / 翻页。
+  货位图保留：格子里有第一个商品的小图 + 名称前几个字，放上去看全部；货位多（> 400）只画选中的库区，货架先是一行汇总，点开才画格子，别的库区是上面的一排汇总。
+  规模：接口 `/api/inv/loc/{list,items,codes,suggest,summary,map}` 全在 SQL 里筛选 / 排序 / 搜索 / 分页；索引 inv_loc_qty(item_id / loc_id)、inv_locations(code / zone,shelf,layer,pos)、inv_items(code / name_zh / category,code / location)、inv_loc_log(from_loc / to_loc)；
+  汇总（数字卡片、各库区利用率）按「货位 / 数量 / 设置有没有变」缓存；`/api/inv/locations` 货位多于 1500 只给汇总，选货位的下拉框改成边打边联想（`/api/inv/loc/suggest`）；待上架数一条 SQL，推荐共用一次读好的数据，货位编号解析加缓存。
+  库存表（inventory.js）：`/api/inv/items?view=…&page=&size=&sort=&dir=` 服务端分页 / 排序 / 搜索（不带 page / size 还是返回全部）。
+  数量文字：全部走 `qtytext.qty_text()`（接口字段 qty_text / qty_text_th），耗材改成「2 卷 · 1.97 kg」只改这个文件。手机 /m 货位页：没扫码时是紧凑卡片列表（图、商品、货位、数量，搜索 + 翻页），扫 / 输入货位编号打开详情。
+  测试 tests/t_locviews255.py（含 synth255.py 灌 2 万货位 + 1 万商品的压测，列表 / 搜索 / 排序都 < 1 秒）。

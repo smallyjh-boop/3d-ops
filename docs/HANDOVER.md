@@ -12,6 +12,7 @@
 - 开发中（v2.55.0，未发版）：T29 新建生产单改成选产品（建议生产 / 全部产品 / 已选清单 + 估算；生产单页顶部建议卡片）。core/po.py suggest / picker，ui/po.js，测试 modules/prod/tests/t_po255.py。注意：建议数量含「订单待打」件数（订单任务本身仍会打，老板确认这个口径）
 - 开发中（v2.55.0，未发版）：打印机编码规则（T30）——积木式规则 + 预览、自动编码（添加 / 发现 / 导入）、手填查重、批量重新编号（预览 / 冲突 / 引用一起改 / 重新打印标签）、改位置提示重新编号。详见 modules/prod/README.md「系统 v2.55.0」，测试 t_codes255.py
 - 开发中（v2.55.0，未发版）：耗材两个单位 卷 + 重量（树脂：瓶 + 毫升）——库存表「2 卷（1 整卷 + 1 开封卷）· 1.97 kg」、货位分布按卷、补货线按卷或公斤（inv_items.reorder_unit / reorder_value / roll_g；reorder_point 仍同步成克）、按卷入库 / 退回 / 领用 / 报废（每卷一条料卷记录和标签）、盘点数卷 / 称重（货位盘点也包含按卷管的耗材）、采购建议按卷带公斤和金额。入口 core/inventory/units.py；详见 modules/inv/README.md、modules/pur/README.md「系统 v2.55.0」，测试 inv/t_units255、pur/t_pur255
+- 开发中（v2.55.0，未发版）：仓库 → 货位页三种看法（列表 | 按商品 | 货位图）+ 2 万货位 / 1 万商品服务端分页 / 筛选 / 排序 / 搜索；库存表同样分页；手机货位列表。数量文字统一走 modules/inv/qtytext.py（另一个任务改耗材显示只换这个文件）。详见 modules/inv/README.md「系统 v2.55.0」，测试 t_locviews255.py。已知：2 万货位时「待上架」页每个物品推荐约 70ms（pending 41 个约 3 秒），可再优化 wms.candidates
 - 测试机已装 OrcaSlicer 2.3.1（/opt/orca，PATH 里 orca-slicer），v20_test 和真切片测试能跑
 - 老板 NAS：两个网口同网段（qvs0 192.168.31.2 没插线），需要在 QNAP 把网口 1 改 DHCP 才能永久生效
 - 打印机：P1S、K1 Max（192.168.31.139）、K1C（192.168.31.133）已填；K1 原厂固件发送打印待「打印测试」真机验证
