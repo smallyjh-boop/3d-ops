@@ -39,7 +39,11 @@ def _recipe_slice(pid, b):
     from core import recipes
     try:
         from core import specmodel
-        p = specmodel.view(store.load(pid), b.get("spec") or "")     # 规格有自己的模型时切那个模型（v2.22）
+        p0 = store.load(pid)
+        if specmodel.plan_sliced(p0, b.get("spec") or ""):
+            # v2.53.1：按主模型缩放 / 只有自己打印方案的规格不能按主模型切（会切出主模型大小的文件）
+            raise ValueError(f"{specmodel.spec_name(b.get('spec'))}要在产品的「打印方案」里按它自己的方案切片")
+        p = specmodel.view(p0, b.get("spec") or "")     # 规格有自己的模型时切那个模型（v2.22）
         sp = p.get("_spec") or ""
         idx = int(b.get("printer") or 0)
         names = [x.get("name") for x in load_config().get("printers") or []]

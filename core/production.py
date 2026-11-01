@@ -848,12 +848,23 @@ def merge_candidates(job_id, plate=None):
                         COALESCE(o.ship_by, 9e12), j.id""",
                      (job_id, j["product_id"], j["color"] or "")).fetchall()
     out = []
+    key = _spec_key(j["product_id"], j["sku"])
     for r in rows:
         d = dict(r)
         d["remaining"] = max(0, d["qty"] - (d["qty_done"] or 0))
-        if d["remaining"]:
+        if d["remaining"] and _spec_key(d["product_id"], d["sku"]) == key:     # v2.53.1：不同规格（大小）的不能拼一盘
             out.append(d)
     return out
+
+
+def _spec_key(product_id, sku):
+    """这个 SKU 用哪个规格的切片文件（specmodel.file_spec）；拼盘只能拼同一个。"""
+    from . import specmodel, store
+    try:
+        p = store.load(product_id)
+    except (FileNotFoundError, OSError, ValueError):
+        return ""
+    return specmodel.file_spec(p, specmodel.spec_of_sku(p, sku))
 
 
 def send_options(job_id, printer_idx=None, plate=None):
@@ -881,9 +892,17 @@ def send_options(job_id, printer_idx=None, plate=None):
     try:
         from . import specmodel
         p0 = store.load(j["product_id"])
-        p = specmodel.view(p0, specmodel.spec_of_sku(p0, j["sku"]))      # 规格有自己的模型（v2.22）
+        sp0 = specmodel.spec_of_sku(p0, j["sku"])
+        p = specmodel.view(p0, sp0)      # 规格有自己的模型（v2.22）
         recipe = recipes.get(p)
-        if p.get("model"):
+        if specmodel.plan_sliced(p0, sp0):
+            # v2.53.1：按主模型缩放 / 只有自己方案的规格：没有文件时按这个规格的方案切，主模型的方案和容量不适用
+            recipe = None
+            from . import modules
+            pp = modules.public("model")
+            pls = (pp.get_plan(p0, specmodel.file_spec(p0, sp0)).get("plates") or []) if pp else []
+            capacity = max(1, int(pls[0].get("sets") or 1)) if len(pls) == 1 else None
+        elif p.get("model"):
             g = recipes.geometry(p, recipe, idx)
             capacity = g.get("capacity")
     except Exception:  # 没有模型时只看已有文件
@@ -896,6 +915,10 @@ def send_options(job_id, printer_idx=None, plate=None):
             f["machine_ok"], f["machine_errors"] = sc["ok"], sc["errors"]
     except ImportError:
         pass
+    for f in files:                       # v2.53.1：规格 / 缩放比例对不上任务的文件（试打任务指定的文件）也不能用
+        ferr = job_file_error(j, f)
+        if ferr:
+            f["machine_ok"], f["machine_errors"] = False, (f.get("machine_errors") or []) + [ferr]
     usable = [f for f in files if (f["status"] in ("reviewed", "verified") or j.get("kind") in PRINT_ONLY) and f.get("machine_ok", True)]
     if not capacity:
         capacity = max([f["per_plate"] for f in files] or [remaining or 1])
@@ -990,6 +1013,25 @@ def material_check(j, f, idx):
 
 
 
+def job_file_error(j, f):
+    """v2.53.1：这个文件能不能给这个任务用（产品 / 规格 / 缩放比例）；能 → ""，不能 → 原因。
+    打印测试（kind=test）只能用测试立方体的文件；试打任务只能用任务指定的文件。"""
+    from . import specmodel, store
+    from .trial import TEST_PRODUCT
+    if not f:
+        return ""
+    kind = _col(j, "kind") or "order"
+    if kind == "test":
+        return "" if (f.get("product_id") or "") == TEST_PRODUCT else f"打印测试只能用测试立方体的切片文件（文件 #{f.get('id')} 不是）"
+    if kind == "trial" and _col(j, "file_id") and int(f["id"]) != int(j["file_id"]):
+        return f"试打任务只能用建任务时选的切片文件（#{j['file_id']}）"
+    try:
+        p = store.load(j["product_id"])
+    except (FileNotFoundError, OSError, ValueError):
+        return "这个任务的产品不存在了，不能发送切片文件"
+    return specmodel.file_error(f, p, j["sku"])
+
+
 def _file_for_count(j, idx, count, file_id=None, user="", plate=None):
     """找到（或马上切出）一盘 count 个的文件。plate（v2.52）：几盘的方案里的这一盘 → 只用这一盘的文件，没有就按方案切这一盘。"""
     from . import print_files, recipes, store
@@ -1011,12 +1053,28 @@ def _file_for_count(j, idx, count, file_id=None, user="", plate=None):
         if not pp:
             raise ValueError(f"{plate_text(plate)}还没有切片文件。请在产品的「打印方案」里切这一盘，或者手动开始")
         return pp.slice_plate(j["product_id"], plate["spec"], plate["plate_id"], j["color"] or "", idx, user)["file"]
+    from . import specmodel
+    p0 = store.load(j["product_id"])
+    sp0 = specmodel.spec_of_sku(p0, j["sku"])
+    if specmodel.plan_sliced(p0, sp0):
+        # v2.53.1：「按主模型缩放 N%」/ 只有自己打印方案的规格：只用这个规格（这个缩放比例）的文件，没有就按这个规格的方案切，
+        # 绝不切主模型（以前会切出主模型 100% 的文件发给缩放的规格）
+        f = print_files.find(j["product_id"], j["sku"], pname, j["color"] or "")
+        if f:
+            return f
+        key = specmodel.file_spec(p0, sp0)
+        from . import modules
+        pp = modules.public("model")
+        if not pp:
+            raise ValueError(f"{specmodel.spec_name(key)}要按它的打印方案切片，但「3D 模型」模块没有开启。请先开启模块，或上传这个规格的切片文件")
+        plates = pp.get_plan(p0, key).get("plates") or []
+        if len(plates) != 1:
+            raise ValueError(f"{specmodel.spec_name(key)}的打印方案有 {len(plates)} 盘，请在产品的「打印方案」里切片后再开始")
+        return pp.slice_plate(j["product_id"], key, plates[0]["id"], j["color"] or "", idx, user)["file"]
     f = print_files.find(j["product_id"], j["sku"], pname, j["color"] or "", per_plate=count)
     if f:
         return f
-    from . import specmodel
-    p0 = store.load(j["product_id"])
-    p = specmodel.view(p0, specmodel.spec_of_sku(p0, j["sku"]))       # 规格有自己的模型时切那个模型（v2.22）
+    p = specmodel.view(p0, sp0)       # 规格有自己的模型时切那个模型（v2.22）
     if not p.get("model"):
         have = sorted({x["per_plate"] for x in print_files.candidates(j["product_id"], j["sku"], pname, j["color"] or "")})
         raise ValueError(f"没有一盘 {count} 个的切片文件，这个产品也没有 3D 模型可以自动切片。"
@@ -1075,8 +1133,12 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
     trial = (j.get("kind") or "order") in PRINT_ONLY          # v2.53：试打 / 打印测试：不拼盘，用任务指定的文件，不要求先复核
     if trial:
         merge_ids = []
-        if not file_id and j.get("file_id"):
-            file_id = j["file_id"]
+        # v2.53.1：试打 / 测试只能用建任务时定好的文件（以前请求里随便给个 file_id 都能用，连别的产品的文件也不用复核就发出去）
+        if not j.get("file_id"):
+            raise ValueError("这个试打 / 测试任务没有指定切片文件，请删掉重新建")
+        if file_id not in (None, "") and int(file_id) != int(j["file_id"]):
+            raise ValueError(f"试打 / 测试任务只能用建任务时选的切片文件（#{j['file_id']}），不能换成别的文件。要换文件请重新建试打任务")
+        file_id = j["file_id"]
     jobs = [j] + [dict(_job(c, int(x))) for x in (merge_ids or []) if int(x) != job_id]
     units = {}       # v2.52：几盘的任务每个任务这一盘还差几套
     if pv:
@@ -1093,6 +1155,8 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
                 raise ValueError(f"任务 #{x['id']} 不能拼在一起（产品/颜色不同或已经在打印）")
             if int(x.get("multi_plate") or 0):
                 raise ValueError(f"任务 #{x['id']} 要分几盘打，不能和整件打的任务拼在一起")
+            if _spec_key(x["product_id"], x["sku"]) != _spec_key(j["product_id"], j["sku"]):
+                raise ValueError(f"任务 #{x['id']} 是别的规格（大小 / 模型不同），不能拼在一起")
     need = sum(units.values()) if pv else sum(max(0, x["qty"] - (x["qty_done"] or 0)) for x in jobs)
     count = pv["sets"] if pv else int(count or need or 1)
     if send:
@@ -1104,6 +1168,9 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
     f = None
     if send or file_id:
         f = _file_for_count(j, idx, count, file_id, user, pv)
+        ferr = job_file_error(j, f)          # v2.53.1：文件的产品 / 规格 / 缩放比例必须和任务一致（第二道保险，复核之前就拦下）
+        if ferr:
+            raise ValueError(ferr)
         if trial:
             pass       # 试打就是为了验证这个文件：不要求先复核 / 试打验证（机型、喷嘴、热床板、AMS 的核对下面照旧）
         elif f["status"] == "draft":

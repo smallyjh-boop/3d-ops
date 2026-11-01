@@ -60,6 +60,70 @@ def own(p, spec):
     return entry_for(p, spec) is not None
 
 
+def _plans(p):
+    return p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
+
+
+def file_spec(p, spec):
+    """v2.53.1：这个规格的任务只能用 print_files.spec 等于几的切片文件（"" = 主模型的文件）。
+    规格有自己的模型，或者有自己的打印方案（保存过的盘 / 「按主模型缩放 N%」）→ 规格自己；其他 → 主模型。
+    打印方案的 plan_key、切片文件的筛选、试打结果写回都按这个，保证不会把主模型 100% 的文件发给缩放过的规格。"""
+    spec = (spec or "").strip()
+    if not spec:
+        return ""
+    if own(p, spec):
+        return spec
+    pl = _plans(p).get(spec) or {}
+    return spec if (pl.get("plates") or pl.get("follow")) else ""
+
+
+def follow_scale(p, spec):
+    """「按主模型缩放 N%」的规格 → N（百分比）；其他 → None。"""
+    spec = (spec or "").strip()
+    pl = (_plans(p).get(spec) or {}) if spec else {}
+    if pl.get("follow") and pl.get("scale"):
+        try:
+            return round(float(pl["scale"]), 1)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def plan_sliced(p, spec):
+    """这个规格的切片文件要按打印方案（modules/model printplan.slice_plate）切，不能用 recipes.slice_product 切模型：
+    「按主模型缩放」的规格，或者没有自己的模型、却有自己保存过的方案（例如从别的规格复制的）。"""
+    key = file_spec(p, spec)
+    return bool(key) and (follow_scale(p, key) is not None or not own(p, key))
+
+
+def spec_name(s):
+    return f"规格「{s}」" if s else "主模型"
+
+
+def file_error(f, p, sku):
+    """切片文件和任务（产品 p 的 SKU）的规格 / 尺寸对不对得上；对不上返回原因（中文），对得上返回 ""。
+    第二道保险：开始打印 / 试打 / 检查文件都会再核对一次（slicecheck 只核对机型 / 喷嘴 / 热床板）。"""
+    if not f:
+        return ""
+    head = f"文件尺寸 / 规格和任务不一致（文件 #{f.get('id')}）："
+    if (f.get("product_id") or "") != (p.get("id") or ""):
+        return head + "不是这个产品的切片文件"
+    want = file_spec(p, spec_of_sku(p, sku))
+    have = (f.get("spec") or "").strip()
+    if have != want:
+        return head + f"任务要{spec_name(want)}的文件，这个文件是{spec_name(have)}的。请用{spec_name(want)}的打印方案重新切片"
+    sc = follow_scale(p, want)
+    fs = f.get("scale")
+    if sc is not None:
+        if fs in (None, ""):
+            return head + f"{spec_name(want)}按主模型缩放 {sc:g}%，这个文件没有记录缩放比例，请重新切片"
+        if abs(float(fs) - sc) > 0.05:
+            return head + f"{spec_name(want)}现在按主模型缩放 {sc:g}%，这个文件是按 {float(fs):g}% 切的，请重新切片"
+    elif fs not in (None, "") and abs(float(fs) - 100.0) > 0.05:
+        return head + f"这个文件是按 {float(fs):g}% 缩放切的，{spec_name(want)}现在不缩放，请重新切片"
+    return ""
+
+
 def view(p, spec):
     """按规格看的产品：模型、打印方案换成这个规格的。没有自己模型的规格就是产品本身（_spec = ""）。"""
     e = entry_for(p, spec)
@@ -110,8 +174,7 @@ def overview(pid):
                      "own": bool(e), "variants": len(vs), "grams": vs[0].get("grams") if vs else None,
                      "hours": vs[0].get("hours") if vs else None, "est": est,
                      "own_recipe": s in (p.get("spec_recipes") or {}),
-                     "files": sum(1 for f in files if (f.get("spec") or "") == s) if e else
-                     sum(1 for f in files if not f.get("spec"))})
+                     "files": sum(1 for f in files if (f.get("spec") or "") == file_spec(p, s))})
     entries = []
     for e in lib.values():
         info = e.get("info") or {}

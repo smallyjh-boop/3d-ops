@@ -348,7 +348,8 @@ def _upload_resin(src_path, filename, p, user, printer, per_plate, sku, color, n
 
 
 def slice_spec(p, filename, sku="", spec=None):
-    """v2.22.1：切片文件是哪个规格的。指定了就用；否则按 SKU、再按文件名里出现的规格名认。只有「有自己模型」的规格才单独算，其他 = 主模型（空）。"""
+    """v2.22.1：切片文件是哪个规格的。指定了就用；否则按 SKU、再按文件名里出现的规格名认。
+    只有「有自己模型」或「有自己打印方案（含按主模型缩放）」的规格才单独算（v2.53.1），其他 = 主模型（空）。"""
     from . import specmodel
     if spec is None or spec == "auto":
         spec = specmodel.spec_of_sku(p, sku) if sku else ""
@@ -358,7 +359,7 @@ def slice_spec(p, filename, sku="", spec=None):
             hits.sort(key=len, reverse=True)
             spec = hits[0] if hits else ""
     spec = (spec or "").strip()
-    return spec if spec and specmodel.own(p, spec) else ""
+    return specmodel.file_spec(p, spec)
 
 
 def upload_slice(src_path, filename, product_id, user="", printer="auto", per_plate="auto", sku="", color="", note="",

@@ -170,6 +170,65 @@ ok(C.post(f"/api/products/{PID}/display", json={"spec": "大号", "parts": []}).
 d = C.post(f"/api/products/{PID}/spec-scale", json={"spec": "大号", "pct": None}).get_json()
 ok(d["mode"] == "inherit" and "大号" not in (store.load(PID).get("print_plans") or {}), "scale cancelled")
 
+# ---------- 6b. v2.53.1 按主模型缩放的规格只用自己（这个缩放比例）的切片文件 ----------
+from core import print_files, production, trial
+from modules.prod import slicecheck
+REVIEW = {k: True for k, _ in print_files.REVIEW_ITEMS}
+CONFIRM = {"bed_clear": True, "material": True, "review": REVIEW}
+def gf(name, spec="", sku="", plate="p1", scale=None):
+    path = os.path.join(D, name)
+    open(path, "w").write("; filament used [g] = 10\nM83\nG28\n;LAYER_CHANGE\nG1 X60 Y60 E1\n")
+    f = print_files.add(path, name, PID, "Bambu Lab P1S", sku, 1, "", "t", "boss", "PLA", 10, 1, source="plan", spec=spec, plate_id=plate, scale=scale)
+    slicecheck.confirm(f["id"], "Bambu Lab P1S", "boss")
+    print_files.review(f["id"], REVIEW, "boss")
+    return print_files.get(f["id"])
+C.post(f"/api/products/{PID}/spec-scale", json={"spec": "大号", "pct": 150})
+p = store.load(PID)
+ok(specmodel.file_spec(p, "大号") == "大号" and specmodel.follow_scale(p, "大号") == 150 and specmodel.plan_sliced(p, "大号")
+   and specmodel.file_spec(p, "带盖") == "", "file_spec: scaled spec has its own files, inheriting spec uses the main ones")
+fm = gf("main100.gcode")
+fsku = gf("main100_skuD.gcode", sku="3DP0002-WH-D")            # 主模型 100% 的文件，却标了大号的 SKU
+fl = gf("big150.gcode", spec="大号")
+ok(fl["scale"] == 150 and fm["scale"] is None, f"scale recorded on the scaled spec's file automatically {fl['scale']}")
+ids = lambda rows: [x["id"] for x in rows]
+cd = ids(print_files.candidates(PID, "3DP0002-WH-D", "Bambu Lab P1S", usable_only=False))
+ok(cd == [fl["id"]], f"scaled-spec job: only the scaled spec's files are candidates {cd} (main {fm['id']}, sku-labelled main {fsku['id']})")
+ca = ids(print_files.candidates(PID, "3DP0002-WH-A", "Bambu Lab P1S", usable_only=False))
+ok(fm["id"] in ca and fl["id"] not in ca and fsku["id"] not in ca, f"main-model job never gets the scaled file {ca}")
+jD = production.create_job(PID, "3DP0002-WH-D", 1, "stock", user="boss")
+for bad in (fm, fsku):
+    try:
+        production.start_run(jD["id"], 0, file_id=bad["id"], send=False, user="boss", confirm=CONFIRM); ok(False, "main file refused")
+    except ValueError as e:
+        ok("文件尺寸 / 规格和任务不一致" in str(e) and "大号" in str(e), f"main-model file refused for the scaled job: {e}")
+r = PC.post(f"/api/jobs/{jD['id']}/start", json={"printer": 0, "send": False, "confirm": CONFIRM, "file_id": fm["id"]})
+ok(r.status_code == 400 and "文件尺寸 / 规格和任务不一致" in r.get_json()["error"], "API refuses it too")
+so = production.send_options(jD["id"], 0)
+ok(ids(so["files"]) == [fl["id"]] and so["usable_files"] == [fl["id"]] and so["recipe"] is None, f"send options list only the scaled file {ids(so['files'])}")
+ok(production._file_for_count(dict(production._job(db.conn(), jD["id"])), 0, 1)["id"] == fl["id"], "_file_for_count picks the scaled file")
+# 合并：不同规格（大小）的任务不能拼一盘
+jA = production.create_job(PID, "3DP0002-WH-A", 1, "stock", user="boss")
+ok(jA["id"] not in ids(production.merge_candidates(jD["id"])), "a main-size job is not offered for merging with the scaled one")
+try:
+    production.start_run(jD["id"], 0, merge_ids=[jA["id"]], send=False, user="boss", confirm=CONFIRM); ok(False, "merge refused")
+except ValueError as e:
+    ok("别的规格" in str(e), f"merging different sizes refused: {e}")
+# 缩放比例改了：按 150% 切的文件作废
+C.post(f"/api/products/{PID}/spec-scale", json={"spec": "大号", "pct": 130})
+ok(not print_files.candidates(PID, "3DP0002-WH-D", "Bambu Lab P1S", usable_only=False), "after changing the scale the 150% file is no candidate")
+try:
+    production.start_run(jD["id"], 0, file_id=fl["id"], send=False, user="boss", confirm=CONFIRM); ok(False, "old scale refused")
+except ValueError as e:
+    ok("130%" in str(e) and "150%" in str(e), f"file sliced at another scale refused: {e}")
+# 规格缩放取消后，大号跟主模型：大号的旧文件不能用，主模型的可以
+C.post(f"/api/products/{PID}/spec-scale", json={"spec": "大号", "pct": None})
+cd = ids(print_files.candidates(PID, "3DP0002-WH-D", "Bambu Lab P1S", usable_only=False))
+ok(fl["id"] not in cd and fm["id"] in cd, f"scale cancelled: back to the main files {cd}")
+for j_ in (jD, jA):
+    production.delete_stock_job(j_["id"], "boss")
+for f_ in (fm, fsku, fl):
+    print_files.update(f_["id"], active=0)
+
 # ---------- 7. 自动选零件 ----------
 ok(asm.name_qty("leg x4") == 4 and asm.name_qty("4x leg.stl") == 4 and asm.name_qty("keycap_1x3") == 1 and asm.name_qty("arm (2pcs)") == 2, "quantity from part names")
 r = C.post(f"/api/products/{PID}/display/auto-select", json={"spec": "无盖"}).get_json()
@@ -235,6 +294,65 @@ else:
     ok(st and st["done"] == st["total"] == 4 and not st["running"], f"progress recorded {st and {k: st[k] for k in ('done', 'total', 'running')}}")
     rows = {x["spec"]: x for x in C.get(f"/api/products/{PID}/model-status").get_json()["specs"]}
     ok(rows["无盖"]["plan"]["state"] == "sliced", "overview shows 已切片")
+
+    # ---------- v2.53.1 真切片：按主模型缩放 120% 的规格生产 / 试打用的是缩放后的文件 ----------
+    import re
+    from core import printers as pr
+    def zmax(f):
+        z = zm = 0.0
+        for line in trial._gcode_text(f, 60_000_000).splitlines():
+            if line.startswith(("G1", "G0", "G2", "G3")):
+                mz = re.search(r"Z([-\d.]+)", line)
+                if mz:
+                    z = float(mz.group(1))
+                me = re.search(r"E([-\d.]+)", line)
+                if me and float(me.group(1)) > 0 and re.search(r"[XY]", line):
+                    zm = max(zm, z)
+        return zm
+    res = {x["spec"]: x["file_id"] for x in r["results"]}
+    fmain, fbig = print_files.get(res[""]), print_files.get(res["大号"])
+    ok(fbig["spec"] == "大号" and fbig["scale"] == 120 and (fmain["spec"] or "") == "" and fmain["scale"] is None, f"slice-all: scaled file tagged 大号 @120% {fbig['spec']} {fbig['scale']}")
+    zm, zb = zmax(fmain), zmax(fbig)
+    ok(zm > 5 and abs(zb / zm - 1.2) < 0.04, f"G-code: the scaled file really is 120% tall ({zb} vs {zm} mm)")
+    jD = production.create_job(PID, "3DP0002-WH-D", 1, "stock", user="boss")
+    n0 = len(print_files.list_files(PID))
+    fnew = production._file_for_count(dict(production._job(db.conn(), jD["id"])), 0, 1, user="boss")
+    ok(len(print_files.list_files(PID)) == n0 + 1 and fnew["spec"] == "大号" and fnew["scale"] == 120 and fnew["source"] == "plan",
+       f"no reviewed scaled file -> sliced the scaled plan (not the main model) {fnew['spec']} {fnew['scale']} {fnew['source']}")
+    ok(abs(zmax(fnew) / zm - 1.2) < 0.04, f"newly sliced file is 120% tall ({zmax(fnew)} mm)")
+    try:
+        production.start_run(jD["id"], 0, file_id=fmain["id"], send=False, user="boss", confirm=CONFIRM); ok(False, "main refused")
+    except ValueError as e:
+        ok("文件尺寸 / 规格和任务不一致" in str(e), f"main 100% file refused for the 120% job: {e}")
+    print_files.review(fnew["id"], REVIEW, "boss")
+    cfg = load_config(); cfg["printers"][0]["conn"] = {"type": "bambu", "host": "10.0.0.9"}; save_config(cfg)
+    SENT = []
+    pr.send_file = lambda idx, path, name, kind, slot=None: (SENT.append(os.path.basename(path)) or name)
+    pr.match_tray = lambda *a, **k: None
+    rs = production.start_run(jD["id"], 0, send=True, user="boss", confirm=CONFIRM)
+    ok(rs["file"]["id"] == fnew["id"] and SENT == [fnew["stored"]], f"start_run sends the scaled file {SENT} {fnew['stored']}")
+    production.cancel_run(rs["run_id"], "boss")
+    production.delete_stock_job(jD["id"], "boss")
+    # 试打：用大号的文件，结果写回大号的文件 / 方案 / 款式，主模型的不动
+    gA = next(v for v in store.load(PID)["variants"] if v["opt2_zh"] == "带盖")["grams"]
+    try:
+        trial.create_trial(PID, "3DP0002-WH-D", None, "p1", 0, fmain["id"], "boss"); ok(False, "trial with main refused")
+    except ValueError as e:
+        ok("文件尺寸 / 规格和任务不一致" in str(e), f"trial with the main-model file refused: {e}")
+    ck = trial.check_file(PID, None, "p1", 0, fmain["id"], "3DP0002-WH-D", "boss", False)
+    ok(not ck["ok"] and any(c["key"] == "spec" and c["level"] == "error" for c in ck["checks"]), f"check-file flags the main file for the scaled spec {ck['errors']}")
+    tr = trial.create_trial(PID, "3DP0002-WH-D", None, "p1", 0, None, "boss")
+    ok(tr["file"]["id"] == fnew["id"] and tr["trial"]["spec"] == "大号", f"trial for the scaled spec uses its file {tr['file']['id']}")
+    rr = production.start_run(tr["job"]["id"], 0, send=False, user="boss", confirm=CONFIRM)
+    production.finish_run(rr["run_id"], "boss")
+    trial.submit_result(tr["job"]["id"], True, grams=77, hours=5, dest="sample", user="boss")
+    ok(print_files.get(fnew["id"])["status"] == "verified" and print_files.get(fnew["id"])["actual_grams"] == 77, "trial verifies the scaled file")
+    ok(print_files.get(fmain["id"])["status"] != "verified" and not print_files.get(fmain["id"]).get("actual_grams"), "main-model file untouched")
+    p = store.load(PID)
+    vs = {v["opt2_zh"]: v for v in p["variants"]}
+    sb = (p["print_plans"]["大号"].get("sliced_by") or {}).get("p1") or {}
+    ok(vs["大号"]["grams_src"] == "trial" and abs(vs["大号"]["grams"] - 77) < 1 and sb.get("trial"), f"grams written to the scaled spec {vs['大号']['grams']} {sb.get('trial')}")
+    ok(vs["带盖"]["grams"] == gA and not (((p["print_plans"].get("") or {}).get("plates") or [{}])[0].get("sliced") or {}).get("trial"), "main plan / inheriting spec untouched")
 
 print("ERRORS", E_)
 sys.exit(1 if E_ else 0)
