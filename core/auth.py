@@ -26,7 +26,6 @@ OWNER_ONLY = [
     ("POST", r"^/api/config$"),
     ("*", r"^/api/(profit|expenses|fin/)"),
     ("*", r"^/api/users"),
-    ("*", r"^/api/curator"),
     ("*", r"^/api/audit"),
     ("GET", r"^/api/catalog$"),
     ("POST", r"^/api/slicer/(automatch|pick)$"),
@@ -329,13 +328,8 @@ def _api_guard(path):
         if not (path.startswith("/api/v1/ops/") or path == "/api/v1/ping"):
             return jsonify({"ok": False, "error": "这个密钥只能调用 /api/v1/ops/ 写回接口"}), 403
     elif scope == "catalog":
-        # 建产品密钥（规范 v1.5 第 4.2 条）：只能新建产品草稿、查类目、ping
-        ok = ((request.method == "POST" and (path == "/api/v1/catalog/products"
-                                             or re.fullmatch(r"/api/v1/catalog/products/[A-Za-z0-9_-]{1,40}/files", path)))
-              or (request.method == "PUT" and re.fullmatch(r"/api/v1/catalog/products/[A-Za-z0-9_-]{1,40}/variants", path))
-              or (request.method in ("GET", "HEAD") and path in ("/api/v1/categories", "/api/v1/ping")))
-        if not ok:
-            return jsonify({"ok": False, "error": "这个密钥只能新建产品（POST /api/v1/catalog/products）和查类目"}), 403
+        # v2.54：旧「3D选品工具」对接已移除，这种密钥不再有任何权限（行还留着，设置里显示「已停用」）
+        return jsonify({"ok": False, "error": "「建产品」密钥已停用：旧的 3D选品工具对接在 v2.54 移除了"}), 403
     elif scope == "wholesale":
         # 批发站密钥（v2.36）：只能读 SKU、推送 / 查询 / 改状态批发站自己的订单（platform 强制为 wholesale）
         ok = ((request.method in ("GET", "HEAD") and (path in ("/api/v1/ping", "/api/v1/skus", "/api/v1/orders")
@@ -357,8 +351,6 @@ def _api_guard(path):
     elif path.startswith("/api/v1/ops/") and not path.startswith("/api/v1/ops/ext/"):
         # v2.48：/api/v1/ops/ext/… 是浏览器扩展的采集接口（竞品、搜索结果、店铺、卖家后台数据），员工的扩展密钥（完整权限）就能用
         return jsonify({"ok": False, "error": "写回接口要用「运营写回」权限的密钥（scope = ops）"}), 403
-    if path.startswith("/api/v1/catalog/") and scope != "catalog":
-        return jsonify({"ok": False, "error": "新建产品要用「建产品」权限的密钥（scope = catalog）"}), 403
     return None
 
 

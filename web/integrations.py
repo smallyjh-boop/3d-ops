@@ -1,4 +1,4 @@
-"""对接接口 /api/v1、密钥、店铺、3D选品工具、运营写回。"""
+"""对接接口 /api/v1、密钥、店铺、运营写回。"""
 from web.common import *  # noqa: F401,F403
 
 @app.get("/api/catalog")
@@ -158,10 +158,10 @@ def v1_skus():
             grams = float(v.get("grams") or 0)
             out.append({
                 "sku": v["sku"], "product_id": p["id"], "product_code": p["id"], "name": p.get("name_zh", ""),
-                "draft": bool(p.get("draft")),                 # v2.12：选品工具推过来、还没补齐的草稿
+                "draft": bool(p.get("draft")),                 # v2.12：还没补齐的草稿（选品 / 采集建的）
                 "source": {k: (p.get("source") or {}).get(k) for k in ("source", "source_id")} if p.get("source") else None,
                 "title_th": cp.get("title_th", ""), "color": v.get("opt1_zh", ""), "spec": v.get("opt2_zh", ""),
-                "variant": v.get("opt2_zh", ""),                # v2.12.1：规格中文名（尺寸 / 版本 / 套装），给选品工具显示
+                "variant": v.get("opt2_zh", ""),                # v2.12.1：规格中文名（尺寸 / 版本 / 套装）
                 "material": p.get("material") or "PLA", "grams": v.get("grams"), "hours": v.get("hours"),
                 "unit_cost": pr["cost"],                       # 材料/机时/包材/失败损耗/合计（泰铢，不含平台费）
                 "price": pr["final_price"], "suggested_price": pr["suggested_price"], "floor_price": pr["floor_price"],
@@ -241,6 +241,8 @@ def integrations_get():
 @app.post("/api/apikeys")
 def apikey_create():
     b = request.get_json(force=True) or {}
+    if b.get("scope") == "catalog":        # v2.54：旧选品工具对接已移除，不能再新建这种密钥
+        return jsonify({"ok": False, "error": "「建产品」密钥已停用（旧的 3D选品工具对接在 v2.54 移除）"}), 400
     raw = integrations.create_key(b.get("name") or "API", b.get("scope") or "full")
     return jsonify({"key": raw, "keys": integrations.list_keys()})
 

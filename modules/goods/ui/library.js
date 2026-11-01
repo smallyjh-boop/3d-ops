@@ -87,7 +87,7 @@ function renderLibrary() {
       <td><input type="checkbox" data-lsel="${esc(p.id)}" ${LIB_SEL.has(p.id) ? "checked" : ""}></td>
       <td>${p.thumb ? `<img class="thumb" src="${esc(p.thumb)}" alt="" loading="lazy">` : ""}</td>
       <td><b data-notr data-p360="${esc(p.id)}">${esc(p.id)}</b>${p.exported ? ' <span class="muted small" title="已导出过，SKU 已锁定">🔒</span>' : ""}
-        ${p.draft ? '<div><span class="pill warn-pill" title="选品工具推过来的，填好颜色、核对售价后再导出">草稿·待完善</span></div>' : p.from_curator ? '<div class="small muted">来自选品工具</div>' : ""}</td>
+        ${p.draft ? '<div><span class="pill warn-pill" title="选品来的，填好颜色、核对售价后再导出">草稿·待完善</span></div>' : p.from_curator ? '<div class="small muted">来自选品</div>' : ""}</td>
       <td class="lib-name"><span data-notr>${esc(p.name_zh)}</span>${window.SEO ? SEO.badge(p) : ""}${p.title_th ? `<div class="small muted clamp2" data-notr title="${esc(p.title_th)}">${esc(p.title_th)}</div>` : ""}</td>
       <td>${pgPill(p)} ${marksPills(p)} ${(p.groups || []).map((g) => gname[g] ? `<span class="pill tag-pill" data-notr>${esc(gname[g])}</span>` : "").join(" ")}
         <div class="small">${p.lz && p.lz.status !== "none" ? `LZ ${lstBadge(p.lz, "lazada")}` : ""} ${p.sp && p.sp.status !== "none" ? `SP ${lstBadge(p.sp, "shopee")}` : ""}</div>${onlineBadges(p)}</td>

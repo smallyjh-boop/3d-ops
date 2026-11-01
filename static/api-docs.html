@@ -117,8 +117,8 @@ th{background:#f9fafb}
 预估包裹重量 <code>est_package_weight_g</code>（克数 + 包材重量）、包裹尺寸、Lazada / Shopee 类目、导出时间。
 参数 <code>since</code>（Unix 秒）：只返回之后改过的产品。</p>
 <p>每条都有 <code>product_id</code>（产品编号，如 <code>3DP0012</code>）和 <code>updated_at</code>（产品最后修改时间，Unix 秒；改资料、改上架状态都会变）。
-v2.12.1 起多 <code>variant</code>（规格中文名，和 <code>spec</code> 一样；没有规格为空）。v2.12 起多返回：<code>product_code</code>（和 <code>product_id</code> 一样，给选品工具用）、<code>draft</code>（选品工具推过来、还没填颜色的草稿为 true）、
-<code>source</code>（选品工具来的：<code>{"source": "3d-curator", "source_id": "7"}</code>，其他为 null）。
+v2.12.1 起多 <code>variant</code>（规格中文名，和 <code>spec</code> 一样；没有规格为空）。v2.12 起多返回：<code>product_code</code>（和 <code>product_id</code> 一样）、<code>draft</code>（选品 / 采集建的、还没填颜色的草稿为 true）、
+<code>source</code>（选品来的产品的来源信息，其他为 null）。
 数据多时用 <code>since</code> 分段拉：按 <code>updated_at</code> 记住拉到哪里，往回多拉 10 分钟。</p>
 <p><b>v2.11.1 新增 <code>listing</code></b>（每个 SKU 都带，同一产品的 SKU 一样），按平台分 <code>lazada</code> / <code>shopee</code>，状态按<b>平台自己的商品状态</b>：</p>
 <table>
@@ -196,37 +196,15 @@ status（applied 已生效 / pending 待确认 / rejected 已拒绝 / reverted �
 v2.12 起每行多 <code>spools</code>：<code>{"sealed": 未开封卷数, "open": 已开封在库卷数, "loaded": 在机上卷数, "on": [{"code","printer","slot","remaining_g"}]}</code>；
 返回里多 <code>alerts</code>：<code>[{"level": "bad"/"warn", "key": [材料, 颜色], "printer": 机器编码（有时）, "text": 中文提醒}]</code>。</p>
 
-<h2>3D选品工具建产品（v2.12，对接规范 v1.5 第 4.2 条）</h2>
-<p>密钥权限选「建产品」（scope = <code>catalog</code>）：只能调下面两个接口和 <code>/api/v1/ping</code>，不能读订单、改价、上下架、推订单。
-操作日志里操作人显示为 <code>api:&lt;密钥名&gt;</code>。</p>
+<h2>类目</h2>
+<p class="muted">v2.54 起旧的「3D选品工具」对接（<code>/api/v1/catalog/…</code>、「建产品」密钥）已移除，选品在 ERP 的「商品 → 选品」里做；这些地址返回 404，原来的「建产品」密钥保留但不再有任何权限。</p>
 
 <h2><span class="m get">GET</span>/api/v1/categories　类目</h2>
-<p>只读、建产品、完整密钥都可以调。返回 ERP 里能用的类目（已上传 Lazada 模板的类目，导出上架表格要用），推送时 <code>category</code> 填 <code>name</code>（也接受 <code>id</code> 或 <code>lazada_cat_id</code>）。
+<p>只读、完整密钥都可以调。返回 ERP 里能用的类目（已上传 Lazada 模板的类目，导出上架表格要用），推送时 <code>category</code> 填 <code>name</code>（也接受 <code>id</code> 或 <code>lazada_cat_id</code>）。
 另外返回 ERP 的产品分组 <code>groups</code>（参考用）。</p>
 <pre><code>{"ok": true, "categories": [{"name": "园艺 &gt; 花盆", "id": "lazada_xxx.xlsx|กระถางปลูกต้นไม้", "lazada_cat_id": "12345", "path": "..."}],
  "groups": [{"id": 1, "name": "猫咪系列"}]}</code></pre>
 
-<h2><span class="m post">POST</span>/api/v1/catalog/products　新建产品（草稿）</h2>
-<p>请求字段按《接口需求单：选品工具 → ERP 新建产品》：<code>source</code>、<code>source_id</code>（两个一起防重复）、<code>source_version</code>、
-<code>name_zh</code> / <code>name_th</code>（中 / 泰品名，至少一个；也认早期的 <code>title_zh</code> / <code>title_th</code>）、<code>description_zh</code> / <code>description_th</code>、
-<code>category</code>（必填）、<code>material</code>（PLA / PETG / TPU / ABS / ASA / 树脂 / 其他）、<code>print_minutes</code>、<code>filament_grams</code>、
-<code>images</code>（<code>[{position, is_cover, url}]</code>，按 <code>is_cover</code>、<code>position</code> 排序）、<code>files</code>（<code>[{name, bytes, kind, url}]</code>，可空）、
-<code>source_url</code>、<code>license_name</code>、<code>license_verified</code>（必须为 true）、<code>package_url</code>。不带成本和售价，ERP 按自己的成本参数算。
-多带的字段（例如 <code>tags</code>、<code>author</code>）ERP 会存进来源信息或忽略，不会报错。</p>
-<p>ERP 会：生成产品编号（<code>3DP</code> + 流水号）；建成草稿（颜色、SKU、售价在 ERP 里补齐，填了颜色后草稿标记自动去掉）；
-用 ERP「系统 → 账号与对接 → 3D选品工具对接」里填的选品工具密钥，把图片下载到 ERP（相对地址按设置里的选品工具地址拼）；模型文件（STL / 3MF / ZIP）也下载，第一个 STL / 3MF 设为产品 3D 模型。
-图片下载失败整单不建（可以重推）；模型文件下载失败只在 <code>warnings</code> 里提醒。</p>
-<pre><code>→ 201 {"ok": true, "product_code": "3DP0012", "created": true, "skus": ["3DP0012"], "images": 5, "files": 1, "warnings": []}
-同一个 source + source_id 再推：→ 200 {"ok": true, "product_code": "3DP0012", "created": false, ...}
-失败：{"ok": false, "error": "中文说明", "code": "invalid_category"}</code></pre>
-<table>
-<tr><th>code</th><th>HTTP</th><th>含义</th></tr>
-<tr><td><code>invalid_category</code></td><td>400</td><td>类目不在 <code>/api/v1/categories</code> 里</td></tr>
-<tr><td><code>title_required</code></td><td>400</td><td>中文、泰文标题都没有</td></tr>
-<tr><td><code>license_not_verified</code></td><td>400</td><td><code>license_verified</code> 不是 true</td></tr>
-<tr><td><code>invalid_field</code></td><td>400</td><td>字段格式不对（缺 source / source_id、材料不对、数组不是数组等）</td></tr>
-<tr><td><code>image_download_failed</code></td><td>502</td><td>从选品工具下载图片失败（密钥不对、地址不通、不是 JPG / PNG、太大）</td></tr>
-</table>
 <h2>批发站密钥（scope = wholesale，v2.36）</h2>
 <p>给批发网站用。只能调：<code>GET /api/v1/ping</code>、<code>GET /api/v1/skus</code>、<code>GET /api/v1/images/…</code>（商品图片）、<code>GET /api/v1/orders</code>、<code>POST /api/v1/orders</code>、<code>POST /api/v1/orders/status</code>。
 推送和改状态时平台一律当作 <code>wholesale</code>（传别的平台也会被改掉），所以碰不到 Lazada / Shopee 的订单；查询只返回批发订单。
@@ -248,53 +226,6 @@ SKU 不返回成本、底价、建议价、手填价、机时；订单不返回�
 <h2><span class="m get">GET</span>/api/v1/finance/pl · breakdown · cashflow · expenses · tax　财务报表（v2.21）</h2>
 <p>「财务」密钥，只读。期间：<code>month=YYYY-MM</code> 或 <code>start=YYYY-MM-DD&amp;end=YYYY-MM-DD</code>。<code>pl</code> 损益表；<code>breakdown?by=platform|shop|product|sku|day|month</code> 利润分析；
 <code>cashflow</code> 现金流；<code>expenses</code> 收支明细；<code>tax</code> VAT 和平台代扣税。字段和口径见对接规范 11.1。</p>
-<h2><span class="m put">PUT</span>/api/v1/catalog/products/&lt;产品编号&gt;/variants　同步规格（v2.16，对接规范 4.3）</h2>
-<p>「建产品」密钥。选品工具的规格有变化时调用，<b>每次传全部现有规格</b>，ERP 按 <code>spec_id</code> 对比；同样的内容重复推送不改任何东西。
-规格字段见对接规范 4.3.4：<code>spec_id</code>（固定编号，必填）、<code>position</code>、<code>kind</code>（size / version / bundle / style）、<code>name_zh</code>、<code>name_th</code>、
-<code>name_en</code>、<code>is_default</code>、<code>size_mm</code>、<code>scale_pct</code>、<code>pack_qty</code>、<code>parts</code>、<code>filament_grams</code>、<code>print_minutes</code>、<code>files</code>、
-<code>recognize</code>（<code>{method: rule/ai/manual, confidence, evidence}</code>）。规格不含颜色，最多 12 个（多的只保留前 12 个并在 <code>warnings</code> 提醒）。</p>
-<pre><code>PUT /api/v1/catalog/products/3DP0012/variants
-{"source": "3d-curator", "source_id": "7", "product_code": "3DP0012", "source_colors": ["粉色"],
- "variants": [{"spec_id": "v7-1", "position": 1, "kind": "size", "name_zh": "小号 8cm", "name_th": "ขนาดเล็ก 8 ซม.", "filament_grams": 28, "print_minutes": 95,
-               "recognize": {"method": "rule", "confidence": 0.95, "evidence": "文件名 cat_small.3mf"}}]}
-→ {"ok": true, "added": ["小号 8cm"], "updated": [], "unchanged": 0, "removed": [], "removed_pending": [], "skus": [...], "warnings": []}</code></pre>
-<ul>
-<li>产品还没导出过上架表格：新增 / 修改 / 删除直接生效。已导出（SKU 锁定）：新增照加；修改照改（SKU 不变）；列表里没有了的规格<b>不删</b>，标记「选品工具已删除·待确认」（<code>removed_pending</code>），由 ERP 里的人决定。</li>
-<li>AI 识别 <code>confidence</code> &lt; 0.8、名字里有颜色词、没有泰文名的规格标记「待确认」（<code>spec_status = review</code>），确认前不能导出上架表格、自动库存算 0。</li>
-<li>在 ERP 切片过 / 手改过克数的变体，选品工具改克数不会覆盖。</li>
-<li>建档 <code>POST /api/v1/catalog/products</code> 的 <code>variants</code> 也按这套字段（v2.16 起）。没有 <code>spec_id</code> 的老版本先用规格名代替。</li>
-<li>错误：404 <code>not_found</code>；400 <code>invalid_field</code>（规格名 / spec_id 重复、缺中文名、数字格式不对、不是这条选品记录建的产品）。</li>
-</ul>
-<p><b>v2.16 建档新字段（选品工具 2.2）</b>：<code>listing</code>（结构化商品文案：<code>title_zh/th</code>、<code>highlights_zh/th</code>、<code>intro</code>、<code>scenes</code>、<code>package</code>、
-<code>notes</code>、<code>keywords</code>、<code>ip_risk:[{term, reason}]</code>、<code>method</code>、<code>version</code>、<code>generated_at</code>）——原样保存，并填进 ERP 的泰文标题、Shopee 标题、卖点、包装内容、关键词；
-<code>ip_risk</code> 不为空时产品「侵权待确认」，确认前不能导出。<code>source_description_zh/th</code> 存进来源信息。泰文详情的段落文字（【…】、•）自动转成 HTML。</p>
-<p><b>v2.16 <code>GET /api/v1/skus</code> 新字段</b>：<code>spec_id</code>、<code>color_code</code>、<code>random_color</code>（随机颜色 SKU，颜色码 RND）、
-<code>stock</code>（ERP 算出的可售库存：开了按耗材自动算时 = 这个颜色剩余耗材能做几件，上限默认 50；没开时 = 手填或默认库存）、
-<code>stock_sync</code>（这个产品是否按耗材自动算）、<code>spec_status</code>（ok / review / removed_pending）。</p>
-<h2><span class="m post">POST</span>/api/v1/catalog/products/&lt;产品编号&gt;/files　补传模型文件（v2.12.2）</h2>
-<p>「建产品」密钥。给已建档的产品补传模型文件（建档时还没下载好的，或 2.12 以前手动对接的产品）。只加文件，不改其他资料。</p>
-<pre><code>POST /api/v1/catalog/products/3DP0012/files
-{"source": "3d-curator", "source_id": 12, "product_code": "3DP0012",
- "files": [{"name": "small_part.stl", "bytes": 684123, "kind": "stl", "variant": "小号", "url": "http://…/api/v1/catalog/12/files/45"}]}
-→ {"ok": true, "added": 1, "skipped": 0, "warnings": [], "files": [{"name": "small_part.stl", "variant": "小号", "bytes": 684123}]}</code></pre>
-<ul>
-<li>下载方式同建档（用「系统 → 账号与对接 → 3D选品工具对接」里填的选品工具密钥），存到 ERP 的 data 文件夹，在产品编辑页「原始文件」里能下载。</li>
-<li>防重复：同一产品里 <code>url</code> 相同，或「文件名 + 字节数」相同的跳过（算在 <code>skipped</code>），不报错。</li>
-<li><code>variant</code> = 规格中文名：挂到这个规格（这个规格还没有模型文件时设为它的模型文件）；ERP 里没有这个规格时当整个产品的文件保存，并在 <code>warnings</code> 里提醒。</li>
-<li>产品还没有 3D 模型时，第一个 STL / 3MF 设为产品 3D 模型；已经有的不改。STEP / OBJ 等只保存，不设为模型。</li>
-<li>某个文件下载失败放进 <code>warnings</code>（带文件名），其他文件照常保存。一次最多 20 个文件。</li>
-<li>错误：产品编号不存在 404 <code>not_found</code>；产品是别的选品记录建的（<code>source</code> / <code>source_id</code> 对不上）400 <code>invalid_field</code>。
-产品在 ERP 里还没有来源信息（2.12 以前手动建的）：第一次补传时自动对上这条选品记录（这条选品记录已经对应别的产品时 400 <code>invalid_field</code>）。</li>
-</ul>
-<p><b>v2.12.1 多规格</b>（选品工具 1.8 的需求单）：有 2 个及以上规格（尺寸 / 版本 / 套装数量，不是颜色）时带 <code>variants</code>：
-<code>[{position, name_zh, name_th, print_minutes, filament_grams, files:[{name, bytes, kind, url}]}]</code>。ERP 每个规格建一个变体（第二个选项「规格」），
-各自保存时长、克数，对应的模型文件记在这个规格上（下载时和顶层 <code>files</code> 按 <code>url</code> 去重）；产品的 3D 模型用第 1 个规格的文件。
-<code>name_th</code> 写进泰文选项名。规格中文名不能空、不能重复（否则 <code>invalid_field</code>），最多 30 个。
-在 ERP 加颜色时按 <b>规格 × 颜色</b> 展开，SKU = <code>产品编号-颜色码-规格码</code>（ERP 现有规则，例如 <code>3DP0012-WH-S</code>；还没加颜色时是 <code>3DP0012-S</code>）。
-规格码：小 / 中 / 大号等用 S / M / L，其他取英文和数字，取不到按顺序 O1、O2…。</p>
-<p><code>print_minutes</code> / <code>filament_grams</code>（顶层和规格里）都可以是 0 或不传，表示还不知道：照常建草稿，不报错，在 ERP 编辑页补上后再算成本。</p>
-<p>SKU：草稿只有一个变体、没颜色，SKU 就是产品编号；在 ERP 里填了颜色后变成 <code>产品编号-颜色码</code>（如 <code>3DP0012-WH</code>），按 <code>/api/v1/skus</code> 同步。</p>
-
 <h2><span class="m post">POST</span>/api/v1/webhook/&lt;平台&gt;　平台主动推送</h2>
 <p>给平台开放后台填的「推送地址（Push URL）」，例如 <code>https://你的域名/api/v1/webhook/shopee</code>。
 不用 API 密钥，由平台签名验证。所有推送内容都会记录在「API 与店铺对接」页面，方便联调。

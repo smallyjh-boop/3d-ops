@@ -1,15 +1,14 @@
 """店铺与系统对接模块的接口（v2.30 从 web/integrations.py 搬过来）：
-店铺（平台开放接口拉订单、授权、Webhook 推送）、3D选品工具推产品（/api/v1/catalog/…）、运营分析系统写回（/api/v1/ops/…）和「运营改动」页面。
+店铺（平台开放接口拉订单、授权、Webhook 推送）、类目查询（/api/v1/categories）、运营分析系统写回（/api/v1/ops/…）和「运营改动」页面。
 API 密钥管理、只读查询接口（/api/v1/orders、skus、cost-params…）在内核。"""
 from flask import Blueprint
 
 from web.common import *  # noqa: F401,F403
 from core import connectors, integrations
-from . import curator, opsapi
+from . import opsapi
 
 bp = Blueprint("m_link", __name__)
-PREFIXES = ["/api/curator", "/api/v1/categories", "/api/v1/catalog/", "/api/v1/ops/", "/api/ops/", "/api/v1/webhook/", "/api/shops"]
-curator.init()
+PREFIXES = ["/api/v1/categories", "/api/v1/ops/", "/api/ops/", "/api/v1/webhook/", "/api/shops"]
 opsapi.init()
 
 
@@ -19,61 +18,6 @@ def _ops_err(e):
 
 def _v1_err(msg, code=400):
     return jsonify({"ok": False, "error": msg}), code
-
-
-@bp.get("/api/curator")
-def curator_status():
-    return jsonify(curator.status())
-
-
-@bp.post("/api/curator")
-def curator_save():
-    b = request.get_json(force=True) or {}
-    return jsonify(curator.save(b.get("base_url"), b.get("api_key")))
-
-
-@bp.post("/api/curator/test")
-def curator_test():
-    b = request.get_json(force=True) or {}
-    return jsonify(curator.test(b.get("base_url"), b.get("api_key")))
-
-
-@bp.post("/api/v1/catalog/products")
-def v1_catalog_create():
-    b = request.get_json(force=True, silent=True)
-    if b is None:
-        return jsonify({"ok": False, "error": "请求体必须是 JSON", "code": "invalid_field"}), 400
-    try:
-        r = curator.create(b, auth.current_user()["username"])
-    except curator.CatalogError as e:
-        return jsonify({"ok": False, "error": str(e), "code": e.code}), e.http
-    return jsonify({"ok": True, **r}), (201 if r["created"] else 200)
-
-
-@bp.post("/api/v1/catalog/products/<code>/files")
-def v1_catalog_add_files(code):
-    """选品工具补传模型文件（已建档的产品）。"""
-    b = request.get_json(force=True, silent=True)
-    if b is None:
-        return jsonify({"ok": False, "error": "请求体必须是 JSON", "code": "invalid_field"}), 400
-    try:
-        r = curator.add_files(code, b, auth.current_user()["username"])
-    except curator.CatalogError as e:
-        return jsonify({"ok": False, "error": str(e), "code": e.code}), e.http
-    return jsonify({"ok": True, **r})
-
-
-@bp.put("/api/v1/catalog/products/<code>/variants")
-def v1_catalog_sync_variants(code):
-    """选品工具同步规格（对接规范 4.3.5，v2.16）：传完整列表，按 spec_id 对比；已导出的产品删掉的规格只标记待确认。"""
-    b = request.get_json(force=True, silent=True)
-    if b is None:
-        return jsonify({"ok": False, "error": "请求体必须是 JSON", "code": "invalid_field"}), 400
-    try:
-        r = curator.sync_variants(code, b, auth.current_user()["username"])
-    except curator.CatalogError as e:
-        return jsonify({"ok": False, "error": str(e), "code": e.code}), e.http
-    return jsonify({"ok": True, **r})
 
 
 @bp.post("/api/v1/ops/products/<target>")
@@ -199,9 +143,16 @@ def shop_auth_code(sid):
     return jsonify({"ok": True, "shops": integrations.list_shops()})
 
 
+def _categories():
+    """ERP 里能用的类目 = 已上传了 Lazada 模板的类目（导出上架表格要用）。"""
+    from core import categories as cats
+    return [{"name": c["name"], "id": c["id"], "lazada_cat_id": c.get("cat_id") or None, "path": c.get("path") or ""}
+            for c in cats.library()]
+
+
 @bp.get("/api/v1/categories")
 def v1_categories():
     """ERP 里能用的类目（已上传 Lazada 模板的类目）。name 就是推送时 category 要填的值。"""
     from core import extras as _ex
-    return jsonify({"ok": True, "categories": curator.categories(),
+    return jsonify({"ok": True, "categories": _categories(),
                     "groups": [{"id": g["id"], "name": g["name"]} for g in _ex.groups()]})

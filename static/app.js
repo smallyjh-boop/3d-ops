@@ -831,17 +831,17 @@ function L(x) {   // 双语字段按界面语言显示
 // ---------------- API 密钥（老板；设置 → 账号）：v2.34 从 ops.js 搬到内核 ----------------
 (function () {
   const { day, isOwner } = window.OPSH;
-  // v2.30：店铺对接、3D选品工具对接搬到了「对接」模块（modules/link/ui/settings.js）
+  // v2.30：店铺对接搬到了「对接」模块（modules/link/ui/settings.js）
   let INTG = null;
   async function loadIntegrations() {
     if (!isOwner()) return;
     INTG = await api("/api/integrations");
     $("#intg-keys tbody").innerHTML = INTG.keys.map((k) => `<tr><td data-notr>${esc(k.name)}</td><td class="mono" data-notr>${esc(k.prefix)}…</td>
-      <td>${k.scope === "read" ? '<span class="pill ok-pill">只读</span>' : k.scope === "ops" ? '<span class="pill warn-pill">运营写回</span>' : k.scope === "catalog" ? '<span class="pill tag-pill">建产品</span>' : k.scope === "wholesale" ? '<span class="pill tag-pill">批发站</span>' : k.scope === "chat" ? '<span class="pill tag-pill">AI 接待</span>' : "完整"}</td>
+      <td>${k.scope === "read" ? '<span class="pill ok-pill">只读</span>' : k.scope === "ops" ? '<span class="pill warn-pill">运营写回</span>' : k.scope === "catalog" ? '<span class="pill">建产品·已停用</span>' : k.scope === "wholesale" ? '<span class="pill tag-pill">批发站</span>' : k.scope === "chat" ? '<span class="pill tag-pill">AI 接待</span>' : "完整"}</td>
       <td class="nowrap">${day(k.created_at)}</td><td class="nowrap">${k.last_used ? fmtTime(k.last_used) : "-"}</td><td>${k.uses || 0}</td>
       <td><input type="checkbox" data-keyact="${k.id}" ${k.active ? "checked" : ""}></td>
       <td><button class="danger mini-x" data-keydel="${k.id}">删除</button></td></tr>`).join("") || '<tr><td colspan="8" class="muted">还没有密钥</td></tr>';
-    document.dispatchEvent(new CustomEvent("intg-loaded", { detail: INTG }));   // 对接模块用（店铺列表、选品工具密钥）
+    document.dispatchEvent(new CustomEvent("intg-loaded", { detail: INTG }));   // 对接模块用（店铺列表）
   }
   $("#intg").addEventListener("click", async (e) => {
     const t = e.target, d = t.dataset;

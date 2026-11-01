@@ -1080,7 +1080,7 @@ def goods_group_settings():
 # ---------------- 规格确认、按耗材算的库存（v2.16） ----------------
 @bp.post("/api/products/<pid>/specs/<path:spec_id>/<action>")
 def spec_confirm(pid, spec_id, action):
-    """待确认的规格：ok 确认没问题 / keep 选品工具删了也保留 / delete 删掉这个规格和它的 SKU。"""
+    """待确认的规格：ok 确认没问题 / keep 保留 / delete 删掉这个规格和它的 SKU。"""
     from core import specs
     try:
         p = store.load(pid)
@@ -1119,7 +1119,7 @@ def license_verify(pid):
 
 @bp.post("/api/products/<pid>/ip-risk")
 def ip_risk_set(pid):
-    """侵权待确认（选品工具 listing.ip_risk）：ok = 确认没问题（已改掉品牌 / 角色词，或确认不侵权）；pending = 改回待确认。"""
+    """侵权待确认（选品检查 ip_risk）：ok = 确认没问题（已改掉品牌 / 角色词，或确认不侵权）；pending = 改回待确认。"""
     act = (request.get_json(force=True, silent=True) or {}).get("action")
     if act not in ("ok", "pending"):
         return err("action 只能是 ok / pending")

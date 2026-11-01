@@ -79,7 +79,7 @@ if fid:
 ok(C.post(f"/api/products/{pid}/spec-models", json={"spec": "不存在", "entry_id": ""}).status_code == 400, "unknown spec rejected")
 
 
-# ---- 变体检查：不能加重复的、不能加选品工具没有的规格；规格模型以服务器为准 ----
+# ---- 变体检查：不能加重复的；规格模型以服务器为准 ----
 q = store.load(pid)
 C.post(f"/api/products/{pid}/spec-models", json={"spec": "小号", "entry_id": small_e["id"]})
 q = store.load(pid)
@@ -93,15 +93,15 @@ q = store.load(pid); q["variants"].append(dict(q["variants"][0], sku=""))
 r = C.post(f"/api/products/{pid}", json=q)
 ok(r.status_code == 400 and "只能有一行" in r.get_json()["error"], "duplicate color+spec rejected")
 q = store.load(pid); q["variants"].append(dict(q["variants"][0], opt2_zh="中号", sku=""))
-ok(C.post(f"/api/products/{pid}", json=q).status_code == 200, "free spec allowed when not curator-managed")
+ok(C.post(f"/api/products/{pid}", json=q).status_code == 200, "free spec allowed")
 q = store.load(pid); q["specs"] = [{"spec_id": "s1", "name_zh": "大号"}, {"spec_id": "s2", "name_zh": "小号"}, {"spec_id": "s3", "name_zh": "中号"}]; store.save(q)
 q = store.load(pid); q["variants"].append(dict(q["variants"][0], opt2_zh="特大号", sku=""))
 r = C.post(f"/api/products/{pid}", json=q)
 sp = {x["name_zh"]: x for x in store.load(pid)["specs"]}
-ok(r.status_code == 200 and sp["特大号"].get("source") == "erp" and sp["特大号"].get("kept_local"), f"curator-managed: ERP spec added as local {r.get_json()}")
-from core import specs as _sp
-q = store.load(pid); res = _sp.sync(q, [dict(x, name_th="", grams=0, hours=0, status="ok", reasons=[], rcodes=[]) for x in q["specs"] if x.get("source") != "erp"])
-ok(any(x["name_zh"] == "特大号" for x in q["specs"]) and any(v["opt2_zh"] == "特大号" for v in q["variants"]), f"local spec survives curator sync {res}")
+ok(r.status_code == 200 and sp["特大号"].get("source") == "erp" and sp["特大号"].get("kept_local"), f"ERP spec added as local {r.get_json()}")
+q = store.load(pid); [v.update(opt2_zh="超大号") for v in q["variants"] if v["opt2_zh"] == "大号"]           # v2.54：改名 → 规格记录跟着改名（不新增、不丢数据）
+ok(C.post(f"/api/products/{pid}", json=q).status_code == 200 and "超大号" in {x["name_zh"] for x in store.load(pid)["specs"]} and "大号" not in {x["name_zh"] for x in store.load(pid)["specs"]}, "spec renamed in place")
+q = store.load(pid); [v.update(opt2_zh="大号") for v in q["variants"] if v["opt2_zh"] == "超大号"]; C.post(f"/api/products/{pid}", json=q)
 q = store.load(pid); q["variants"] = [v for v in q["variants"] if v["opt2_zh"] != "特大号"]
 ok(C.post(f"/api/products/{pid}", json=q).status_code == 200 and not any(x["name_zh"] == "特大号" for x in store.load(pid)["specs"]), "removed local spec dropped")
 q = store.load(pid); q["variants"].append(dict(q["variants"][0], opt2_zh="这个规格名字实在是太长了超过了二十个字的限制呀", sku=""))

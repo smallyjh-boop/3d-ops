@@ -215,7 +215,7 @@ def zip_products(pids, include_inactive=False):
             mp = model_path(p)
             if mp:
                 z.write(mp, f"{folder}/model_{p['model'].get('orig_name') or p['model']['file']}")
-            # 模型库里的全部文件（选品工具推过来的、自己上传的、合并出来的）
+            # 模型库里的全部文件（选品来的、自己上传的、合并出来的）
             for d in ("models", "source_files"):
                 fd = os.path.join(store.product_dir(pid), d)
                 if os.path.isdir(fd):
