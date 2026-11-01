@@ -103,7 +103,7 @@ class BambuLink:
                 t.start()
                 self.client.loop(self.stop)
             except Exception as e:  # 断线重连
-                self.error = str(e) or type(e).__name__
+                self.error = _human_err(e)          # v2.53：不再显示 [Errno 113] 这类原始英文
                 _set(self.idx, {"state": "offline", "error": self.error, "conn": "bambu"})
             finally:
                 try:
@@ -244,6 +244,23 @@ def creality_raw(host, wait=2.5, send=None):
         net.ws_close(s)
 
 
+def _creality_err(err):
+    """v2.53：Creality 原厂固件的 err 是 {'errcode': 0, 'key': 0, 'value': ''}，errcode 为 0 表示没有错误（以前原样显示成红字）。"""
+    if err in (None, 0, "0", "", {}):
+        return ""
+    if isinstance(err, dict):
+        code = err.get("errcode") or err.get("key") or 0
+        try:
+            code = int(code)
+        except (TypeError, ValueError):
+            pass
+        if not code:
+            return ""
+        val = str(err.get("value") or "").strip()
+        return f"错误码 {code}" + (f"：{val}" if val else "")
+    return str(err)
+
+
 def creality_status(host):
     d = creality_raw(host)
     stt = d.get("state")
@@ -255,7 +272,7 @@ def creality_status(host):
     return {"state": st, "state_raw": str(stt), "progress": prog, "file": d.get("printFileName") or "",
             "remaining_min": round(left / 60) if isinstance(left, (int, float)) else None,
             "layer": d.get("layer"), "total_layers": d.get("TotalLayer"), "nozzle": d.get("nozzleTemp"),
-            "bed": d.get("bedTemp0"), "error": str(d.get("err") or "") if d.get("err") not in (None, 0, "0", {}) else "",
+            "bed": d.get("bedTemp0"), "error": _creality_err(d.get("err")),
             "trays": [], "conn": "creality"}
 
 
@@ -287,7 +304,7 @@ def _human_err(e):
     if "timed out" in low or "timeout" in low:
         return "连不上打印机（超时）：检查打印机是否开机、IP 是否对、是否在同一个网络"
     if "no route" in low or "unreachable" in low or "errno 113" in low or "name or service" in low:
-        return "找不到这台打印机（IP 不对或不在同一个网络）"
+        return "找不到这台打印机（打印机关机了、IP 不对，或不在同一个网络）"
     return s
 
 
