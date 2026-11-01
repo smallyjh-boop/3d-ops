@@ -202,6 +202,7 @@ def do_import(token, mapping, platform, shop="", user=""):
               (n, new, len(touched), r2(total), min(days) if days else "", max(days) if days else "", bid))
     c.commit()
     matched = _apply(platform, touched)
+    _fee_refresh(platform)
     db.audit(user, "财务·导入平台结算", f"{platform} {shop}".strip(), f"{meta.get('filename')}：{new} 行新数据，{len(touched)} 个订单，对上 {matched} 个")
     try:
         os.remove(meta["path"]); os.remove(meta_p)
@@ -209,6 +210,12 @@ def do_import(token, mapping, platform, shop="", user=""):
         pass
     return {"batch": bid, "rows": n, "new_rows": new, "dup_rows": n - new, "orders": len(touched), "matched": matched,
             "total": r2(total)}
+
+
+def _fee_refresh(platform):
+    """v2.53：导入结算报表后重算这个平台的费率快照（Shopee 没接口，费率就来自这里；变动超过 0.5 个百分点会进待办）。"""
+    from core import feerates
+    feerates.after_import(platform)
 
 
 def import_lines(platform, shop, lines, filename="", user=""):
@@ -266,6 +273,7 @@ def import_lines(platform, shop, lines, filename="", user=""):
               (len(rows), new, len(touched), r2(total), min(days) if days else "", max(days) if days else "", bid))
     c.commit()
     matched = _apply(platform, touched)
+    _fee_refresh(platform)
     db.audit(user or "系统", "财务·接口结算明细", f"{platform} {shop}".strip(), f"{filename}：{new} 行新数据，{len(touched)} 个订单，对上 {matched} 个")
     return {"batch": bid, "new_rows": new, "orders": len(touched), "matched": matched}
 

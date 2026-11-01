@@ -152,3 +152,4 @@ oa_patrol_competitors）、机会分权重（oa_radar_w_*、oa_radar_alert_score
   商品表现、流量给上架客服看（没有成本利润）；看板接口支持时间段 / 平台 / 店铺；店铺表现指标名中文 / 泰文、进度条。测试 tests/t_ops246.py、t_ops248.py、tests/cases/t_shell249.py。
 - （系统 v2.50.0）：public.market_keywords / market_keyword 给选品模块（候选卡片显示泰国市场数据）；爆款雷达每个关键词加「去模型站找」（POST /api/cur/from-radar：每个模型网站建一个关键词关注，然后打开「商品 → 选品 → 关注巡逻」）。
 - （系统 v2.53.0）：运营分析的 AI 走「系统 → AI 接口」的「运营分析」任务；有没有 AI 按这个任务判断。
+- （系统 v2.53.0）：看板的扣点（mkt_util.fee_rate）、「售价低于最低价」用费率引擎；看板数据多一个 fee_rates（各平台默认店铺现在用的费率 + 来源）。

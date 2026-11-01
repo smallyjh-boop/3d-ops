@@ -215,7 +215,13 @@ def pricing_preview():
         except FileNotFoundError:
             data.pop("markup", None)
     codes.ensure_skus(cfg, data)
-    return jsonify({"rows": auth.strip_prices(pricing.price_product(cfg, data), auth.current_user()),
+    by_shop = None
+    if auth.is_owner():          # v2.53：同一个产品在每个店铺的定价（店铺费率不同时利润不同）
+        try:
+            by_shop = pricing.price_by_shop(cfg, data)
+        except Exception:  # noqa: BLE001
+            by_shop = None
+    return jsonify({"rows": auth.strip_prices(pricing.price_product(cfg, data), auth.current_user()), "by_shop": by_shop,
                     "summary": pricing.cost_summary(cfg) if auth.is_owner() else None,
                     "skus": [v.get("sku") for v in data.get("variants", [])],
                     "colors": [(lambda c: c[1] if c else "")(codes.find_color(cfg, v.get("opt1_zh")))

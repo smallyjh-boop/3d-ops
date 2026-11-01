@@ -22,7 +22,7 @@
   try { BOOK_TAB = localStorage.getItem("fin_book_tab") || "book"; } catch { /* 忽略 */ }
 
   const q = () => (PER.mode === "range" && PER.start ? `start=${PER.start}&end=${PER.end || today()}` : `month=${PER.month || thisMonth()}`);
-  const TABS = { fin_orders: "fin-od", fin_overview: "fin-ov", fin_settle: "fin-st", fin_book: "fin-bk", fin_tax: "fin-tx" };
+  const TABS = { fin_orders: "fin-od", fin_overview: "fin-ov", fin_settle: "fin-st", fin_fees: "fin-fe", fin_book: "fin-bk", fin_tax: "fin-tx" };
   // v2.49：旧菜单 → 新页面 + 页签（书签、首页卡片、别的模块里的链接还能用）
   const ALIAS = { fin_profit: ["fin_overview", () => { PROFIT_FOCUS = true; }], fin_cash: ["fin_book", () => { BOOK_TAB = "cash"; }],
     profit: ["fin_orders", () => { if (window.FIN_ORDERS) FIN_ORDERS.setGroup("day"); }] };
@@ -59,6 +59,7 @@
       if (!META) META = await api("/api/fin/meta");
       if (name === "fin_orders") return window.FIN_ORDERS && await FIN_ORDERS.render(box);
       if (name === "fin_settle") return window.FIN_SETTLE && await FIN_SETTLE.render(box);
+      if (name === "fin_fees") return window.FIN_FEES && await FIN_FEES.render(box);
       if (name === "fin_overview") return await overview(box);
       if (name === "fin_book") return await bookCash(box);
       if (name === "fin_tax") return await tax(box);

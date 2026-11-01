@@ -17,6 +17,9 @@
   6. 自动分组：产品库 / 采集箱 / 候选池（清理 + 回收站）/ 上架工作台，共用 static/groups.js + core/prodgroups.py；
      铺货到第二个店铺记录在 p["lazada_api_shops"]（未在真店铺验证）
   7. 库存同步重做：modules/listing/stocksync.py + stockadapters.py（Lazada update_price_quantity，Shopee / TikTok 先导出表）
+  8. 平台费率引擎：core/feerates.py（Lazada 财务流水 / Shopee 导入报表 → 店铺×类目×费用项的真实费率，30/90 天快照，回退链 店铺×类目 → 店铺 → 类目默认 → 平台默认）；
+     pricing.price_variant / price_product 多 platform、shop 参数并返回 fee 拆分；新页面 财务 → 平台费率（fin_fees）；Shopee 7 天没导入 / 费率变动 > 0.5 个百分点进待办；
+     测试 modules/fin/tests/t_feerates253.py。旧 platform_fee_rate / shopee_fee_rate 就是平台默认费率（原值保留）
 - 待做：打印机「网络诊断」按钮 → reviewer 审查 → 全量测试 → 发 v2.53.0
 
 ## 已知问题 / 坑

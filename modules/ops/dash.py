@@ -224,6 +224,20 @@ def price_rows(cfg=None):
     return out
 
 
+def _fee_rates_brief(cfg):
+    """v2.53：各平台默认店铺现在用的费率（实际 / 默认），给看板显示。"""
+    out = {}
+    try:
+        from core import feerates
+        for plat in feerates.PLATFORMS:
+            r = feerates.resolve(plat, None, None, cfg)
+            out[plat] = {"pct": r["pct"], "fixed": r["fixed"], "source": r["source"], "source_zh": r["source_zh"], "source_th": r["source_th"],
+                         "orders": r["orders"], "shop": r["shop"]}
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def pricing_issues(cfg=None):
     """售价低于最低价（最低加价率对应的价格）：ERP 里的售价，或者平台上实际在卖的价（在线商品，有促销价按促销价）。"""
     from core import modules
@@ -542,7 +556,7 @@ def dashboard(args=None):
             "cod": cod_stats(30), "aftersales": af, "aftersales_period": period_af, "pricing": pricing_issues(cfg)[:50],
             "health": data_health([r for r in rows if (r[0]["order_time"] or 0) >= day_start(29)], cfg),
             "production": production(), "materials": materials_low(), "lazada": lz, "compare": compare,
-            "fee_rate_setting": cfg.get("platform_fee_rate"), "market": market_summary(cfg)}
+            "fee_rate_setting": cfg.get("platform_fee_rate"), "fee_rates": _fee_rates_brief(cfg), "market": market_summary(cfg)}
 
 
 def market_summary(cfg=None):

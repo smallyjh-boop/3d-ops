@@ -9,18 +9,21 @@ from . import logic
 
 def _todo(add):
     logic.todo(add)
+    from core import feerates          # v2.53：Shopee 导入提醒、费率变动（受影响的产品）
+    feerates.todo(add)
 
 
 def _start():
-    from .logic import recon
+    from .logic import recon, fees
     recon.start()
+    fees.start()
 
 
 MODULE = {
     "id": "fin",
     "name_zh": "财务",
     "name_th": "การเงิน",
-    "version": "1.9",
+    "version": "2.0",
     "desc_zh": "总览（损益、利润分析）、订单利润、平台对账（Lazada 接口自动对账，Shopee / TikTok 导入报表）、收支与现金流、税务；给会计软件的只读接口。",
     "desc_th": "ภาพรวม (กำไรขาดทุน วิเคราะห์กำไร) กำไรรายคำสั่งซื้อ กระทบยอดแพลตฟอร์ม (Lazada อัตโนมัติผ่าน API, Shopee / TikTok นำเข้ารายงาน) รายรับรายจ่ายและกระแสเงินสด ภาษี และ API อ่านอย่างเดียวสำหรับโปรแกรมบัญชี",
     "depends": [],
@@ -31,7 +34,8 @@ MODULE = {
         {"tab": "fin_overview", "mod": "biz", "zh": "总览", "th": "ภาพรวม", "roles": "owner", "before": "profit"},
         {"tab": "fin_orders", "mod": "biz", "zh": "订单利润", "th": "กำไรรายคำสั่งซื้อ", "roles": "owner", "after": "fin_overview"},
         {"tab": "fin_settle", "mod": "biz", "zh": "平台对账", "th": "กระทบยอดแพลตฟอร์ม", "roles": "owner", "after": "fin_orders"},
-        {"tab": "fin_book", "mod": "biz", "zh": "收支与现金流", "th": "รายรับรายจ่ายและกระแสเงินสด", "roles": "owner", "after": "fin_settle"},
+        {"tab": "fin_fees", "mod": "biz", "zh": "平台费率", "th": "อัตราค่าธรรมเนียมแพลตฟอร์ม", "roles": "owner", "after": "fin_settle"},
+        {"tab": "fin_book", "mod": "biz", "zh": "收支与现金流", "th": "รายรับรายจ่ายและกระแสเงินสด", "roles": "owner", "after": "fin_fees"},
         {"tab": "fin_tax", "mod": "biz", "zh": "税务", "th": "ภาษี", "roles": "owner", "after": "fin_book"},
         {"tab": "fin_profit", "mod": "biz", "zh": "利润分析", "th": "วิเคราะห์กำไร", "roles": "owner", "ghost": True, "panel": "fin_overview"},
         {"tab": "fin_cash", "mod": "biz", "zh": "现金流", "th": "กระแสเงินสด", "roles": "owner", "ghost": True, "panel": "fin_book"},
@@ -39,5 +43,5 @@ MODULE = {
     ],
     "todo": _todo,
     "startup": _start,
-    "ui": {"html": "page.html", "page_js": ["finance.js", "orders.js", "settle.js", "page.js"], "css": ["page.css"], "boot_js": ["boot.js"]},
+    "ui": {"html": "page.html", "page_js": ["finance.js", "orders.js", "settle.js", "fees.js", "page.js"], "css": ["page.css"], "boot_js": ["boot.js"]},
 }

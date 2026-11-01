@@ -48,6 +48,40 @@ def _sold(platform, shop_id, shop_name, since):
     return here, anyshop
 
 
+def _belowcost_ctx(platform, shop_name):
+    """v2.53：「售价低于成本」按这个店铺的费率引擎算（店铺有真实费率才切过来；没有就沿用产品库的算法）。"""
+    try:
+        from core import feerates
+        from core.config import load_config
+        L = feerates._load()
+        if not any(k[0] == platform and (not shop_name or k[1] == shop_name) for k in L["snaps"]):
+            return None
+        return {"cfg": load_config(), "platform": platform, "shop": shop_name, "memo": {}}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _below(ctx, pid, recs):
+    from core import feerates, store
+    try:
+        if pid not in ctx["memo"]:
+            ctx["memo"][pid] = store.load(pid)
+        live = {}
+        for r in recs:
+            if r["status"] != "live":
+                continue
+            try:
+                for x in json.loads(r["skus"] or "[]"):
+                    pr = x.get("special_price") or x.get("price")
+                    if x.get("seller_sku") and pr:
+                        live[str(x["seller_sku"]).upper()] = float(pr)
+            except (ValueError, TypeError):
+                continue
+        return bool(feerates.below_cost(ctx["cfg"], ctx["memo"][pid], ctx["platform"], ctx["shop"], live))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def compute(platform="lazada", shop_id=0, rows=None):
     """返回 {gk: {产品: [键]}, summary: {n, total, shops}, ...}。rows：产品库的行（goods 的 cached_rows）。"""
     from modules.goods import api as gapi
@@ -61,6 +95,7 @@ def compute(platform="lazada", shop_id=0, rows=None):
     has_online_data = bool(all_recs)
     sold_here, sold_any = _sold(platform, shop_id, shop_name, now - 30 * 86400)
     lk = "sp" if platform == "shopee" else "lz"
+    bc = _belowcost_ctx(platform, shop_name)
     gk, n, mk_all = {}, {}, {}
     ranked = sorted(((pid, q) for pid, q in sold_here.items() if q > 0), key=lambda x: -x[1])
     top = {pid for pid, _q in ranked[:int(S["hot_top"])]}
@@ -103,7 +138,10 @@ def compute(platform="lazada", shop_id=0, rows=None):
             todo.add("badimg")
         if (it.get("title_len") or 0) > TITLE_MAX:
             todo.add("longtitle")
-        if "td:belowcost" in (it.get("gk") or []):
+        if bc is None:
+            if "td:belowcost" in (it.get("gk") or []):
+                todo.add("belowcost")
+        elif _below(bc, pid, recs):
             todo.add("belowcost")
         sp, sk = it.get("sku_price") or {}, it.get("sku_stock") or {}
         for r in recs:

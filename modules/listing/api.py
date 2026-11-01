@@ -174,10 +174,7 @@ def export_shopee():
         warnings += [f"{name}：{x}" for x in w]
     if errors and not body.get("force"):
         return jsonify({"ok": False, "errors": errors, "warnings": warnings})
-    cfg_sp = dict(cfg)
-    if float(cfg.get("shopee_fee_rate") or 0) > 0:
-        cfg_sp["platform_fee_rate"] = float(cfg["shopee_fee_rate"])
-    pr = {p["id"]: pricing.price_product(cfg_sp, p) for p in prods}
+    pr = {p["id"]: pricing.price_product(cfg, p, platform="shopee") for p in prods}
     rows = shopee.build_rows(prods, pr, cfg)
     name = shopee.export_name()
     n = shopee.fill(rows, os.path.join(EXPORT_DIR, name))

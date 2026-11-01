@@ -108,7 +108,7 @@ COST_KEYS = ("filament_price_cny_per_kg", "cny_to_thb", "material_loss_rate", "e
              "printer_count", "hours_per_day_each", "failure_rate", "packaging_per_item", "platform_fee_rate",
              "shopee_fee_rate", "default_markup", "min_markup")
 PRICE_HIDE = ("cost", "material_cost", "machine_cost", "failure", "profit", "markup", "actual_markup",
-              "suggested_price", "floor_price", "platform_fee", "breakdown", "margin", "summary", "warning")
+              "suggested_price", "floor_price", "platform_fee", "fee", "by_shop", "breakdown", "margin", "summary", "warning")
 
 
 def login_required():

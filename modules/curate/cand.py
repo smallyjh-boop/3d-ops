@@ -33,7 +33,12 @@ def cost_fn(cfg):
 
 
 def fee(cfg):
-    return rules.tf(cfg.get("platform_fee_rate"), 0.2)
+    try:        # v2.53：费率引擎（Lazada 默认店铺的实际费率，没有数据 = 设置里的默认扣点）；固定费用折算成比例用不上，这里只取百分比部分
+        from core import feerates
+        r = feerates.resolve("lazada", None, None, cfg)
+        return r["pct"] + (r["fixed"] / 300.0 if r["fixed"] else 0.0)
+    except Exception:  # noqa: BLE001
+        return rules.tf(cfg.get("platform_fee_rate"), 0.2)
 
 
 def calib():

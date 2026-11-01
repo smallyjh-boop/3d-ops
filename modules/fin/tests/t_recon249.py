@@ -174,7 +174,7 @@ ok(st["LZ-B"]["state"] == "paid" and st["LZ-B"]["paid_at"] == today.isoformat(),
 # ---------- 菜单：8 → 5，旧的变成看不见的跳转 ----------
 ms = {m["id"]: m for m in C.get("/api/modules").get_json()["modules"]}
 vis = [mn["tab"] for mn in ms["fin"]["menus"] if not mn["ghost"]]
-ok(vis == ["fin_overview", "fin_orders", "fin_settle", "fin_book", "fin_tax"], f"5 menus {vis}")
+ok(vis == ["fin_overview", "fin_orders", "fin_settle", "fin_fees", "fin_book", "fin_tax"], f"6 menus {vis}")
 gh = {mn["tab"]: mn["panel"] for mn in ms["fin"]["menus"] if mn["ghost"]}
 ok(gh == {"fin_profit": "fin_overview", "fin_cash": "fin_book", "profit": "fin_orders"}, f"old tabs redirect {gh}")
 ok("boot.js" in ms["fin"]["ui"]["boot_js"] and "settle.js" in ms["fin"]["ui"]["page_js"], "ui files")

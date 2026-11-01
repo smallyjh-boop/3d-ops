@@ -48,6 +48,12 @@ def order_profit(cfg, o, items):
         fee, fee_src = sum(abs(v or 0) for v in parts.values()) + abs(g("seller_discount") or 0), "detail"
     elif o["platform_fee"] is not None:
         fee, fee_src = abs(o["platform_fee"]), "import"
+    elif o["platform"] in ("lazada", "shopee"):
+        try:        # v2.53：估算也用费率引擎（店铺 × 类目的真实费率，没有数据 = 默认扣点，结果和以前一样）
+            from . import feerates
+            fee, _src = feerates.estimate_order_fee(cfg, o["platform"], (g("shop") or ""), items, revenue)
+        except Exception:  # noqa: BLE001
+            fee = revenue * rate
     else:
         fee = revenue * rate
     fee_est = fee_src == "estimate"
