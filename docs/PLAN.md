@@ -22,6 +22,7 @@
 - [x] T17：库存同步重做（v2.53.0）：规则、对照总表、快速修改、预警、记录｜modules/listing、core/connectors/lazada.py
 - [x] T18：打印机「网络诊断」按钮（端口逐个测、超时 / 拒绝、NAS 网口和路由、识别同网段两网口）｜core/printers.py、modules/prod
 - [ ] T19：没有订单也能生产 / 试打：➕ 生产、🧪 试打 + 试打结果、🔍 检查切片文件、打印机打印测试、看板按类型区分｜core/production.py、modules/prod、modules/model
+- [ ] T20：动态成本核算：实际结算倒推店铺 × 类目 × 费用项费率、Shopee 定期检测、定价拆分费用、费率变化预警、平台费率页｜core/pricing.py、modules/fin、modules/ops
 - [ ] T13：发 v2.53.0｜测试交给 test-runner、发版前 reviewer 审查、泰文缺口交给 translator
 
 ## 不做的事
