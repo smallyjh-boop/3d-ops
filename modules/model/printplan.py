@@ -14,6 +14,9 @@
 多色：每盘最多 4 个 AMS 槽；按零件分色 = 每个零件选一个槽；款式（例如 白款 / 黑款）= 配色方案（槽 → 颜色）。
 拓竹 / MakerWorld 涂色的 3MF 原样保留，只读它用几种颜色、每种用多少（文件里有 slice_info 时）；改涂色请在 Bambu Studio 里改好再上传。
 
+v2.53：「按主模型缩放 N%」的规格 = {"follow": True, "scale": N}（主模型方案里每个零件带 scale，不要另外的文件；主模型改了跟着改）；
+「从某个规格复制」「从组装生成打印方案」「一键全部切片」；零件可以带 "scale"（克数按 k³、时长按 k^2.5 估）。
+
 ★ 对外（modules.public("model")）：get_plan / colours_for / usage / job_colours / run_colours / job_plates / plate_info
 """
 import math
@@ -51,10 +54,26 @@ def printer_models(cfg=None):
             continue
         seen.add(n)
         m = fleet.model_info(n) or {}
-        out.append({"name": n, "bed": m.get("bed") or DEFAULT_BED, "multicolor": fleet.is_multicolor(p)})
+        out.append({"name": n, "bed": m.get("bed") or DEFAULT_BED, "multicolor": fleet.is_multicolor(p), "exclude": exclude_of(n)})
     if not out:
-        out.append({"name": "Bambu Lab P1S", "bed": [256, 256, 256], "multicolor": True})
+        out.append({"name": "Bambu Lab P1S", "bed": [256, 256, 256], "multicolor": True, "exclude": exclude_of("Bambu Lab P1S")})
     return out
+
+
+def exclude_of(name):
+    """热床上不能放零件的地方（v2.53）：拓竹 X1 / P1 系列左前角 18×28 mm 是废料口（切片软件的 bed_exclude_area），
+    零件压到这里 OrcaSlicer 会说「盘上没有能切的零件」。返回 [x0, y0, x1, y1] 或 None。"""
+    import re
+    if re.search(r"bambu.*\b(x1|p1)", str(name or ""), re.I):
+        return [0.0, 0.0, 18.0, 28.0]
+    return None
+
+
+def _x0(excl, y, d=0.0):
+    """这一排从哪里开始：排的范围碰到废料口就从废料口右边开始。"""
+    if excl and y < excl[3] + 1 and y + d > excl[1] - 1:
+        return max(MARGIN, excl[2] + 3)
+    return MARGIN
 
 
 def bed_of(name, cfg=None):
@@ -96,7 +115,19 @@ def _simplify(h, n=40):
     return [h[int(i * step)] for i in range(n)]
 
 
-def _tris_of(pid, p, eid, part):
+def _sc(v):
+    try:
+        k = float(v or 1)
+    except (TypeError, ValueError):
+        return 1.0
+    return k if 0.01 <= k <= 20 else 1.0
+
+
+def _tris_of(pid, p, eid, part, scale=1.0):
+    k = _sc(scale)
+    if k != 1.0:
+        fp, t, label = _tris_of(pid, p, eid, part)
+        return fp, np.asarray(t, dtype=np.float64) * k, f"{label} ({round(k * 100)}%)"
     e = modellib._entry(p, eid)
     fp = modellib.path_of(pid, e)
     if not fp or os.path.splitext(fp)[1].lower() not in modellib.MODEL_EXT:
@@ -110,16 +141,16 @@ def _tris_of(pid, p, eid, part):
     return fp, np.concatenate([t for _n, t in parts]), e["orig_name"]
 
 
-def footprint(pid, eid, part=None, orient="bottom", p=None):
-    """零件按摆放方向放平后的俯视轮廓（凸包，中心在外框中心）。返回 {hull, w, d, h, label}。"""
+def footprint(pid, eid, part=None, orient="bottom", p=None, scale=1.0):
+    """零件按摆放方向放平后的俯视轮廓（凸包，中心在外框中心）。返回 {hull, w, d, h, label}。scale：按主模型缩放的规格（v2.53）。"""
     p = p or store.load(pid)
     orient = orient if orient in mesh.ORIENT_ZH else "bottom"
     e = modellib._entry(p, eid)
     fp = modellib.path_of(pid, e)
-    key = (fp, os.path.getmtime(fp) if fp else 0, part, orient)
+    key = (fp, os.path.getmtime(fp) if fp else 0, part, orient, _sc(scale))
     if key in _FP:
         return _FP[key]
-    fp, tris, label = _tris_of(pid, p, eid, part)
+    fp, tris, label = _tris_of(pid, p, eid, part, scale)
     t = mesh.rotate(np.asarray(tris, dtype=np.float64), orient)
     v = t.reshape(-1, 3)
     if len(v) > 300_000:
@@ -178,6 +209,10 @@ def check_plate(plate, bed, fps):
         out = any(px < -OUT_TOL or py < -OUT_TOL or px > W + OUT_TOL or py > D + OUT_TOL for px, py in pg)
         if len(bed) > 2 and f["h"] > float(bed[2]) + OUT_TOL:
             out = True
+        ex = exclude_of(plate.get("printer"))
+        if ex and not out and _overlap(pg, [(ex[0], ex[1]), (ex[2], ex[1]), (ex[2], ex[3]), (ex[0], ex[3])]) > OVERLAP_TOL:
+            out = True                                          # 压到拓竹的废料口
+
         res[it["uid"]] = {"out": out, "overlap": []}
     ids = list(polys)
     for i, a in enumerate(ids):
@@ -200,14 +235,16 @@ def auto_arrange(plate, bed, fps, gap=GAP):
     W, D = float(bed[0]), float(bed[1])
     items = [it for it in plate.get("items") or [] if it["uid"] in fps]
     items.sort(key=lambda it: -max(fps[it["uid"]]["w"], fps[it["uid"]]["d"]))
-    x, y, row_h, miss = MARGIN, MARGIN, 0.0, 0
+    excl = exclude_of(plate.get("printer"))
+    x, y, row_h, miss = _x0(excl, MARGIN, 1e9), MARGIN, 0.0, 0
     for it in items:
         f = fps[it["uid"]]
         w, d, rot = f["w"], f["d"], 0
         if w > W - 2 * MARGIN and d <= W - 2 * MARGIN and w <= D - 2 * MARGIN:
             w, d, rot = d, w, 90
-        if x > MARGIN and x + w > W - MARGIN:
-            x, y, row_h = MARGIN, y + row_h + gap, 0.0
+        if x > _x0(excl, y, 1e9) and x + w > W - MARGIN:
+            y, row_h = y + row_h + gap, 0.0
+            x = _x0(excl, y, 1e9)
         if x + w > W - MARGIN + 0.01 and w < d and d <= W - 2 * MARGIN:   # 这一排剩下的地方转 90° 放得下
             w, d, rot = d, w, 90
         it["x"], it["y"], it["rot"] = round(x + w / 2, 1), round(y + d / 2, 1), rot
@@ -275,15 +312,17 @@ def rows_layout(plate, fps, rows, rots, bed, gap=GAP):
         row = [u for u in row if u in by and u in fps and u not in placed]
         if not row:
             continue
-        x, row_h = MARGIN, 0.0
+        excl = exclude_of(plate.get("printer"))
+        x, row_h = _x0(excl, y, 1e9), 0.0
         for u in row:
             it, f = by[u], fps[u]
             rot = float(rots.get(u, 0) or 0) % 360
             pg = _poly(f, 0, 0, rot)
             w = max(px for px, _ in pg) - min(px for px, _ in pg)
             d = max(py for _, py in pg) - min(py for _, py in pg)
-            if x > MARGIN and x + w > W - MARGIN:
-                x, y, row_h = MARGIN, y + row_h + gap, 0.0
+            if x > _x0(excl, y, 1e9) and x + w > W - MARGIN:
+                y, row_h = y + row_h + gap, 0.0
+                x = _x0(excl, y, 1e9)
             it["x"], it["y"], it["rot"] = round(x + w / 2, 1), round(y + d / 2, 1), round(rot, 1)
             if y + d > D - MARGIN + 0.01 or x + w > W - MARGIN + 0.01:
                 miss += 1
@@ -433,9 +472,135 @@ def get_plan(p, spec=""):
     spec = (spec or "").strip()
     plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
     plan = plans.get(spec)
+    if spec and plan and plan.get("follow") and plan.get("scale"):
+        return scaled_plan(p, spec, plan)
     if not plan or not plan.get("plates"):
         return default_plan(p, spec)
     return plan
+
+
+# ---------------- v2.53 按主模型缩放的规格 / 从别的规格复制 ----------------
+def scaled_plan(p, spec, sp):
+    """「按主模型缩放 N%」的规格：主模型的方案，每个零件放大 / 缩小（不用另外的文件）。主模型方案改了自动跟着改。
+    切片结果存在 sp["sliced_by"][盘号]（带摆盘签名，主模型改了摆盘就作废）。"""
+    import copy
+    base = copy.deepcopy(get_plan(p, ""))
+    k = float(sp.get("scale") or 100) / 100.0
+    for pl in base.get("plates") or []:
+        for it in pl.get("items") or []:
+            it["scale"] = round(_sc(it.get("scale")) * k, 4)
+            it["x"] = it["y"] = None                     # 大小变了：重新排
+        pl["manual"] = False
+        pl.pop("sliced", None)
+        got = (sp.get("sliced_by") or {}).get(pl["id"])
+        if got and got.get("sig") == _sig(pl):
+            pl["sliced"] = {k2: v for k2, v in got.items() if k2 != "sig"}
+    base.update(follow=True, scale=sp.get("scale"), base_default=bool(base.get("default")))
+    base.pop("default", None)
+    base.pop("updated_at", None)
+    if sp.get("updated_at"):
+        base["updated_at"] = sp["updated_at"]
+    return base
+
+
+def set_scale(pid, spec, pct, user=""):
+    """规格的打印方案「按主模型缩放 N%」（pct 空 / 0 = 取消，回到默认）。"""
+    p = store.load(pid)
+    spec = (spec or "").strip()
+    if not spec:
+        raise ValueError("主模型不能按自己缩放")
+    plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
+    if pct:
+        plans[spec] = {"follow": True, "scale": round(float(pct), 1), "updated_at": time.time(), "updated_by": user}
+    else:
+        if (plans.get(spec) or {}).get("follow"):
+            plans.pop(spec, None)
+    p["print_plans"] = plans
+    store.save(p)
+    return get_plan(p, spec)
+
+
+def copy_plan(pid, spec, src, user=""):
+    """「从某个规格复制」打印方案（盘、零件、槽、配色），切片结果不带过去。"""
+    import copy
+    from core import specmodel
+    p = store.load(pid)
+    spec, src = (spec or "").strip(), (src or "").strip()
+    for s in (spec, src):
+        if s and s not in specmodel.specs(p):
+            raise ValueError(f"这个产品没有规格「{s}」")
+    if spec == src:
+        raise ValueError("不能从自己复制")
+    plan = copy.deepcopy(get_plan(p, plan_key(p, src) if src else ""))
+    for pl in plan.get("plates") or []:
+        pl.pop("sliced", None)
+    for k in ("default", "follow", "sliced_by", "base_default", "scale"):
+        plan.pop(k, None)
+    plan.update(updated_at=time.time(), updated_by=user, copied_from=src)
+    p.setdefault("print_plans", {})[spec] = clean_plan(p, plan) | {"updated_at": time.time(), "updated_by": user, "copied_from": src}
+    _refresh_variants(p, spec, p["print_plans"][spec])
+    store.save(p)
+    return p["print_plans"][spec]
+
+
+def _split_plates(pid, p, plate, bed):
+    """一盘放不下：放不下的零件挪到新的一盘，直到都放下（最多 20 盘）。返回盘列表。"""
+    out = [plate]
+    cur = plate
+    for _ in range(20):
+        fps = fps_for(pid, p, cur)
+        miss = auto_arrange(cur, bed, fps)
+        if not miss:
+            break
+        W, D = float(bed[0]), float(bed[1])
+        keep, move = [], []
+        for it in cur["items"]:
+            pg = _poly(fps[it["uid"]], it["x"], it["y"], it.get("rot") or 0)
+            fits = max(px for px, _ in pg) <= W - MARGIN + 0.01 and max(py for _, py in pg) <= D - MARGIN + 0.01
+            (keep if fits else move).append(it)
+        if not move or not keep:
+            break
+        cur["items"] = keep
+        auto_arrange(cur, bed, fps_for(pid, p, cur))
+        nxt = {**{k: v for k, v in cur.items() if k not in ("items", "sliced")}, "id": f"p{len(out) + 1}", "items": move, "manual": False}
+        out.append(nxt)
+        cur = nxt
+    return out
+
+
+def plan_from_display(pid, spec="", user=""):
+    """「从组装生成打印方案」：展示里的零件（数量照算）每个按推荐方向平放，自动排盘（一盘放不下自动分盘）。不保存，返回方案。"""
+    from . import assembly
+    p = store.load(pid)
+    r = assembly.resolve(p, spec)
+    if not r["items"]:
+        raise ValueError("展示里还没有零件")
+    lib = {e["id"]: e for e in p.get("model_lib") or []}
+    cfg = load_config()
+    old = get_plan(p, spec)
+    first = (old.get("plates") or [{}])[0]
+    printer = first.get("printer") or printer_models(cfg)[0]["name"]
+    k = float(r.get("scale") or 1)
+    items = []
+    for key, it, _n in assembly.instances(r["items"]):
+        if (r["poses"].get(key) or {}).get("hidden"):
+            continue
+        info = (lib.get(it["id"]) or {}).get("info") or {}
+        src = info
+        if it.get("part") is not None:
+            src = next((x for x in info.get("parts") or [] if x.get("index") == it["part"]), None) or {}
+        items.append({"uid": _uid(), "id": it["id"], "part": it.get("part"), "orient": src.get("best") or "bottom", "slot": 1,
+                      "x": None, "y": None, "rot": 0, **({"scale": round(k, 4)} if abs(k - 1) > 1e-6 else {})})
+    if not items:
+        raise ValueError("展示里的零件都隐藏了")
+    plate = {"id": "p1", "name": "", "printer": printer, "layer_height": float(first.get("layer_height") or 0.2), "sets": 1,
+             "slots": [dict(s) for s in (first.get("slots") or [{"slot": 1, "material": p.get("material") or "PLA", "colour": ""}])][:1],
+             "items": items, "manual": False}
+    plates = _split_plates(pid, p, plate, bed_of(printer, cfg))
+    for i, pl in enumerate(plates):
+        pl["id"] = f"p{i + 1}"
+        pl["manual"] = True
+    return {"plates": plates, "schemes": dict(old.get("schemes") or {}), "from_display": True}
 
 
 def _num(v, lo, hi, d):
@@ -472,7 +637,8 @@ def clean_plan(p, data, cfg=None):
                           "slot": int(_num(it.get("slot"), 1, len(slots), 1)),
                           "x": None if it.get("x") in (None, "") else round(_num(it["x"], -2000, 2000, 0), 1),
                           "y": None if it.get("y") in (None, "") else round(_num(it["y"], -2000, 2000, 0), 1),
-                          "rot": round(_num(it.get("rot"), -360, 360, 0), 1) % 360})
+                          "rot": round(_num(it.get("rot"), -360, 360, 0), 1) % 360,
+                          **({"scale": round(_sc(it["scale"]), 4)} if _sc(it.get("scale")) != 1.0 else {})})
         if len({it["uid"] for it in items}) != len(items):
             for it in items:
                 it["uid"] = _uid()
@@ -493,7 +659,7 @@ def clean_plan(p, data, cfg=None):
 def fps_for(pid, p, plate):
     out = {}
     for it in plate.get("items") or []:
-        out[it["uid"]] = footprint(pid, it["id"], it.get("part"), it.get("orient"), p)
+        out[it["uid"]] = footprint(pid, it["id"], it.get("part"), it.get("orient"), p, it.get("scale") or 1)
     return out
 
 
@@ -529,13 +695,15 @@ def save_plan(pid, spec, data, user=""):
 
 
 def _sig(pl):
-    return repr([(it["id"], it.get("part"), it.get("orient"), it.get("slot"), it.get("x"), it.get("y"), it.get("rot")) for it in pl.get("items") or []]
+    return repr([(it["id"], it.get("part"), it.get("orient"), it.get("slot"), it.get("x"), it.get("y"), it.get("rot"), _sc(it.get("scale")))
+                 for it in pl.get("items") or []]
                 + [(s["slot"], s.get("material")) for s in pl.get("slots") or []] + [pl.get("printer"), pl.get("layer_height")])
 
 
 def plate_selection(plate):
     """给 modellib（合并 / 预览摆盘 / 导出）用的选择：每个零件一件，带位置。"""
     return [{"id": it["id"], "part": it.get("part"), "qty": 1, "orient": it.get("orient") or "bottom",
+             **({"scale": _sc(it.get("scale"))} if _sc(it.get("scale")) != 1.0 else {}),
              **({"x": it["x"], "y": it["y"], "rot": it.get("rot") or 0} if it.get("x") is not None and it.get("y") is not None else {})}
             for it in plate.get("items") or []]
 
@@ -574,7 +742,8 @@ def _item_est(p, it, cfg):
     if it.get("part") not in (None, ""):
         src = next((x for x in info.get("parts") or [] if x.get("index") == int(it["part"])), None) or {}
     est = src.get("sliced_result") if src is info and info.get("sliced_result") else src.get("est") or {}
-    return float(est.get("grams") or 0), float(est.get("hours") or 0), info, src
+    k = _sc(it.get("scale"))            # 按主模型缩放：克数按体积（k³），时长大约按 k^2.5（估）
+    return float(est.get("grams") or 0) * k ** 3, float(est.get("hours") or 0) * k ** 2.5, info, src
 
 
 def purge_estimate(heights, layer_h, cfg=None):
@@ -624,7 +793,7 @@ def plate_usage(p, plan, plate, colour="", cfg=None, fps=None):
                 hh = fps[it["uid"]]["h"]
             else:
                 o = next((x for x in (src.get("orients") or []) if x.get("key") == it.get("orient")), None)
-                hh = (o or {}).get("height_mm") or (src.get("size") or [0, 0, 0])[2]
+                hh = ((o or {}).get("height_mm") or (src.get("size") or [0, 0, 0])[2]) * _sc(it.get("scale"))
             heights[cols.get(sl)] = max(heights.get(cols.get(sl), 0), float(hh or 0))
     sl_res = plate.get("sliced") or {}
     est = True
@@ -711,7 +880,7 @@ def _plan_for_sku(p, sku):
     key = spec if spec in plans else ("" if "" in plans else None)
     if key is None:
         return spec, None
-    plan = plans.get(key) or {}
+    plan = get_plan(p, key) if (plans.get(key) or {}).get("follow") else (plans.get(key) or {})
     return key, (plan if plan.get("plates") else None)
 
 
@@ -747,6 +916,8 @@ def plate_info(p, spec, plate_id):
     """切片文件记着是哪一盘：{no, total, name}（方案里已经没有这一盘 → None）。"""
     plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
     plan = plans.get(spec or "") or {}
+    if plan.get("follow"):
+        plan = get_plan(p, spec or "")
     plates = plan.get("plates") or []
     for i, pl in enumerate(plates):
         if pl.get("id") == plate_id:
@@ -816,7 +987,7 @@ def plate_objects(pid, plate, p=None):
     p = p or store.load(pid)
     out = []
     for it in plate.get("items") or []:
-        _fp, tris, label = _tris_of(pid, p, it["id"], it.get("part"))
+        _fp, tris, label = _tris_of(pid, p, it["id"], it.get("part"), it.get("scale") or 1)
         t = mesh.rotate(np.asarray(tris, dtype=np.float64), it.get("orient") or "bottom")
         v = t.reshape(-1, 3)
         mn, mx = v.min(0), v.max(0)
@@ -947,11 +1118,16 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
               "hours": res.get("hours"), "grams": res.get("grams"), "at": time.time(), "colour": colour}
     p = store.load(pid)
     plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
-    plan = plans.get(spec) or plan
-    for x in plan["plates"]:
-        if x["id"] == plate_id:
-            x["sliced"] = sliced
-    p.setdefault("print_plans", {})[spec] = plan
+    if (plans.get(spec) or {}).get("follow"):          # 按主模型缩放的规格：结果记在 sliced_by（带摆盘签名）
+        plans[spec].setdefault("sliced_by", {})[plate_id] = dict(sliced, sig=_sig(plate))
+    else:
+        plan = plans.get(spec) or plan
+        plan.pop("default", None)
+        for x in plan["plates"]:
+            if x["id"] == plate_id:
+                x["sliced"] = sliced
+        plans[spec] = plan
+    p["print_plans"] = plans
     store.save(p)
     pname = names[printer_idx] if 0 <= printer_idx < len(names) else plate["printer"]
     f = print_files.add(res["kept"], fname.replace(".3mf", ".gcode.3mf"), pid, pname, "", int(plate.get("sets") or 1), "",
@@ -959,3 +1135,119 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
                         fils[0]["material"], res.get("grams"), res.get("hours"), move=True, source="plan", spec=spec,
                         plate_id=plate_id)        # v2.52：记下是哪一盘（几盘的方案生产时每盘用自己的文件）
     return {"sliced": sliced, "file": f}
+
+
+# ---------------- v2.53 规格 × 状态 概览、一键全部切片 ----------------
+def _spec_colour(p, spec):
+    return next(((v.get("opt1_zh") or "").strip() for v in p.get("variants") or []
+                 if (v.get("opt2_zh") or "").strip() == spec and (v.get("opt1_zh") or "").strip()), "")
+
+
+def plan_key(p, spec):
+    """生产时这个规格用哪份方案：规格自己的（保存过 / 按主模型缩放）> 主模型的。"""
+    plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
+    return spec if (spec in plans and (plans[spec].get("plates") or plans[spec].get("follow"))) else ""
+
+
+def plan_summary(p, spec="", cfg=None):
+    """概览一行（不读模型文件）：{state, key, plates, items, sets, grams, hours, est, sliced, scale, colour}
+    state：unsaved 还没保存（自动的一盘）/ saved 已保存（估）/ sliced 每盘都切过 / partial 部分切过 / follow 按主模型缩放 / inherit 跟主模型"""
+    cfg = cfg or load_config()
+    spec = (spec or "").strip()
+    key = plan_key(p, spec)
+    plan = get_plan(p, key)
+    colour = _spec_colour(p, spec)
+    try:
+        u = usage(p, key, colour, cfg)
+    except (ValueError, OSError, KeyError):
+        u = {"grams": 0, "hours": 0, "est": True, "multicolor": False, "purge_g": 0}
+    plates = plan.get("plates") or []
+    ns = sum(1 for pl in plates if (pl.get("sliced") or {}).get("filaments") or (pl.get("sliced") or {}).get("grams"))
+    if spec and key == "":
+        state = "inherit"
+    elif plan.get("follow"):
+        state = "follow"
+    elif plan.get("default"):
+        state = "unsaved"
+    elif plates and ns == len(plates):
+        state = "sliced"
+    elif ns:
+        state = "partial"
+    else:
+        state = "saved"
+    return {"state": state, "key": key, "plates": len(plates), "items": sum(len(pl.get("items") or []) for pl in plates),
+            "sets": [int(pl.get("sets") or 1) for pl in plates], "grams": u.get("grams"), "hours": u.get("hours"),
+            "purge_g": u.get("purge_g"), "est": bool(u.get("est")), "multicolor": bool(u.get("multicolor")),
+            "sliced": ns, "scale": plan.get("scale") if plan.get("follow") else None, "colour": colour,
+            "updated_at": plan.get("updated_at")}
+
+
+SLICE_ALL = {}          # 产品 → 一键全部切片的进度 {total, done, current, results, errors, running}
+
+
+def slice_all(pid, user="", specs=None):
+    """「一键全部切片」：主模型和每个有自己方案的规格，每一盘按顺序切（真的 OrcaSlicer），切完按方案填变体克数 / 时长。
+    跟着主模型的规格不用另外切（生产用主模型的），克数按主模型的方案填。进度在 SLICE_ALL[pid]。返回 {results, errors, filled, total}。"""
+    from core import bgjobs, slicer, specmodel
+    p = store.load(pid)
+    todo = []
+    keys = [""] + [s for s in specmodel.specs(p) if plan_key(p, s) == s]
+    if specs is not None:
+        keys = [k for k in keys if k in specs]
+    for k in keys:
+        plan = get_plan(p, k)
+        colour = _spec_colour(p, k) or next(((v.get("opt1_zh") or "").strip() for v in p.get("variants") or []), "")
+        for i, pl in enumerate(plan.get("plates") or []):
+            if pl.get("items"):
+                todo.append((k, pl["id"], i + 1, len(plan["plates"]), colour))
+    prog = SLICE_ALL[pid] = {"total": len(todo), "done": 0, "current": "", "results": [], "errors": [], "running": True, "started": time.time()}
+    filled = {}
+    try:
+        for n, (k, plate_id, no, tot, colour) in enumerate(todo):
+            prog["current"] = {"spec": k, "no": no, "total": tot}
+            bgjobs.note(stage=f"{n + 1}/{len(todo)}")
+            try:
+                r = slice_plate(pid, k, plate_id, colour, None, user)
+                s = r["sliced"]
+                prog["results"].append({"spec": k, "plate": plate_id, "no": no, "total": tot, "grams": s.get("grams"),
+                                        "hours": s.get("hours"), "file_id": (r.get("file") or {}).get("id")})
+            except slicer.SliceError as e:
+                prog["errors"].append({"spec": k, "plate": plate_id, "no": no, "error": f"切片没有成功：{e}"})
+            except (ValueError, OSError) as e:
+                prog["errors"].append({"spec": k, "plate": plate_id, "no": no, "error": str(e)})
+            prog["done"] = n + 1
+        for k in keys:
+            try:
+                filled[k] = fill_variants(pid, k, user)
+                if k == "":
+                    p2 = store.load(pid)          # 跟着主模型的规格也按主模型的方案填
+                    for s in specmodel.specs(p2):
+                        if plan_key(p2, s) == "":
+                            filled[s] = _fill_from(pid, s, "", user)
+            except (ValueError, OSError) as e:
+                prog["errors"].append({"spec": k, "plate": "", "no": 0, "error": f"填克数没成功：{e}"})
+    finally:
+        prog["running"] = False
+        prog["current"] = ""
+    return {"results": prog["results"], "errors": prog["errors"], "filled": filled, "total": prog["total"]}
+
+
+def _fill_from(pid, spec, key, user=""):
+    """规格（没有自己的方案）按 key 的方案填克数 / 时长。"""
+    p = store.load(pid)
+    n = 0
+    for v in p.get("variants") or []:
+        if (v.get("opt2_zh") or "").strip() != spec:
+            continue
+        u = usage(p, key, v.get("opt1_zh") or "")
+        if not u["grams"]:
+            continue
+        v["grams"] = u["grams"]
+        if u["hours"]:
+            v["hours"] = u["hours"]
+        v["grams_src"] = "plan_est" if u["est"] else "plan"
+        v["colour_usage"] = u["colours"] if u["multicolor"] else None
+        v["purge_g"] = u["purge_g"] if u["multicolor"] else None
+        n += 1
+    store.save(p)
+    return n

@@ -2,10 +2,12 @@
 // v2.52 打印方案（生产用）：每个规格一份，一份 = 一盘或几盘。每盘：打印机、层高、AMS 槽（材料 + 颜色）、零件（方向、用哪个槽、位置）。
 // 手动摆盘：按打印机热床大小画俯视图，每个零件是它的俯视轮廓，可以拖动、旋转、复制；「自动排列」后再微调；重叠 / 超出热床标红。
 // 款式（白款 / 黑款…）= 配色方案（每个槽装什么颜色）。保存后生产任务、成本、扣耗材都按这里。服务器在 modules/model/printplan.py。
+// v2.53：编辑页里默认收起（m3.js 显示一行摘要，点「查看 / 编辑」才打开）；规格由 ③ 顶部切换；撤销 / 重做（Ctrl+Z / Ctrl+Y）；
+// 「从组装生成打印方案」（展示里的零件平放、自动排盘）。
 (function () {
   const TH = () => window.I18N && I18N.lang === "th";
   const Z = (zh, th) => (TH() ? th : zh);
-  let S = null;          // {pid, spec, d(服务器数据), plan(正在改的), fps, sel: {pl, uid}, colour, dirty}
+  let S = null;          // {pid, spec, d(服务器数据), plan(正在改的), fps, sel: {pl, uid}, colour, dirty, undo: [], redo: []}
   let BOX = null;
 
   const css = `
@@ -87,10 +89,11 @@
   }
   function check(pl) {
     const bed = bedOf(pl.printer), res = {}, polys = {};
+    const ex = prModel(pl.printer).exclude, exr = ex ? [[ex[0], ex[1]], [ex[2], ex[1]], [ex[2], ex[3]], [ex[0], ex[3]]] : null;   // v2.53 拓竹废料口
     for (const it of pl.items) {
       const f = S.fps[it.uid]; if (!f || it.x == null) continue;
       const pg = poly(f, it.x, it.y, it.rot); polys[it.uid] = pg;
-      res[it.uid] = { out: pg.some(([x, y]) => x < -0.5 || y < -0.5 || x > bed[0] + 0.5 || y > bed[1] + 0.5) || f.h > bed[2] + 0.5, overlap: [] };
+      res[it.uid] = { out: pg.some(([x, y]) => x < -0.5 || y < -0.5 || x > bed[0] + 0.5 || y > bed[1] + 0.5) || f.h > bed[2] + 0.5 || (exr ? overlap(pg, exr) > 0.3 : false), overlap: [] };
     }
     const ids = Object.keys(polys);
     for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
@@ -99,18 +102,39 @@
     return res;
   }
 
+  // ---------------- 撤销 / 重做（v2.53） ----------------
+  function mark() {                    // 改之前调用：记下现在的样子
+    if (!S || !S.plan) return;
+    const snap = JSON.stringify(S.plan);
+    if (S.undo.length && S.undo[S.undo.length - 1] === snap) return;
+    S.undo.push(snap); if (S.undo.length > 80) S.undo.shift();
+    S.redo = [];
+  }
+  async function undoRedo(back) {
+    if (!S) return;
+    const from = back ? S.undo : S.redo, to = back ? S.redo : S.undo;
+    if (!from.length) { toast(back ? Z("没有可以撤销的", "ไม่มีอะไรให้ย้อน") : Z("没有可以重做的", "ไม่มีอะไรให้ทำซ้ำ")); return; }
+    to.push(JSON.stringify(S.plan));
+    S.plan = JSON.parse(from.pop());
+    S.dirty = true;
+    if (S.sel && !plateOf(S.sel.pl)) S.sel = { pl: (S.plan.plates[0] || {}).id, uid: null };
+    try { await fpFor(S.plan.plates.flatMap((pl) => pl.items)); } catch { /* 忽略 */ }
+    render();
+  }
+
   // ---------------- 读取 / 保存 ----------------
   async function mount(el, pid, spec) {
     BOX = el;
     if (!pid) { el.innerHTML = ""; S = null; return; }
-    if (!S || S.pid !== pid) S = { pid, spec: "", colour: "" };
+    if (!S || S.pid !== pid) S = { pid, spec: "", colour: "", undo: [], redo: [] };
     if (spec !== undefined) S.spec = spec || "";
     el.innerHTML = `<p class="muted small">${Z("读取打印方案…", "กำลังโหลดแผนการพิมพ์…")}</p>`;
     try { load(await api(`/api/products/${encodeURIComponent(pid)}/print-plan?spec=${encodeURIComponent(S.spec)}`)); }
     catch (e) { el.innerHTML = `<p class="bad small">${esc(e.message)}</p>`; }
   }
-  function load(d) {
-    S.d = d; S.plan = clone(d.plan); S.fps = clone(d.footprints || {}); S.dirty = false;
+  function load(d, draft) {
+    S.d = d; S.plan = clone(d.plan); S.fps = clone(d.footprints || {}); S.dirty = !!draft;
+    if (!draft) { S.undo = []; S.redo = []; }
     if (!d.colours.includes(S.colour)) S.colour = d.colours[0] || "";
     if (!S.sel || !plateOf(S.sel.pl)) S.sel = { pl: (S.plan.plates[0] || {}).id, uid: null };
     render();
@@ -120,6 +144,7 @@
       const d = await api(`/api/products/${encodeURIComponent(S.pid)}/print-plan`, { json: { spec: S.spec, plan: S.plan } });
       load(d);
       toast(Z("打印方案已保存", "บันทึกแผนการพิมพ์แล้ว"));
+      if (window.M3) M3.refresh();
       if (typeof P !== "undefined" && P && P.id === S.pid) {     // 成本按颜色拆分：变体的多色用量刷新
         try { const fresh = await api(`/api/products/${encodeURIComponent(S.pid)}`); P.variants.forEach((v, i) => { const f = (fresh.variants || []).find((x) => x.sku && x.sku === v.sku) || fresh.variants[i]; if (f) { v.colour_usage = f.colour_usage; v.purge_g = f.purge_g; } }); P.print_plans = fresh.print_plans; P.edit_rev = fresh.edit_rev; if (window.refreshPricing) refreshPricing(); } catch { /* 忽略 */ }
       }
@@ -143,10 +168,13 @@
 
   // ---------------- 画面 ----------------
   function render() {
-    const d = S.d, own = (d.specs || []).filter((x) => x.own);
-    const specBar = (d.specs || []).length ? `<div class="pp-bar small"><span class="muted">${Z("规格", "แบบ")}：</span>
-      <span class="chip ${!S.spec ? "on" : ""}" data-pp-spec="">${Z("主模型", "โมเดลหลัก")}${(d.specs || []).some((x) => !x.own) ? ` <span class="muted" data-notr>(${esc(d.specs.filter((x) => !x.own).map((x) => x.spec).join("、"))})</span>` : ""}</span>
-      ${own.map((x) => `<span class="chip ${S.spec === x.spec ? "on" : ""}" data-pp-spec="${esc(x.spec)}" data-notr>${esc(x.spec)}</span>`).join("")}</div>` : "";
+    const d = S.d;
+    const specBar = `<div class="pp-bar small"><b>${S.spec ? `<span data-notr>${esc(S.spec)}</span>` : Z("主模型", "โมเดลหลัก")}</b>
+      ${d.state === "inherit" ? `<span class="m3-tag inh">${Z("这个规格现在用主模型的打印方案；在这里改好保存后，这个规格用自己的方案", "แบบนี้ตอนนี้ใช้แผนของโมเดลหลัก ถ้าแก้และบันทึกที่นี่ แบบนี้จะใช้แผนของตัวเอง")}</span>` : ""}
+      ${d.follow ? `<span class="m3-tag inh">${Z(`按主模型缩放 ${d.scale}%：盘和零件跟着主模型的方案，保存后改成这个规格自己的方案`, `ย่อ/ขยายจากโมเดลหลัก ${d.scale}%: ถ้าบันทึกจะเป็นแผนของแบบนี้เอง`)}</span>` : ""}
+      <span class="pp-tools" style="margin-left:auto">
+        <button class="mini" data-pp="undo" title="Ctrl+Z">↶ ${Z("撤销", "ย้อน")}</button><button class="mini" data-pp="redo" title="Ctrl+Y">↷ ${Z("重做", "ทำซ้ำ")}</button>
+        <button class="mini primary-lite" data-pp="from-display" title="${Z("展示（组装）里的零件，每个按推荐方向平放，自动排盘（一盘放不下自动分盘），当草稿再改", "นำชิ้นงานจากการประกอบ วางราบตามทิศที่แนะนำ แล้วจัดถาดอัตโนมัติ (ร่าง)")}">🧩→🖨 ${Z("从组装生成打印方案", "สร้างแผนพิมพ์จากการประกอบ")}</button></span></div>`;
     const colBar = d.colours.length ? `<div class="pp-bar small"><span class="muted">${Z("看哪个款式（颜色）", "ดูแบบสีไหน")}：</span>
       ${d.colours.map((c) => `<span class="chip ${S.colour === c ? "on" : ""}" data-pp-col="${esc(c)}"><i class="pp-sw" style="background:${hexOf(c)}"></i><span data-notr>${esc(cl(c))}</span></span>`).join("")}</div>` : "";
     if (!(d.library || []).length) {
@@ -300,7 +328,12 @@
     for (let v = 10; v < bed[0]; v += 10) { g.globalAlpha = v % 50 ? 0.5 : 1; g.beginPath(); g.moveTo(X(v), Y(0)); g.lineTo(X(v), Y(bed[1])); g.stroke(); }
     for (let v = 10; v < bed[1]; v += 10) { g.globalAlpha = v % 50 ? 0.5 : 1; g.beginPath(); g.moveTo(X(0), Y(v)); g.lineTo(X(bed[0]), Y(v)); g.stroke(); }
     g.globalAlpha = 1; g.strokeStyle = "#5b6b80"; g.lineWidth = 2; g.strokeRect(X(0), Y(bed[1]), bed[0] * k, bed[1] * k);
-    g.fillStyle = "#8a97a8"; g.font = "11px sans-serif"; g.fillText(`${bed[0]} × ${bed[1]} mm`, X(0) + 4, Y(0) - 4);
+    const ex = prModel(pl.printer).exclude;
+    if (ex) {          // 拓竹左前角的废料口：不能放零件
+      g.fillStyle = "rgba(120,130,145,.35)"; g.fillRect(X(ex[0]), Y(ex[3]), (ex[2] - ex[0]) * k, (ex[3] - ex[1]) * k);
+      g.strokeStyle = "#8a97a8"; g.lineWidth = 1; g.strokeRect(X(ex[0]), Y(ex[3]), (ex[2] - ex[0]) * k, (ex[3] - ex[1]) * k);
+    }
+    g.fillStyle = "#8a97a8"; g.font = "11px sans-serif"; g.fillText(`${bed[0]} × ${bed[1]} mm`, X(0) + 4 + (ex ? (ex[2] - ex[0]) * k : 0), Y(0) - 4);
     const ck = check(pl);
     pl.items.forEach((it, i) => {
       const f = S.fps[it.uid]; if (!f || it.x == null) return;
@@ -346,7 +379,7 @@
     const cv = ev.target.closest("[data-cv]"); if (!cv || !S) return;
     const pl = plateOf(cv.dataset.cv), [mx, my] = toBed(cv, pl, ev), it = hit(pl, mx, my);
     S.sel = { pl: pl.id, uid: it ? it.uid : null };
-    if (it) { DRAG = { cv, pl, it, dx: mx - it.x, dy: my - it.y, moved: false }; cv.setPointerCapture(ev.pointerId); cv.style.cursor = "grabbing"; }
+    if (it) { DRAG = { cv, pl, it, dx: mx - it.x, dy: my - it.y, moved: false, snap: JSON.stringify(S.plan) }; cv.setPointerCapture(ev.pointerId); cv.style.cursor = "grabbing"; }
     cv.focus();
     refreshPlate(pl);
   }
@@ -359,12 +392,16 @@
   function onUp() {
     if (!DRAG) return;
     DRAG.cv.style.cursor = "";
-    if (DRAG.moved) { DRAG.pl.manual = true; S.dirty = true; }
+    if (DRAG.moved) {
+      DRAG.pl.manual = true; S.dirty = true;
+      if (!S.undo.length || S.undo[S.undo.length - 1] !== DRAG.snap) { S.undo.push(DRAG.snap); S.redo = []; }
+    }
     DRAG = null;
   }
   function rotSel(a) {
     const pl = plateOf(S.sel.pl), it = pl && pl.items.find((x) => x.uid === S.sel.uid);
     if (!it) { toast(Z("先在图上点一下要转的零件", "คลิกเลือกชิ้นงานบนภาพก่อน"), true); return false; }
+    mark();
     it.rot = (((it.rot || 0) + a) % 360 + 360) % 360; pl.manual = true; S.dirty = true; refreshPlate(pl); return true;
   }
 
@@ -381,16 +418,18 @@
       ev.preventDefault(); rotSel(ev.deltaY > 0 ? 5 : -5);
     }, { passive: false });
     BOX.addEventListener("keydown", (ev) => {
+      if ((ev.ctrlKey || ev.metaKey) && !ev.target.closest("input,select,textarea")) {
+        const k = ev.key.toLowerCase();
+        if (k === "z" || k === "y") { ev.preventDefault(); undoRedo(k === "z" && !ev.shiftKey); return; }
+      }
       const cv = ev.target.closest("[data-cv]"); if (!cv || !S.sel.uid) return;
       const pl = plateOf(cv.dataset.cv), it = pl.items.find((x) => x.uid === S.sel.uid); if (!it) return;
       const mv = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[ev.key];
-      if (mv) { ev.preventDefault(); it.x += mv[0]; it.y += mv[1]; pl.manual = true; S.dirty = true; refreshPlate(pl); }
+      if (mv) { ev.preventDefault(); if (!ev.repeat) mark(); it.x += mv[0]; it.y += mv[1]; pl.manual = true; S.dirty = true; refreshPlate(pl); }
       else if (ev.key === "r" || ev.key === "R") { ev.preventDefault(); rotSel(90); }
-      else if (ev.key === "Delete") { ev.preventDefault(); pl.items = pl.items.filter((x) => x !== it); S.sel.uid = null; S.dirty = true; render(); }
+      else if (ev.key === "Delete") { ev.preventDefault(); mark(); pl.items = pl.items.filter((x) => x !== it); S.sel.uid = null; S.dirty = true; render(); }
     });
     BOX.addEventListener("click", async (ev) => {
-      const sp = ev.target.closest("[data-pp-spec]");
-      if (sp) { if (S.dirty && !confirm(Z("打印方案有改动还没保存，切换规格会丢掉改动。继续？", "มีการแก้ไขที่ยังไม่บันทึก เปลี่ยนแบบจะทิ้งการแก้ไข ดำเนินการต่อ?"))) return; S.sel = null; mount(BOX, S.pid, sp.dataset.ppSpec); return; }
       const cc = ev.target.closest("[data-pp-col]");
       if (cc) { S.colour = cc.dataset.ppCol; render(); return; }
       const row = ev.target.closest("tr[data-uid]");
@@ -400,6 +439,19 @@
       const a = b.dataset.pp, plEl = b.closest("[data-pl]"), pl = plEl ? plateOf(plEl.dataset.pl) : null;
       try {
         if (a === "save") return save(b);
+        if (a === "undo" || a === "redo") { await undoRedo(a === "undo"); return; }
+        if (a === "from-display") {
+          if (S.dirty && !confirm(Z("现在的改动会被替换（可以撤销）。继续？", "การแก้ไขตอนนี้จะถูกแทนที่ (ย้อนได้) ดำเนินการต่อ?"))) return;
+          await busy(b, async () => {
+            const r = await apiJob(`/api/products/${encodeURIComponent(S.pid)}/print-plan/from-display`, { json: { spec: S.spec } });
+            const undo = S.undo.concat([JSON.stringify(S.plan)]);
+            load(r, true); S.undo = undo; S.redo = [];
+            render();
+            toast(Z(`已按组装的零件生成 ${r.plan.plates.length} 盘（草稿），检查后点「保存打印方案」`, `สร้าง ${r.plan.plates.length} ถาดจากการประกอบแล้ว (ร่าง) ตรวจแล้วกดบันทึก`));
+          });
+          return;
+        }
+        if (["add-plate", "del-plate", "add-slot", "del-slot", "arrange", "kit", "del-item", "dup"].includes(a)) mark();
         if (a === "add-plate") {
           const base = S.plan.plates[S.plan.plates.length - 1];
           S.plan.plates.push({ id: "p" + Date.now().toString(36).slice(-5), name: "", printer: base.printer, layer_height: base.layer_height, sets: 1,
@@ -447,18 +499,20 @@
             const r = await api(`/api/products/${encodeURIComponent(S.pid)}/print-plan/fill`, { json: { spec: S.spec } });
             if (typeof P !== "undefined" && P && P.id === S.pid && r.product) { P.variants = r.product.variants; P.edit_rev = r.product.edit_rev; if (window.renderVariants) renderVariants(); if (window.refreshPricing) refreshPricing(); }
             toast(Z(`已填 ${r.n} 个变体的克数 / 时长`, `ใส่กรัม / เวลาให้ ${r.n} ตัวเลือกแล้ว`));
+            if (window.M3) M3.refresh();
           });
           return;
         }
         if (a === "slice" || a === "merge") {
           if (S.dirty) { toast(Z("先保存打印方案", "บันทึกแผนการพิมพ์ก่อน"), true); return; }
           if (a === "merge" && !confirm(S.spec ? Z(`按摆好的位置合并成一个模型，指定给规格「${S.spec}」？这个规格原来的切片文件会退回草稿。`, `รวมเป็นโมเดลเดียวและกำหนดให้แบบ「${S.spec}」?`)
-            : Z("按摆好的位置合并成一个模型，设为 3D 模型？这个产品已有的切片文件会退回草稿。", "รวมเป็นโมเดลเดียวและตั้งเป็นโมเดล 3D? ไฟล์สไลซ์เดิมจะกลับเป็นร่าง"))) return;
+            : Z("按摆好的位置合并成一个模型，设为 3D 模型（只影响打印；展示不变，还是原来的零件）？这个产品已有的切片文件会退回草稿。", "รวมเป็นโมเดลเดียวและตั้งเป็นโมเดล 3D (มีผลกับการพิมพ์เท่านั้น การแสดงผลไม่เปลี่ยน)? ไฟล์สไลซ์เดิมจะกลับเป็นร่าง"))) return;
           await busy(b, async () => {
             const r = await apiJob(`/api/products/${encodeURIComponent(S.pid)}/print-plan/${a}`, { json: { spec: S.spec, plate_id: pl.id, colour: S.colour } });
             if (a === "merge") { toast(Z("已合并", "รวมแล้ว")); window.dispatchEvent(new CustomEvent("model-changed", { detail: S.pid })); }
             else toast(Z("切片完成，已存成切片文件（草稿，复核后生产用）", "สไลซ์เสร็จ บันทึกเป็นไฟล์สไลซ์แล้ว (ร่าง)") + (r.file_id ? ` #${r.file_id}` : ""));
             await mount(BOX, S.pid, S.spec);
+            if (window.M3) M3.refresh();
           }, a === "slice" ? TR("busy.slicing") : undefined);
           return;
         }
@@ -467,6 +521,10 @@
     BOX.addEventListener("change", async (ev) => {
       const t = ev.target, plEl = t.closest("[data-pl]"), pl = plEl ? plateOf(plEl.dataset.pl) : null;
       try {
+        if ((t.dataset.ppf || t.dataset.pps || t.dataset.ppi || t.dataset.schSlot || (t.dataset.ppAdd !== undefined && t.value))) {
+          // 改之前记下（下拉框已经变了：用改之前的方案）
+          if (S._pre) { if (!S.undo.length || S.undo[S.undo.length - 1] !== S._pre) { S.undo.push(S._pre); S.redo = []; } }
+        }
         if (t.dataset.ppf && pl) {
           pl[t.dataset.ppf] = t.dataset.ppf === "printer" ? t.value : +t.value;
           S.dirty = true; render(); return;
@@ -502,6 +560,7 @@
         }
       } catch (e) { toast(e.message, true); }
     });
+    BOX.addEventListener("focusin", (ev) => { if (S && S.plan && ev.target.closest("select,input")) S._pre = JSON.stringify(S.plan); });
     window.addEventListener("resize", () => { if (S && S.plan && BOX && BOX.isConnected) S.plan.plates.forEach(draw); });
   }
   // 手动摆过的盘里新加的零件：找一个空地方放（从左下往右上找，不和别的重叠）
@@ -540,15 +599,31 @@
     });
   }
 
+  // v2.53：编辑页打开时不读方案（收起，m3.js 显示一行摘要）；点「查看 / 编辑打印方案」才 open
   async function mountEditor(force) {
     if (typeof P === "undefined" || !P) return;
     const el = document.getElementById("plan-box");
     if (!el) return;
-    if (!force && S && S.pid === P.id && BOX === el && el.childElementCount) return;    // 同一个产品：保留正在改的方案
-    BOX = el; wire();
-    await mount(el, P.id);
+    const same = S && S.pid === P.id && BOX === el && el.childElementCount;
+    if (!same || force) { el.innerHTML = ""; el.classList.add("hidden"); if (!same) S = null; }
+    if (window.M3) await M3.mount(P.id);
+    if (force && window.M3 && M3.state.planOpen) await open(M3.spec);
   }
-  window.PLAN = { mount: async (el, pid, spec) => { BOX = el; wire(); await mount(el, pid, spec); }, mountEditor, check, poly, overlap };
+  async function open(spec) {
+    const el = document.getElementById("plan-box");
+    if (!el || typeof P === "undefined" || !P) return;
+    BOX = el; wire();
+    el.classList.remove("hidden");
+    if (S && S.pid === P.id) S.sel = null;
+    await mount(el, P.id, spec || "");
+  }
+  function close() {
+    const el = document.getElementById("plan-box");
+    if (el) { el.classList.add("hidden"); el.innerHTML = ""; }
+    if (S) { S.dirty = false; S.plan = null; }
+  }
+  window.PLAN = { mount: async (el, pid, spec) => { BOX = el; wire(); await mount(el, pid, spec); }, mountEditor, open, close,
+    dirty: () => !!(S && S.dirty && S.plan), check, poly, overlap };
   // 编辑页：打开产品 / 换了 3D 模型时刷新
-  window.addEventListener("model-changed", (e) => { if (typeof P !== "undefined" && P && e.detail === P.id) mountEditor(true).catch(() => {}); });
+  window.addEventListener("model-changed", (e) => { if (typeof P !== "undefined" && P && e.detail === P.id && window.M3 && M3.state.planOpen) open(M3.spec).catch(() => {}); });
 })();

@@ -282,6 +282,8 @@ def _save_from_client(pid, p):
         else:
             p.pop("print_plans", None)
         p["display"] = old.get("display")
+        if renames and isinstance(p["display"], dict) and isinstance(p["display"].get("specs"), dict):   # v2.53 每个规格的展示跟着改名
+            p["display"] = dict(p["display"], specs={renames.get(k, k): v for k, v in p["display"]["specs"].items()})
         _cu = {(x.get("sku") or "").upper(): (x.get("colour_usage"), x.get("purge_g")) for x in old.get("variants") or [] if x.get("sku")}
         for v in p.get("variants") or []:
             if (v.get("sku") or "").upper() in _cu:

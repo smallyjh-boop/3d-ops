@@ -115,6 +115,7 @@
       <label class="filebtn">上传模型文件<input id="model-input" type="file" accept=".stl,.3mf" hidden></label></div>
     </div>
     <div id="model-empty" class="muted small" data-ed-free>上传 STL 或 3MF 后，可以 360° 预览、自动估算克数和打印时长、一键生成多颜色多角度商品图和尺寸图。没有模型也可以跳过这一步。</div>
+    <div id="m3-top" class="m3-top" data-ed-free></div>
     <section class="ed-sec ed-sec-show" id="show-sec">
       <div class="ed-sec-h"><span class="ed-sec-tag show">🖼 展示</span><b>商品页用：3D 预览、组装好的样子、颜色效果、商品图</b>
         <span class="muted small">（只管好看，不影响生产）</span></div>
@@ -148,19 +149,16 @@
           <select id="snap-color" hidden></select>
         </div>
         <div id="render-progress" class="muted small"></div>
-        <div class="asm-entry" data-ed-free>
-          <h4>组装（多个零件的模型）</h4>
-          <p class="muted small">零件是分开打印的（例如 身体 + 头 + 底座）：在 3D 里用鼠标把每个零件拖到 / 转到商品照片里的位置，保存后 3D 预览和商品图都按组装好的样子显示。打印时零件还是按「打印方案」平放。</p>
-          <div class="row gap wrap"><button class="primary-lite" id="btn-asm">🧩 打开组装视图</button><span id="asm-note" class="small muted"></span></div>
-        </div>
       </div>
     </div>
+    <div id="asm-sum" class="m3-sum" data-ed-free></div>
     <div id="asm-box" class="asm-box hidden" data-ed-free></div>
     </section>
 
     <section class="ed-sec ed-sec-plan" id="plan-sec">
       <div class="ed-sec-h"><span class="ed-sec-tag plan">🧩 打印方案</span><b>生产用：每个规格打几盘、怎么摆、用哪几个 AMS 颜色槽；生产任务、成本、扣耗材都按这里</b></div>
-      <div id="plan-box" data-ed-free></div>
+      <div id="plan-sum" class="m3-sum" data-ed-free></div>
+      <div id="plan-box" class="hidden" data-ed-free></div>
       <details class="plan-more" id="est-wrap">
         <summary><b>克数 / 打印时长（估算 · 切片）</b> <span class="muted small">按整个 3D 模型估算，或用 OrcaSlicer 切片、导入切片文件</span></summary>
         <div class="row gap wrap">
