@@ -292,9 +292,9 @@ const PRINTERS_CARD = () => `<div class="card cfg-group"><h3>打印机与 OrcaSl
         <label class="small">台数<input id="pr-add-n" type="number" min="1" max="50" value="1" style="width:60px"></label>
         <button id="pr-add" class="mini">＋ 添加</button>
         <span class="small muted">共 ${(CFG.printers || []).length} 台：${prCountByModel()}</span></div>
-      <table class="grid" id="printer-table"><thead><tr><th>机器编码</th><th>机型</th><th>备注（位置等）</th><th>类型</th><th>启用</th><th title="有 AMS（自动换料系统），能打多色。多色的生产任务只排给勾了的打印机">有 AMS / 多色</th><th>每小时克数</th><th title="发送切片文件前核对：文件的喷嘴直径要和这里一样">喷嘴 mm</th><th title="填了就核对切片文件用的热床板；不填不核对">现在装的热床板</th><th>打印机配置 (machine)</th><th>工艺配置 (process)</th><th>耗材配置 (filament)</th><th></th></tr></thead><tbody>
+      <div class="tbl-scroll"><table class="grid" id="printer-table"><thead><tr><th>机器编码</th><th>机型</th><th>备注（位置等）</th><th>类型</th><th>启用</th><th title="有 AMS（自动换料系统），能打多色。多色的生产任务只排给勾了的打印机">有 AMS / 多色</th><th>每小时克数</th><th title="发送切片文件前核对：文件的喷嘴直径要和这里一样">喷嘴 mm</th><th title="填了就核对切片文件用的热床板；不填不核对">现在装的热床板</th><th title="OrcaSlicer 打印机配置 (machine)">打印机配置</th><th title="OrcaSlicer 工艺配置 (process)">工艺配置</th><th title="OrcaSlicer 耗材配置 (filament)">耗材配置</th><th></th></tr></thead><tbody>
       ${(CFG.printers || []).map((p, i) => printerRow(p, i)).join("")}
-      </tbody></table>
+      </tbody></table></div>
       <datalist id="dl-machine"></datalist>
       <datalist id="dl-models">${(window.PR_MODELS || []).map((m) => `<option value="${esc(m.name)}">`).join("")}</datalist>
       <div class="row gap wrap"><button id="btn-automatch" class="primary">自动匹配配置</button><button id="btn-find-profiles">查找 OrcaSlicer 和配置文件</button>${window.IN_DOCKER ? "" : '<button id="btn-pick-orca">手动选择程序…</button>'}<span id="profiles-info" class="muted small"></span></div>
@@ -461,18 +461,18 @@ function amsDefault(p) {
 function printerRow(p, i) {
   return `<tr data-i="${i}">
         <td><input data-p="code" value="${esc(p.code || "")}" placeholder="自动编号" style="width:84px" class="mono" data-notr></td>
-        <td><input data-p="name" list="dl-models" value="${esc(p.name)}" style="min-width:140px" data-notr></td>
-        <td><input data-p="note" value="${esc(p.note || "")}" style="width:100px" data-notr></td>
+        <td><input data-p="name" list="dl-models" value="${esc(p.name)}" title="${esc(p.name)}" style="width:120px" data-notr></td>
+        <td><input data-p="note" value="${esc(p.note || "")}" style="width:80px" data-notr></td>
         <td><select data-p="tech" style="width:90px"><option value="fdm" ${p.tech !== "resin" ? "selected" : ""}>FDM</option>${p.tech === "resin" || !window.MODKIT || MODKIT.enabled("resin") ? `<option value="resin" ${p.tech === "resin" ? "selected" : ""}>光固化</option>` : ""}</select></td>
         <td><input type="checkbox" data-p="enabled" ${p.enabled === false ? "" : "checked"}></td>
         <td><input type="checkbox" data-p="ams" ${amsDefault(p) ? "checked" : ""} title="有 AMS / 多色"></td>
         <td><input data-p="g_per_h" value="${esc(p.g_per_h)}" style="width:60px"></td>
         <td>${p.tech === "resin" ? '<input type="hidden" data-p="nozzle" value="0.4"><span class="muted small">—</span>' : `<input data-p="nozzle" value="${esc(p.nozzle ?? 0.4)}" style="width:52px">`}</td>
         <td>${p.tech === "resin" ? '<input type="hidden" data-p="plate" value="">' : `<select data-p="plate">${PLATES.map(([v, l]) => `<option value="${v}" ${(p.plate || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`}</td>
-        <td><input data-p="orca_machine" list="dl-machine" value="${esc(p.orca_machine || "")}" placeholder="自动" style="min-width:180px"></td>
-        <td><input data-p="orca_process" list="dl-process-${i}" value="${esc(p.orca_process || "")}" placeholder="自动" style="min-width:180px"><datalist id="dl-process-${i}"></datalist></td>
-        <td><input data-p="orca_filament" list="dl-filament-${i}" value="${esc(p.orca_filament || "")}" placeholder="自动" style="min-width:160px"><datalist id="dl-filament-${i}"></datalist></td>
-        <td class="nowrap">${p.tech === "resin" ? '<span class="small muted">光固化：电脑上切好上传</span>' : `<button data-test="${i}">测试切片</button>`} <button class="mini danger" data-prdel>删除</button></td></tr>`;
+        <td><input data-p="orca_machine" list="dl-machine" value="${esc(p.orca_machine || "")}" title="${esc(p.orca_machine || "")}" placeholder="自动" style="width:140px"></td>
+        <td><input data-p="orca_process" list="dl-process-${i}" value="${esc(p.orca_process || "")}" title="${esc(p.orca_process || "")}" placeholder="自动" style="width:140px"><datalist id="dl-process-${i}"></datalist></td>
+        <td><input data-p="orca_filament" list="dl-filament-${i}" value="${esc(p.orca_filament || "")}" title="${esc(p.orca_filament || "")}" placeholder="自动" style="width:120px"><datalist id="dl-filament-${i}"></datalist></td>
+        <td class="nowrap">${p.tech === "resin" ? '<span class="small muted">光固化：电脑上切好上传</span>' : `<button class="mini" data-test="${i}">测试切片</button>`} <button class="mini danger" data-prdel>删除</button></td></tr>`;
 }
 function prCountByModel() {
   const n = {}; (CFG.printers || []).forEach((p) => (n[p.name] = (n[p.name] || 0) + 1));

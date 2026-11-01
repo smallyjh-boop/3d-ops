@@ -850,3 +850,21 @@ tr.nav-hl>td{animation:navhl 2.4s ease-out}
 .lib-wrap>*,.cur-inbox>*,.lw-body>*{min-width:0}
 @media (max-width:900px){.lib-groups,.lw-groups,.cur-folders{max-width:100%;overflow:hidden}.grp3-top,.grp3-shops{flex-wrap:nowrap;overflow-x:auto}}
 #lw-shop{width:auto;min-width:140px;max-width:220px}
+/* v2.53：打印机设置表格不撑出卡片（窄屏横向滚动），输入框不换行挤压 */
+#printer-table{width:auto;min-width:100%}
+#printer-table td{white-space:nowrap}
+#printer-table th{white-space:normal;vertical-align:bottom;font-size:12px;line-height:1.25}
+#printer-table td,#printer-table th{padding-left:4px;padding-right:4px}
+#printer-table input:not([type=checkbox]),#printer-table select{padding:4px 6px;font-size:13px;min-width:0}
+#printer-table [data-p=code]{width:70px!important}
+#printer-table [data-p=note]{width:70px!important}
+#printer-table [data-p=tech]{width:72px!important}
+#printer-table [data-p=g_per_h]{width:48px!important}
+#printer-table [data-p=nozzle]{width:46px!important}
+#printer-table [data-p=plate]{width:88px}
+#printer-table td:last-child button{padding:3px 8px;font-size:12px}
+#printer-table [data-p=orca_machine],#printer-table [data-p=orca_process]{width:128px!important}
+#printer-table [data-p=orca_filament]{width:112px!important}
+#printer-table [data-p=name]{width:112px!important}
+#printer-table td:last-child{display:flex;flex-direction:column;gap:3px;align-items:stretch}
+#printer-table th:nth-child(5),#printer-table th:nth-child(6){width:44px}
