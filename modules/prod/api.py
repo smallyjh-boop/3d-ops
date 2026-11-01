@@ -25,6 +25,11 @@ def recipe_save(pid):
     r["updated_at"] = time.time()
     r["updated_by"] = _uname()
     specmodel.save_recipe(pid, body.get("spec") or "", r)      # 规格有自己的模型时存到规格的方案里（v2.22）
+    try:                                # v2.55：参数在打印方案（每盘）里编辑；老接口保存的也写进方案，两边一致
+        from modules.model import printplan
+        printplan.apply_recipe(pid, body.get("spec") or "", r)
+    except ImportError:
+        pass
     return recipe_get(pid)
 
 

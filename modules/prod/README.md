@@ -81,3 +81,4 @@
   ⑦ 导入预览不回传原始行（明文访问码），存在服务器上给 token，提交按 token + 行号取；提交失败返回的行也遮住访问码。
   ⑧ POST /api/config 不再把 200 台以后的打印机截掉：超过 5000 台报错。
   ⑨ load_config 按设置文件版本（inode + 修改时间 + 大小）缓存，返回拷贝（2000 台反复读约 5 毫秒，原来每次 0.2 秒以上）；连接管理在单独线程里读设置。
+- （系统 v2.55.0）「生产 → 打印方案 / 切片文件」打开的窗口换成统一的打印方案编辑器（modules/model/ui/plan.js，和编辑产品页同一份方案，能切换规格），下面是模型文件 + 切片文件（recipe.js 的 filesOnly 模式；编辑产品页的「📁 模型文件与切片文件」也是这个模式）。老接口 POST /api/products/<pid>/recipe 保存后同步写进打印方案；slicer.orca_slice 加 keep_settings（零件有单独参数时保留 3MF 的 model_settings、只在本机切）。

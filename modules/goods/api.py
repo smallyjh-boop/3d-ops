@@ -52,7 +52,7 @@ def _rows(want):
             "groups": p.get("groups") or [], "material": p.get("material") or "",
             "has_model": bool(p.get("model")), "keywords": p.get("keywords") or "",
             "draft": bool(p.get("draft")), "from_curator": bool(p.get("source")), "inbox": bool(p.get("inbox")),
-            "lead_days": p.get("lead_days"), "has_recipe": bool(p.get("recipe")),
+            "lead_days": p.get("lead_days"), "has_recipe": bool(p.get("recipe") or p.get("print_plans")),
             "thumb": next((f"/files/{p['id']}/{'out' if im.get('processed') else 'raw'}/{im['file']}" for im in p.get("images", []) if im.get("file")), ""),
         })
         out.append(item)

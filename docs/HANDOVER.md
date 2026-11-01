@@ -9,6 +9,7 @@
   删除旧外部选品工具对接
 - v2.53.0：AI 接口、场景图、返回回原处、模型区按规格、仓库全部进货位、自动分组、库存同步（自动推送总开关默认关）、平台费率、试打 / 打印测试、网络诊断
 - 开发中（v2.54.1，未发版）：选品 → 候选池操作重做（页签 待处理 / 已采用 / 已处理 / 回收站；每条删除 / 恢复 / 编辑 / 手动分数；清理对话框换成「可以清理」建议行 + ⚙ 设置；修「清理所选」字符串数字报错）。详见 modules/curate/README.md「系统 v2.54.1」，测试 t_pool254.py
+- 开发中（v2.55.0，未发版，T27）：统一的打印方案编辑器（编辑页 ③ 和生产 → 打印方案窗口同一个）：参数按盘、旧 recipe 自动搬进方案并回写、零件清单 + 每个零件方向卡片、多选 / 框选 / 工具条（移动 旋转 缩放 镜像 贴平台 复制 对齐 成组 拆分 切开 换槽 移盘 单独参数）、快捷键。详见 modules/model/README.md「系统 v2.55.0」，测试 t_editor255
 - 测试机已装 OrcaSlicer 2.3.1（/opt/orca，PATH 里 orca-slicer），v20_test 和真切片测试能跑
 - 老板 NAS：两个网口同网段（qvs0 192.168.31.2 没插线），需要在 QNAP 把网口 1 改 DHCP 才能永久生效
 - 打印机：P1S、K1 Max（192.168.31.139）、K1C（192.168.31.133）已填；K1 原厂固件发送打印待「打印测试」真机验证
@@ -23,6 +24,8 @@
 - 拓竹 X1 / P1 左前角 18×28 mm 是废料口（bed_exclude_area），零件压到那里 OrcaSlicer 报「盘上没有能切的零件」；自动排列已避开（printplan.exclude_of）
 
 ## 重要决定（以及原因）
+- v2.55 打印参数的唯一来源是打印方案每盘的 params；product["recipe"] / spec_recipes 只是第 1 盘的镜像（老代码读）；recipes.get 只认 v2.55 后保存过（盘里有 params）的方案
+- v2.55 零件单独参数写在 3MF Metadata/model_settings.config 的 <object> metadata（layer_height / sparse_infill_density / wall_loops），切片时 keep_settings 保留该文件
 - v2.54 打印机身份：稳定 id + 只往后加；数据库仍存序号，删除时 fleet.remap 按 id 重映射（全改成 id 要动几十处 SQL，风险大）
 - v2.54 复审：load_config 按文件版本缓存并返回拷贝（pickle）；本进程保存后 config.invalidate()，别的进程写按 inode / mtime / 大小认出来
 - v2.54 复审：printers._status 按稳定 id 存（外面按序号读写照旧）；后台进程 ERP 等不到结果但已认领 = UnknownResult（不当失败，start_run 记成打印中）

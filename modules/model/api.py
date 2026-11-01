@@ -551,7 +551,7 @@ def _plan_payload(pid, spec, plan=None, checks=None):
     from core import mesh, specmodel
     p = store.load(pid)
     plan = plan or _pp.get_plan(p, spec)
-    fps, chk, warn = {}, {}, []
+    fps, chk, warn, pchk = {}, {}, [], {}
     for pl in plan.get("plates") or []:
         try:
             f = _pp.fps_for(pid, p, pl)
@@ -560,8 +560,15 @@ def _plan_payload(pid, spec, plan=None, checks=None):
             continue
         fps.update(f)
         if any(it.get("x") is None for it in pl.get("items") or []):
-            _pp.auto_arrange(pl, _pp.bed_of(pl["printer"]), f)
+            if pl.get("manual") and any(it.get("x") is not None for it in pl.get("items") or []):
+                _pp.place_new(pl, _pp.bed_of(pl["printer"]), f)
+            else:
+                _pp.auto_arrange(pl, _pp.bed_of(pl["printer"]), f)
         chk[pl["id"]] = (checks or {}).get(pl["id"]) or _pp.check_plate(pl, _pp.bed_of(pl["printer"]), f)
+        try:
+            pchk[pl["id"]] = _pp.plate_checks(p, pl, f)
+        except (ValueError, OSError) as e:
+            warn.append(str(e))
     colours = list(dict.fromkeys((v.get("opt1_zh") or "").strip() for v in p.get("variants") or []
                                  if (v.get("opt2_zh") or "").strip() == spec and (v.get("opt1_zh") or "").strip()))
     p2 = dict(p, print_plans=dict(p.get("print_plans") or {}, **{spec: plan}))
@@ -589,13 +596,24 @@ def _plan_payload(pid, spec, plan=None, checks=None):
                     "parts": [{"index": x.get("index"), "name": x.get("name"), "best": x.get("best"), "size": x.get("size")} for x in info.get("parts") or []],
                     "multicolor": bool(ci.get("multicolor")), "painted": bool(ci.get("painted")),
                     "colors": {"filaments": ci.get("filaments"), "used": ci.get("used"), "usage": ci.get("usage")} if ci.get("multicolor") else None,
-                    "main": (p.get("model") or {}).get("lib_id") == e["id"]})
+                    "main": (p.get("model") or {}).get("lib_id") == e["id"], "origin": e.get("origin") or "",
+                    "parts_of": [{"id": d.get("id"), "part": d.get("part"), "qty": d.get("qty"), "label": d.get("label")} for d in e.get("parts_of") or []] or None,
+                    "cut_of": e.get("cut_of"), "orients": [{k: o.get(k) for k in ("key", "contact_cm2", "overhang_cm2", "size_mm", "score")} for o in info.get("orients") or []]})
     specs = [{"spec": s, "own": specmodel.own(p, s), "has_plan": s in (p.get("print_plans") or {})} for s in specmodel.specs(p)]
     summ = _pp.plan_summary(p2 if plan.get("from_display") else p, spec, cfg)
     return {"spec": spec, "plan": plan, "footprints": fps, "checks": chk, "usage": use, "colours": colours, "library": lib,
             "printers": _pp.printer_models(cfg), "specs": specs, "orient_zh": mesh.ORIENT_ZH, "material": p.get("material") or "PLA",
             "warnings": warn, "slot_max": _pp.SLOT_MAX, "state": summ["state"], "follow": bool(plan.get("follow")), "scale": plan.get("scale"),
-            "purge": {"g": cfg.get("mc_purge_g", 1.5), "s": cfg.get("mc_change_s", 50)}}
+            "purge": {"g": cfg.get("mc_purge_g", 1.5), "s": cfg.get("mc_change_s", 50)},
+            # v2.55：每盘参数（原来「打印方案」面板的）、每盘规则检查
+            "plate_checks": pchk, "params_meta": _params_meta(cfg), "model_entry": (_pp._spec_entry(p, spec) or {}).get("id")}
+
+
+def _params_meta(cfg):
+    from core import recipes
+    names = [x.get("name") for x in cfg.get("printers") or []]
+    return {"support_zh": recipes.SUPPORT_ZH, "bed_types": recipes.BED_TYPES, "patterns": _pp.PATTERNS, "materials": recipes.MATERIALS,
+            "temp_range": recipes.TEMP_RANGE, "printer_idx": {n: names.index(n) for n in names if n}, "ov_range": {k: v[:2] for k, v in _pp.OV_RANGE.items()}}
 
 
 @bp.get("/api/products/<pid>/print-plan")
@@ -628,7 +646,8 @@ def print_plan_footprint(pid):
     b = request.get_json(force=True) or {}
     try:
         p = store.load(pid)
-        return jsonify({"items": [_pp.footprint(pid, x.get("id"), x.get("part"), x.get("orient") or "bottom", p) for x in (b.get("items") or [])[:200]]})
+        return jsonify({"items": [_pp.footprint(pid, x.get("id"), x.get("part"), x.get("orient") or "bottom", p, x.get("scale") or 1,
+                                                x.get("face"), x.get("mirror") or "") for x in (b.get("items") or [])[:200]]})
     except (ValueError, OSError) as e:
         return err(str(e))
 
@@ -646,7 +665,44 @@ def print_plan_check(pid):
         miss = 0
         if b.get("arrange") or any(it.get("x") is None for it in pl["items"]):
             miss = _pp.auto_arrange(pl, bed, f)
-        return jsonify({"plate": pl, "check": _pp.check_plate(pl, bed, f), "footprints": f, "missed": miss, "bed": bed})
+        if not pl.get("params"):
+            _pp._migrate(p, (b.get("spec") or "").strip(), plan)
+        return jsonify({"plate": pl, "check": _pp.check_plate(pl, bed, f), "footprints": f, "missed": miss, "bed": bed,
+                        "plate_checks": _pp.plate_checks(p, pl, f)})
+    except (ValueError, OSError) as e:
+        return err(str(e))
+
+
+@bp.post("/api/products/<pid>/print-plan/op")
+def print_plan_op(pid):
+    """v2.55 编辑器的多选操作（复制 / 删除 / 镜像 / 旋转 / 缩放 / 换槽 / 方向 / 对齐 / 分布 / 成组 / 拆分 / 移到别的盘 / 单独参数 / 切割…），
+    不保存，返回改好的方案。{spec, plan, op: {op, plate, uids, …}}（见 printplan.apply_op）"""
+    b = request.get_json(force=True) or {}
+
+    def go():
+        try:
+            r = _pp.apply_op(pid, (b.get("spec") or "").strip(), b.get("plan") or {}, b.get("op") or {}, _uname())
+            if (b.get("op") or {}).get("op") == "cut":
+                db.audit(_uname(), "打印方案：切割零件", pid, ", ".join(x["name"] for x in r.get("cut") or []))
+            return jsonify(r)
+        except FileNotFoundError:
+            return err("产品不存在", 404)
+        except (ValueError, OSError) as e:
+            return err(str(e))
+    if (b.get("op") or {}).get("op") in ("cut", "auto_orient", "split"):
+        return maybe_async(f"打印方案编辑 {pid}", go, "model_lib", pid)
+    return go()
+
+
+@bp.post("/api/products/<pid>/print-plan/orients")
+def print_plan_orients(pid):
+    """v2.55 一个零件的方向卡片（六个方向 + 推荐的面），{id, part, scale}"""
+    b = request.get_json(force=True) or {}
+    try:
+        part = b.get("part")
+        return jsonify(_pp.orient_options(pid, b.get("id"), None if part in (None, "") else int(part), b.get("scale") or 1))
+    except FileNotFoundError:
+        return err("产品不存在", 404)
     except (ValueError, OSError) as e:
         return err(str(e))
 

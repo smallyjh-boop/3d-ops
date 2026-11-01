@@ -4,10 +4,18 @@
 // 款式（白款 / 黑款…）= 配色方案（每个槽装什么颜色）。保存后生产任务、成本、扣耗材都按这里。服务器在 modules/model/printplan.py。
 // v2.53：编辑页里默认收起（m3.js 显示一行摘要，点「查看 / 编辑」才打开）；规格由 ③ 顶部切换；撤销 / 重做（Ctrl+Z / Ctrl+Y）；
 // 「从组装生成打印方案」（展示里的零件平放、自动排盘）。
+// v2.55 统一的打印方案编辑器（编辑页 ③ 和「生产 → 打印方案」窗口用同一个）：
+// - 原来「打印方案」面板的参数（材料、支撑、壁数、顶底层、填充、热床板、帽檐、间距、温度、每台打印机的耗材配置、注意事项）按盘编辑，
+//   每盘的规则检查（悬空、贴平台面积、细高…）；
+// - 零件清单（组合模型按零件，合并出来的模型可以拆回零件）、每个零件自己的方向（方向卡片：六个方向 + 推荐的面）；
+// - 切片软件常用操作：点选 / Ctrl·Shift 多选 / 框选 / 全选 / 选同种零件，移动 / 旋转 / 缩放（填数字），按面贴平台、自动方向、
+//   自动排列、复制 N 份、删除、镜像、对齐 / 均匀分布、成组 / 拆组、拆成零件、按高度切开、换 AMS 槽、移到别的盘 / 新的一盘、
+//   零件单独参数（层高 / 填充 / 壁数，写进 3MF 给 OrcaSlicer），撤销重做 + 快捷键（和 Bambu Studio 一样的尽量一样）。
+//   多选操作在服务器算（/print-plan/op），拖动 / 方向键微调在浏览器。
 (function () {
   const TH = () => window.I18N && I18N.lang === "th";
   const Z = (zh, th) => (TH() ? th : zh);
-  let S = null;          // {pid, spec, d(服务器数据), plan(正在改的), fps, sel: {pl, uid}, colour, dirty, undo: [], redo: []}
+  let S = null;          // {pid, spec, d(服务器数据), plan(正在改的), fps, sel: {pl, uids}, colour, dirty, undo, redo, ori, pchk, clip, opts}
   let BOX = null;
 
   const css = `
@@ -20,28 +28,51 @@
   .pp-plate{border:1px solid #dfe5ee;border-radius:10px;padding:8px 10px;margin:8px 0;background:#fff}
   .pp-ph{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
   .pp-ph label{font-size:13px}
-  .pp-grid{display:grid;grid-template-columns:minmax(260px,480px) minmax(280px,1fr);gap:12px;margin-top:6px}
+  .pp-grid{display:grid;grid-template-columns:minmax(300px,560px) minmax(280px,1fr);gap:12px;margin-top:6px}
   @media (max-width:1100px){.pp-grid{grid-template-columns:1fr}}
-  .pp-cv{width:100%;max-width:520px;touch-action:none;border-radius:8px;background:#fafbfc;cursor:grab;display:block}
+  .pp-cv{width:100%;max-width:560px;touch-action:none;border-radius:8px;background:#fafbfc;cursor:default;display:block}
   .pp-cv:focus{outline:2px solid #6aa7ee}
-  .pp-tools{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0}
+  .pp-tools{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0;align-items:center}
   .pp-tools button{padding:3px 8px}
   .pp-st{font-size:13px;margin:4px 0}.pp-st.ok{color:#18794e}.pp-st.bad{color:#c62828;font-weight:600}
   .pp-slots{width:100%;border-collapse:collapse;font-size:13px}.pp-slots td,.pp-slots th{padding:3px 4px;border-bottom:1px solid #eef1f5;text-align:left}
   .pp-sw{display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid rgba(0,0,0,.25);vertical-align:-2px;margin-right:4px}
-  .pp-items{max-height:260px;overflow:auto;border:1px solid #eef1f5;border-radius:8px}
+  .pp-items{max-height:240px;overflow:auto;border:1px solid #eef1f5;border-radius:8px}
   .pp-items table{width:100%;border-collapse:collapse;font-size:12.5px}.pp-items td{padding:3px 4px;border-bottom:1px solid #f1f3f6;vertical-align:middle}
-  .pp-items tr.on{background:#eaf3ff}.pp-items tr.bad td:first-child{border-left:3px solid #e53935}
+  .pp-items tr{cursor:pointer}.pp-items tr.on{background:#eaf3ff}.pp-items tr.bad td:first-child{border-left:3px solid #e53935}
   .pp-items select{max-width:130px}
   .pp-use{font-size:13px;background:#f7f9fc;border-radius:8px;padding:6px 8px;margin-top:6px}
   .pp-use table{border-collapse:collapse}.pp-use td,.pp-use th{padding:2px 8px 2px 0;text-align:left}
   .pp-est{font-size:11px;border-radius:4px;padding:0 4px;background:#fff3cd;color:#8a6100;margin-left:4px}
   .pp-sch td,.pp-sch th{padding:3px 6px}
   .pp-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-  .pp-3d{height:300px;margin-top:6px}
+  .pp-3d{height:320px;margin-top:6px}
   .asm-box{border:1px solid #f0d9b5;border-radius:10px;padding:8px;margin-top:8px;background:#fffdf8}
+  .pe-ctx{border:1px solid #b9d3f3;background:#f3f8ff;border-radius:8px;padding:6px 8px;margin:6px 0;font-size:12.5px}
+  .pe-ctx .pe-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:2px 0}
+  .pe-ctx .pe-g{display:inline-flex;gap:3px;align-items:center;padding:2px 6px;border-radius:6px;background:#fff;border:1px solid #e0e8f3}
+  .pe-ctx input{width:58px!important;padding:2px 4px!important;display:inline-block}
+  .pe-ctx select{width:auto!important;max-width:150px;padding:2px 4px!important;display:inline-block}
+  .pe-ctx button{padding:2px 7px}
+  .pe-parts{width:100%;border-collapse:collapse;font-size:12.5px;margin:4px 0}
+  .pe-parts td,.pe-parts th{padding:3px 6px;border-bottom:1px solid #eef1f5;text-align:left;vertical-align:middle}
+  .pe-parts input{width:56px!important;display:inline-block}
+  .pe-oris{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin:4px 0}
+  .pe-ori{border:1px solid #dfe5ee;border-radius:8px;padding:5px 6px;font-size:12px;cursor:pointer;background:#fff;line-height:1.35}
+  .pe-ori:hover{border-color:#6aa7ee}.pe-ori.on{border:2px solid #1565c0;background:#eef5ff}
+  .pe-ori.lv-bad{background:#fff5f5}.pe-ori.lv-warn{background:#fffbea}
+  .pe-ori b{display:block;font-size:12.5px}
+  .pe-prm{border:1px solid #e3e8ef;border-radius:8px;margin-top:8px;background:#fbfcfe}
+  .pe-prm>summary{padding:6px 8px;cursor:pointer;font-size:13px}
+  .pe-prm .form4{padding:4px 8px 8px}
+  .pe-chk{font-size:12.5px;margin:2px 0;padding:2px 6px;border-radius:6px}
+  .pe-chk.lv-error{background:#fdecea;color:#b3261e}.pe-chk.lv-warn{background:#fff6e0;color:#7a5200}.pe-chk.lv-info{background:#eef5ff;color:#244d80}.pe-chk.lv-ok{color:#18794e}
+  .pe-chk[data-chk-uids]{cursor:pointer}
+  .pe-keys{font-size:12px}.pe-keys kbd{border:1px solid #ccd3dd;border-bottom-width:2px;border-radius:4px;padding:0 4px;background:#fff;font-size:11px}
+  .pe-specs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:2px 0 6px}
   `;
   if (!document.getElementById("pp-css")) { const st = document.createElement("style"); st.id = "pp-css"; st.textContent = css; document.head.appendChild(st); }
+  else document.getElementById("pp-css").textContent = css;
 
   const clone = (o) => JSON.parse(JSON.stringify(o));
   const uid = () => "i" + Math.random().toString(16).slice(2, 8);
@@ -49,10 +80,13 @@
   const colourNames = () => Object.keys(window.COLORS || {});
   const cl = (c) => { if (!c || !TH()) return c; try { const i = window.colorInfo ? colorInfo(c) : null; return (i && i.th) || c; } catch { return c; } };   // 颜色名：泰文界面显示泰文名
   const n1 = (v) => (v == null ? "-" : (Math.round(v * 10) / 10).toString());
+  const enc = encodeURIComponent;
   const bedOf = (name) => { const m = (S.d.printers || []).find((x) => x.name === name); return (m && m.bed) || [256, 256, 256]; };
   const prModel = (name) => (S.d.printers || []).find((x) => x.name === name) || {};
   const plateOf = (id) => S.plan.plates.find((x) => x.id === id);
   const libOf = (id) => (S.d.library || []).find((x) => x.id === id);
+  const partKey = (it) => `${it.id}|${it.part == null ? "" : it.part}`;
+  const fpKey = (it) => `${it.id}/${it.part}/${it.orient}/${(it.face || []).join(",")}/${it.mirror || ""}/${it.scale || 1}`;
   function labelOf(it) {
     const e = libOf(it.id);
     if (!e) return it.id;
@@ -66,6 +100,16 @@
     const s = (pl.slots || []).find((x) => x.slot === slot) || {};
     return sch[String(slot)] || s.colour || S.colour || "";
   }
+
+  // ---------------- 选择（v2.55：多选） ----------------
+  const selOf = (pl) => (S.sel && S.sel.pl === pl.id ? S.sel.uids : []);
+  const isSel = (pl, u) => selOf(pl).includes(u);
+  function withGroups(pl, uids) {             // 成组的零件一起选
+    const gs = new Set(pl.items.filter((it) => uids.includes(it.uid) && it.group).map((it) => it.group));
+    if (!gs.size) return uids;
+    return pl.items.filter((it) => uids.includes(it.uid) || (it.group && gs.has(it.group))).map((it) => it.uid);
+  }
+  function setSel(pl, uids) { S.sel = { pl: pl.id, uids: withGroups(pl, [...new Set(uids)]) }; }
 
   // ---------------- 几何（和服务器 printplan.py 一样的算法） ----------------
   function poly(fp, x, y, rot) {
@@ -101,6 +145,14 @@
     }
     return res;
   }
+  function selBox(pl, uids) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    pl.items.forEach((it) => {
+      if (!uids.includes(it.uid) || it.x == null || !S.fps[it.uid]) return;
+      poly(S.fps[it.uid], it.x, it.y, it.rot).forEach(([x, y]) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); });
+    });
+    return x0 === Infinity ? null : [x0, y0, x1, y1];
+  }
 
   // ---------------- 撤销 / 重做（v2.53） ----------------
   function mark() {                    // 改之前调用：记下现在的样子
@@ -117,59 +169,115 @@
     to.push(JSON.stringify(S.plan));
     S.plan = JSON.parse(from.pop());
     S.dirty = true;
-    if (S.sel && !plateOf(S.sel.pl)) S.sel = { pl: (S.plan.plates[0] || {}).id, uid: null };
+    if (!S.sel || !plateOf(S.sel.pl)) S.sel = { pl: (S.plan.plates[0] || {}).id, uids: [] };
+    else S.sel.uids = S.sel.uids.filter((u) => plateOf(S.sel.pl).items.some((it) => it.uid === u));
     try { await fpFor(S.plan.plates.flatMap((pl) => pl.items)); } catch { /* 忽略 */ }
     render();
   }
 
   // ---------------- 读取 / 保存 ----------------
-  async function mount(el, pid, spec) {
+  async function mount(el, pid, spec, opts) {
     BOX = el;
     if (!pid) { el.innerHTML = ""; S = null; return; }
-    if (!S || S.pid !== pid) S = { pid, spec: "", colour: "", undo: [], redo: [] };
+    if (!S || S.pid !== pid) S = { pid, spec: "", colour: "", undo: [], redo: [], ori: {}, openPrm: {} };
+    if (opts) S.opts = opts;
+    if (!S.opts) S.opts = {};
     if (spec !== undefined) S.spec = spec || "";
     el.innerHTML = `<p class="muted small">${Z("读取打印方案…", "กำลังโหลดแผนการพิมพ์…")}</p>`;
-    try { load(await api(`/api/products/${encodeURIComponent(pid)}/print-plan?spec=${encodeURIComponent(S.spec)}`)); }
+    try { load(await api(`/api/products/${enc(pid)}/print-plan?spec=${enc(S.spec)}`)); }
     catch (e) { el.innerHTML = `<p class="bad small">${esc(e.message)}</p>`; }
   }
   function load(d, draft) {
-    S.d = d; S.plan = clone(d.plan); S.fps = clone(d.footprints || {}); S.dirty = !!draft;
+    S.d = d; S.plan = clone(d.plan); S.fps = clone(d.footprints || {}); S.dirty = !!draft; S.pchk = clone(d.plate_checks || {});
+    S.plan.plates.forEach((pl) => pl.items.forEach((it) => { if (S.fps[it.uid]) S.fps[it.uid]._k = fpKey(it); }));
     if (!draft) { S.undo = []; S.redo = []; }
     if (!d.colours.includes(S.colour)) S.colour = d.colours[0] || "";
-    if (!S.sel || !plateOf(S.sel.pl)) S.sel = { pl: (S.plan.plates[0] || {}).id, uid: null };
+    if (!S.sel || !plateOf(S.sel.pl)) S.sel = { pl: (S.plan.plates[0] || {}).id, uids: [] };
+    else S.sel.uids = S.sel.uids.filter((u) => plateOf(S.sel.pl).items.some((it) => it.uid === u));
     render();
   }
   async function save(btn) {
     const run = async () => {
-      const d = await api(`/api/products/${encodeURIComponent(S.pid)}/print-plan`, { json: { spec: S.spec, plan: S.plan } });
+      const d = await api(`/api/products/${enc(S.pid)}/print-plan`, { json: { spec: S.spec, plan: S.plan } });
       load(d);
-      toast(Z("打印方案已保存", "บันทึกแผนการพิมพ์แล้ว"));
+      toast(Z("打印方案已保存（改了参数 / 摆盘要重新切片）", "บันทึกแผนการพิมพ์แล้ว (แก้พารามิเตอร์/การจัดวางต้องสไลซ์ใหม่)"));
       if (window.M3) M3.refresh();
-      if (typeof P !== "undefined" && P && P.id === S.pid) {     // 成本按颜色拆分：变体的多色用量刷新
-        try { const fresh = await api(`/api/products/${encodeURIComponent(S.pid)}`); P.variants.forEach((v, i) => { const f = (fresh.variants || []).find((x) => x.sku && x.sku === v.sku) || fresh.variants[i]; if (f) { v.colour_usage = f.colour_usage; v.purge_g = f.purge_g; } }); P.print_plans = fresh.print_plans; P.edit_rev = fresh.edit_rev; if (window.refreshPricing) refreshPricing(); } catch { /* 忽略 */ }
+      if (S.opts && S.opts.onSaved) S.opts.onSaved(d);
+      if (typeof P !== "undefined" && P && P.id === S.pid) {     // 成本按颜色拆分：变体的多色用量刷新；材料（槽 1）跟着
+        try {
+          const fresh = await api(`/api/products/${enc(S.pid)}`);
+          P.variants.forEach((v, i) => { const f = (fresh.variants || []).find((x) => x.sku && x.sku === v.sku) || fresh.variants[i]; if (f) { v.colour_usage = f.colour_usage; v.purge_g = f.purge_g; } });
+          P.print_plans = fresh.print_plans; P.recipe = fresh.recipe; P.edit_rev = fresh.edit_rev;
+          if (fresh.material && P.material !== fresh.material) { P.material = fresh.material; const el = document.querySelector('[data-f="material"]'); if (el) el.value = fresh.material; }
+          if (window.refreshPricing) refreshPricing();
+        } catch { /* 忽略 */ }
       }
     };
     try { if (btn) await busy(btn, run); else await run(); } catch (e) { toast(e.message, true); }
   }
   async function fpFor(items) {
-    const need = items.filter((it) => !S.fps[it.uid] || S.fps[it.uid]._k !== `${it.id}/${it.part}/${it.orient}`);
+    const need = items.filter((it) => !S.fps[it.uid] || S.fps[it.uid]._k !== fpKey(it));
     if (!need.length) return;
-    const r = await api(`/api/products/${encodeURIComponent(S.pid)}/print-plan/footprint`, { json: { items: need.map((it) => ({ id: it.id, part: it.part, orient: it.orient })) } });
-    need.forEach((it, k) => { S.fps[it.uid] = { ...r.items[k], _k: `${it.id}/${it.part}/${it.orient}` }; });
+    const r = await api(`/api/products/${enc(S.pid)}/print-plan/footprint`, { json: { items: need.map((it) => ({ id: it.id, part: it.part, orient: it.orient, face: it.face, mirror: it.mirror, scale: it.scale })) } });
+    need.forEach((it, k) => { S.fps[it.uid] = { ...r.items[k], _k: fpKey(it) }; });
   }
   async function arrange(pl) {
-    const r = await api(`/api/products/${encodeURIComponent(S.pid)}/print-plan/check`, { json: { plate: pl, arrange: true } });
+    const r = await api(`/api/products/${enc(S.pid)}/print-plan/check`, { json: { plate: pl, arrange: true, spec: S.spec } });
     const byUid = Object.fromEntries(r.plate.items.map((x) => [x.uid, x]));
     pl.items.forEach((it) => { const n = byUid[it.uid]; if (n) { it.x = n.x; it.y = n.y; it.rot = n.rot; } });
-    Object.assign(S.fps, r.footprints);
+    Object.entries(r.footprints).forEach(([k, v]) => { const it = pl.items.find((x) => x.uid === k); S.fps[k] = { ...v, _k: it ? fpKey(it) : "" }; });
+    if (r.plate_checks) S.pchk[pl.id] = r.plate_checks;
     pl.manual = true; S.dirty = true;
     if (r.missed) toast(Z(`有 ${r.missed} 个零件这一盘放不下（标红），减少数量或分成两盘`, `มี ${r.missed} ชิ้นวางไม่พอในถาดนี้ (สีแดง) ลดจำนวนหรือแบ่งเป็น 2 ถาด`), true);
   }
+  let CHK_T = null;
+  function recheck(pl) {               // 改了参数：每盘的规则检查重新算（不保存）
+    clearTimeout(CHK_T);
+    CHK_T = setTimeout(async () => {
+      try {
+        const r = await api(`/api/products/${enc(S.pid)}/print-plan/check`, { json: { plate: pl, spec: S.spec } });
+        S.pchk[pl.id] = r.plate_checks || [];
+        const el = BOX && BOX.querySelector(`[data-pchk="${pl.id}"]`);
+        if (el) el.outerHTML = checksHtml(pl);
+      } catch { /* 忽略 */ }
+    }, 350);
+  }
+  // v2.55：多选操作交给服务器（/print-plan/op），返回改好的方案
+  async function runOp(pl, o, btn) {
+    const uids = o.uids || selOf(pl);
+    mark();
+    const heavy = ["cut", "auto_orient", "split"].includes(o.op);
+    const go = async () => {
+      const r = await (heavy ? apiJob : api)(`/api/products/${enc(S.pid)}/print-plan/op`, { json: { spec: S.spec, plan: S.plan, op: { ...o, plate: pl.id, uids } } });
+      const keep = { updated_at: S.plan.updated_at, follow: S.plan.follow, scale: S.plan.scale, default: S.plan.default, from_display: S.plan.from_display };
+      S.plan = { ...r.plan, ...Object.fromEntries(Object.entries(keep).filter(([, v]) => v !== undefined)) };
+      S.plan.plates.forEach((p2) => p2.items.forEach((it) => { if (r.footprints[it.uid]) S.fps[it.uid] = { ...r.footprints[it.uid], _k: fpKey(it) }; }));
+      S.pchk = r.plate_checks || S.pchk;
+      const tp = plateOf(r.plate) || pl;
+      S.sel = { pl: tp.id, uids: r.sel || [] };
+      S.dirty = true;
+      if (r.cut) {
+        if (!S.d.library.some((e) => e.id === r.cut[0].id)) {          // 切开的两半进了模型库：重新读库（不丢改动）
+          try { const d2 = await api(`/api/products/${enc(S.pid)}/print-plan?spec=${enc(S.spec)}`); S.d.library = d2.library; } catch { /* 忽略 */ }
+        }
+        toast(Z(`已切开：${r.cut.map((c) => `${c.name}（高 ${n1(c.h)} mm${c.closed ? "" : "，切口没补全"}）`).join("、")}`, `ตัดแล้ว: ${r.cut.map((c) => `${c.name} (สูง ${n1(c.h)} mm)`).join(", ")}`), r.cut.some((c) => !c.closed), 6000);
+      }
+      if (r.missed) toast(Z(`有 ${r.missed} 个零件放不下（标红）`, `มี ${r.missed} ชิ้นวางไม่พอ (สีแดง)`), true);
+      render();
+      focusCv(tp);
+      return r;
+    };
+    try { return btn ? await busy(btn, go) : await go(); } catch (e) { S.undo.pop(); toast(e.message, true); return null; }
+  }
+  function focusCv(pl) { const cv = BOX && BOX.querySelector(`[data-cv="${pl.id}"]`); if (cv) try { cv.focus({ preventScroll: true }); } catch { /* 忽略 */ } }
 
   // ---------------- 画面 ----------------
   function render() {
     const d = S.d;
-    const specBar = `<div class="pp-bar small"><b>${S.spec ? `<span data-notr>${esc(S.spec)}</span>` : Z("主模型", "โมเดลหลัก")}</b>
+    const specChips = S.opts && S.opts.standalone && (d.specs || []).length ? `<div class="pe-specs small"><b>${Z("看哪个规格", "ดูแบบไหน")}：</b>
+      <span class="chip ${!S.spec ? "on" : ""}" data-pe-spec="">${Z("主模型", "โมเดลหลัก")}</span>
+      ${d.specs.map((x) => `<span class="chip ${S.spec === x.spec ? "on" : ""}" data-pe-spec="${esc(x.spec)}" data-notr>${esc(x.spec)}</span>`).join("")}</div>` : "";
+    const specBar = `${specChips}<div class="pp-bar small"><b>${S.spec ? `<span data-notr>${esc(S.spec)}</span>` : Z("主模型", "โมเดลหลัก")}</b>
       ${d.state === "inherit" ? `<span class="m3-tag inh">${Z("这个规格现在用主模型的打印方案；在这里改好保存后，这个规格用自己的方案", "แบบนี้ตอนนี้ใช้แผนของโมเดลหลัก ถ้าแก้และบันทึกที่นี่ แบบนี้จะใช้แผนของตัวเอง")}</span>` : ""}
       ${d.follow ? `<span class="m3-tag inh">${Z(`按主模型缩放 ${d.scale}%：盘和零件跟着主模型的方案，保存后改成这个规格自己的方案`, `ย่อ/ขยายจากโมเดลหลัก ${d.scale}%: ถ้าบันทึกจะเป็นแผนของแบบนี้เอง`)}</span>` : ""}
       <span class="pp-tools" style="margin-left:auto">
@@ -182,8 +290,9 @@
       return;
     }
     BOX.innerHTML = `${specBar}${colBar}
-      ${d.plan.default ? `<div class="small muted">${Z("还没保存过：下面是按现在的 3D 模型自动生成的一盘（单色）。改好后点「保存打印方案」。", "ยังไม่เคยบันทึก: ด้านล่างเป็นถาดที่สร้างอัตโนมัติจากโมเดลปัจจุบัน (สีเดียว) แก้แล้วกด「บันทึกแผนการพิมพ์」")}</div>` : ""}
-      ${(d.warnings || []).map((w) => `<div class="small warn">${esc(w)}</div>`).join("")}
+      ${d.plan.default ? `<div class="small muted">${Z("还没保存过：下面是按现在的 3D 模型和原来的打印参数自动生成的一盘。改好后点「保存打印方案」。", "ยังไม่เคยบันทึก: ด้านล่างเป็นถาดที่สร้างอัตโนมัติจากโมเดลและพารามิเตอร์เดิม แก้แล้วกด「บันทึกแผนการพิมพ์」")}</div>` : ""}
+      ${(d.warnings || []).map((w) => `<div class="small warn" data-notr>${esc(w)}</div>`).join("")}
+      ${partsHtml()}
       <div id="pp-plates">${S.plan.plates.map(plateHtml).join("")}</div>
       <div class="row gap wrap small"><button class="mini" data-pp="add-plate">＋ ${Z("再加一盘（例如零件太多 / 盖子单独打）", "เพิ่มอีกถาด (เช่น ชิ้นเยอะ / ฝาพิมพ์แยก)")}</button></div>
       ${schemeHtml()}
@@ -192,13 +301,48 @@
         <button class="primary" data-pp="save">💾 ${Z("保存打印方案", "บันทึกแผนการพิมพ์")}</button>
         <button data-pp="fill" title="${Z("按这个方案算的克数（含换色冲刷废料）和时长，填进这个规格每个颜色的变体", "ใส่กรัม (รวมเศษล้างสี) และเวลาตามแผนนี้ลงในตัวเลือกทุกสีของแบบนี้")}">${Z("按方案填克数 / 时长到变体", "ใส่กรัม / เวลาตามแผนลงตัวเลือก")}</button>
         <span class="small muted">${S.dirty ? `<b class="warn">${Z("有改动，还没保存", "มีการแก้ไข ยังไม่ได้บันทึก")}</b>` : (d.plan.updated_at ? Z("已保存 ", "บันทึกแล้ว ") + fmtTime(d.plan.updated_at) : "")}</span></div>`;
-    S.plan.plates.forEach((pl) => draw(pl));
+    S.plan.plates.forEach((pl) => { draw(pl); loadOri(pl); });
   }
+  function renderPlate(pl) {           // 只重画一盘（选择变了、改了一盘的东西）
+    const el = BOX && BOX.querySelector(`.pp-plate[data-pl="${pl.id}"]`);
+    if (!el) { render(); return; }
+    const det = el.querySelector("details.pe-prm"), shown = BOX.querySelector(`[data-3d="${pl.id}"]:not(.hidden)`);
+    if (det) S.openPrm[pl.id] = det.open;
+    if (shown) { render(); return; }
+    const k = S.plan.plates.indexOf(pl);
+    el.outerHTML = plateHtml(pl, k);
+    draw(pl); loadOri(pl);
+    const pt = BOX.querySelector(".pe-parts-box"); if (pt) pt.outerHTML = partsHtml();
+  }
+
+  // ---- 零件清单（整个方案：每种零件几个，组合模型按零件；合并出来的可以拆回零件） ----
+  function partsHtml() {
+    const rows = {};
+    S.plan.plates.forEach((pl, k) => pl.items.forEach((it) => {
+      const key = partKey(it);
+      const r = (rows[key] = rows[key] || { key, id: it.id, part: it.part, n: 0, plates: {}, orients: new Set() });
+      r.n += 1; r.plates[k + 1] = (r.plates[k + 1] || 0) + 1; r.orients.add(it.face ? "face" : it.orient);
+    }));
+    const opts = (S.d.library || []).flatMap((e) => [`<option value="${e.id}|">${esc(e.name)}${e.multicolor ? " 🎨" : ""}${(e.parts || []).length > 1 ? Z("（整个）", " (ทั้งหมด)") : ""}</option>`,
+      ...((e.parts || []).length > 1 ? e.parts.map((p) => `<option value="${e.id}|${p.index}">└ ${esc(p.name)}</option>`) : [])]).join("");
+    const list = Object.values(rows);
+    return `<details class="card-sub pe-parts-box" ${S.openParts === false ? "" : "open"}><summary class="small"><b>${Z("零件清单", "รายการชิ้นงาน")}</b>
+      <span class="muted">${Z(`（${list.length} 种 · ${list.reduce((a, r) => a + r.n, 0)} 个）每种零件打几个、在哪一盘；组合模型（合并的 / 多个组件的文件）可以拆回零件，每个零件选自己的方向`, `(${list.length} แบบ · ${list.reduce((a, r) => a + r.n, 0)} ชิ้น) แต่ละชิ้นพิมพ์กี่ชิ้น อยู่ถาดไหน; โมเดลรวมแยกกลับเป็นชิ้นได้ แต่ละชิ้นเลือกทิศของตัวเอง`)}</span></summary>
+      <table class="pe-parts"><thead><tr><th>${Z("零件", "ชิ้นงาน")}</th><th>${Z("数量", "จำนวน")}</th><th>${Z("在哪盘", "อยู่ถาด")}</th><th>${Z("方向", "ทิศ")}</th><th></th></tr></thead><tbody>
+      ${list.map((r) => { const e = libOf(r.id) || {}; const canSplit = r.part == null && ((e.parts_of || []).length || (e.parts || []).length > 1);
+        return `<tr data-prow="${esc(r.key)}"><td><span data-notr>${esc(labelOf(r).slice(-40))}</span>${e.parts_of ? ` <span class="m3-tag">${Z("合并的", "รวมไว้")}</span>` : ""}${e.origin === "cut" ? ` <span class="m3-tag">✂ ${Z("切开的", "ตัดแล้ว")}</span>` : ""}</td>
+          <td><input type="number" min="0" max="200" value="${r.n}" data-pe-qty="${esc(r.key)}"></td>
+          <td class="small">${Object.entries(r.plates).map(([k, n]) => Z(`第${k}盘×${n}`, `ถาด ${k}×${n}`)).join(" ")}</td>
+          <td class="small">${[...r.orients].map(oriTxt).join(" / ")}</td>
+          <td class="nowrap"><button class="mini" data-pe="sel-part" data-key="${esc(r.key)}">${Z("选中", "เลือก")}</button>
+            ${canSplit ? `<button class="mini" data-pe="split-part" data-key="${esc(r.key)}" title="${Z("合并出来的模型 → 原来的零件；多个组件的文件 → 每个组件一件（每个按推荐方向）", "โมเดลที่รวมไว้ → แยกกลับเป็นชิ้นเดิม")}">${Z("拆成零件", "แยกเป็นชิ้น")}</button>` : ""}</td></tr>`; }).join("")}
+      </tbody></table>
+      <div class="small"><select data-pp-add data-notr><option value="">${Z("＋ 加零件（模型库里的文件 / 组件）…", "＋ เพิ่มชิ้นงาน (ไฟล์ / ชิ้นส่วนในคลังโมเดล)…")}</option>${opts}</select></div></details>`;
+  }
+
   function plateHtml(pl, k) {
     const pm = prModel(pl.printer), multi = new Set(pl.slots.map((s) => slotColour(pl, s.slot))).size > 1;
     const bed = bedOf(pl.printer);
-    const opts = (S.d.library || []).flatMap((e) => [`<option value="${e.id}|">${esc(e.name)}${e.multicolor ? " 🎨" : ""}${(e.parts || []).length > 1 ? Z("（整个）", " (ทั้งหมด)") : ""}</option>`,
-      ...((e.parts || []).length > 1 ? e.parts.map((p) => `<option value="${e.id}|${p.index}">└ ${esc(p.name)}</option>`) : [])]).join("");
     const ck = check(pl);
     const nbad = Object.values(ck).filter((x) => x.out || x.overlap.length).length;
     const painted = pl.items.some((it) => { const e = libOf(it.id); return e && e.multicolor && it.part == null; });
@@ -206,70 +350,192 @@
       <div class="pp-ph"><b>${Z("第", "ถาดที่ ")}${k + 1}${Z(" 盘", "")}</b>
         <label>${Z("打印机", "เครื่องพิมพ์")} <select data-ppf="printer" data-notr>${S.d.printers.map((m) => `<option ${m.name === pl.printer ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>
         <span class="small muted" data-notr>${bed[0]}×${bed[1]}×${bed[2]} mm</span>
-        <label>${Z("层高", "ความสูงชั้น")} <select data-ppf="layer_height">${[0.08, 0.12, 0.16, 0.2, 0.24, 0.28].map((v) => `<option value="${v}" ${Math.abs(v - pl.layer_height) < 1e-6 ? "selected" : ""}>${v.toFixed(2)} mm</option>`).join("")}</select></label>
+        <label>${Z("层高", "ความสูงชั้น")} <select data-ppf="layer_height">${[0.08, 0.12, 0.16, 0.2, 0.24, 0.28].concat([pl.layer_height]).filter((v, i, a) => a.findIndex((x) => Math.abs(x - v) < 1e-6) === i).sort((a, b) => a - b).map((v) => `<option value="${v}" ${Math.abs(v - pl.layer_height) < 1e-6 ? "selected" : ""}>${(+v).toFixed(2)} mm</option>`).join("")}</select></label>
         <label title="${Z("这一盘打出来是几套成品（例如钥匙扣一盘 8 个 = 8 套）", "ถาดนี้ได้สินค้ากี่ชุด (เช่น พวงกุญแจ 8 ชิ้น = 8 ชุด)")}">${Z("这一盘出几套", "ถาดนี้ได้กี่ชุด")} <input type="number" min="1" max="200" value="${pl.sets}" data-ppf="sets" style="width:56px"></label>
         <span>${S.plan.plates.length > 1 ? `<button class="mini danger" data-pp="del-plate">${Z("删掉这一盘", "ลบถาดนี้")}</button>` : ""}</span></div>
       ${multi && pm.multicolor === false ? `<div class="small bad">⚠ ${Z("这台打印机没有 AMS，不能打多色。多色的盘请选拓竹 P1S 这类有 AMS 的打印机（设置 → 打印机「有 AMS / 多色」）", "เครื่องนี้ไม่มี AMS พิมพ์หลายสีไม่ได้ เลือกเครื่องที่มี AMS เช่น Bambu P1S")}</div>` : ""}
+      <div class="pp-tools">
+        <button class="mini primary-lite" data-pp="arrange" title="${Z("按大小排得最紧，一盘放最多（避开废料口）。快捷键 A", "เรียงให้แน่นที่สุด (หลบช่องทิ้งเศษ) คีย์ลัด A")}">✨ ${Z("自动排列", "จัดเรียงอัตโนมัติ")}</button>
+        <button class="mini primary-lite" data-pp="kit" title="${Z("按组装关系摆：一起拼的零件放在一起、按组装顺序、朝向一致（按原站说明 / 零件名；AI 开着时让 AI 分组）", "จัดตามความสัมพันธ์การประกอบ (ตามคำอธิบาย / ชื่อชิ้นงาน / AI)")}">🧩 ${Z("组合摆盘", "จัดเป็นชุด")}</button>
+        <button class="mini" data-pe="sel-all" title="Ctrl+A">▣ ${Z("全选", "เลือกทั้งหมด")}</button>
+        <button class="mini" data-pp="3d" title="${Z("3D 预览这一盘（按摆好的位置）", "ดูตัวอย่าง 3D ของถาดนี้")}">👁 3D</button>
+        <details class="pe-keys"><summary>⌨ ${Z("快捷键", "คีย์ลัด")}</summary>${keysHtml()}</details>
+      </div>
+      ${ctxHtml(pl)}
       <div class="pp-grid">
         <div>
-          <canvas class="pp-cv" tabindex="0" data-cv="${pl.id}" aria-label="${Z("热床俯视图：拖动零件摆位置", "มุมมองจากด้านบนของฐาน: ลากชิ้นงานเพื่อจัดวาง")}"></canvas>
-          <div class="pp-tools">
-            <button class="mini primary-lite" data-pp="arrange" title="${Z("按大小排得最紧，一盘放最多", "เรียงให้แน่นที่สุด วางได้มากที่สุด")}">✨ ${Z("自动排列（省空间）", "จัดเรียงอัตโนมัติ (ประหยัดพื้นที่)")}</button>
-            <button class="mini primary-lite" data-pp="kit" title="${Z("按组装关系摆：一起拼的零件放在一起、按组装顺序、朝向一致，员工和买家一看就懂（按原站说明 / 零件名；AI 开着时让 AI 分组）", "จัดตามความสัมพันธ์การประกอบ: ชิ้นที่ประกอบด้วยกันวางคู่กัน เรียงตามลำดับ (ตามคำอธิบาย / ชื่อชิ้นงาน / AI)")}">🧩 ${Z("组合摆盘（按说明 / AI）", "จัดเป็นชุด (ตามคำอธิบาย / AI)")}</button>
-            <button class="mini" data-pp="rot" data-a="-15" title="${Z("选中的零件逆时针转 15°（也可以按住 Shift 滚轮）", "หมุนชิ้นที่เลือกทวนเข็ม 15°")}">⟲ 15°</button>
-            <button class="mini" data-pp="rot" data-a="15">⟳ 15°</button>
-            <button class="mini" data-pp="rot" data-a="90">↻ 90°</button>
-            <button class="mini" data-pp="dup" title="${Z("复制选中的零件（数量在旁边填）", "คัดลอกชิ้นที่เลือก (ใส่จำนวนด้านข้าง)")}">⧉ ${Z("复制", "คัดลอก")}</button>
-            <input type="number" min="1" max="50" value="1" data-pp-dupn style="width:46px" title="${Z("复制几个", "คัดลอกกี่ชิ้น")}">
-            <button class="mini danger" data-pp="del-item">✕ ${Z("删除", "ลบ")}</button>
-            <button class="mini" data-pp="3d">👁 3D</button>
-          </div>
+          <canvas class="pp-cv" tabindex="0" data-cv="${pl.id}" aria-label="${Z("热床俯视图：点选 / 框选零件，拖动摆位置", "มุมมองจากด้านบนของฐาน: คลิก / ลากกรอบเลือกชิ้นงาน ลากเพื่อย้าย")}"></canvas>
           <div class="pp-st ${nbad ? "bad" : "ok"}" data-st="${pl.id}">${statusTxt(pl, ck)}</div>
           ${S.kit && S.kit[pl.id] ? `<div class="small pp-kit">🧩 <b>${S.kit[pl.id].source === "ai" ? Z("AI 组合摆盘", "AI จัดเป็นชุด") : Z("按零件名组合摆盘", "จัดเป็นชุดตามชื่อชิ้นงาน")}</b>
-            <span class="pp-est">${Z("仅供参考，可手动调整", "ใช้อ้างอิงเท่านั้น ปรับเองได้")}</span> <span data-notr>${esc((TH() ? S.kit[pl.id].note_th : S.kit[pl.id].note_zh) || "")}</span>
-            ${(S.kit[pl.id].groups || []).length ? `<div class="muted">${S.kit[pl.id].groups.map((g, i) => `${Z("组", "กลุ่ม")} ${i + 1}: <span data-notr>${esc(g.name)}</span> (${g.uids.map((u) => pl.items.findIndex((x) => x.uid === u) + 1).filter((n) => n > 0).join(", ")})`).join(" · ")}</div>` : ""}</div>` : ""}
-          <div class="small muted">${Z("拖动零件挪位置；选中后用按钮或 Shift + 滚轮旋转，方向键微调（1 mm）。", "ลากชิ้นงานเพื่อย้าย เลือกแล้วใช้ปุ่มหรือ Shift + ล้อเมาส์เพื่อหมุน ปุ่มลูกศรเลื่อนทีละ 1 mm")}
+            <span class="pp-est">${Z("仅供参考，可手动调整", "ใช้อ้างอิงเท่านั้น ปรับเองได้")}</span> <span data-notr>${esc((TH() ? S.kit[pl.id].note_th : S.kit[pl.id].note_zh) || "")}</span></div>` : ""}
+          <div class="small muted">${Z("点选零件，Ctrl / Shift 多选，在空白处拖一个框框选；拖动挪位置，方向键微调 1 mm（Shift 10 mm）。", "คลิกเลือกชิ้นงาน Ctrl / Shift เลือกหลายชิ้น ลากกรอบในที่ว่างเพื่อเลือก ลากเพื่อย้าย ปุ่มลูกศรเลื่อน 1 mm (Shift 10 mm)")}
             ${pl.manual ? `<span class="pill tag-pill">${Z("手动摆盘", "จัดวางเอง")}</span>` : `<span class="pill">${Z("自动排列", "จัดเรียงอัตโนมัติ")}</span>`}</div>
           <div class="pp-3d hidden" data-3d="${pl.id}"></div>
         </div>
         <div>
+          ${oriBoxHtml(pl)}
           <div class="small"><b>${Z("AMS 耗材槽", "ช่องเส้นพลาสติก AMS")}</b> <span class="muted">${Z("（单色只用槽 1；多色每种颜色一个槽，最多 4 个）", "(สีเดียวใช้ช่อง 1; หลายสีใช้ช่องละสี สูงสุด 4)")}</span></div>
           <table class="pp-slots"><thead><tr><th>${Z("槽", "ช่อง")}</th><th>${Z("材料", "วัสดุ")}</th><th>${Z("颜色", "สี")}</th><th>${Z("这个款式装", "แบบนี้ใส่")}</th><th></th></tr></thead><tbody>
           ${pl.slots.map((s) => `<tr data-slot="${s.slot}"><td><b>${s.slot}</b></td>
-            <td><select data-pps="material" data-notr>${["PLA", "PETG", "TPU", "ABS", "ASA", "PLA-CF", "PETG-CF"].concat([s.material]).filter((v, i, a) => v && a.indexOf(v) === i).map((m) => `<option ${m === s.material ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></td>
+            <td><select data-pps="material" data-notr>${(S.d.params_meta && S.d.params_meta.materials || ["PLA", "PETG", "TPU", "ABS", "ASA", "PLA-CF", "PETG-CF"]).filter((m) => !/^RESIN/.test(m)).concat([s.material]).filter((v, i, a) => v && a.indexOf(v) === i).map((m) => `<option ${m === s.material ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></td>
             <td><select data-pps="colour"><option value="">${Z("跟着款式颜色", "ตามสีของแบบ")}</option>${colourNames().concat(s.colour && !colourNames().includes(s.colour) ? [s.colour] : []).map((c) => `<option value="${esc(c)}" ${c === s.colour ? "selected" : ""} data-notr>${esc(cl(c))}</option>`).join("")}</select></td>
             <td class="nowrap"><i class="pp-sw" style="background:${hexOf(slotColour(pl, s.slot))}"></i><span data-notr>${esc(cl(slotColour(pl, s.slot)) || "—")}</span></td>
             <td>${s.slot > 1 && !s.file_slot ? `<button class="mini" data-pp="del-slot" title="${Z("去掉这个槽（用它的零件改回槽 1）", "เอาช่องนี้ออก")}">✕</button>` : ""}</td></tr>`).join("")}
           </tbody></table>
           ${pl.slots.length < (S.d.slot_max || 4) && !painted ? `<button class="mini" data-pp="add-slot">＋ ${Z("加一个颜色槽（多色）", "เพิ่มช่องสี (หลายสี)")}</button>` : ""}
           ${painted ? `<div class="small muted">🎨 ${Z("涂色的多色 3MF（MakerWorld / 拓竹）按文件原样打，槽的颜色从文件里读；要改涂色请在 Bambu Studio 里改好再上传。", "ไฟล์ 3MF ที่ลงสีหลายสี (MakerWorld / Bambu) พิมพ์ตามไฟล์ สีของช่องอ่านจากไฟล์ ถ้าจะแก้สีให้แก้ใน Bambu Studio แล้วอัปโหลดใหม่")}</div>` : ""}
-          <div class="small" style="margin-top:8px"><b>${Z("零件", "ชิ้นงาน")}</b> <span class="muted">(${pl.items.length})</span>
-            <select data-pp-add data-notr><option value="">${Z("＋ 加零件…", "＋ เพิ่มชิ้นงาน…")}</option>${opts}</select></div>
-          <div class="pp-items"><table><tbody>${pl.items.map((it, i) => itemRow(pl, it, i, ck)).join("") || `<tr><td class="muted">${Z("这一盘还没有零件", "ถาดนี้ยังไม่มีชิ้นงาน")}</td></tr>`}</tbody></table></div>
-          <div class="pp-acts">
-            <a class="btn mini-btn" href="/api/products/${encodeURIComponent(S.pid)}/print-plan/export?spec=${encodeURIComponent(S.spec)}&plate=${pl.id}&colour=${encodeURIComponent(S.colour)}" data-pp-dl title="${Z("按摆好的位置、每个零件带耗材槽的 3MF，拓竹 Studio / OrcaSlicer 打开就是摆好分好色的（先保存）", "ไฟล์ 3MF ตามตำแหน่งที่จัดไว้ แต่ละชิ้นกำหนดช่องสีแล้ว (บันทึกก่อน)")}">⬇ ${Z("下载这一盘（3MF）", "ดาวน์โหลดถาดนี้ (3MF)")}</a>
-            <button class="mini" data-pp="slice" title="${Z("按摆好的位置切片（多色时每个槽一份耗材配置、开擦料塔），切好存成切片文件给生产用。需要 OrcaSlicer", "สไลซ์ตามตำแหน่งที่จัดไว้ ต้องมี OrcaSlicer")}">✂ ${Z("按这一盘切片", "สไลซ์ถาดนี้")}</button>
-            ${window.TRIAL && TRIAL.can() ? `<button class="mini" data-tr-check="${esc(S.pid)}" data-tr-spec="${esc(S.spec)}" data-tr-plate="${esc(pl.id)}" title="${Z("不打印：用这一盘现有的切片文件（没有就先切片）核对机型 / 喷嘴 / 热床板、克数、零件是否都在热床上、颜色槽，并画第一层预览", "ไม่พิมพ์: ตรวจไฟล์สไลซ์ของเพลทนี้ (ไม่มีจะสไลซ์ก่อน) รุ่นเครื่อง หัวฉีด แผ่นฐาน น้ำหนัก ตำแหน่งชิ้นงาน ช่องสี พร้อมภาพชั้นแรก")}">🔍 ${Z("检查切片文件", "ตรวจไฟล์สไลซ์")}</button>
-            <button class="mini" data-tr-trial="${esc(S.pid)}" data-tr-spec="${esc(S.spec)}" data-tr-plate="${esc(pl.id)}" data-tr-src="plan" title="${Z("选一台同机型的空闲打印机，用这一盘的文件试打（没有文件先切片）", "เลือกเครื่องรุ่นเดียวกันที่ว่าง ทดลองพิมพ์ด้วยไฟล์ของเพลทนี้ (ไม่มีไฟล์จะสไลซ์ก่อน)")}">🧪 ${Z("试打这一盘", "ทดลองพิมพ์เพลทนี้")}</button>` : ""}
-            ${CAN("models.change") ? `<button class="mini" data-pp="merge" title="${Z("按摆好的位置合并成一个模型：主模型 → 设为 3D 模型；规格 → 指定给这个规格", "รวมเป็นโมเดลเดียวตามตำแหน่งที่จัดไว้")}">${Z("合并成一套（设为模型）", "รวมเป็นชุด (ตั้งเป็นโมเดล)")}</button>` : ""}
-          </div>
-          ${pl.sliced ? `<div class="small ok">✂ ${Z("已切片", "สไลซ์แล้ว")}：${(pl.sliced.filaments || []).map((f) => `${Z("槽", "ช่อง")} ${f.slot} ${n1(f.grams)} g`).join(" · ")}${pl.sliced.purge_g ? ` · ${Z("冲刷", "ล้างสี")} ${n1(pl.sliced.purge_g)} g` : ""}${pl.sliced.hours ? ` · ${n1(pl.sliced.hours)} h` : ""}</div>` : ""}
+          <div class="small" style="margin-top:8px"><b>${Z("这一盘的零件", "ชิ้นงานในถาดนี้")}</b> <span class="muted">(${pl.items.length})</span></div>
+          <div class="pp-items"><table><tbody>${pl.items.map((it, i) => itemRow(pl, it, i, ck)).join("") || `<tr><td class="muted">${Z("这一盘还没有零件（在上面「零件清单」里加）", "ถาดนี้ยังไม่มีชิ้นงาน (เพิ่มใน「รายการชิ้นงาน」ด้านบน)")}</td></tr>`}</tbody></table></div>
         </div>
+      </div>
+      ${checksHtml(pl)}
+      ${paramsHtml(pl)}
+      <div class="pp-acts">
+        <a class="btn mini-btn" href="/api/products/${enc(S.pid)}/print-plan/export?spec=${enc(S.spec)}&plate=${pl.id}&colour=${enc(S.colour)}" data-pp-dl title="${Z("按摆好的位置、每个零件带耗材槽和单独参数的 3MF，拓竹 Studio / OrcaSlicer 打开就是摆好分好色的（先保存）", "ไฟล์ 3MF ตามตำแหน่งที่จัดไว้ แต่ละชิ้นกำหนดช่องสีแล้ว (บันทึกก่อน)")}">⬇ ${Z("下载这一盘（3MF）", "ดาวน์โหลดถาดนี้ (3MF)")}</a>
+        <button class="mini" data-pp="slice" title="${Z("按摆好的位置和这一盘的参数切片（多色时每个槽一份耗材配置、开擦料塔），切好存成切片文件给生产用。需要 OrcaSlicer", "สไลซ์ตามตำแหน่งและพารามิเตอร์ของถาดนี้ ต้องมี OrcaSlicer")}">✂ ${Z("按这一盘切片", "สไลซ์ถาดนี้")}</button>
+        ${window.TRIAL && TRIAL.can() ? `<button class="mini" data-tr-check="${esc(S.pid)}" data-tr-spec="${esc(S.spec)}" data-tr-plate="${esc(pl.id)}" title="${Z("不打印：用这一盘现有的切片文件（没有就先切片）核对机型 / 喷嘴 / 热床板、克数、零件是否都在热床上、颜色槽，并画第一层预览", "ไม่พิมพ์: ตรวจไฟล์สไลซ์ของเพลทนี้ (ไม่มีจะสไลซ์ก่อน) รุ่นเครื่อง หัวฉีด แผ่นฐาน น้ำหนัก ตำแหน่งชิ้นงาน ช่องสี พร้อมภาพชั้นแรก")}">🔍 ${Z("检查切片文件", "ตรวจไฟล์สไลซ์")}</button>
+        <button class="mini" data-tr-trial="${esc(S.pid)}" data-tr-spec="${esc(S.spec)}" data-tr-plate="${esc(pl.id)}" data-tr-src="plan" title="${Z("选一台同机型的空闲打印机，用这一盘的文件试打（没有文件先切片）", "เลือกเครื่องรุ่นเดียวกันที่ว่าง ทดลองพิมพ์ด้วยไฟล์ของเพลทนี้ (ไม่มีไฟล์จะสไลซ์ก่อน)")}">🧪 ${Z("试打这一盘", "ทดลองพิมพ์เพลทนี้")}</button>` : ""}
+        ${CAN("models.change") ? `<button class="mini" data-pp="merge" title="${Z("按摆好的位置合并成一个模型：主模型 → 设为 3D 模型；规格 → 指定给这个规格", "รวมเป็นโมเดลเดียวตามตำแหน่งที่จัดไว้")}">${Z("合并成一套（设为模型）", "รวมเป็นชุด (ตั้งเป็นโมเดล)")}</button>` : ""}
+      </div>
+      ${pl.sliced ? `<div class="small ok">✂ ${Z("已切片", "สไลซ์แล้ว")}：${(pl.sliced.filaments || []).map((f) => `${Z("槽", "ช่อง")} ${f.slot} ${n1(f.grams)} g`).join(" · ")}${pl.sliced.purge_g ? ` · ${Z("冲刷", "ล้างสี")} ${n1(pl.sliced.purge_g)} g` : ""}${pl.sliced.hours ? ` · ${n1(pl.sliced.hours)} h` : ""}</div>` : ""}
+      </div>`;
+  }
+  function keysHtml() {
+    const k = (a, zh, th) => `<div><kbd>${a}</kbd> ${Z(zh, th)}</div>`;
+    return `<div class="muted" style="padding:4px 0">${k("Ctrl+A", "全选", "เลือกทั้งหมด")}${k("Ctrl / Shift + " + Z("点", "คลิก"), "多选", "เลือกหลายชิ้น")}${k("Ctrl+C / Ctrl+V", "复制 / 粘贴", "คัดลอก / วาง")}
+      ${k("Ctrl+D", "复制一份", "ทำสำเนา 1 ชิ้น")}${k("Del", "删除", "ลบ")}${k("R / Shift+R", "转 90° / -90°", "หมุน 90° / -90°")}${k("M / Shift+M", "镜像 X / Y", "สะท้อน X / Y")}
+      ${k("F", "贴平台（推荐的面）", "วางราบ (ด้านที่แนะนำ)")}${k("A", "自动排列", "จัดเรียงอัตโนมัติ")}${k("Ctrl+G / Ctrl+Shift+G", "成组 / 拆组", "จัดกลุ่ม / แยกกลุ่ม")}
+      ${k("Ctrl+Z / Ctrl+Y", "撤销 / 重做", "ย้อน / ทำซ้ำ")}${k("← ↑ → ↓", "微调 1 mm（Shift 10 mm）", "เลื่อน 1 mm (Shift 10 mm)")}${k("Esc", "取消选择", "ยกเลิกการเลือก")}</div>`;
+  }
+  // 选中零件后的工具条（v2.55）
+  function ctxHtml(pl) {
+    const uids = selOf(pl);
+    if (!uids.length) return `<div class="pe-ctx muted small" data-ctx="${pl.id}">${Z("点一下零件（或拖框选几个）就会出现编辑工具：移动 / 旋转 / 缩放 / 镜像 / 贴平台 / 复制 / 对齐 / 切割 / 换槽 / 移到别的盘 / 单独参数", "คลิกเลือกชิ้นงาน (หรือลากกรอบ) จะมีเครื่องมือ: ย้าย / หมุน / ย่อขยาย / สะท้อน / วางราบ / ทำสำเนา / จัดแนว / ตัด / เปลี่ยนช่อง / ย้ายถาด / ตั้งค่าแยก")}</div>`;
+    const its = pl.items.filter((it) => uids.includes(it.uid));
+    const one = its.length === 1 ? its[0] : null;
+    const bb = selBox(pl, uids) || [0, 0, 0, 0];
+    const cx = Math.round((bb[0] + bb[2]) / 2 * 10) / 10, cy = Math.round((bb[1] + bb[3]) / 2 * 10) / 10;
+    const f = one ? S.fps[one.uid] : null;
+    const sc = Math.round((one ? one.scale || 1 : 1) * 1000) / 10;
+    const ov = one ? one.ov || {} : {};
+    const grouped = its.some((it) => it.group);
+    const others = S.plan.plates.filter((x) => x !== pl);
+    return `<div class="pe-ctx" data-ctx="${pl.id}">
+      <div class="pe-row"><b>${Z(`已选 ${its.length} 个`, `เลือก ${its.length} ชิ้น`)}</b>${one ? ` <span data-notr class="muted">${esc(labelOf(one).slice(-36))}</span>${f ? ` <span class="muted" data-notr>${n1(f.w)}×${n1(f.d)}×${n1(f.h)} mm</span>` : ""}` : ""}${grouped ? ` <span class="m3-tag">${Z("成组", "กลุ่ม")}</span>` : ""}
+        <span class="pe-g">X <input type="number" step="0.5" value="${cx}" data-pe-in="x"> Y <input type="number" step="0.5" value="${cy}" data-pe-in="y"> <button class="mini" data-pe="move" title="${Z("把选中的（中心）移到这个位置（毫米，左下角是原点）", "ย้ายที่เลือก (จุดกึ่งกลาง) ไปตำแหน่งนี้ (mm)")}">${Z("移到", "ย้ายไป")}</button></span>
+        <span class="pe-g">${Z("旋转", "หมุน")} <input type="number" step="1" value="90" data-pe-in="angle">° <button class="mini" data-pe="rot" data-sign="1" title="R">↻</button><button class="mini" data-pe="rot" data-sign="-1" title="Shift+R">↺</button></span>
+        <span class="pe-g">${Z("缩放", "ย่อ/ขยาย")} <input type="number" min="1" max="2000" step="1" value="${sc}" data-pe-in="pct">% <button class="mini" data-pe="scale">${Z("应用", "ใช้")}</button></span>
+        <span class="pe-g"><button class="mini" data-pe="mirror" data-axis="x" title="M">⇆ ${Z("镜像 X", "สะท้อน X")}</button><button class="mini" data-pe="mirror" data-axis="y" title="Shift+M">⇅ ${Z("镜像 Y", "สะท้อน Y")}</button></span>
+      </div>
+      <div class="pe-row">
+        <span class="pe-g"><button class="mini primary-lite" data-pe="auto-orient" title="${Z("每个选中的零件按推荐的方向 / 面放平（贴平台面积大、悬空少）。快捷键 F", "วางราบตามทิศ/ด้านที่แนะนำ คีย์ลัด F")}">⤓ ${Z("自动方向（贴平台）", "ทิศอัตโนมัติ (วางราบ)")}</button></span>
+        <span class="pe-g">${Z("复制", "ทำสำเนา")} <input type="number" min="1" max="100" value="1" data-pe-in="n"> <button class="mini" data-pe="dup" title="Ctrl+D">⧉</button></span>
+        <button class="mini danger" data-pe="del" title="Del">✕ ${Z("删除", "ลบ")}</button>
+        <select data-pe-sel="align" ${its.length < 2 ? "disabled" : ""}><option value="">${Z("对齐 / 分布…", "จัดแนว / กระจาย…")}</option>
+          <option value="left">${Z("左对齐", "ชิดซ้าย")}</option><option value="right">${Z("右对齐", "ชิดขวา")}</option><option value="top">${Z("上对齐", "ชิดบน")}</option><option value="bottom">${Z("下对齐", "ชิดล่าง")}</option>
+          <option value="cx">${Z("水平居中对齐", "กึ่งกลางแนวนอน")}</option><option value="cy">${Z("垂直居中对齐", "กึ่งกลางแนวตั้ง")}</option>
+          <option value="dist-x" ${its.length < 3 ? "disabled" : ""}>${Z("横向均匀分布", "กระจายแนวนอนเท่ากัน")}</option><option value="dist-y" ${its.length < 3 ? "disabled" : ""}>${Z("纵向均匀分布", "กระจายแนวตั้งเท่ากัน")}</option></select>
+        ${its.length > 1 && !its.every((it) => it.group && it.group === its[0].group) ? `<button class="mini" data-pe="group" title="Ctrl+G">⛓ ${Z("成组", "จัดกลุ่ม")}</button>` : ""}
+        ${grouped ? `<button class="mini" data-pe="ungroup" title="Ctrl+Shift+G">${Z("拆组", "แยกกลุ่ม")}</button>` : ""}
+        <button class="mini" data-pe="split" title="${Z("合并出来的模型 → 原来的零件；多个组件的文件 → 每个组件一件", "โมเดลที่รวมไว้ → แยกกลับเป็นชิ้นเดิม")}">${Z("拆成零件", "แยกเป็นชิ้น")}</button>
+        <button class="mini" data-pe="same" title="${Z("把这一盘里同一种零件都选上", "เลือกชิ้นแบบเดียวกันทั้งหมดในถาดนี้")}">${Z("选同种零件", "เลือกชิ้นแบบเดียวกัน")}</button>
+      </div>
+      <div class="pe-row">
+        ${one ? `<span class="pe-g">✂ ${Z("按高度切开", "ตัดที่ความสูง")} Z <input type="number" min="0.5" step="0.5" value="${f ? Math.round(f.h / 2 * 10) / 10 : 5}" data-pe-in="z"> mm <button class="mini" data-pe="cut" title="${Z("在离热床这个高度的水平面切成两个零件（切口补平，两半存进模型库）", "ตัดเป็น 2 ชิ้นที่ระนาบความสูงนี้ (ปิดหน้าตัด เก็บทั้งสองส่วนในคลัง)")}">${Z("切开", "ตัด")}</button></span>` : ""}
+        <select data-pe-sel="slot"><option value="">${Z("换 AMS 槽…", "เปลี่ยนช่อง AMS…")}</option>${pl.slots.map((s) => `<option value="${s.slot}">${Z("槽", "ช่อง")} ${s.slot} · ${esc(cl(slotColour(pl, s.slot)) || s.material)}</option>`).join("")}</select>
+        <select data-pe-sel="to-plate"><option value="">${Z("移到别的盘…", "ย้ายไปถาดอื่น…")}</option>${others.map((x) => `<option value="${x.id}">${Z(`第 ${S.plan.plates.indexOf(x) + 1} 盘`, `ถาดที่ ${S.plan.plates.indexOf(x) + 1}`)}</option>`).join("")}<option value="new">＋ ${Z("新的一盘", "ถาดใหม่")}</option></select>
+        <span class="pe-g" title="${Z("只对选中的零件：层高 / 填充 / 壁数和这一盘不一样（写进 3MF，OrcaSlicer 按零件用）。空 = 跟着这一盘", "เฉพาะชิ้นที่เลือก: ความสูงชั้น / เติมเนื้อใน / จำนวนผนัง ต่างจากถาด (ว่าง = ตามถาด)")}">⚙ ${Z("单独参数", "ตั้งค่าแยก")}
+          ${Z("层高", "ชั้น")} <input type="number" min="0.04" max="0.6" step="0.04" value="${ov.layer_height ?? ""}" placeholder="${pl.layer_height}" data-pe-ov="layer_height">
+          ${Z("填充", "เติม")} <input type="number" min="0" max="100" value="${ov.infill_pct ?? ""}" placeholder="${(pl.params || {}).infill_pct ?? ""}" data-pe-ov="infill_pct">%
+          ${Z("壁", "ผนัง")} <input type="number" min="1" max="20" value="${ov.walls ?? ""}" placeholder="${(pl.params || {}).walls ?? ""}" data-pe-ov="walls">
+          <button class="mini" data-pe="ov">${Z("应用", "ใช้")}</button><button class="mini" data-pe="ov-clear">${Z("清除", "ล้าง")}</button></span>
       </div></div>`;
+  }
+  // 方向卡片（选中的是同一种零件时）
+  function oriSubject(pl) {
+    const its = pl.items.filter((it) => selOf(pl).includes(it.uid));
+    if (!its.length) return null;
+    const keys = new Set(its.map(partKey));
+    return keys.size === 1 ? its[0] : null;
+  }
+  const oriKey = (it) => `${partKey(it)}|${it.scale || 1}`;
+  function oriBoxHtml(pl) {
+    const it = oriSubject(pl);
+    if (!it) return selOf(pl).length ? `<div class="small muted" data-ori="${pl.id}">${Z("选中了几种不同的零件：方向卡片只对同一种零件显示（可以点「自动方向」）", "เลือกหลายแบบ: การ์ดทิศแสดงเมื่อเลือกชิ้นแบบเดียวกัน")}</div>` : `<div data-ori="${pl.id}"></div>`;
+    const o = S.ori[oriKey(it)];
+    if (!o) return `<div class="small muted" data-ori="${pl.id}">${Z("读取方向…", "กำลังโหลดทิศ…")}</div>`;
+    if (o.error) return `<div class="small bad" data-ori="${pl.id}" data-notr>${esc(o.error)}</div>`;
+    const cur = (r) => (it.face ? r.face && r.face.reduce((a, v, i) => a + v * it.face[i], 0) > 0.999 : r.key === it.orient && !r.face);
+    let nf = 0;
+    return `<div data-ori="${pl.id}"><div class="small"><b>${Z("摆放方向（哪一面贴热床）", "ทิศการวาง (ด้านไหนติดฐาน)")}</b> <span class="muted" data-notr>${esc(labelOf(it).slice(-30))}</span></div>
+      <div class="pe-oris">${o.rows.map((r, i) => { const fn = r.face ? ++nf : 0; const nm = r.face ? Z(`推荐的面 ${fn}`, `ด้านที่แนะนำ ${fn}`) : oriTxt(r.key);
+        return `<div class="pe-ori lv-${r.level} ${cur(r) ? "on" : ""}" data-pe-ori="${i}" title="${esc((r.risks || []).map((x) => (TH() ? x.th : x.zh)).join("\n"))}">
+          <b>${nm}</b><span data-notr>${window.UX && UX.sizeText ? UX.sizeText(r.size_mm, "×") : (r.size_mm || []).join("×")}</span><br>
+          ${Z("贴平台", "ติดฐาน")} ${r.contact_cm2} cm² · ${Z("悬空", "ยื่นลอย")} ${r.overhang_cm2} cm²<br>
+          ${i === o.best ? `<span class="pill ok-pill">${Z("推荐", "แนะนำ")}</span>` : ""}${r.level === "bad" ? `<span class="pill bad-pill">${Z("风险大", "เสี่ยงสูง")}</span>` : r.level === "warn" ? `<span class="pill warn-pill">${Z("注意", "ระวัง")}</span>` : ""}</div>`; }).join("")}</div></div>`;
+  }
+  async function loadOri(pl) {
+    const it = oriSubject(pl);
+    if (!it || oriKey(it) in S.ori) return;
+    const k = oriKey(it);
+    S.ori[k] = null;
+    try { S.ori[k] = await api(`/api/products/${enc(S.pid)}/print-plan/orients`, { json: { id: it.id, part: it.part, scale: it.scale || 1 } }); }
+    catch (e) { S.ori[k] = { error: e.message }; }
+    const el = BOX && BOX.querySelector(`[data-ori="${pl.id}"]`);
+    if (el) el.outerHTML = oriBoxHtml(pl);
+  }
+  // 每盘的打印参数（原来「打印方案」面板）
+  function paramsHtml(pl) {
+    const m = S.d.params_meta || {}, r = pl.params || {};
+    const mat = (pl.slots[0] || {}).material || S.d.material || "PLA";
+    const tr = (m.temp_range || {})[mat] || [];
+    const pidx = (m.printer_idx || {})[pl.printer];
+    const fil = (r.filament || {})[pl.printer] || "";
+    const supTh0 = { none: "ไม่มีซัพพอร์ต", tree: "ซัพพอร์ตแบบต้นไม้", normal: "ซัพพอร์ตปกติ" };
+    const sum = [TH() ? supTh0[r.supports] || "" : (m.support_zh || {})[r.supports] || "",
+      Z(`${r.walls} 层壁`, `ผนัง ${r.walls}`), Z(`填充 ${r.infill_pct}%`, `เติม ${r.infill_pct}%`), r.brim ? Z("帽檐", "ปีกกันงอ") : ""].filter(Boolean).join(" · ");
+    const bedTh = { auto: "อัตโนมัติ (ตามเครื่อง)", textured: "แผ่น PEI ผิวทราย", smooth: "แผ่น PEI ผิวเรียบ / อุณหภูมิสูง", cool: "แผ่นอุณหภูมิต่ำ (Cool Plate)", engineering: "แผ่นวิศวกรรม" };
+    const supTh = { none: "ไม่มีซัพพอร์ต", tree: "ซัพพอร์ตแบบต้นไม้", normal: "ซัพพอร์ตปกติ" };
+    return `<details class="pe-prm" data-prm="${pl.id}" ${S.openPrm[pl.id] ? "open" : ""}><summary><b>⚙ ${Z("这一盘的打印参数", "พารามิเตอร์การพิมพ์ของถาดนี้")}</b> <span class="muted small" data-notr>${esc(mat)} · ${pl.layer_height} mm · </span><span class="muted small">${esc(sum)}</span></summary>
+      <div class="form4 small">
+        <label>${Z("打印材料（槽 1）", "วัสดุ (ช่อง 1)")}<select data-prm-mat data-notr>${(m.materials || ["PLA"]).filter((x) => !/^RESIN/.test(x)).concat([mat]).filter((v, i, a) => a.indexOf(v) === i).map((x) => `<option ${x === mat ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></label>
+        <label>${Z("支撑", "ซัพพอร์ต")}<select data-prm="supports">${Object.keys(m.support_zh || { none: 1, tree: 1, normal: 1 }).map((k) => `<option value="${k}" ${k === r.supports ? "selected" : ""}>${esc(TH() ? supTh[k] || k : (m.support_zh || {})[k] || k)}</option>`).join("")}</select></label>
+        <label>${Z("支撑角度 °", "มุมซัพพอร์ต °")}<input type="number" min="10" max="80" value="${r.support_angle ?? 30}" data-prm="support_angle"></label>
+        <label class="row" style="align-self:end"><input type="checkbox" data-prm="support_build_plate_only" ${r.support_build_plate_only ? "checked" : ""}> ${Z("支撑只从热床长", "ซัพพอร์ตจากฐานเท่านั้น")}</label>
+        <label>${Z("壁数（外墙圈数）", "จำนวนผนัง")}<input type="number" min="1" max="8" value="${r.walls ?? 2}" data-prm="walls"></label>
+        <label>${Z("顶 / 底层数", "ชั้นบน / ล่าง")}<input type="number" min="2" max="10" value="${r.top_bottom ?? 4}" data-prm="top_bottom"></label>
+        <label>${Z("填充率 %", "เติมเนื้อใน %")}<input type="number" min="0" max="100" value="${r.infill_pct ?? 15}" data-prm="infill_pct"></label>
+        <label>${Z("填充图案", "ลายเติมเนื้อใน")}<select data-prm="infill_pattern" data-notr>${(m.patterns || ["gyroid"]).map((p) => `<option ${p === r.infill_pattern ? "selected" : ""}>${p}</option>`).join("")}</select></label>
+        <label>${Z("热床板", "แผ่นฐาน")}<select data-prm="bed_type">${Object.keys(m.bed_types || { auto: 1 }).map((k) => `<option value="${k}" ${k === r.bed_type ? "selected" : ""}>${esc(TH() ? bedTh[k] || k : (m.bed_types || {})[k] || k)}</option>`).join("")}</select></label>
+        <label class="row" style="align-self:end"><input type="checkbox" data-prm="brim" ${r.brim ? "checked" : ""}> ${Z("帽檐（防翘边、防倒）", "ปีกกันงอ (brim)")}</label>
+        <label>${Z("自动排列间距 mm", "ระยะห่างจัดเรียง mm")}<input type="number" min="2" max="30" value="${r.gap_mm ?? 6}" data-prm="gap_mm"></label>
+        <label>${Z("喷嘴温度 °C（空 = 按耗材配置）", "อุณหภูมิหัวฉีด °C (ว่าง = ตามโปรไฟล์)")}<input type="number" min="0" max="320" value="${r.nozzle_temp || ""}" placeholder="${tr.length ? tr[0] + "–" + tr[1] : ""}" data-prm="nozzle_temp"></label>
+        <label>${Z("热床温度 °C（空 = 按耗材配置）", "อุณหภูมิฐาน °C (ว่าง = ตามโปรไฟล์)")}<input type="number" min="0" max="120" value="${r.bed_temp || ""}" data-prm="bed_temp"></label>
+        <label>${Z("耗材配置", "โปรไฟล์เส้นพลาสติก")} <span class="muted" data-notr>${esc(pl.printer)}</span><select data-prm-fil data-pi="${pidx ?? ""}" data-notr><option value="">${Z("自动（按材料选）", "อัตโนมัติ (ตามวัสดุ)")}</option>${fil ? `<option value="${esc(fil)}" selected>${esc(fil)}</option>` : ""}</select></label>
+      </div>
+      <label class="small" style="display:block;padding:0 8px">${Z("给生产员工的注意事项（显示在生产工单上）", "หมายเหตุสำหรับพนักงานผลิต (แสดงในใบงาน)")}<textarea rows="2" data-prm="notes" data-notr>${esc(r.notes || "")}</textarea></label>
+      ${S.plan.plates.length > 1 ? `<div style="padding:0 8px 8px"><button class="mini" data-pe="prm-all">${Z("这些参数用到所有盘", "ใช้พารามิเตอร์นี้กับทุกถาด")}</button></div>` : ""}
+    </details>`;
+  }
+  function checksHtml(pl) {
+    const L = { error: "❌", warn: "⚠️", info: "💡", ok: "✅" };
+    const list = (S.pchk || {})[pl.id] || [];
+    return `<div class="pe-checks" data-pchk="${pl.id}">${list.map((c) => `<div class="pe-chk lv-${c.level}" ${(c.uids || []).length ? `data-chk-uids="${esc(c.uids.join(","))}" title="${Z("点一下选中这些零件", "คลิกเพื่อเลือกชิ้นเหล่านี้")}"` : ""}>${L[c.level] || ""} ${esc(TH() ? c.th : c.zh)}</div>`).join("")}</div>`;
   }
   function itemRow(pl, it, i, ck) {
     const c = ck[it.uid] || {}, bad = c.out || (c.overlap || []).length;
     const e = libOf(it.id) || {}, painted = e.multicolor && it.part == null;
-    return `<tr data-uid="${it.uid}" class="${S.sel.uid === it.uid ? "on" : ""} ${bad ? "bad" : ""}">
+    const tags = [it.face ? Z("按面", "ตามด้าน") : "", it.mirror ? "⇋" : "", it.scale && it.scale !== 1 ? `${Math.round(it.scale * 100)}%` : "", it.ov ? "⚙" : "", it.group ? "⛓" : ""].filter(Boolean).join(" ");
+    return `<tr data-uid="${it.uid}" class="${isSel(pl, it.uid) ? "on" : ""} ${bad ? "bad" : ""}">
       <td class="nowrap"><b>${i + 1}</b></td>
-      <td><span data-notr title="${esc(labelOf(it))}">${esc(labelOf(it).slice(-28))}</span>${bad ? `<div class="small bad">${c.out ? Z("超出热床", "เกินฐาน") : ""} ${(c.overlap || []).length ? Z("重叠", "ซ้อนกัน") : ""}</div>` : ""}</td>
-      <td><select data-ppi="orient" title="${Z("摆放方向（哪一面贴热床）", "ทิศการวาง (ด้านไหนติดฐาน)")}">${Object.keys(S.d.orient_zh).map((k) => `<option value="${k}" ${k === it.orient ? "selected" : ""}>${esc(oriTxt(k))}</option>`).join("")}</select></td>
+      <td><span data-notr title="${esc(labelOf(it))}">${esc(labelOf(it).slice(-28))}</span> <span class="small muted">${tags}</span>${bad ? `<div class="small bad">${c.out ? Z("超出热床", "เกินฐาน") : ""} ${(c.overlap || []).length ? Z("重叠", "ซ้อนกัน") : ""}</div>` : ""}</td>
+      <td class="small">${it.face ? Z("按面贴平台", "วางตามด้าน") : esc(oriTxt(it.orient))}</td>
       <td>${painted ? `<span class="small muted">🎨 ${Z("文件自带颜色", "สีตามไฟล์")}</span>` : `<select data-ppi="slot" title="${Z("这个零件用哪个槽（颜色）", "ชิ้นนี้ใช้ช่องไหน (สี)")}">${pl.slots.map((s) => `<option value="${s.slot}" ${s.slot === it.slot ? "selected" : ""}>${Z("槽", "ช่อง")} ${s.slot} · ${esc(cl(slotColour(pl, s.slot)) || "")}</option>`).join("")}</select>`}</td>
-      <td class="nowrap small muted">${S.fps[it.uid] ? `${n1(S.fps[it.uid].w)}×${n1(S.fps[it.uid].d)}×${n1(S.fps[it.uid].h)}` : ""}</td></tr>`;
+      <td class="nowrap small muted" data-notr>${S.fps[it.uid] ? `${n1(S.fps[it.uid].w)}×${n1(S.fps[it.uid].d)}×${n1(S.fps[it.uid].h)}` : ""}</td></tr>`;
   }
   function oriTxt(k) {
-    const zh = { bottom: "底面朝下", top: "倒放", front: "前面朝下", back: "背面朝下", left: "左侧朝下", right: "右侧朝下" };
-    const th = { bottom: "ฐานลง", top: "คว่ำ", front: "ด้านหน้าลง", back: "ด้านหลังลง", left: "ด้านซ้ายลง", right: "ด้านขวาลง" };
+    const zh = { bottom: "底面朝下", top: "倒放", front: "前面朝下", back: "背面朝下", left: "左侧朝下", right: "右侧朝下", face: "按面贴平台" };
+    const th = { bottom: "ฐานลง", top: "คว่ำ", front: "ด้านหน้าลง", back: "ด้านหลังลง", left: "ด้านซ้ายลง", right: "ด้านขวาลง", face: "วางตามด้าน" };
     return Z(zh[k] || k, th[k] || k);
   }
   function statusTxt(pl, ck) {
@@ -336,20 +602,29 @@
       g.strokeStyle = "#8a97a8"; g.lineWidth = 1; g.strokeRect(X(ex[0]), Y(ex[3]), (ex[2] - ex[0]) * k, (ex[3] - ex[1]) * k);
     }
     g.fillStyle = "#8a97a8"; g.font = "11px sans-serif"; g.fillText(`${bed[0]} × ${bed[1]} mm`, X(0) + 4 + (ex ? (ex[2] - ex[0]) * k : 0), Y(0) - 4);
-    const ck = check(pl);
+    const ck = check(pl), sel = selOf(pl);
     pl.items.forEach((it, i) => {
       const f = S.fps[it.uid]; if (!f || it.x == null) return;
-      const pg = poly(f, it.x, it.y, it.rot), c = ck[it.uid] || {}, bad = c.out || c.overlap.length, on = S.sel.uid === it.uid;
+      const pg = poly(f, it.x, it.y, it.rot), c = ck[it.uid] || {}, bad = c.out || c.overlap.length, on = sel.includes(it.uid);
       g.beginPath(); pg.forEach(([x, y], j) => (j ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y)))); g.closePath();
       const e = libOf(it.id) || {};
       g.fillStyle = bad ? "rgba(229,57,53,.45)" : (e.multicolor && it.part == null ? "rgba(140,120,220,.55)" : hexOf(slotColour(pl, it.slot)));
       g.globalAlpha = bad ? 1 : 0.85; g.fill(); g.globalAlpha = 1;
+      g.setLineDash(it.group ? [5, 3] : []);
       g.lineWidth = on ? 3 : 1.5; g.strokeStyle = bad ? "#c62828" : on ? "#1565c0" : "#37474f"; g.stroke();
-      g.fillStyle = "#111"; g.font = "bold 12px sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
-      g.fillStyle = "rgba(255,255,255,.85)"; g.beginPath(); g.arc(X(it.x), Y(it.y), 9, 0, Math.PI * 2); g.fill();
-      g.fillStyle = "#111"; g.fillText(String(i + 1), X(it.x), Y(it.y));
+      g.setLineDash([]);
+      if (on) { g.fillStyle = "rgba(21,101,192,.12)"; g.fill(); }
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillStyle = on ? "rgba(21,101,192,.9)" : "rgba(255,255,255,.85)"; g.beginPath(); g.arc(X(it.x), Y(it.y), 9, 0, Math.PI * 2); g.fill();
+      g.fillStyle = on ? "#fff" : "#111"; g.font = "bold 12px sans-serif"; g.fillText(String(i + 1), X(it.x), Y(it.y));
+      if (it.ov || it.mirror) { g.font = "11px sans-serif"; g.fillStyle = "#0b3d75"; g.fillText((it.ov ? "⚙" : "") + (it.mirror ? "⇋" : ""), X(it.x) + 14, Y(it.y) - 10); }
       g.textAlign = "start"; g.textBaseline = "alphabetic";
     });
+    if (BSEL && BSEL.pl === pl) {          // 框选的框
+      const [x0, y0, x1, y1] = [Math.min(BSEL.x0, BSEL.x1), Math.min(BSEL.y0, BSEL.y1), Math.max(BSEL.x0, BSEL.x1), Math.max(BSEL.y0, BSEL.y1)];
+      g.fillStyle = "rgba(21,101,192,.10)"; g.fillRect(X(x0), Y(y1), (x1 - x0) * k, (y1 - y0) * k);
+      g.strokeStyle = "#1565c0"; g.lineWidth = 1; g.setLineDash([4, 3]); g.strokeRect(X(x0), Y(y1), (x1 - x0) * k, (y1 - y0) * k); g.setLineDash([]);
+    }
   }
   function hit(pl, mx, my) {
     for (let i = pl.items.length - 1; i >= 0; i--) {
@@ -373,39 +648,83 @@
     const ck = check(pl), st = BOX.querySelector(`[data-st="${pl.id}"]`);
     if (st) { st.textContent = statusTxt(pl, ck); st.className = "pp-st " + (Object.values(ck).some((x) => x.out || x.overlap.length) ? "bad" : "ok"); }
     BOX.querySelectorAll(`[data-pl="${pl.id}"] .pp-items tr[data-uid]`).forEach((tr) => {
-      const c = ck[tr.dataset.uid] || {}; tr.classList.toggle("bad", !!(c.out || (c.overlap || []).length)); tr.classList.toggle("on", tr.dataset.uid === S.sel.uid);
+      const c = ck[tr.dataset.uid] || {}; tr.classList.toggle("bad", !!(c.out || (c.overlap || []).length)); tr.classList.toggle("on", isSel(pl, tr.dataset.uid));
     });
   }
-  let DRAG = null;
+  let DRAG = null, BSEL = null;
   function onDown(ev) {
     const cv = ev.target.closest("[data-cv]"); if (!cv || !S) return;
     const pl = plateOf(cv.dataset.cv), [mx, my] = toBed(cv, pl, ev), it = hit(pl, mx, my);
-    S.sel = { pl: pl.id, uid: it ? it.uid : null };
-    if (it) { DRAG = { cv, pl, it, dx: mx - it.x, dy: my - it.y, moved: false, snap: JSON.stringify(S.plan) }; cv.setPointerCapture(ev.pointerId); cv.style.cursor = "grabbing"; }
-    cv.focus();
-    refreshPlate(pl);
+    const multi = ev.ctrlKey || ev.metaKey || ev.shiftKey;
+    if (S.sel.pl !== pl.id) S.sel = { pl: pl.id, uids: [] };
+    if (it) {
+      if (multi) {
+        const cur = selOf(pl);
+        const grp = withGroups(pl, [it.uid]);
+        setSel(pl, cur.includes(it.uid) ? cur.filter((u) => !grp.includes(u)) : cur.concat(grp));
+        cv.focus(); renderPlate(pl); focusCv(pl);
+        return;
+      }
+      const wasSel = isSel(pl, it.uid);
+      if (!wasSel) setSel(pl, [it.uid]);
+      const items = pl.items.filter((x) => isSel(pl, x.uid) && x.x != null);
+      DRAG = { cv, pl, it, x0: mx, y0: my, orig: items.map((x) => [x, x.x, x.y]), moved: false, snap: JSON.stringify(S.plan), wasSel };
+      cv.setPointerCapture(ev.pointerId); cv.style.cursor = "grabbing";
+      if (!wasSel) { renderPlate(pl); const cv2 = BOX.querySelector(`[data-cv="${pl.id}"]`); DRAG.cv = cv2; try { cv2.setPointerCapture(ev.pointerId); } catch { /* 忽略 */ } cv2.focus({ preventScroll: true }); }
+      else cv.focus({ preventScroll: true });
+      return;
+    }
+    BSEL = { cv, pl, x0: mx, y0: my, x1: mx, y1: my, add: multi, base: multi ? selOf(pl).slice() : [] };
+    cv.setPointerCapture(ev.pointerId);
+    cv.focus({ preventScroll: true });
   }
   function onMove(ev) {
-    if (!DRAG) return;
-    const [mx, my] = toBed(DRAG.cv, DRAG.pl, ev);
-    DRAG.it.x = Math.round((mx - DRAG.dx) * 2) / 2; DRAG.it.y = Math.round((my - DRAG.dy) * 2) / 2; DRAG.moved = true;
-    refreshPlate(DRAG.pl);
+    if (DRAG) {
+      const [mx, my] = toBed(DRAG.cv, DRAG.pl, ev);
+      const dx = Math.round((mx - DRAG.x0) * 2) / 2, dy = Math.round((my - DRAG.y0) * 2) / 2;
+      if (!DRAG.moved && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      DRAG.orig.forEach(([x, ox, oy]) => { x.x = Math.round((ox + dx) * 2) / 2; x.y = Math.round((oy + dy) * 2) / 2; });
+      DRAG.moved = true;
+      refreshPlate(DRAG.pl);
+      return;
+    }
+    if (BSEL) {
+      const [mx, my] = toBed(BSEL.cv, BSEL.pl, ev);
+      BSEL.x1 = mx; BSEL.y1 = my;
+      draw(BSEL.pl);
+    }
   }
   function onUp() {
-    if (!DRAG) return;
-    DRAG.cv.style.cursor = "";
-    if (DRAG.moved) {
-      DRAG.pl.manual = true; S.dirty = true;
-      if (!S.undo.length || S.undo[S.undo.length - 1] !== DRAG.snap) { S.undo.push(DRAG.snap); S.redo = []; }
+    if (DRAG) {
+      const d = DRAG; DRAG = null;
+      d.cv.style.cursor = "";
+      if (d.moved) {
+        d.pl.manual = true; S.dirty = true;
+        if (!S.undo.length || S.undo[S.undo.length - 1] !== d.snap) { S.undo.push(d.snap); S.redo = []; }
+        renderPlate(d.pl); focusCv(d.pl);
+      } else if (d.wasSel && selOf(d.pl).length > 1) { setSel(d.pl, [d.it.uid]); renderPlate(d.pl); focusCv(d.pl); }
+      return;
     }
-    DRAG = null;
+    if (BSEL) {
+      const b = BSEL; BSEL = null;
+      const [x0, y0, x1, y1] = [Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.max(b.x0, b.x1), Math.max(b.y0, b.y1)];
+      let got = [];
+      if (x1 - x0 > 1 || y1 - y0 > 1) {          // box-select：外框和框有交叠的零件
+        const rect = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+        got = b.pl.items.filter((it) => S.fps[it.uid] && it.x != null && overlap(poly(S.fps[it.uid], it.x, it.y, it.rot), rect) > 0).map((it) => it.uid);
+      }
+      setSel(b.pl, b.add ? b.base.concat(got) : got);
+      renderPlate(b.pl); focusCv(b.pl);
+    }
   }
-  function rotSel(a) {
-    const pl = plateOf(S.sel.pl), it = pl && pl.items.find((x) => x.uid === S.sel.uid);
-    if (!it) { toast(Z("先在图上点一下要转的零件", "คลิกเลือกชิ้นงานบนภาพก่อน"), true); return false; }
+  function rotSel(pl, a) {
+    const its = pl.items.filter((x) => isSel(pl, x.uid));
+    if (!its.length) { toast(Z("先在图上点一下要转的零件", "คลิกเลือกชิ้นงานบนภาพก่อน"), true); return false; }
+    if (its.length > 1) { runOp(pl, { op: "rotate", angle: a }); return true; }
     mark();
-    it.rot = (((it.rot || 0) + a) % 360 + 360) % 360; pl.manual = true; S.dirty = true; refreshPlate(pl); return true;
+    its[0].rot = (((its[0].rot || 0) + a) % 360 + 360) % 360; pl.manual = true; S.dirty = true; refreshPlate(pl); return true;
   }
+  function curPlate() { return (S && S.sel && plateOf(S.sel.pl)) || (S && S.plan && S.plan.plates[0]); }
 
   // ---------------- 事件 ----------------
   function wire() {
@@ -416,170 +735,304 @@
     BOX.addEventListener("pointerup", onUp);
     BOX.addEventListener("pointercancel", onUp);
     BOX.addEventListener("wheel", (ev) => {
-      if (!ev.shiftKey || !ev.target.closest("[data-cv]") || !S.sel.uid) return;
-      ev.preventDefault(); rotSel(ev.deltaY > 0 ? 5 : -5);
+      if (!S || !ev.shiftKey || !ev.target.closest("[data-cv]")) return;
+      const pl = plateOf(ev.target.closest("[data-cv]").dataset.cv); if (!selOf(pl).length || selOf(pl).length > 1) return;
+      ev.preventDefault(); rotSel(pl, ev.deltaY > 0 ? 5 : -5);
     }, { passive: false });
-    BOX.addEventListener("keydown", (ev) => {
-      if ((ev.ctrlKey || ev.metaKey) && !ev.target.closest("input,select,textarea")) {
-        const k = ev.key.toLowerCase();
-        if (k === "z" || k === "y") { ev.preventDefault(); undoRedo(k === "z" && !ev.shiftKey); return; }
-      }
-      const cv = ev.target.closest("[data-cv]"); if (!cv || !S.sel.uid) return;
-      const pl = plateOf(cv.dataset.cv), it = pl.items.find((x) => x.uid === S.sel.uid); if (!it) return;
-      const mv = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[ev.key];
-      if (mv) { ev.preventDefault(); if (!ev.repeat) mark(); it.x += mv[0]; it.y += mv[1]; pl.manual = true; S.dirty = true; refreshPlate(pl); }
-      else if (ev.key === "r" || ev.key === "R") { ev.preventDefault(); rotSel(90); }
-      else if (ev.key === "Delete") { ev.preventDefault(); mark(); pl.items = pl.items.filter((x) => x !== it); S.sel.uid = null; S.dirty = true; render(); }
+    BOX.addEventListener("keydown", onKey);
+    BOX.addEventListener("click", onClick);
+    BOX.addEventListener("change", onChange);
+    BOX.addEventListener("focusin", (ev) => {
+      if (S && S.plan && ev.target.closest("select,input,textarea")) S._pre = JSON.stringify(S.plan);
+      const fs = ev.target.closest("[data-prm-fil]"); if (fs) loadFilaments(fs);
     });
-    BOX.addEventListener("click", async (ev) => {
-      const cc = ev.target.closest("[data-pp-col]");
-      if (cc) { S.colour = cc.dataset.ppCol; render(); return; }
-      const row = ev.target.closest("tr[data-uid]");
-      if (row && !ev.target.closest("select")) { S.sel = { pl: row.closest("[data-pl]").dataset.pl, uid: row.dataset.uid }; refreshPlate(plateOf(S.sel.pl)); }
-      if (ev.target.closest("[data-pp-dl]") && S.dirty) { ev.preventDefault(); toast(Z("先保存打印方案再下载", "บันทึกแผนการพิมพ์ก่อนดาวน์โหลด"), true); return; }
-      const b = ev.target.closest("[data-pp]"); if (!b) return;
-      const a = b.dataset.pp, plEl = b.closest("[data-pl]"), pl = plEl ? plateOf(plEl.dataset.pl) : null;
-      try {
-        if (a === "save") return save(b);
-        if (a === "undo" || a === "redo") { await undoRedo(a === "undo"); return; }
-        if (a === "from-display") {
-          if (S.dirty && !confirm(Z("现在的改动会被替换（可以撤销）。继续？", "การแก้ไขตอนนี้จะถูกแทนที่ (ย้อนได้) ดำเนินการต่อ?"))) return;
-          await busy(b, async () => {
-            const r = await apiJob(`/api/products/${encodeURIComponent(S.pid)}/print-plan/from-display`, { json: { spec: S.spec } });
-            const undo = S.undo.concat([JSON.stringify(S.plan)]);
-            load(r, true); S.undo = undo; S.redo = [];
-            render();
-            toast(Z(`已按组装的零件生成 ${r.plan.plates.length} 盘（草稿），检查后点「保存打印方案」`, `สร้าง ${r.plan.plates.length} ถาดจากการประกอบแล้ว (ร่าง) ตรวจแล้วกดบันทึก`));
-          });
-          return;
-        }
-        if (["add-plate", "del-plate", "add-slot", "del-slot", "arrange", "kit", "del-item", "dup"].includes(a)) mark();
-        if (a === "add-plate") {
-          const base = S.plan.plates[S.plan.plates.length - 1];
-          S.plan.plates.push({ id: "p" + Date.now().toString(36).slice(-5), name: "", printer: base.printer, layer_height: base.layer_height, sets: 1,
-            slots: [{ slot: 1, material: base.slots[0].material, colour: "" }], items: [], manual: false });
-          S.dirty = true; render(); return;
-        }
-        if (a === "del-plate") { if (!confirm(Z("删掉这一盘？", "ลบถาดนี้?"))) return; S.plan.plates = S.plan.plates.filter((x) => x !== pl); S.dirty = true; render(); return; }
-        if (a === "add-slot") { pl.slots.push({ slot: pl.slots.length + 1, material: pl.slots[0].material, colour: "" }); S.dirty = true; render(); return; }
-        if (a === "del-slot") {
-          const n = +b.closest("tr").dataset.slot;
-          pl.slots = pl.slots.filter((s) => s.slot !== n).map((s, i) => ({ ...s, slot: i + 1 }));
-          pl.items.forEach((it) => { if (it.slot === n) it.slot = 1; else if (it.slot > n) it.slot -= 1; });
-          Object.values(S.plan.schemes || {}).forEach((m) => { const o = { ...m }; Object.keys(m).forEach((k) => delete m[k]); Object.entries(o).forEach(([k, v]) => { const kk = +k; if (kk < n) m[k] = v; else if (kk > n) m[String(kk - 1)] = v; }); });
-          S.dirty = true; render(); return;
-        }
-        if (a === "arrange") { await busy(b, () => arrange(pl)); if (S.kit) delete S.kit[pl.id]; render(); return; }
-        if (a === "kit") {
-          await busy(b, async () => {
-            const r = await apiJob(`/api/products/${encodeURIComponent(S.pid)}/print-plan/kit`, { json: { plate: pl, ai: true } });
-            const byUid = Object.fromEntries(r.plate.items.map((x) => [x.uid, x]));
-            pl.items.forEach((it) => { const n = byUid[it.uid]; if (n) { it.x = n.x; it.y = n.y; it.rot = n.rot; } });
-            Object.entries(r.footprints || {}).forEach(([k, v]) => { S.fps[k] = { ...v, _k: S.fps[k] && S.fps[k]._k }; });
-            pl.manual = true; S.dirty = true;
-            S.kit = S.kit || {}; S.kit[pl.id] = r;
-          });
-          render(); return;
-        }
-        if (a === "rot") { rotSel(+b.dataset.a); return; }
-        if (a === "del-item") {
-          if (!S.sel.uid || S.sel.pl !== pl.id) { toast(Z("先在图上点一下要删的零件", "คลิกเลือกชิ้นงานที่จะลบก่อน"), true); return; }
-          pl.items = pl.items.filter((x) => x.uid !== S.sel.uid); S.sel.uid = null; S.dirty = true; render(); return;
-        }
-        if (a === "dup") {
-          const it = pl.items.find((x) => x.uid === S.sel.uid);
-          if (!it || S.sel.pl !== pl.id) { toast(Z("先在图上点一下要复制的零件", "คลิกเลือกชิ้นงานที่จะคัดลอกก่อน"), true); return; }
-          const n = Math.max(1, Math.min(50, +(plEl.querySelector("[data-pp-dupn]") || {}).value || 1));
-          for (let k = 0; k < n; k++) { const c = { ...it, uid: uid(), x: null, y: null }; pl.items.push(c); S.fps[c.uid] = S.fps[it.uid]; }
-          await busy(b, () => (pl.manual ? placeNew(pl) : arrange(pl)));
-          S.dirty = true; render(); return;
-        }
-        if (a === "3d") { await view3d(pl, b); return; }
-        if (a === "fill") {
-          if (S.dirty) await save();
-          await busy(b, async () => {
-            const r = await api(`/api/products/${encodeURIComponent(S.pid)}/print-plan/fill`, { json: { spec: S.spec } });
-            if (typeof P !== "undefined" && P && P.id === S.pid && r.product) { P.variants = r.product.variants; P.edit_rev = r.product.edit_rev; if (window.renderVariants) renderVariants(); if (window.refreshPricing) refreshPricing(); }
-            toast(Z(`已填 ${r.n} 个变体的克数 / 时长`, `ใส่กรัม / เวลาให้ ${r.n} ตัวเลือกแล้ว`));
-            if (window.M3) M3.refresh();
-          });
-          return;
-        }
-        if (a === "slice" || a === "merge") {
-          if (S.dirty) { toast(Z("先保存打印方案", "บันทึกแผนการพิมพ์ก่อน"), true); return; }
-          if (a === "merge" && !confirm(S.spec ? Z(`按摆好的位置合并成一个模型，指定给规格「${S.spec}」？这个规格原来的切片文件会退回草稿。`, `รวมเป็นโมเดลเดียวและกำหนดให้แบบ「${S.spec}」?`)
-            : Z("按摆好的位置合并成一个模型，设为 3D 模型（只影响打印；展示不变，还是原来的零件）？这个产品已有的切片文件会退回草稿。", "รวมเป็นโมเดลเดียวและตั้งเป็นโมเดล 3D (มีผลกับการพิมพ์เท่านั้น การแสดงผลไม่เปลี่ยน)? ไฟล์สไลซ์เดิมจะกลับเป็นร่าง"))) return;
-          await busy(b, async () => {
-            const r = await apiJob(`/api/products/${encodeURIComponent(S.pid)}/print-plan/${a}`, { json: { spec: S.spec, plate_id: pl.id, colour: S.colour } });
-            if (a === "merge") { toast(Z("已合并", "รวมแล้ว")); window.dispatchEvent(new CustomEvent("model-changed", { detail: S.pid })); }
-            else toast(Z("切片完成，已存成切片文件（草稿，复核后生产用）", "สไลซ์เสร็จ บันทึกเป็นไฟล์สไลซ์แล้ว (ร่าง)") + (r.file_id ? ` #${r.file_id}` : ""));
-            await mount(BOX, S.pid, S.spec);
-            if (window.M3) M3.refresh();
-          }, a === "slice" ? TR("busy.slicing") : undefined);
-          return;
-        }
-      } catch (e) { toast(e.message, true); }
-    });
-    BOX.addEventListener("change", async (ev) => {
-      const t = ev.target, plEl = t.closest("[data-pl]"), pl = plEl ? plateOf(plEl.dataset.pl) : null;
-      try {
-        if ((t.dataset.ppf || t.dataset.pps || t.dataset.ppi || t.dataset.schSlot || (t.dataset.ppAdd !== undefined && t.value))) {
-          // 改之前记下（下拉框已经变了：用改之前的方案）
-          if (S._pre) { if (!S.undo.length || S.undo[S.undo.length - 1] !== S._pre) { S.undo.push(S._pre); S.redo = []; } }
-        }
-        if (t.dataset.ppf && pl) {
-          pl[t.dataset.ppf] = t.dataset.ppf === "printer" ? t.value : +t.value;
-          S.dirty = true; render(); return;
-        }
-        if (t.dataset.pps && pl) {
-          const s = pl.slots.find((x) => x.slot === +t.closest("tr").dataset.slot); s[t.dataset.pps] = t.value; S.dirty = true; render(); return;
-        }
-        if (t.dataset.ppi && pl) {
-          const it = pl.items.find((x) => x.uid === t.closest("tr").dataset.uid);
-          if (t.dataset.ppi === "slot") { it.slot = +t.value; S.dirty = true; render(); return; }
-          it.orient = t.value; await fpFor([it]); S.dirty = true; render(); return;
-        }
-        if (t.dataset.ppAdd !== undefined && pl) {
-          if (!t.value) return;
-          const [id, part] = t.value.split("|"), e = libOf(id);
-          const pp = part === "" ? null : +part, src = pp == null ? e : (e.parts || []).find((x) => x.index === pp) || {};
-          const it = { uid: uid(), id, part: pp, orient: src.best || "bottom", slot: 1, x: null, y: null, rot: 0 };
-          if (e.multicolor && pp == null && e.colors) {      // 涂色 3MF：槽按文件里的颜色
-            const used = e.colors.used || [];
-            const fl = (e.colors.filaments || []).filter((f) => !used.length || used.includes(f.slot)).slice(0, S.d.slot_max || 4);
-            if (fl.length > pl.slots.length) pl.slots = fl.map((f, i) => ({ slot: i + 1, file_slot: f.slot, material: (f.type || pl.slots[0].material || "PLA").toUpperCase(), colour: f.name || "", hex: f.hex }));
-          }
-          pl.items.push(it); t.value = "";
-          await fpFor([it]);
-          if (pl.manual) await placeNew(pl); else await arrange(pl);
-          S.sel = { pl: pl.id, uid: it.uid }; S.dirty = true; render(); return;
-        }
-        if (t.dataset.schSlot) {
-          const c = t.closest("tr").dataset.sch; S.plan.schemes = S.plan.schemes || {};
-          const m = (S.plan.schemes[c] = S.plan.schemes[c] || {});
-          if (t.value) m[t.dataset.schSlot] = t.value; else delete m[t.dataset.schSlot];
-          S.dirty = true; render(); return;
-        }
-      } catch (e) { toast(e.message, true); }
-    });
-    BOX.addEventListener("focusin", (ev) => { if (S && S.plan && ev.target.closest("select,input")) S._pre = JSON.stringify(S.plan); });
+    BOX.addEventListener("toggle", (ev) => { const d = ev.target.closest && ev.target.closest("details.pe-prm"); if (d && S) S.openPrm[d.dataset.prm] = d.open; const pb = ev.target.closest && ev.target.closest("details.pe-parts-box"); if (pb && S) S.openParts = pb.open; }, true);
     window.addEventListener("resize", () => { if (S && S.plan && BOX && BOX.isConnected) S.plan.plates.forEach(draw); });
   }
-  // 手动摆过的盘里新加的零件：找一个空地方放（从左下往右上找，不和别的重叠）
-  async function placeNew(pl) {
-    await fpFor(pl.items);
-    const bed = bedOf(pl.printer);
-    for (const it of pl.items.filter((x) => x.x == null)) {
-      const f = S.fps[it.uid]; let done = false;
-      for (let y = 5 + f.d / 2; y <= bed[1] - f.d / 2 && !done; y += 5) {
-        for (let x = 5 + f.w / 2; x <= bed[0] - f.w / 2 && !done; x += 5) {
-          it.x = x; it.y = y;
-          const c = check(pl)[it.uid];
-          if (c && !c.out && !c.overlap.length) done = true;
-        }
-      }
-      if (!done) { it.x = bed[0] + f.w; it.y = f.d / 2; }
+  function onKey(ev) {
+    if (!S || !S.plan) return;
+    if (ev.target.closest("input,select,textarea")) return;
+    const k = ev.key.toLowerCase(), ctrl = ev.ctrlKey || ev.metaKey;
+    const pl = (ev.target.closest("[data-cv]") && plateOf(ev.target.closest("[data-cv]").dataset.cv)) || curPlate();
+    if (!pl) return;
+    const sel = selOf(pl);
+    const stop = () => { ev.preventDefault(); ev.stopPropagation(); };
+    if (ctrl && (k === "z" || k === "y")) { stop(); undoRedo(k === "z" && !ev.shiftKey); return; }
+    if (ctrl && k === "a") { stop(); setSel(pl, pl.items.map((x) => x.uid)); renderPlate(pl); focusCv(pl); return; }
+    if (ctrl && k === "c") { if (!sel.length) return; stop(); S.clip = clone(pl.items.filter((x) => sel.includes(x.uid))); toast(Z(`已复制 ${S.clip.length} 个零件（Ctrl+V 粘贴）`, `คัดลอก ${S.clip.length} ชิ้นแล้ว (Ctrl+V วาง)`)); return; }
+    if (ctrl && k === "v") {
+      if (!S.clip || !S.clip.length) return; stop();
+      const snap = JSON.stringify(S.plan);
+      const add = S.clip.map((x) => ({ ...clone(x), uid: uid(), x: null, y: null, group: undefined }));
+      pl.items.push(...add);
+      runOp(pl, { op: "move", uids: add.map((x) => x.uid), dx: 0, dy: 0 }).then((r) => { if (r) S.undo[S.undo.length - 1] = snap; else pl.items = pl.items.filter((x) => !add.includes(x)); });
+      return;
     }
+    if (ctrl && k === "d") { if (!sel.length) return; stop(); runOp(pl, { op: "duplicate", n: 1 }); return; }
+    if (ctrl && k === "g") { if (!sel.length) return; stop(); runOp(pl, { op: ev.shiftKey ? "ungroup" : "group" }); return; }
+    if (ctrl) return;
+    if (k === "escape") { S.sel = { pl: pl.id, uids: [] }; renderPlate(pl); focusCv(pl); return; }
+    if (k === "a") { stop(); busyPlate(pl, () => arrange(pl)).then(() => { if (S.kit) delete S.kit[pl.id]; render(); focusCv(pl); }); return; }
+    if (!sel.length) return;
+    const mv = { arrowleft: [-1, 0], arrowright: [1, 0], arrowup: [0, 1], arrowdown: [0, -1] }[k];
+    if (mv) {
+      stop(); if (!ev.repeat) mark();
+      const st = ev.shiftKey ? 10 : 1;
+      pl.items.filter((x) => sel.includes(x.uid) && x.x != null).forEach((x) => { x.x += mv[0] * st; x.y += mv[1] * st; });
+      pl.manual = true; S.dirty = true; refreshPlate(pl); return;
+    }
+    if (k === "r") { stop(); rotSel(pl, ev.shiftKey ? -90 : 90); return; }
+    if (k === "delete" || k === "backspace") {
+      stop(); mark(); pl.items = pl.items.filter((x) => !sel.includes(x.uid)); S.sel.uids = []; S.dirty = true; render(); focusCv(pl); return;
+    }
+    if (k === "m") { stop(); runOp(pl, { op: "mirror", axis: ev.shiftKey ? "y" : "x" }); return; }
+    if (k === "f") { stop(); runOp(pl, { op: "auto_orient" }); }
+  }
+  async function busyPlate(pl, fn) { const b = BOX.querySelector(`[data-pl="${pl.id}"] [data-pp="arrange"]`); mark(); return b ? busy(b, fn) : fn(); }
+
+  async function onClick(ev) {
+    if (!S) return;
+    const sp = ev.target.closest("[data-pe-spec]");
+    if (sp) {
+      if (S.dirty && !confirm(Z("打印方案有改动还没保存，切换规格会丢掉。继续？", "แผนการพิมพ์ยังไม่ได้บันทึก เปลี่ยนแบบจะหาย ดำเนินการต่อ?"))) return;
+      S.ori = {}; await mount(BOX, S.pid, sp.dataset.peSpec);
+      if (S.opts && S.opts.onSpec) S.opts.onSpec(S.spec);
+      return;
+    }
+    const cc = ev.target.closest("[data-pp-col]");
+    if (cc) { S.colour = cc.dataset.ppCol; render(); return; }
+    const chk = ev.target.closest("[data-chk-uids]");
+    if (chk) { const pl = plateOf(chk.closest("[data-pchk]").dataset.pchk); setSel(pl, chk.dataset.chkUids.split(",")); renderPlate(pl); focusCv(pl); return; }
+    const ori = ev.target.closest("[data-pe-ori]");
+    if (ori) {
+      const pl = plateOf(ori.closest("[data-pl]").dataset.pl), it = oriSubject(pl); if (!it) return;
+      const r = S.ori[oriKey(it)].rows[+ori.dataset.peOri];
+      const uids = pl.items.filter((x) => isSel(pl, x.uid) && partKey(x) === partKey(it)).map((x) => x.uid);
+      await runOp(pl, r.face ? { op: "orient", face: r.face, uids } : { op: "orient", orient: r.key, uids });
+      return;
+    }
+    const row = ev.target.closest("tr[data-uid]");
+    if (row && !ev.target.closest("select")) {
+      const pl = plateOf(row.closest("[data-pl]").dataset.pl), u = row.dataset.uid;
+      if (S.sel.pl !== pl.id) S.sel = { pl: pl.id, uids: [] };
+      if (ev.ctrlKey || ev.metaKey || ev.shiftKey) setSel(pl, isSel(pl, u) ? selOf(pl).filter((x) => x !== u) : selOf(pl).concat([u]));
+      else setSel(pl, [u]);
+      renderPlate(pl); return;
+    }
+    if (ev.target.closest("[data-pp-dl]") && S.dirty) { ev.preventDefault(); toast(Z("先保存打印方案再下载", "บันทึกแผนการพิมพ์ก่อนดาวน์โหลด"), true); return; }
+    const e = ev.target.closest("[data-pe]");
+    if (e) { await peAction(ev, e); return; }
+    const b = ev.target.closest("[data-pp]"); if (!b) return;
+    const a = b.dataset.pp, plEl = b.closest("[data-pl]"), pl = plEl ? plateOf(plEl.dataset.pl) : null;
+    try {
+      if (a === "save") return save(b);
+      if (a === "undo" || a === "redo") { await undoRedo(a === "undo"); return; }
+      if (a === "from-display") {
+        if (S.dirty && !confirm(Z("现在的改动会被替换（可以撤销）。继续？", "การแก้ไขตอนนี้จะถูกแทนที่ (ย้อนได้) ดำเนินการต่อ?"))) return;
+        await busy(b, async () => {
+          const r = await apiJob(`/api/products/${enc(S.pid)}/print-plan/from-display`, { json: { spec: S.spec } });
+          const undo = S.undo.concat([JSON.stringify(S.plan)]);
+          load(r, true); S.undo = undo; S.redo = [];
+          render();
+          toast(Z(`已按组装的零件生成 ${r.plan.plates.length} 盘（草稿），检查后点「保存打印方案」`, `สร้าง ${r.plan.plates.length} ถาดจากการประกอบแล้ว (ร่าง) ตรวจแล้วกดบันทึก`));
+        });
+        return;
+      }
+      if (["add-plate", "del-plate", "add-slot", "del-slot", "kit"].includes(a)) mark();
+      if (a === "add-plate") {
+        const base = S.plan.plates[S.plan.plates.length - 1];
+        S.plan.plates.push({ id: "p" + Date.now().toString(36).slice(-5), name: "", printer: base.printer, layer_height: base.layer_height, sets: 1,
+          slots: [{ slot: 1, material: base.slots[0].material, colour: "" }], items: [], manual: false, params: clone(base.params || {}) });
+        S.dirty = true; render(); return;
+      }
+      if (a === "del-plate") { if (!confirm(Z("删掉这一盘？", "ลบถาดนี้?"))) return; S.plan.plates = S.plan.plates.filter((x) => x !== pl); S.dirty = true; render(); return; }
+      if (a === "add-slot") { pl.slots.push({ slot: pl.slots.length + 1, material: pl.slots[0].material, colour: "" }); S.dirty = true; renderPlate(pl); return; }
+      if (a === "del-slot") {
+        const n = +b.closest("tr").dataset.slot;
+        pl.slots = pl.slots.filter((s) => s.slot !== n).map((s, i) => ({ ...s, slot: i + 1 }));
+        pl.items.forEach((it) => { if (it.slot === n) it.slot = 1; else if (it.slot > n) it.slot -= 1; });
+        Object.values(S.plan.schemes || {}).forEach((m) => { const o = { ...m }; Object.keys(m).forEach((k) => delete m[k]); Object.entries(o).forEach(([k, v]) => { const kk = +k; if (kk < n) m[k] = v; else if (kk > n) m[String(kk - 1)] = v; }); });
+        S.dirty = true; render(); return;
+      }
+      if (a === "arrange") { mark(); await busy(b, () => arrange(pl)); if (S.kit) delete S.kit[pl.id]; render(); focusCv(pl); return; }
+      if (a === "kit") {
+        await busy(b, async () => {
+          const r = await apiJob(`/api/products/${enc(S.pid)}/print-plan/kit`, { json: { plate: pl, ai: true } });
+          const byUid = Object.fromEntries(r.plate.items.map((x) => [x.uid, x]));
+          pl.items.forEach((it) => { const n = byUid[it.uid]; if (n) { it.x = n.x; it.y = n.y; it.rot = n.rot; } });
+          Object.entries(r.footprints || {}).forEach(([k, v]) => { S.fps[k] = { ...v, _k: S.fps[k] && S.fps[k]._k }; });
+          pl.manual = true; S.dirty = true;
+          S.kit = S.kit || {}; S.kit[pl.id] = r;
+        });
+        render(); return;
+      }
+      if (a === "3d") { await view3d(pl, b); return; }
+      if (a === "fill") {
+        if (S.dirty) await save();
+        await busy(b, async () => {
+          const r = await api(`/api/products/${enc(S.pid)}/print-plan/fill`, { json: { spec: S.spec } });
+          if (typeof P !== "undefined" && P && P.id === S.pid && r.product) { P.variants = r.product.variants; P.edit_rev = r.product.edit_rev; if (window.renderVariants) renderVariants(); if (window.refreshPricing) refreshPricing(); }
+          toast(Z(`已填 ${r.n} 个变体的克数 / 时长`, `ใส่กรัม / เวลาให้ ${r.n} ตัวเลือกแล้ว`));
+          if (window.M3) M3.refresh();
+        });
+        return;
+      }
+      if (a === "slice" || a === "merge") {
+        if (S.dirty) { toast(Z("先保存打印方案", "บันทึกแผนการพิมพ์ก่อน"), true); return; }
+        if (a === "merge" && !confirm(S.spec ? Z(`按摆好的位置合并成一个模型，指定给规格「${S.spec}」？这个规格原来的切片文件会退回草稿。`, `รวมเป็นโมเดลเดียวและกำหนดให้แบบ「${S.spec}」?`)
+          : Z("按摆好的位置合并成一个模型，设为 3D 模型（只影响打印；展示不变，还是原来的零件）？这个产品已有的切片文件会退回草稿。", "รวมเป็นโมเดลเดียวและตั้งเป็นโมเดล 3D (มีผลกับการพิมพ์เท่านั้น การแสดงผลไม่เปลี่ยน)? ไฟล์สไลซ์เดิมจะกลับเป็นร่าง"))) return;
+        await busy(b, async () => {
+          const r = await apiJob(`/api/products/${enc(S.pid)}/print-plan/${a}`, { json: { spec: S.spec, plate_id: pl.id, colour: S.colour } });
+          if (a === "merge") { toast(Z("已合并", "รวมแล้ว")); window.dispatchEvent(new CustomEvent("model-changed", { detail: S.pid })); }
+          else toast(Z("切片完成，已存成切片文件（草稿，复核后生产用）", "สไลซ์เสร็จ บันทึกเป็นไฟล์สไลซ์แล้ว (ร่าง)") + (r.file_id ? ` #${r.file_id}` : ""));
+          await mount(BOX, S.pid, S.spec);
+          if (window.M3) M3.refresh();
+          if (a === "slice") window.dispatchEvent(new CustomEvent("plan-sliced", { detail: S.pid }));
+        }, a === "slice" ? TR("busy.slicing") : undefined);
+        return;
+      }
+    } catch (err) { toast(err.message, true); }
+  }
+  // 工具条 / 零件清单 / 参数面板上的按钮（v2.55）
+  async function peAction(ev, b) {
+    const a = b.dataset.pe, plEl = b.closest("[data-pl]"), pl = plEl ? plateOf(plEl.dataset.pl) : curPlate();
+    const ctx = plEl && plEl.querySelector(".pe-ctx");
+    const val = (k) => { const el = ctx && ctx.querySelector(`[data-pe-in="${k}"]`); return el ? el.value : ""; };
+    if (a === "sel-all") { setSel(pl, pl.items.map((x) => x.uid)); renderPlate(pl); focusCv(pl); return; }
+    if (a === "sel-part" || a === "split-part") {
+      const key = b.dataset.key;
+      const hostPl = S.plan.plates.find((x) => x.items.some((it) => partKey(it) === key));
+      if (!hostPl) return;
+      const uids = hostPl.items.filter((it) => partKey(it) === key).map((it) => it.uid);
+      if (a === "sel-part") { setSel(hostPl, uids); renderPlate(hostPl); focusCv(hostPl); BOX.querySelector(`[data-pl="${hostPl.id}"]`).scrollIntoView({ behavior: "smooth", block: "nearest" }); return; }
+      for (const x of S.plan.plates.filter((p2) => p2.items.some((it) => partKey(it) === key))) {
+        await runOp(x, { op: "split", uids: x.items.filter((it) => partKey(it) === key).map((it) => it.uid) }, b);
+      }
+      return;
+    }
+    if (a === "prm-all") {
+      mark();
+      S.plan.plates.forEach((x) => { if (x !== pl) { x.params = clone(pl.params || {}); x.layer_height = pl.layer_height; } });
+      S.dirty = true; S.plan.plates.forEach((x) => recheck(x)); render();
+      toast(Z("已把这一盘的参数用到所有盘（记得保存）", "ใช้พารามิเตอร์กับทุกถาดแล้ว (อย่าลืมบันทึก)"));
+      return;
+    }
+    if (!pl || !selOf(pl).length) { toast(Z("先选中零件（点一下零件；Ctrl / Shift 多选，或拖一个框）", "เลือกชิ้นงานก่อน (คลิก; Ctrl / Shift เลือกหลายชิ้น หรือลากกรอบ)"), true); return; }
+    if (a === "move") { await runOp(pl, { op: "move", x: +val("x"), y: +val("y") }, b); return; }
+    if (a === "rot") { const ang = (+val("angle") || 0) * (+b.dataset.sign || 1); if (selOf(pl).length > 1) await runOp(pl, { op: "rotate", angle: ang }, b); else rotSel(pl, ang); return; }
+    if (a === "scale") { await runOp(pl, { op: "scale", pct: +val("pct") }, b); return; }
+    if (a === "mirror") { await runOp(pl, { op: "mirror", axis: b.dataset.axis }, b); return; }
+    if (a === "auto-orient") { await runOp(pl, { op: "auto_orient" }, b); return; }
+    if (a === "dup") { await runOp(pl, { op: "duplicate", n: Math.max(1, Math.min(100, +val("n") || 1)) }, b); return; }
+    if (a === "del") { mark(); const s = selOf(pl); pl.items = pl.items.filter((x) => !s.includes(x.uid)); S.sel.uids = []; S.dirty = true; render(); return; }
+    if (a === "group" || a === "ungroup" || a === "split") { await runOp(pl, { op: a }, b); return; }
+    if (a === "same") {
+      const keys = new Set(pl.items.filter((x) => isSel(pl, x.uid)).map(partKey));
+      setSel(pl, pl.items.filter((x) => keys.has(partKey(x))).map((x) => x.uid)); renderPlate(pl); focusCv(pl); return;
+    }
+    if (a === "cut") {
+      const z = +val("z");
+      if (!(z > 0)) { toast(Z("填切的高度（毫米）", "ใส่ความสูงที่จะตัด (mm)"), true); return; }
+      if (!confirm(Z(`在离热床 ${z} mm 的高度把这个零件切成两个？两半会存进模型库（原来的文件不变）。`, `ตัดชิ้นนี้เป็น 2 ชิ้นที่ความสูง ${z} mm? ทั้งสองส่วนจะเก็บในคลังโมเดล (ไฟล์เดิมไม่เปลี่ยน)`))) return;
+      await runOp(pl, { op: "cut", z }, b); return;
+    }
+    if (a === "ov" || a === "ov-clear") {
+      const ov = {};
+      ctx.querySelectorAll("[data-pe-ov]").forEach((x) => { ov[x.dataset.peOv] = a === "ov-clear" || x.value === "" ? null : +x.value; });
+      await runOp(pl, { op: "overrides", ov }, b); return;
+    }
+  }
+  async function onChange(ev) {
+    if (!S) return;
+    const t = ev.target, plEl = t.closest("[data-pl]"), pl = plEl ? plateOf(plEl.dataset.pl) : null;
+    const pushPre = () => { if (S._pre) { if (!S.undo.length || S.undo[S.undo.length - 1] !== S._pre) { S.undo.push(S._pre); S.redo = []; } } };
+    try {
+      if (t.dataset.peQty) {
+        const [id, part] = t.dataset.peQty.split("|");
+        const host = S.plan.plates.find((x) => x.items.some((it) => partKey(it) === t.dataset.peQty)) || curPlate();
+        await runOp(host, { op: "qty", id, part: part === "" ? null : +part, qty: Math.max(0, Math.min(200, +t.value || 0)), uids: [] });
+        return;
+      }
+      if (t.dataset.peSel && pl) {
+        const v = t.value; t.value = ""; if (!v) return;
+        if (t.dataset.peSel === "slot") await runOp(pl, { op: "slot", slot: +v });
+        else if (t.dataset.peSel === "to-plate") await runOp(pl, { op: "to_plate", target: v });
+        else if (t.dataset.peSel === "align") await runOp(pl, v.startsWith("dist-") ? { op: "distribute", axis: v.slice(5) } : { op: "align", mode: v });
+        return;
+      }
+      if (t.dataset.prm !== undefined && pl) {
+        pushPre();
+        const k = t.dataset.prm;
+        pl.params = pl.params || {};
+        pl.params[k] = t.type === "checkbox" ? t.checked : t.type === "number" ? (t.value === "" ? 0 : +t.value) : t.value;
+        S.dirty = true; recheck(pl);
+        const sm = plEl.querySelector("details.pe-prm > summary"); if (sm) { S.openPrm[pl.id] = true; }
+        return;
+      }
+      if (t.dataset.prmMat !== undefined && pl) {
+        pushPre();
+        pl.slots[0].material = t.value;
+        if (pl.params) pl.params.filament = {};            // 换了材料：之前指定的耗材配置作废
+        S.dirty = true; S.openPrm[pl.id] = true; renderPlate(pl); recheck(pl); return;
+      }
+      if (t.dataset.prmFil !== undefined && pl) {
+        pushPre();
+        pl.params = pl.params || {}; pl.params.filament = { ...(pl.params.filament || {}) };
+        if (t.value) pl.params.filament[pl.printer] = t.value; else delete pl.params.filament[pl.printer];
+        S.dirty = true; return;
+      }
+      if (t.dataset.ppf || t.dataset.pps || t.dataset.ppi || t.dataset.schSlot || (t.dataset.ppAdd !== undefined && t.value)) pushPre();
+      if (t.dataset.ppf && pl) {
+        pl[t.dataset.ppf] = t.dataset.ppf === "printer" ? t.value : +t.value;
+        S.dirty = true; renderPlate(pl); recheck(pl); return;
+      }
+      if (t.dataset.pps && pl) {
+        const s = pl.slots.find((x) => x.slot === +t.closest("tr").dataset.slot); s[t.dataset.pps] = t.value; S.dirty = true; render(); return;
+      }
+      if (t.dataset.ppi && pl) {
+        const it = pl.items.find((x) => x.uid === t.closest("tr").dataset.uid);
+        if (t.dataset.ppi === "slot") { it.slot = +t.value; S.dirty = true; renderPlate(pl); return; }
+        return;
+      }
+      if (t.dataset.ppAdd !== undefined) {
+        if (!t.value) return;
+        const [id, part] = t.value.split("|"), e = libOf(id);
+        const host = curPlate();
+        const pp = part === "" ? null : +part;
+        if (e && e.multicolor && pp == null && e.colors) {      // 涂色 3MF：槽按文件里的颜色
+          const used = e.colors.used || [];
+          const fl = (e.colors.filaments || []).filter((f) => !used.length || used.includes(f.slot)).slice(0, S.d.slot_max || 4);
+          if (fl.length > host.slots.length) host.slots = fl.map((f, i) => ({ slot: i + 1, file_slot: f.slot, material: (f.type || host.slots[0].material || "PLA").toUpperCase(), colour: f.name || "", hex: f.hex }));
+        }
+        t.value = "";
+        S.undo.pop();
+        const have = S.plan.plates.reduce((a2, x) => a2 + x.items.filter((it) => it.id === id && (it.part == null ? "" : it.part) === (pp == null ? "" : pp)).length, 0);
+        await runOp(host, { op: "qty", id, part: pp, qty: have + 1, uids: [] });
+        return;
+      }
+      if (t.dataset.schSlot) {
+        const c = t.closest("tr").dataset.sch; S.plan.schemes = S.plan.schemes || {};
+        const m = (S.plan.schemes[c] = S.plan.schemes[c] || {});
+        if (t.value) m[t.dataset.schSlot] = t.value; else delete m[t.dataset.schSlot];
+        S.dirty = true; render(); return;
+      }
+    } catch (e) { toast(e.message, true); }
+  }
+  // 这台打印机能选的耗材配置（OrcaSlicer 的；按材料筛选）
+  async function loadFilaments(sel) {
+    if (sel.dataset.loaded || sel.dataset.pi === "") return;
+    sel.dataset.loaded = "1";
+    const pl = plateOf(sel.closest("[data-pl]").dataset.pl);
+    const mat = (pl.slots[0] || {}).material || "PLA";
+    try {
+      const d = await api(`/api/products/${enc(S.pid)}/filaments?printer=${sel.dataset.pi}&material=${enc(mat)}`);
+      const cur = sel.value;
+      const opts = [`<option value="">${esc(Z("自动：", "อัตโนมัติ: ") + (d.auto || Z("按材料自动选", "ตามวัสดุ")))}</option>`]
+        .concat((d.items || []).map((x) => `<option value="${esc(x.name)}" ${x.name === cur ? "selected" : ""}>${esc(x.name)}${x.user ? " ★" : ""}</option>`));
+      if (cur && !(d.items || []).some((x) => x.name === cur)) opts.push(`<option value="${esc(cur)}" selected>${esc(cur)}</option>`);
+      sel.innerHTML = opts.join("");
+      if (d.error) toast(d.error, true);
+    } catch (err) { toast(err.message, true); delete sel.dataset.loaded; }
   }
   let V3 = null;
   async function view3d(pl, b) {
@@ -588,16 +1041,16 @@
     if (!window.GVIEW) { toast(Z("3D 组件没有加载（刷新页面再试）", "ยังไม่ได้โหลดส่วน 3D (รีเฟรชหน้า)"), true); return; }
     box.classList.remove("hidden");
     await busy(b, async () => {
-      const items = pl.items.map((it) => ({ id: it.id, part: it.part, qty: 1, orient: it.orient, x: it.x, y: it.y, rot: it.rot }));
+      const items = pl.items.map((it) => ({ id: it.id, part: it.part, qty: 1, orient: it.orient, face: it.face, mirror: it.mirror, scale: it.scale, x: it.x, y: it.y, rot: it.rot }));
       const bed = bedOf(pl.printer);
-      const res = await fetch(`/api/products/${encodeURIComponent(S.pid)}/models/layout-preview`, { method: "POST", credentials: "same-origin",
+      const res = await fetch(`/api/products/${enc(S.pid)}/models/layout-preview`, { method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items, bed_w: bed[0] }) });
       if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || res.statusText); }
       const raw = new Float32Array(await res.arrayBuffer());
       if (V3) { try { V3.dispose(); } catch { /* 忽略 */ } }
       box.innerHTML = "";
       V3 = new window.GVIEW.ModelView(box);
-      V3.update({ raw, fitKey: JSON.stringify(items), bed: [bed[0], bed[1]], heightMax: bed[2], count: 1, gap: 6, supports: "none", supportAngle: 30 });
+      V3.update({ raw, fitKey: JSON.stringify(items), bed: [bed[0], bed[1]], heightMax: bed[2], count: 1, gap: 6, supports: (pl.params || {}).supports || "none", supportAngle: (pl.params || {}).support_angle || 30 });
     });
   }
 
@@ -616,16 +1069,16 @@
     if (!el || typeof P === "undefined" || !P) return;
     BOX = el; wire();
     el.classList.remove("hidden");
-    if (S && S.pid === P.id) S.sel = null;
-    await mount(el, P.id, spec || "");
+    if (S && S.pid === P.id) { S.sel = null; S.opts = {}; }
+    await mount(el, P.id, spec || "", { onSaved: () => { const rb = document.getElementById("recipe-box"); if (window.RECIPE && rb && rb.childElementCount) RECIPE.mount(rb, P.id, spec || ""); } });
   }
   function close() {
     const el = document.getElementById("plan-box");
     if (el) { el.classList.add("hidden"); el.innerHTML = ""; }
     if (S) { S.dirty = false; S.plan = null; }
   }
-  window.PLAN = { mount: async (el, pid, spec) => { BOX = el; wire(); await mount(el, pid, spec); }, mountEditor, open, close,
-    dirty: () => !!(S && S.dirty && S.plan), check, poly, overlap };
+  window.PLAN = { mount: async (el, pid, spec, opts) => { BOX = el; wire(); await mount(el, pid, spec, opts || {}); }, mountEditor, open, close,
+    dirty: () => !!(S && S.dirty && S.plan), check, poly, overlap, get state() { return S; } };
   // 编辑页：打开产品 / 换了 3D 模型时刷新
   window.addEventListener("model-changed", (e) => { if (typeof P !== "undefined" && P && e.detail === P.id && window.M3 && M3.state.planOpen) open(M3.spec).catch(() => {}); });
 })();

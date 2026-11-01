@@ -377,10 +377,20 @@
   }
   $("#rc-q").addEventListener("input", renderRecipes);
   $("#rc-filter").addEventListener("change", renderRecipes);
+  // v2.55：和编辑产品页 ③ 是同一个打印方案编辑器（同一份方案，两边改的是一样的），下面是模型文件 + 切片文件（filesOnly）
   function openRecipe(pid) {
-    const el = modal(`<div class="row between"><h3>打印方案 · <span class="mono" data-notr>${esc(pid)}</span></h3><button class="mini" data-mclose>关闭</button></div><div id="rc-modal-box"></div>`);
+    const el = modal(`<div class="row between"><h3>${Z("打印方案", "แผนการพิมพ์")} · <span class="mono" data-notr>${esc(pid)}</span></h3>
+      <button class="mini" data-mclose>${Z("关闭", "ปิด")}</button></div>
+      <div id="rc-plan-box"></div>
+      <details class="recipe-wrap" open><summary><b>📁 ${Z("模型文件与切片文件", "ไฟล์โมเดลและไฟล์สไลซ์")}</b></summary>
+        <div id="rc-modal-box" data-files-only="1"></div></details>`);
     el.classList.add("wide");
-    window.RECIPE.mount($("#rc-modal-box", el), pid);
+    const files = $("#rc-modal-box", el);
+    if (window.PLAN) {
+      window.PLAN.mount($("#rc-plan-box", el), pid, "", { standalone: true, onSpec: (sp) => window.RECIPE.mount(files, pid, sp, { filesOnly: true }),
+        onSaved: () => window.RECIPE.mount(files, pid, undefined, { filesOnly: true }) });
+    }
+    window.RECIPE.mount(files, pid, "", { filesOnly: true });
   }
   window.PROD_OPEN_RECIPE = openRecipe;
   $("#rc-table").addEventListener("click", (e) => {

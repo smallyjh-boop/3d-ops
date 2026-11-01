@@ -46,7 +46,44 @@ def get(product):
                  top_bottom=adv.get("top_bottom_layers") or 4, infill_pct=adv.get("infill_pct") or 15,
                  infill_pattern=adv.get("infill_pattern") or "gyroid", brim=bool(adv.get("brim")), from_ai=True)
     r.update(product.get("recipe") or {})
+    _from_plan(product, r)
     return r
+
+
+PLAN_KEYS = ("supports", "support_build_plate_only", "support_angle", "walls", "top_bottom", "infill_pct", "infill_pattern",
+             "brim", "bed_type", "gap_mm", "nozzle_temp", "bed_temp", "filament", "notes")
+
+
+def _from_plan(product, r):
+    """v2.55：打印参数在打印方案（print_plans[规格] 每一盘的 params）里编辑，这里按第 1 盘取（老的调用照旧能用）。
+    只认 v2.55 以后保存过的方案（盘里有 params）；摆放方向只在第 1 盘只放这个模型文件（整个文件）时才跟方案走。"""
+    plans = product.get("print_plans")
+    if not isinstance(plans, dict):
+        return r
+    plan = plans.get(product.get("_spec") or "") or {}
+    if plan.get("follow") or plan.get("default"):
+        return r
+    pl = (plan.get("plates") or [None])[0]
+    if not isinstance(pl, dict) or not isinstance(pl.get("params"), dict):
+        return r
+    for k in PLAN_KEYS:
+        if k in pl["params"]:
+            r[k] = pl["params"][k]
+    try:
+        r["layer_height"] = round(min(0.32, max(0.08, float(pl.get("layer_height") or r["layer_height"]))), 2)
+    except (TypeError, ValueError):
+        pass
+    lid = (product.get("model") or {}).get("lib_id")
+    its = pl.get("items") or []
+    if lid and its and all(it.get("id") == lid and it.get("part") in (None, "") for it in its) and not it_face(its[0]) \
+            and its[0].get("orient") in mesh.ORIENT_ZH:
+        r["orientation"] = its[0]["orient"]
+    return r
+
+
+def it_face(it):
+    f = (it or {}).get("face")
+    return isinstance(f, (list, tuple)) and len(f) == 3
 
 
 def clean(data):
