@@ -3,7 +3,8 @@
 1. 背景合成（免费）：浏览器里把产品透明图放到背景照片上，可拖动、缩放、加阴影。
    内置背景在 static/scenes；自己拍的背景（书桌、书架、床头柜、客厅…）上传后存在 data/scenes。
 2. AI 场景图（需要图片 AI 的 Key，按张收费）：把产品图交给图片模型，生成真实使用场景。
-   支持 OpenAI（gpt-image-1，images/edits 接口，也兼容同格式的第三方接口）和 Google Gemini（图片模型）。
+   v2.53：出图走 core/ai（「系统 → AI 接口」选服务商：OpenAI、Gemini、Flux（fal.ai / Replicate）），
+   多候选、AI 写提示词、看图质检、类目模板、多尺寸、批量在 core/scene_ai.py。
 """
 import base64
 import io
@@ -12,7 +13,6 @@ import os
 import re
 import uuid
 
-import requests
 from PIL import Image
 
 from .config import BASE_DIR, DATA_DIR
@@ -57,9 +57,6 @@ BG_SUFFIX = (" The surface is completely EMPTY in the lower center area (nothing
              "later; the surface occupies roughly the lower 35-40% of the frame; camera at a slightly elevated eye level, "
              "photorealistic, professional e-commerce lifestyle photography, shallow depth of field, no people, no text, "
              "no logos, square 1:1.")
-
-
-DEFAULT_MODEL = {"openai": "gpt-image-1-mini", "gemini": "gemini-3.1-flash-lite-image"}
 
 
 class SceneError(Exception):
@@ -163,79 +160,21 @@ def _png_b64_to_bytes(b64):
     return base64.b64decode(b64)
 
 
-def _openai(cfg, prompt, png_bytes):
-    key = (cfg.get("image_api_key") or "").strip()
-    base = (cfg.get("image_api_base") or "https://api.openai.com/v1").rstrip("/")
-    model = cfg.get("image_model") or DEFAULT_MODEL["openai"]
-    data = {"model": model, "prompt": prompt, "size": "1024x1024", "n": "1"}
-    if cfg.get("image_quality"):
-        data["quality"] = cfg["image_quality"]
-    if "gpt-image" in model:
-        data["input_fidelity"] = "high"
-    r = requests.post(f"{base}/images/edits", headers={"Authorization": f"Bearer {key}"},
-                      files={"image": ("product.png", png_bytes, "image/png")}, data=data, timeout=240)
-    if r.status_code != 200 and "input_fidelity" in r.text:
-        data.pop("input_fidelity", None)
-        r = requests.post(f"{base}/images/edits", headers={"Authorization": f"Bearer {key}"},
-                          files={"image": ("product.png", png_bytes, "image/png")}, data=data, timeout=240)
-    if r.status_code != 200:
-        raise SceneError(f"图片 AI 接口错误 {r.status_code}: {r.text[:300]}")
-    item = (r.json().get("data") or [{}])[0]
-    if item.get("b64_json"):
-        return base64.b64decode(item["b64_json"])
-    if item.get("url"):
-        return requests.get(item["url"], timeout=120).content
-    raise SceneError("图片 AI 没有返回图片")
-
-
-def _gemini(cfg, prompt, png_bytes):
-    key = (cfg.get("image_api_key") or "").strip()
-    model = cfg.get("image_model") or DEFAULT_MODEL["gemini"]
-    base = (cfg.get("image_api_base") or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
-    if "openai.com" in base:
-        base = "https://generativelanguage.googleapis.com/v1beta"
-    parts = [{"text": prompt}]
-    if png_bytes:
-        parts.append({"inline_data": {"mime_type": "image/png", "data": base64.b64encode(png_bytes).decode()}})
-    body = {"contents": [{"parts": parts}],
-            "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}}
-    r = requests.post(f"{base}/models/{model}:generateContent", params={"key": key}, json=body, timeout=240)
-    if r.status_code != 200:
-        raise SceneError(f"图片 AI 接口错误 {r.status_code}: {r.text[:300]}")
-    for c in r.json().get("candidates") or []:
-        for part in (c.get("content") or {}).get("parts") or []:
-            d = part.get("inlineData") or part.get("inline_data")
-            if d and d.get("data"):
-                return base64.b64decode(d["data"])
-    raise SceneError("图片 AI 没有返回图片（可能被安全策略拦截，换个场景或提示词再试）")
-
-
-def _openai_generate(cfg, prompt):
-    key = (cfg.get("image_api_key") or "").strip()
-    base = (cfg.get("image_api_base") or "https://api.openai.com/v1").rstrip("/")
-    model = cfg.get("image_model") or DEFAULT_MODEL["openai"]
-    data = {"model": model, "prompt": prompt, "size": "1024x1024", "n": 1}
-    if cfg.get("image_quality"):
-        data["quality"] = cfg["image_quality"]
-    r = requests.post(f"{base}/images/generations", headers={"Authorization": f"Bearer {key}"}, json=data, timeout=240)
-    if r.status_code != 200:
-        raise SceneError(f"图片 AI 接口错误 {r.status_code}: {r.text[:300]}")
-    item = (r.json().get("data") or [{}])[0]
-    if item.get("b64_json"):
-        return base64.b64decode(item["b64_json"])
-    if item.get("url"):
-        return requests.get(item["url"], timeout=120).content
-    raise SceneError("图片 AI 没有返回图片")
+def _image(cfg, task, prompt, png_bytes=None):
+    """v2.53：出图统一走 core/ai（「系统 → AI 接口」里给这个任务选的出图服务商，自动备用、记费用）。"""
+    from . import ai
+    try:
+        r = ai.image(cfg, prompt, png_bytes, "1:1", 1, task=task)
+    except ai.AIError as e:
+        raise SceneError(str(e)) from e
+    return r["images"][0], r
 
 
 def ai_background(cfg, preset, extra=""):
     """AI 生成一张空背景（没有产品），存进背景库。"""
-    if not (cfg.get("image_api_key") or "").strip():
-        raise SceneError("还没有填写图片 AI 的接口密钥（设置 → 商品与上架 → 场景图 AI）")
     name, desc = BG_PRESETS.get(preset, (preset[:20] or "AI 背景", preset))
     prompt = f"Photorealistic empty product-display background: {desc}.{BG_SUFFIX}" + (f" Additional: {extra}" if extra else "")
-    provider = cfg.get("image_provider") or "openai"
-    raw = _gemini(cfg, prompt, None) if provider == "gemini" else _openai_generate(cfg, prompt)
+    raw, _r = _image(cfg, "scene_bg", prompt)
     try:
         img = Image.open(io.BytesIO(raw)).convert("RGB")
     except Exception as e:
@@ -253,14 +192,17 @@ def ai_background(cfg, preset, extra=""):
 
 
 def ai_generate(cfg, product, scene_key, product_png_b64, extra=""):
-    if not (cfg.get("image_api_key") or "").strip():
-        raise SceneError("还没有填写图片 AI 的接口密钥（设置 → 商品与上架 → 场景图 AI）")
+    """一张场景图（旧接口，编辑页「AI 生成场景图」）。能按参考图改图的服务商：直接把产品放进场景；
+    不能改图的（例如 Flux 普通模型）：生成空场景，再把真实产品抠图贴上去（产品不会被画走样）。"""
+    from . import scene_ai
     png = _png_b64_to_bytes(product_png_b64)
     prompt = build_prompt(product, scene_key, extra)
-    provider = cfg.get("image_provider") or "openai"
-    raw = _gemini(cfg, prompt, png) if provider == "gemini" else _openai(cfg, prompt, png)
+    bg_prompt = scene_ai.background_prompt(PRESETS.get(scene_key, ("", scene_key))[1], "1:1", extra)
+    raw, r = _image(cfg, "scene", lambda edit: prompt if edit else bg_prompt, png)
     try:
         img = Image.open(io.BytesIO(raw)).convert("RGB")
     except Exception as e:
         raise SceneError(f"图片 AI 返回的图片无法读取：{e}") from e
-    return img, prompt
+    if not r.get("edited"):
+        img = scene_ai.composite(img, scene_ai.open_rgba(png))
+    return img, prompt if r.get("edited") else bg_prompt

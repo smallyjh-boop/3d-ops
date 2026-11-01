@@ -176,6 +176,9 @@ def allowed(user, method, path):
 def strip_config(cfg, user):
     """给员工的设置：去掉密钥和成本参数。"""
     out = dict(cfg)
+    if isinstance(out.get("ai_providers"), dict):    # v2.53：各家 AI 的密钥不下发（「AI 接口」页有自己的打码接口）
+        out["ai_providers"] = {k: {kk: ("******" if kk in ("api_key", "image_key") and vv else vv) for kk, vv in (v or {}).items()}
+                               for k, v in out["ai_providers"].items()}
     if out.get("printers"):     # 打印机访问码不下发
         prs = []
         for p in out["printers"]:

@@ -94,6 +94,8 @@ def bundle(version, check_items, cfg, secret_keys):
     for k, v in (cfg or {}).items():
         if k in secret_keys or any(t in k.lower() for t in ("key", "secret", "token", "password")):
             safe[k] = "***" if v else ""
+        elif k == "ai_providers" and isinstance(v, dict):
+            safe[k] = {pk: {kk: ("***" if kk in ("api_key", "image_key") and vv else vv) for kk, vv in (pv or {}).items()} for pk, pv in v.items()}
         elif k == "printers":
             safe[k] = [{kk: ("***" if kk in ("access_code", "password", "token") and vv else vv) for kk, vv in (p or {}).items()} for p in (v or [])]
         else:

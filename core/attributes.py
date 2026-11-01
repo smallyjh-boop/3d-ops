@@ -64,7 +64,7 @@ Lazada Thailand top-level categories:
 
 Return JSON {{"top": ["1 to 3 top-level names exactly as listed where this product can be listed"]}}"""
     try:
-        picked = [x for x in ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user)).get("top") or [] if x in tops]
+        picked = [x for x in ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "category"), CAT_SYSTEM, user)).get("top") or [] if x in tops]
     except ai_copy.AIError:
         return []
     leaves = [(cid, path) for cid, (path, dis) in t.items() if not dis and path.split(" > ")[0] in picked]
@@ -100,7 +100,7 @@ def _match_big(cfg, product, lib):
 Return JSON {{"search_keywords_th": ["8-12 short Thai words to find this product's leaf category in the Lazada Thailand
 category tree: product-type words AND category-level words as Lazada names them (e.g. ของตกแต่งบ้าน, ของเล่น, ที่วาง,
 อุปกรณ์จัดเก็บ, ข้อต่อ, ท่อ, อะไหล่, เครื่องมือ, อุปกรณ์วัด)"], "ideal_path_th": "<the Thai category path you would expect>"}}"""
-    d1 = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user))
+    d1 = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "category"), CAT_SYSTEM, user))
     kws = list(d1.get("search_keywords_th") or [])
     kws += [x.strip() for x in str(d1.get("ideal_path_th") or "").split(">") if x.strip()]
     cands = list(dict.fromkeys(sugg + categories.search_tree(kws, limit=80)))
@@ -133,7 +133,7 @@ if the product's natural category needs a licence, pick the closest category fro
 can legitimately be listed (e.g. a decorative / ornament / accessory category instead of a regulated electrical or toy one).
 Return JSON {{"cat_id": "<id exactly as listed>", "alternatives": ["up to 4 other ids from the list that would also be acceptable"],
  "confidence": <0..1>, "reason_zh": "<one sentence Chinese>", "reason_th": "<same in Thai>", "path_zh": "<the chosen path translated to Chinese>"}}"""
-    d2 = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user2))
+    d2 = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "category"), CAT_SYSTEM, user2))
     ids = dict(cands)
     cid = str(d2.get("cat_id") or "").strip()
     if cid not in ids:
@@ -179,7 +179,7 @@ Return JSON:
 }}
 Categories that require a Thai TISI licence are not offered (the seller has none): if the natural category needs one,
 choose the closest listed category where the product can legitimately be sold."""
-    data = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user))
+    data = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "category"), CAT_SYSTEM, user))
     ids = {c["id"] for c in lib}
     best = data.get("best_id") or ""
     if best not in ids:
@@ -214,7 +214,7 @@ Pick the category that best describes what the product physically is. If a candi
 "template already downloaded" fits about as well as the others, prefer it.
 Return JSON {{"cat_id": "<best id from the list>", "path_zh": "<that path translated to Chinese>"}}"""
             try:
-                d2 = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user2))
+                d2 = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "category"), CAT_SYSTEM, user2))
                 cid = str(d2.get("cat_id") or "")
                 if cid in dict(cands) or any(c["cat_id"] == cid for c in lib):
                     result["suggest_id"] = cid
@@ -309,7 +309,7 @@ Guidance: Place of Origin = Thailand (made locally). For brand/character/licence
 option (e.g. Plastic, PLA if listed). Leave free-text manufacturer fields empty unless provided.
 package_cm = product size plus about 2-3 cm padding per side, from the size field."""
         try:
-            data = ai_copy.extract_json(ai_copy.call(cfg, ATTR_SYSTEM, user))
+            data = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "category"), ATTR_SYSTEM, user))
         except ai_copy.AIError as e:
             data = {"attributes": {}, "_error": str(e)}
         got = data.get("attributes") or {}
@@ -372,7 +372,7 @@ Give 6-10 short ENGLISH keywords to find this product's leaf category in the Sho
 product-type words AND category-level words as Shopee names them (e.g. "figurine", "statue", "desk organizer",
 "phone stand", "vase", "planter", "sink", "water tap", "tools", "home improvement", "washing machine", "others").
 Return JSON {{"keywords": ["..."]}}"""
-    kw = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user)).get("keywords") or []
+    kw = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "category"), CAT_SYSTEM, user)).get("keywords") or []
     cands = shopee.search(kw, limit=60)
     if not cands:
         return {"id": "", "path": "", "status": "check", "reason": "Shopee 类目树里没找到匹配，请手动搜索或逐级选择", "reason_th": ""}
@@ -386,7 +386,7 @@ Candidate Shopee Thailand leaf categories (id | path):
 Pick the leaf category that best describes what the product physically is.
 Return JSON {{"cat_id": "<the numeric id exactly as listed>", "path": "<its path>", "confidence": <0..1>,
  "reason_zh": "<one sentence Chinese>", "reason_th": "<same in Thai>"}}"""
-    d = ai_copy.extract_json(ai_copy.call(cfg, CAT_SYSTEM, user2))
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "category"), CAT_SYSTEM, user2))
     tree = shopee.tree()
     m = re.search(r"\d{5,}", str(d.get("cat_id") or ""))
     cid = m.group(0) if m else ""

@@ -409,7 +409,7 @@ def qa_one(cid, user="AI"):
     if not any(m["role"] == "seller" for m in msgs):
         return None
     from core import ai_copy
-    raw = ai_copy.call(brain._cs_cfg(), QA_PROMPT, "\n".join(lines)[-6000:])
+    raw = ai_copy.call(ai_copy.tcfg(brain._cs_cfg(), "cs_kb"), QA_PROMPT, "\n".join(lines)[-6000:])
     try:
         j = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
     except (AttributeError, ValueError):

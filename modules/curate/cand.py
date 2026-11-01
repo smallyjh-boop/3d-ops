@@ -11,13 +11,13 @@ from . import db, rules, sites
 
 
 def ai_on(cfg=None):
-    cfg = cfg or load_config()
-    return bool((cfg.get("ai_api_key") or "").strip())
+    from core import ai
+    return ai.ready(cfg or load_config(), "curate")
 
 
 def ai_json(cfg, system, obj):
     from core import ai_copy
-    return ai_copy.extract_json(ai_copy.call(cfg, system, json.dumps(obj, ensure_ascii=False)))
+    return ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "curate"), system, json.dumps(obj, ensure_ascii=False)))
 
 
 def cost_fn(cfg):

@@ -60,7 +60,7 @@ def suggest(cfg, product, shop_policy=""):
         "材料": product.get("material", ""), "尺寸": size_txt, "颜色/选项": colors[:12],
         "店铺服务（可以作为卖点）": shop_policy,
     }, ensure_ascii=False)
-    d = ai_copy.extract_json(ai_copy.call(cfg, SYSTEM, user))
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "adtext"), SYSTEM, user))
     pts = []
     for p in d.get("points") or []:
         th = str(p.get("th") or "").strip()

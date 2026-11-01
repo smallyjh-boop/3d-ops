@@ -32,3 +32,4 @@ API 密钥管理和只读查询接口（/api/v1/orders、skus、cost-params、pr
 - 1.5（系统 v2.49.0）：「商品 → 运营改动」页面搬到「运营 → 商品表现 → 待确认的建议」（运营分析模块画页面，接口 /api/ops/changes、/api/v1/ops/… 和 ops_changes 表不变）；删掉 ui/opschg.js。
 - 1.6（系统 v2.50.0）：events.rts_now(oid, user)：订单列表「发货 ▾ → 安排发货」直接在 Lazada 上安排发货（失败的订单进「安排发货失败」队列，可以再试）。
 - （系统 v2.50.0）：选品搬进 ERP（商品 → 选品，modules/curate），设置里旧的「3D选品工具对接」卡片默认收起（legacy）；/api/v1/catalog/* 接口和代码照旧。
+- （系统 v2.53.0）：推过来的产品自动补全文案时按「系统 → AI 接口」的「上架文案」任务判断有没有 AI。

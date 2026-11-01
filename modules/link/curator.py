@@ -356,9 +356,9 @@ def _autocomplete(pid, who=""):
     """选品工具推过来的文案只有泰文 / 中文：后台用 AI 把英文、Shopee 标签、包装内容、变体名称等空着的字段补上（v2.22）。
     没设置 AI 密钥就不做（编辑页可以手动点「补全空着的文案」）。"""
     cfg = load_config()
-    if not (cfg.get("ai_api_key") or "").strip():
+    from core import ai, ai_copy, bgjobs
+    if not ai.ready(cfg, "copy"):
         return
-    from core import ai_copy, bgjobs
 
     def go():
         p = store.load(pid)

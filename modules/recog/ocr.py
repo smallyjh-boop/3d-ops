@@ -96,7 +96,7 @@ def _ai(im, call=None):
     buf = io.BytesIO()
     im.save(buf, "JPEG", quality=85)
     fn = call or ai_copy._request
-    txt = fn(load_config(), OCR_SYSTEM, OCR_USER, base64.b64encode(buf.getvalue()).decode())
+    txt = fn(ai_copy.tcfg(load_config(), "ocr"), OCR_SYSTEM, OCR_USER, base64.b64encode(buf.getvalue()).decode())
     d = ai_copy.extract_json(txt)
     return [str(x) for x in d.get("lines") or [] if str(x).strip()]
 

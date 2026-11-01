@@ -121,7 +121,7 @@ def advise(cfg, product, analysis, prompt="", image_b64=None):
         tall_thin="是" if a.get("tall_thin") else "否",
         orients=orients, best=a.get("best", "bottom"), prompt=prompt or "（无）",
     )
-    data = ai_copy.extract_json(ai_copy.call(cfg, SYSTEM, user, image_b64))
+    data = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "print_advice"), SYSTEM, user, image_b64))
     return normalize(data, a)
 
 

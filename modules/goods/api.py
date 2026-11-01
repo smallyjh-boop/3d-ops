@@ -185,7 +185,7 @@ def fill_attrs(pid):
     if not cat:
         return err("先选择类目")
     p["category"]["cat_id"] = cat["cat_id"]
-    use_ai = bool((cfg.get("ai_api_key") or "").strip())
+    use_ai = ai.ready(cfg, "category")
     _apply_fill(cfg, p, cat, use_ai=use_ai)
     p = _save_from_client(pid, p)
     return jsonify({"product": p, "used_ai": use_ai})
@@ -378,6 +378,126 @@ def scene_ai(pid):
         return err(f"生成失败：{e}")
     added = _add_images(p, [{"img": img, "kind": "scene", "color": b.get("color", ""), "note": "AI"}])
     return jsonify({"product": p, "added": len(added), "prompt": prompt})
+
+
+# ---------------- 场景图改进（v2.53）：模板、多张候选 + 质检、挑图、多尺寸、批量、费用 ----------------
+from core import scene_ai  # noqa: E402
+
+
+def _scene_opts(b):
+    return {"template": str(b.get("template") or ""), "aspect": b.get("aspect") if b.get("aspect") in scene_ai.ASPECTS else "1:1",
+            "n": max(1, min(int(b.get("n") or 2), scene_ai.MAX_N)), "extra": str(b.get("extra") or "")[:300],
+            "qa": b.get("qa", True) not in (False, 0, "0"), "ai_prompt": b.get("ai_prompt", True) not in (False, 0, "0"),
+            "auto_add": bool(b.get("auto_add"))}
+
+
+@bp.get("/api/scenes/templates")
+def scene_templates():
+    cfg = load_config()
+    return jsonify({"templates": scene_ai.templates(cfg), "aspects": list(scene_ai.ASPECTS), "max_n": scene_ai.MAX_N,
+                    "custom": isinstance(cfg.get("scene_templates"), list) and bool(cfg.get("scene_templates"))})
+
+
+@bp.post("/api/scenes/templates")
+def scene_templates_save():
+    if not auth.is_owner():
+        return err("只有老板能改场景模板", 403)
+    b = request.get_json(force=True) or {}
+    items = [] if b.get("reset") else scene_ai.clean_templates(b.get("templates"))
+    save_config({"scene_templates": items})
+    return scene_templates()
+
+
+@bp.post("/api/scenes/estimate")
+def scene_estimate():
+    b = request.get_json(force=True) or {}
+    o = _scene_opts(b)
+    return jsonify(scene_ai.estimate(load_config(), int(b.get("products") or 1), o["n"], o["qa"], o["ai_prompt"]))
+
+
+@bp.get("/api/products/<pid>/scene-cands")
+def scene_cands(pid):
+    p = store.load(pid)
+    cfg = load_config()
+    return jsonify({"cands": scene_ai.list_cands(pid), "suggest": scene_ai.suggest(cfg, p),
+                    "ready": {"image": ai.can(cfg, "scene", "image")[0], "image_why": ai.can(cfg, "scene", "image")[1],
+                              "prompt": ai.ready(cfg, "scene_prompt"), "qa": ai.can(cfg, "scene_qa", "vision")[0]}})
+
+
+@bp.post("/api/products/<pid>/scene-gen")
+def scene_gen(pid):
+    """出几张候选（不直接加进商品图，员工挑）。body: template, aspect, n, extra, qa, ai_prompt, image（可选：浏览器抠好的透明 PNG）"""
+    b = request.get_json(force=True) or {}
+    p = store.load(pid)
+    o = _scene_opts(b)
+    cut = None
+    if b.get("image"):
+        try:
+            cut = scene_ai.open_rgba(scenes._png_b64_to_bytes(b["image"]))
+        except Exception as e:  # noqa: BLE001
+            return err(f"产品图读取失败：{e}")
+    cfg = load_config()
+    try:
+        r = scene_ai.generate(cfg, p, o["template"] or (scene_ai.suggest(cfg, p) or ["minimal_white"])[0], o["aspect"], o["n"],
+                              o["extra"], cut=cut, use_ai_prompt=o["ai_prompt"], do_qa=o["qa"])
+    except scene_ai.SceneAIError as e:
+        return err(str(e))
+    if not r["cands"]:
+        return err((r["errors"] or ["没有生成出图片"])[0])
+    r["all"] = scene_ai.list_cands(pid)
+    return jsonify(r)
+
+
+@bp.post("/api/products/<pid>/scene-cands/pick")
+def scene_pick(pid):
+    b = request.get_json(force=True) or {}
+    p = store.load(pid)
+    imgs = scene_ai.picked_images(pid, [str(x) for x in b.get("ids") or []])
+    if not imgs:
+        return err("请先选候选图")
+    added = _add_images(p, [{"img": im, "kind": "scene", "color": b.get("color", ""), "note": "AI", "keep_aspect": True,
+                             "aspect": c.get("aspect")} for im, c in imgs])
+    return jsonify({"product": p, "added": len(added), "cands": scene_ai.list_cands(pid)})
+
+
+@bp.delete("/api/products/<pid>/scene-cands/<cid>")
+def scene_cand_del(pid, cid):
+    return jsonify({"cands": scene_ai.delete_cand(pid, cid)})
+
+
+@bp.get("/scene-cand/<pid>/<name>")
+def scene_cand_file(pid, name):
+    if not re.fullmatch(r"[0-9a-f]{10}\.jpg", name or ""):
+        abort(404)
+    try:
+        d = scene_ai._dir(pid)
+    except ValueError:
+        abort(404)
+    return send_from_directory(d, name)
+
+
+@bp.get("/api/scenes/batch")
+def scene_batch_status():
+    return jsonify(scene_ai.batch_status())
+
+
+@bp.post("/api/scenes/batch")
+def scene_batch_start():
+    b = request.get_json(force=True) or {}
+    u = auth.current_user() or {}
+
+    def add(pid, img, cand):
+        q = store.load(pid)
+        _add_images(q, [{"img": img, "kind": "scene", "note": "AI", "keep_aspect": True, "aspect": cand.get("aspect")}])
+    try:
+        return jsonify(scene_ai.batch_start(load_config(), b.get("ids") or [], _scene_opts(b), u.get("username", ""), store.load, add))
+    except scene_ai.SceneAIError as e:
+        return err(str(e))
+
+
+@bp.post("/api/scenes/batch/cancel")
+def scene_batch_cancel():
+    return jsonify(scene_ai.batch_cancel())
 
 
 # ---------------- 图片 ----------------
@@ -953,7 +1073,7 @@ def shopee_categories():
         # 中文/泰文：先让 AI 翻译成 Shopee 类目树用的英文关键词
         if q not in _SP_KW_CACHE:
             try:
-                d = ai_copy.extract_json(ai_copy.call(load_config(), "Translate e-commerce search words. Output only JSON.",
+                d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(load_config(), "keywords"), "Translate e-commerce search words. Output only JSON.",
                     f'Give 3-6 short English keywords (single words or 2-word phrases, as used in Shopee category names, '
                     f'singular and plural forms) for finding the Shopee category of: "{q}". Return {{"keywords": [...]}}'))
                 _SP_KW_CACHE[q] = [str(x) for x in d.get("keywords") or []]

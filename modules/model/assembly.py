@@ -235,9 +235,10 @@ def ai_assemble(pid, renders, user="", product_image=None):
     """renders = {零件序号: [dataURL...]}（浏览器画好的几个角度）。返回 {parts: [{index, pos, rot}], note, provider_warn}（不保存）。"""
     from core import ai_copy
     cfg = load_config()
-    if (cfg.get("ai_provider") or "") == "deepseek":
-        raise ValueError("现在设置的 AI（DeepSeek）不能看图片，「AI 按图片组装」需要能看图的 AI（设置 → AI 与对接 换成 Claude 或其他支持图片的模型）。"
-                         "也可以直接用鼠标拖动零件组装")
+    from core import ai
+    ok, why = ai.can(cfg, "assembly", "vision")
+    if not ok:
+        raise ValueError(f"「AI 按图片组装」用不了：{why}。也可以直接用鼠标拖动零件组装")
     p = store.load(pid)
     _e, parts = parts_info(pid)
     if len(parts) < 2:
@@ -257,7 +258,7 @@ def ai_assemble(pid, renders, user="", product_image=None):
     user_msg = ("产品：" + (p.get("name_zh") or p["id"]) + ("" if img is not None else "（没有商品主图，按常识组装）") +
                 "\n零件（外框尺寸 = X 宽 × Y 深 × Z 高，毫米，是渲染图里的原始朝向）：\n" + json.dumps(info, ensure_ascii=False) +
                 '\n\n输出 JSON：{"parts": [{"index": 0, "pos": [x, y, z], "rot": [rx, ry, rz]}], "note_zh": "一句话说明", "note_th": "..."}')
-    data = ai_copy.extract_json(ai_copy.call(cfg, AI_SYSTEM, user_msg, image_b64=sheet))
+    data = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "assembly"), AI_SYSTEM, user_msg, image_b64=sheet))
     out = []
     n = len(parts)
     for x in data.get("parts") or []:

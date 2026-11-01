@@ -314,7 +314,8 @@ def kit_ai(cfg, p, plate, fps):
             '\n\n输出 JSON：{"groups": [{"name_zh": "组名（例如 底座组件）", "uids": ["按摆放顺序的 uid"], "rot": {"uid": 绕竖直轴角度 0/90/180/270}}], '
             '"note_zh": "一句话说明怎么分组", "note_th": "..."}')
     img = None
-    if (cfg.get("ai_provider") or "") != "deepseek":       # DeepSeek 不能看图
+    from core import ai
+    if ai.can(cfg, "kit", "vision")[0]:                    # 能看图的 AI 才附上主图（DeepSeek 不能看图）
         try:
             import base64
             import io
@@ -328,7 +329,7 @@ def kit_ai(cfg, p, plate, fps):
                 img = base64.b64encode(buf.getvalue()).decode()
         except Exception:  # noqa: BLE001
             img = None
-    data = ai_copy.extract_json(ai_copy.call(cfg, KIT_SYSTEM, user, image_b64=img))
+    data = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "kit"), KIT_SYSTEM, user, image_b64=img))
     valid = {it["uid"] for it in plate.get("items") or []}
     rows, rots, groups, seen = [], {}, [], set()
     for g in data.get("groups") or []:
@@ -357,7 +358,8 @@ def kit_layout(pid, plate, use_ai=True, cfg=None):
     fps = fps_for(pid, p, plate)
     bed = bed_of(plate.get("printer"))
     source, note_zh, note_th, rows = "rules", "", "", None
-    if use_ai and (cfg.get("ai_api_key") or "").strip():
+    from core import ai
+    if use_ai and ai.ready(cfg, "kit"):
         try:
             rows, rots, groups, note_zh, note_th = kit_ai(cfg, p, plate, fps)
             source = "ai"
