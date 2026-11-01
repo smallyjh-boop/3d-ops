@@ -20,8 +20,10 @@
     "t.ship": ["扫码发货交接", "สแกนส่งมอบพัสดุ"], "t.ship.s": ["交给快递：一包一扫", "ส่งให้ขนส่ง: สแกนทีละกล่อง"],
     "t.pack": ["验货", "ตรวจแพ็ก"], "t.pack.s": ["扫面单再扫商品", "สแกนใบปะหน้าแล้วสแกนสินค้า"],
     "t.stock": ["库存", "สต็อก"], "t.stock.s": ["查数量、入库、出库", "ดูจำนวน รับเข้า เบิกออก"],
-    "t.count": ["盘点", "ตรวจนับ"], "t.count.s": ["扫货位再扫商品", "สแกนตำแหน่งแล้วสแกนสินค้า"],
-    "t.loc": ["货位", "ตำแหน่งจัดเก็บ"], "t.loc.s": ["在哪、放哪、换位置", "อยู่ไหน วางที่ไหน ย้ายที่"],
+    "t.count": ["盘点", "ตรวจนับ"], "t.count.s": ["一个货位一个货位数", "นับทีละตำแหน่ง"],
+    "t.loc": ["货位", "ตำแหน่งจัดเก็บ"], "t.loc.s": ["货位里有什么、东西在哪", "ในช่องมีอะไร ของอยู่ไหน"],
+    "t.put": ["上架", "จัดเก็บเข้าช่อง"], "t.put.s": ["扫商品，按推荐扫货位放好", "สแกนสินค้า แล้วสแกนช่องที่แนะนำ"],
+    "t.move": ["移库", "ย้ายตำแหน่ง"], "t.move.s": ["扫原货位 → 商品 → 新货位；补货任务", "สแกนช่องเดิม → สินค้า → ช่องใหม่ งานเติมสินค้า"],
     "t.rcv": ["采购到货", "รับของจัดซื้อ"], "t.rcv.s": ["扫采购单 / 物品，点数入库", "สแกนใบสั่งซื้อ / สินค้า นับแล้วรับเข้า"],
     "scan.any": ["直接扫任何码：订单、商品、货位都认得", "สแกนได้เลย: ออเดอร์ สินค้า ตำแหน่ง ระบบรู้จักหมด"],
     "ph.scan": ["扫码或输入…", "สแกนหรือพิมพ์…"],
@@ -88,7 +90,15 @@
     "k.adjnote": ["手机盘点改数", "แก้จำนวนจากมือถือ"], "k.scrapnote": ["请写报废原因", "กรุณาใส่เหตุผลที่ทิ้ง"],
     "k.noinv": ["库存模块没有打开", "ไม่ได้เปิดโมดูลสต็อก"],
     // 盘点
-    "c.scan": ["先扫货位 / 货架条码，开始盘点", "สแกนโค้ดตำแหน่ง / ชั้นวางก่อน เพื่อเริ่มตรวจนับ"],
+    "c.scan": ["扫货位 / 货架 / 库区条码，开始按货位盘点", "สแกนโค้ดตำแหน่ง / ชั้นวาง / โซน เพื่อเริ่มตรวจนับตามตำแหน่ง"],
+    "c.open": ["没盘完的盘点单（点一下接着盘）", "ใบตรวจนับที่ยังไม่เสร็จ (แตะเพื่อทำต่อ)"], "c.prog": ["货位数完 {d} / {t}", "นับช่องแล้ว {d} / {t}"],
+    "c.diffs": ["{n} 个差异", "ต่าง {n} รายการ"], "c.now": ["正在数", "กำลังนับ"],
+    "c.how": ["扫商品一下 +1，或者直接填数；没有的填 0。数完点下面的按钮，再扫下一个货位。", "สแกนสินค้าครั้งละ +1 หรือกรอกจำนวน ไม่มีให้ใส่ 0 นับเสร็จกดปุ่มด้านล่าง แล้วสแกนช่องถัดไป"],
+    "c.extra": ["账上不在这里", "ในระบบไม่อยู่ที่นี่"], "c.locdone": ["✅ 这个货位数完了", "✅ ช่องนี้นับเสร็จแล้ว"],
+    "c.alldone": ["货位都数完了：让老板确认盘点", "นับครบทุกช่องแล้ว: ให้เจ้าของยืนยัน"], "c.locs": ["货位（点一下换着数）", "ตำแหน่ง (แตะเพื่อเปลี่ยน)"],
+    "c.boss": ["数完让老板确认", "นับเสร็จแล้วให้เจ้าของยืนยัน"], "c.locsaved": ["✔ {l} 已保存", "✔ บันทึก {l} แล้ว"],
+    "c.confirm_left": ["还有 {n} 个货位没数（没数的不调整），确认盘点？", "ยังมี {n} ช่องที่ยังไม่นับ (ไม่ปรับ) ยืนยันไหม?"],
+    "c.notarea": ["{l} 不在这张盘点单里（换一张：点「换个货位盘点」）", "{l} ไม่อยู่ในใบนี้ (เปลี่ยนใบ: กด「ตรวจตำแหน่งอื่น」)"],
     "c.area": ["盘点范围", "ขอบเขตตรวจนับ"], "c.book": ["账面", "ในระบบ"], "c.counted": ["实盘", "นับได้"],
     "c.save": ["💾 保存", "💾 บันทึก"], "c.confirm": ["✅ 确认盘点（改库存）", "✅ ยืนยันตรวจนับ (แก้สต็อก)"], "c.zero": ["没扫到的算 0", "ที่ไม่ได้สแกนนับเป็น 0"],
     "c.notin": ["{c} 不在这里的账上{w}", "{c} ไม่อยู่ในรายการที่นี่{w}"], "c.at": ["（账上在 {l}）", " (ในระบบอยู่ที่ {l})"],
@@ -97,19 +107,32 @@
     "c.new": ["换个货位盘点", "ตรวจตำแหน่งอื่น"], "c.diff": ["差", "ต่าง"], "c.needitem": ["这是商品码：先扫货位开始盘点", "นี่คือโค้ดสินค้า: สแกนตำแหน่งก่อน"],
     // 货位
     "l.scan": ["扫货位看里面有什么；扫商品看它在哪", "สแกนตำแหน่งดูว่ามีอะไร สแกนสินค้าดูว่าอยู่ไหน"],
-    "l.empty": ["这个货位是空的", "ตำแหน่งนี้ว่าง"], "l.putin": ["📥 把东西放到这里", "📥 วางของที่นี่"], "l.move": ["↔ 放到 / 换到别的货位", "↔ วาง / ย้ายไปตำแหน่งอื่น"],
+    "l.empty": ["这个货位是空的", "ตำแหน่งนี้ว่าง"], "l.putin": ["📥 把待上架的东西放到这里", "📥 วางของที่รอจัดเก็บที่นี่"],
+    "l.cap": ["容量", "ความจุ"], "l.mvfrom": ["↔ 从这里移走", "↔ ย้ายออกจากที่นี่"], "l.goput": ["📥 上架", "📥 จัดเก็บ"], "l.gomove": ["↔ 移库", "↔ ย้ายตำแหน่ง"], "l.move": ["↔ 放到 / 换到别的货位", "↔ วาง / ย้ายไปตำแหน่งอื่น"],
     "l.takeoff": ["拿下来（不放货位）", "เอาออก (ไม่มีตำแหน่ง)"],
     "l.mode_put": ["放到 {l}：扫要放进来的商品", "วางที่ {l}: สแกนสินค้าที่จะวาง"], "l.mode_move": ["{name}：扫新的货位", "{name}: สแกนตำแหน่งใหม่"],
-    "l.stop": ["结束", "เสร็จ"], "l.put_ok": ["✔ {c} → {l}", "✔ {c} → {l}"], "l.where": ["在", "อยู่ที่"], "l.shelf": ["货架 {c}", "ชั้นวาง {c}"],
+    "l.stop": ["结束", "เสร็จ"], "l.put_ok": ["✔ {c} → {l}", "✔ {c} → {l}"], "l.where": ["放在这些货位（★ = 主货位，拣货先拿这里）", "อยู่ในช่องเหล่านี้ (★ = ช่องหลัก หยิบที่นี่ก่อน)"], "l.shelf": ["货架 {c}", "ชั้นวาง {c}"],
     "l.nofile": ["还没有库存档，先在「库存」里入库", "ยังไม่มีในสต็อก ให้รับเข้าที่「สต็อก」ก่อน"],
     "l.takeoff_q": ["把 {c} 从货位拿下来？", "เอา {c} ออกจากตำแหน่ง?"],
+    // 上架 / 移库（v2.52）
+    "pk.go": ["去 {l} 拿", "ไปหยิบที่ {l}"],
+    "u.pending": ["待上架", "รอจัดเก็บ"], "u.sug": ["推荐货位", "ตำแหน่งที่แนะนำ"], "u.r.same": ["同物品已在", "สินค้าเดิมอยู่"], "u.r.near": ["同类附近空位", "ช่องว่างใกล้หมวดเดียวกัน"],
+    "u.r.empty": ["空货位", "ช่องว่าง"], "u.nosug": ["没有合适的空位：扫一个货位也能放", "ไม่มีช่องที่เหมาะ: สแกนช่องไหนก็วางได้"], "u.qty": ["放多少", "จำนวนที่วาง"],
+    "u.scanloc": ["👉 扫货位条码确认放好", "👉 สแกนป้ายตำแหน่งเพื่อยืนยัน"], "u.back": ["返回列表", "กลับไปรายการ"],
+    "u.scan": ["扫要上架的商品（或者点下面的）", "สแกนสินค้าที่จะจัดเก็บ (หรือแตะด้านล่าง)"], "u.scanat": ["放到 {l}：扫商品", "วางที่ {l}: สแกนสินค้า"],
+    "u.list": ["待上架", "รอจัดเก็บ"], "u.none": ["没有待上架的东西 ✓", "ไม่มีของรอจัดเก็บ ✓"], "u.force": ["还是要放进去吗？", "ยังจะวางไหม?"],
+    "u.notpending": ["{c} 没有待上架的数量（要换位置用「移库」）", "{c} ไม่มีจำนวนรอจัดเก็บ (ย้ายใช้「ย้ายตำแหน่ง」)"],
+    "m.s1": ["扫原货位", "สแกนช่องเดิม"], "m.s2": ["扫要搬的商品（一下 +1）或者填数", "สแกนสินค้าที่จะย้าย (ครั้งละ +1) หรือกรอกจำนวน"], "m.s3": ["扫新货位", "สแกนช่องใหม่"],
+    "m.reset": ["重来", "เริ่มใหม่"], "m.have": ["有", "มี"], "m.all": ["全部", "ทั้งหมด"], "m.tasks": ["补货任务（点一下照着搬）", "งานเติมสินค้า (แตะแล้วย้ายตาม)"],
+    "m.repl": ["补货", "เติม"], "m.dotask": ["搬好后扫 {l}", "ย้ายเสร็จแล้วสแกน {l}"], "m.ok": ["✔ {f} → {t}（{n} 样）", "✔ {f} → {t} ({n} รายการ)"],
+    "m.notfrom": ["{c} 不在 {l}", "{c} ไม่อยู่ที่ {l}"],
     // 采购到货（v2.51）
     "r.scan": ["扫采购单号 / 物流单号 / 物品条码", "สแกนเลขใบสั่งซื้อ / เลขพัสดุ / บาร์โค้ดสินค้า"], "r.transit": ["在途的采购单", "ใบสั่งซื้อที่กำลังส่ง"],
     "r.none": ["没有在途的采购单", "ไม่มีใบสั่งซื้อที่กำลังส่ง"], "r.late": ["晚了 {n} 天", "ช้า {n} วัน"], "r.today": ["今天到", "ถึงวันนี้"],
     "r.days": ["还有 {n} 天", "อีก {n} วัน"], "r.left": ["还没到", "ยังไม่ถึง"], "r.got": ["这次到了", "ถึงรอบนี้"], "r.roll": ["卷", "ม้วน"],
     "r.issue": ["⚠ 有问题（少发 / 破损）", "⚠ มีปัญหา (ขาด / เสีย)"], "r.k.short": ["少发", "ส่งขาด"], "r.k.damaged": ["破损", "เสียหาย"],
     "r.k.wrong": ["发错", "ส่งผิด"], "r.k.extra": ["多发", "ส่งเกิน"], "r.iq": ["数量", "จำนวน"], "r.inote": ["说明", "หมายเหตุ"],
-    "r.loc": ["放到货位（可空）", "วางตำแหน่ง (เว้นได้)"], "r.ok": ["✅ 确认入库", "✅ ยืนยันรับเข้า"], "r.done": ["已入库：{no}", "รับเข้าแล้ว: {no}"],
+    "r.loc": ["放到货位（可空）", "วางตำแหน่ง (เว้นได้)"], "r.sug": ["推荐货位 {l}（空 = 按推荐放）", "แนะนำ {l} (เว้นว่าง = วางตามแนะนำ)"], "r.ok": ["✅ 确认入库", "✅ ยืนยันรับเข้า"], "r.done": ["已入库：{no}", "รับเข้าแล้ว: {no}"],
     "r.print": ["🏷 打印物品标签", "🏷 พิมพ์ป้ายสินค้า"], "r.next": ["下一张", "ใบถัดไป"], "r.notopen": ["这张采购单不在途：{st}", "ใบสั่งซื้อนี้ไม่ได้อยู่ระหว่างส่ง: {st}"],
     "r.notin": ["{c} 不在这张采购单里", "{c} ไม่อยู่ในใบสั่งซื้อนี้"], "r.noitem_po": ["{c} 没有在途的采购单", "{c} ไม่มีใบสั่งซื้อที่กำลังส่ง"],
     "r.pick": ["这个物品在几张采购单里，选一张", "สินค้านี้อยู่หลายใบ เลือกหนึ่งใบ"], "r.plus": ["{c} +1", "{c} +1"], "r.zero": ["全部清零（扫一件加一件）", "ล้างเป็น 0 (สแกนทีละชิ้น)"],
@@ -315,7 +338,7 @@
   // ---------------- 首页 ----------------
   SCREENS.home = {
     show() {
-      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["count", "🧮"], ["loc", "🗄"]] : []), ...(PUR ? [["rcv", "📥"]] : [])];
+      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["loc", "🗄"], ["put", "📍"], ["move", "🔀"], ["count", "🧮"]] : []), ...(PUR ? [["rcv", "📥"]] : [])];
       view().innerHTML = `<div class="me"><span data-notr>👤 ${esc(ME.display_name || ME.username)}</span>
           <span class="row"><a href="/" class="small">${T("full")}</a><button class="sm" id="logout">${T("logout")}</button></span></div>
         <div class="tiles">${tiles.map(([k, ic]) => `<button class="tile" data-go="${k}"><span class="ti">${ic}</span>${T("t." + k)}<small>${T("t." + k + ".s")}</small></button>`).join("")}</div>
@@ -561,6 +584,7 @@
           : `<span class="small muted">${T("p.none")}</span>`;
         rows.push(`<div class="item ${got >= need ? "done" : ""}">${img(i.img)}<div class="grow"><div class="mono" data-notr><b>${esc(i.sku || "")}</b></div>
           <div class="nm" data-notr>${esc(i.name || "")}</div><div class="small muted">${esc(i.variation || i.color || "")}</div>
+          ${i.loc ? `<div class="small" data-notr>📍 ${esc(T("pk.go", { l: i.loc }))}</div>` : ""}
           <div class="prog"><i style="width:${need ? Math.round(100 * got / need) : 100}%"></i></div></div>
           <div style="text-align:right"><div class="q">${got}/${need}</div>${act}</div></div>`);
       }
@@ -724,102 +748,167 @@
     },
   };
 
-  // ---------------- 盘点 ----------------
+  // ---------------- 盘点（v2.52：按货位，一个货位一个货位数）----------------
+  // 扫货位 / 货架 / 库区 → 开一张盘点单（或者接着上次的）；扫货位 = 开始数这个货位；扫商品 = +1；「这个货位数完了」→ 下一个。
+  const qn = (v) => +(+v || 0).toFixed(3);
   SCREENS.count = {
-    doc: null, msg: null,
+    doc: null, cur: null, cnt: {}, msg: null,
     async show() {
-      this.msg = null;
+      this.msg = null; this.cur = null;
       if (!INV) { view().innerHTML = lastMsg("bad", T("k.noinv")); return; }
       const did = +(localStorage.getItem("m3d_count_doc") || 0);
       this.doc = null;
       if (did) {
-        try { const r = await api(`/api/inv/docs/${did}`); if (r.doc && r.doc.status === "draft") this.doc = r.doc; } catch { /* 没了 */ }
+        try { const r = await api(`/api/inv/stocktake/${did}`); if (r.doc && r.doc.status === "draft" && r.doc.by_location) this.doc = r.doc; } catch { /* 没了 */ }
         if (!this.doc) localStorage.removeItem("m3d_count_doc");
       }
+      if (this.doc) this.pickNext();
       this.render();
     },
-    area() { return ((this.doc && this.doc.ref) || "").replace(/^area:/, ""); },
-    render() {
+    refresh() { if (this.doc) this.reload().then(() => this.render()).catch(() => {}); },
+    async reload() { const r = await api(`/api/inv/stocktake/${this.doc.id}`); this.doc = r.doc; },
+    pickNext() {
+      const nx = this.doc.locs.find((l) => !l.done);
+      this.setCur(nx ? nx.code : null);
+    },
+    setCur(code) {
+      this.cur = code;
+      this.cnt = {};
+      if (!code) return;
+      try { this.cnt = JSON.parse(localStorage.getItem(`m3d_cnt_${this.doc.id}_${code}`) || "{}"); } catch { this.cnt = {}; }
+      const l = this.loc();
+      if (l && l.done && !Object.keys(this.cnt).length) l.rows.forEach((x) => { if (x.counted != null) this.cnt[x.code] = { id: x.item_id, q: x.counted, nm: [x.name_zh, x.name_th] }; });
+    },
+    keep() { try { localStorage.setItem(`m3d_cnt_${this.doc.id}_${this.cur}`, JSON.stringify(this.cnt)); } catch { /* 忽略 */ } },
+    loc() { return this.doc && this.doc.locs.find((l) => l.code === this.cur); },
+    async listOpen() {
+      try {
+        const r = await api("/api/inv/docs?kind=stocktake");
+        return r.docs.filter((d) => d.status === "draft" && (d.ref || "").startsWith("area:"));
+      } catch { return []; }
+    },
+    async render() {
       const d = this.doc;
-      if (!d) { view().innerHTML = `${this.msg ? lastMsg(this.msg[0], this.msg[1]) : ""}<p class="hint"><span class="big-ic">🧮</span>${T("c.scan")}</p>`; return; }
-      view().innerHTML = `${this.msg ? lastMsg(this.msg[0], this.msg[1]) : ""}
-        <div class="card"><div class="row between"><span>${T("c.area")}：<b class="loc" data-notr>${esc(this.area() || "—")}</b></span><span class="small muted mono" data-notr>${esc(d.no)}</span></div></div>
-        <div class="card"><ul class="list">${d.lines.map((l) => {
-          const diff = l.counted != null ? +(l.counted - (l.now_qty ?? l.expected)).toFixed(3) : null;
-          return `<li><div class="grow"><div class="mono" data-notr><b>${esc(l.code)}</b></div><div class="small" data-notr>${esc(nm(l.name_zh, l.name_th))}</div>
-            <div class="small muted">${T("c.book")} ${esc(+(+(l.now_qty ?? l.expected)).toFixed(3))} ${esc(l.unit || "")}${diff ? ` · <b class="${diff < 0 ? "bad" : "warn"}">${T("c.diff")} ${diff > 0 ? "+" : ""}${diff}</b>` : ""}</div></div>
-            <div class="step" style="width:150px"><button class="sm" data-dec="${l.id}">−</button><input type="number" inputmode="decimal" data-cnt="${l.id}" value="${l.counted ?? ""}" placeholder="—" style="min-height:40px;font-size:18px;padding:4px"><button class="sm" data-inc="${l.id}">+</button></div></li>`;
-        }).join("")}</ul></div>
-        <label class="row small" style="margin:6px 4px"><input type="checkbox" id="c-zero" style="width:auto;min-height:0"> ${T("c.zero")}</label>
-        <div class="col"><button class="big" id="c-save">${T("c.save")}</button>
-          ${PERMS["inv.adjust"] !== false ? `<button class="big okb" id="c-confirm">${T("c.confirm")}</button>` : ""}
+      const msg = this.msg ? lastMsg(this.msg[0], this.msg[1]) : "";
+      if (!d) {
+        view().innerHTML = `${msg}<p class="hint"><span class="big-ic">🧮</span>${T("c.scan")}</p><div id="c-open"></div>`;
+        const open = await this.listOpen();
+        const box = $("#c-open");
+        if (box && open.length) {
+          box.innerHTML = `<div class="card"><b>${T("c.open")}</b><ul class="list">${open.map((x) => `<li class="tap" data-doc="${x.id}"><b class="mono grow" data-notr>${esc(x.ref.slice(5))}</b><span class="small muted mono" data-notr>${esc(x.no)}</span></li>`).join("")}</ul></div>`;
+          box.querySelectorAll("[data-doc]").forEach((li) => li.addEventListener("click", async () => {
+            try { const r = await api(`/api/inv/stocktake/${li.dataset.doc}`); this.doc = r.doc; localStorage.setItem("m3d_count_doc", r.doc.id); this.pickNext(); this.render(); } catch (e) { toast(e.message, true); }
+          }));
+        }
+        return;
+      }
+      const p = d.progress, l = this.loc();
+      const rows = l ? l.rows : [];
+      const shown = {};
+      rows.forEach((x) => { shown[x.code] = { id: x.item_id, nm: [x.name_zh, x.name_th], unit: x.unit, book: x.book }; });
+      Object.entries(this.cnt).forEach(([c, v]) => { if (!shown[c]) shown[c] = { id: v.id, nm: v.nm || ["", ""], extra: true }; });
+      view().innerHTML = `${msg}
+        <div class="card"><div class="row between"><span>${T("c.area")}：<b class="loc" data-notr style="font-size:18px">${esc(areaOf(d))}</b></span><span class="small muted mono" data-notr>${esc(d.no)}</span></div>
+          <div class="pbar"><i style="width:${p.total ? Math.round(100 * p.done / p.total) : 0}%"></i></div>
+          <div class="small">${T("c.prog", { d: p.done, t: p.total })}${p.diffs ? ` · <b class="bad">${T("c.diffs", { n: p.diffs })}</b>` : ""}</div></div>
+        ${l ? `<div class="card"><div class="row between"><div><div class="small muted">${T("c.now")}</div><div class="loc" data-notr>${esc(l.code)}</div></div>${l.done ? `<span class="ok">✓</span>` : ""}</div>
+            <p class="small muted">${T("c.how")}</p>
+            <ul class="list">${Object.entries(shown).map(([c, x]) => { const v = this.cnt[c]; return `<li><div class="grow"><div class="mono" data-notr><b>${esc(c)}</b>${x.extra ? ` <span class="warn small">${T("c.extra")}</span>` : ""}</div>
+              <div class="small" data-notr>${esc(nm(x.nm[0], x.nm[1]))}</div>${x.book != null ? `<div class="small muted">${T("c.book")} ${esc(qn(x.book))}</div>` : ""}</div>
+              <div class="step" style="width:150px"><button class="sm" data-dec="${esc(c)}">−</button><input type="number" inputmode="decimal" data-cnt="${esc(c)}" value="${v ? esc(v.q) : ""}" placeholder="—" style="min-height:40px;font-size:18px;padding:4px"><button class="sm" data-inc="${esc(c)}">+</button></div></li>`; }).join("") || `<li class="muted">${T("l.empty")}</li>`}</ul>
+            <button class="big okb" id="c-done">${T("c.locdone")}</button></div>`
+          : `<div class="card"><p>${T("c.alldone")}</p></div>`}
+        <div class="card"><b class="small">${T("c.locs")}</b><div class="chipsm">${d.locs.map((x) => `<button class="sm ${x.done ? "okc" : ""} ${x.code === this.cur ? "on" : ""}" data-go="${esc(x.code)}" data-notr>${esc(x.code)}${x.done ? " ✓" : ""}${x.diffs ? " ⚠" : ""}</button>`).join("")}</div></div>
+        <div class="col">${PERMS["inv.adjust"] !== false ? `<button class="big primary" id="c-confirm">${T("c.confirm")}</button>` : `<p class="small muted">${T("c.boss")}</p>`}
           <button class="big" id="c-new">${T("c.new")}</button></div>`;
-      const line = (id) => d.lines.find((l) => l.id === +id);
-      view().querySelectorAll("[data-inc]").forEach((b) => b.addEventListener("click", () => { const l = line(b.dataset.inc); l.counted = (+l.counted || 0) + 1; this.keep(); this.render(); }));
-      view().querySelectorAll("[data-dec]").forEach((b) => b.addEventListener("click", () => { const l = line(b.dataset.dec); l.counted = Math.max(0, (+l.counted || 0) - 1); this.keep(); this.render(); }));
-      view().querySelectorAll("[data-cnt]").forEach((inp) => inp.addEventListener("change", () => { const l = line(inp.dataset.cnt); l.counted = inp.value === "" ? null : +inp.value; this.keep(); }));
-      $("#c-save").addEventListener("click", (e) => this.save(e.target));
+      const set = (c, q) => { const x = shown[c]; this.cnt[c] = { id: x.id, q: Math.max(0, qn(q)), nm: x.nm }; this.keep(); };
+      view().querySelectorAll("[data-inc]").forEach((b) => b.addEventListener("click", () => { const c = b.dataset.inc; set(c, ((this.cnt[c] || {}).q || 0) + 1); this.render(); }));
+      view().querySelectorAll("[data-dec]").forEach((b) => b.addEventListener("click", () => { const c = b.dataset.dec; set(c, ((this.cnt[c] || {}).q || 0) - 1); this.render(); }));
+      view().querySelectorAll("[data-cnt]").forEach((inp) => inp.addEventListener("change", () => { if (inp.value === "") { delete this.cnt[inp.dataset.cnt]; this.keep(); } else set(inp.dataset.cnt, inp.value); }));
+      view().querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => { this.setCur(b.dataset.go); this.msg = null; this.render(); }));
+      const dn = $("#c-done"); if (dn) dn.addEventListener("click", (e) => this.saveLoc(e.target));
       const cf = $("#c-confirm"); if (cf) cf.addEventListener("click", (e) => this.confirm(e.target));
-      $("#c-new").addEventListener("click", () => { localStorage.removeItem("m3d_count_doc"); this.doc = null; this.msg = null; this.render(); });
+      $("#c-new").addEventListener("click", () => { localStorage.removeItem("m3d_count_doc"); this.doc = null; this.cur = null; this.msg = null; this.render(); });
     },
-    keep() { try { localStorage.setItem("m3d_count_lines_" + this.doc.id, JSON.stringify(this.doc.lines.map((l) => [l.id, l.counted]))); } catch { /* 忽略 */ } },
-    counts() {
-      const zero = $("#c-zero") && $("#c-zero").checked;
-      const out = {};
-      this.doc.lines.forEach((l) => { if (l.counted != null && l.counted !== "") out[l.id] = l.counted; else if (zero) { out[l.id] = 0; l.counted = 0; } });
-      return out;
-    },
-    async save(btn) {
+    async saveLoc(btn) {
       btn.disabled = true;
-      try { const r = await api(`/api/inv/stocktake/${this.doc.id}/save`, { json: { counts: this.counts() } }); this.doc = r.doc; this.msg = ["ok", T("c.saved")]; SCAN.ok(); }
-      catch (e) { SCAN.bad(); this.msg = ["bad", e.message]; }
+      const counts = {};
+      Object.entries(this.cnt).forEach(([c, v]) => { counts[v.id || c] = v.q; });
+      try {
+        const r = await api(`/api/inv/stocktake/${this.doc.id}/loc`, { json: { code: this.cur, counts, complete: true } });
+        const done = this.cur;
+        try { localStorage.removeItem(`m3d_cnt_${this.doc.id}_${done}`); } catch { /* 忽略 */ }
+        this.doc = r.doc; SCAN.ok();
+        const l = this.doc.locs.find((x) => x.code === done);
+        this.msg = ["ok", T("c.locsaved", { l: done }) + (l && l.diffs ? " · " + T("c.diffs", { n: l.diffs }) : "")];
+        this.pickNext();
+      } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; }
       this.render();
     },
     async confirm(btn) {
-      if (!(await confirmBox(T("c.confirm_q")))) return;
+      const left = this.doc.progress.total - this.doc.progress.done;
+      if (!(await confirmBox(left ? T("c.confirm_left", { n: left }) : T("c.confirm_q")))) return;
       btn.disabled = true;
       try {
-        await api(`/api/inv/stocktake/${this.doc.id}/save`, { json: { counts: this.counts() } });
         const r = await api(`/api/inv/stocktake/${this.doc.id}/confirm`, { json: {} });
-        const n = (r.doc.lines || []).filter((l) => l.qty && Math.abs(l.qty) > 1e-6).length;
-        SCAN.ok(); localStorage.removeItem("m3d_count_doc"); this.doc = null; this.msg = ["ok", T("c.confirmed", { n })];
-      } catch (e) { SCAN.bad(); this.msg = ["bad", e.message]; }
+        SCAN.ok(); localStorage.removeItem("m3d_count_doc"); this.doc = null; this.cur = null;
+        this.msg = ["ok", T("c.confirmed", { n: r.doc.progress ? r.doc.progress.diffs : 0 })];
+      } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; }
       this.render();
     },
     async start(code) {
       const r = await api("/api/inv/stocktake", { json: { area: code, note: "📱" } });
       this.doc = r.doc;
       localStorage.setItem("m3d_count_doc", r.doc.id);
-      SCAN.ok(); this.msg = null; this.render();
+      SCAN.ok(); this.msg = null;
+      this.pickNext();
+      this.render();
     },
     async scan(code) {
-      const k = code.toUpperCase();
-      if (this.doc) {
-        const l = this.doc.lines.find((x) => String(x.code).toUpperCase() === k);
-        if (l) { l.counted = (+l.counted || 0) + 1; this.keep(); SCAN.ok(); this.msg = ["ok", `✔ ${l.code}  ${l.counted}`]; this.render(); return; }
-      }
+      const k = code.trim().toUpperCase();
       try {
+        if (this.doc && this.cur) {             // 先看是不是这个货位上的商品
+          const l = this.loc();
+          const row = l && l.rows.find((x) => String(x.code).toUpperCase() === k);
+          const had = Object.keys(this.cnt).find((c) => c.toUpperCase() === k);
+          if (row || had) {
+            const c = row ? row.code : had;
+            const cur = this.cnt[c] || { id: row ? row.item_id : this.cnt[had].id, q: 0, nm: row ? [row.name_zh, row.name_th] : this.cnt[had].nm };
+            cur.q = qn(cur.q + 1); this.cnt[c] = cur; this.keep();
+            SCAN.ok(); this.msg = ["ok", `✔ ${c}  ${cur.q}`]; this.render(); return;
+          }
+        }
+        if (this.doc) {
+          const l = this.doc.locs.find((x) => x.code.toUpperCase() === k.replace(/^([A-Z]{1,2})(\d{1,2})-(\d{1,2})-(\d{1,2})$/, (m, a, b, c, d) => `${a}${+b}-${String(+c).padStart(2, "0")}-${String(+d).padStart(2, "0")}`));
+          if (l) { SCAN.ok(); this.setCur(l.code); this.msg = null; this.render(); return; }
+        }
         const r = await api(`/api/mobile/resolve?prefer=location&code=${encodeURIComponent(code)}`);
         if (["location", "shelf", "zone"].includes(r.type)) {
           const ac = r.type === "location" ? r.location.code : String(r.code || "").toUpperCase();
-          if (this.doc && ac === this.area().toUpperCase()) { SCAN.ok(); return; }
+          if (this.doc) { SCAN.warn(); this.msg = ["warn", T("c.notarea", { l: ac })]; this.render(); return; }
           await this.start(ac);
           return;
         }
-        if (r.type === "item") {
+        if ((r.type === "item") && this.doc && this.cur) {      // 账上不在这个货位的商品：也记下（放错地方的）
           SCAN.warn();
-          this.msg = this.doc ? ["warn", T("c.notin", { c: r.item.code, w: r.item.loc ? T("c.at", { l: r.item.loc.code }) : "" })] : ["warn", T("c.needitem")];
-        } else { SCAN.bad(); this.msg = ["bad", T("unknown", { c: code })]; }
-      } catch (e) { SCAN.bad(); this.msg = ["bad", e.message]; }
+          this.cnt[r.item.code] = { id: r.item.id, q: 1, nm: [r.item.name_zh, r.item.name_th] }; this.keep();
+          this.msg = ["warn", T("c.notin", { c: r.item.code, w: r.item.loc ? T("c.at", { l: r.item.loc.code }) : "" })];
+        } else if (r.type === "item") { SCAN.warn(); this.msg = ["warn", T("c.needitem")]; }
+        else { SCAN.bad(); this.msg = ["bad", T("unknown", { c: code })]; }
+      } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; }
       this.render();
     },
   };
+  const areaOf = (d) => ((d.ref || "").startsWith("area:") ? d.ref.slice(5) : "—");
+  const ZT = { pick: ["拣货区", "โซนหยิบสินค้า"], reserve: ["备货区", "โซนสต็อกสำรอง"], staging: ["暂存区", "โซนพักสินค้า"], returns: ["退货区", "โซนสินค้าคืน"],
+    defect: ["次品区", "โซนสินค้าชำรุด"], supply: ["耗材区", "โซนวัสดุสิ้นเปลือง"] };
+  const ztName = (t) => (ZT[t] ? ZT[t][TH() ? 1 : 0] : "");
 
-  // ---------------- 货位 ----------------
+  // ---------------- 货位（查：货位里有什么、物品在哪些货位）----------------
   SCREENS.loc = {
-    r: null, mode: null, msg: null,       // mode: {put: 货位} 或 {move: 物品}
+    r: null, msg: null,
     show(arg) {
-      this.r = null; this.mode = null; this.msg = null;
+      this.r = null; this.msg = null;
       if (!INV) { view().innerHTML = lastMsg("bad", T("k.noinv")); return; }
       this.render();
       if (arg) this.scan(arg);
@@ -832,68 +921,198 @@
       this.render();
       return r;
     },
-    modeBar() {
-      if (!this.mode) return "";
-      const t = this.mode.put ? T("l.mode_put", { l: this.mode.put }) : T("l.mode_move", { name: this.mode.move.code });
-      return `<div class="mode row between"><span data-notr>${esc(t)}</span><button id="l-stop">${T("l.stop")}</button></div>`;
-    },
     render() {
       const r = this.r;
       let body = "";
       if (!r) body = `<p class="hint"><span class="big-ic">🗄</span>${T("l.scan")}</p>`;
       else if (r.type === "location") {
         const l = r.location;
-        body = `<div class="card"><div class="loc" data-notr>${esc(l.code)}</div><div class="small muted">${esc(TH() ? l.human_th : l.human_zh)}</div></div>
-          <div class="card">${r.items.length ? `<ul class="list">${r.items.map((x) => `<li class="tap" data-code="${esc(x.code)}"><div class="grow"><div class="mono" data-notr><b>${esc(x.code)}</b></div>
-            <div class="small" data-notr>${esc(nm(x.name_zh, x.name_th))}</div></div><b>${esc(+(+x.qty).toFixed(3))}</b> <span class="small" data-notr>${esc(x.unit || "")}</span></li>`).join("")}</ul>`
+        body = `<div class="card"><div class="loc" data-notr>${esc(l.code)}</div><div class="small muted">${esc(TH() ? l.human_th : l.human_zh)}</div>
+            <div class="small"><span class="pill">${esc(ztName(l.ztype))}</span>${l.capacity != null ? ` · ${T("l.cap")} <b>${esc(qn(l.total))} / ${esc(qn(l.capacity))}</b>` : ""}${l.fixed ? ` · 📌 <span data-notr>${esc(l.fixed.code)}</span>` : ""}</div></div>
+          <div class="card">${r.items.length ? `<ul class="list">${r.items.map((x) => `<li class="tap" data-code="${esc(x.code)}"><div class="grow"><div class="mono" data-notr><b>${esc(x.code)}</b>${x.primary ? " ★" : ""}</div>
+            <div class="small" data-notr>${esc(nm(x.name_zh, x.name_th))}</div></div><b>${esc(qn(x.qty))}</b> <span class="small" data-notr>${esc(x.unit || "")}</span></li>`).join("")}</ul>`
             : `<p class="muted">${T("l.empty")}</p>`}</div>
-          ${PERMS["inv.in"] !== false ? `<button class="big primary" id="l-put">${T("l.putin")}</button>` : ""}`;
+          ${PERMS["inv.in"] !== false ? `<div class="col"><button class="big primary" id="l-put">${T("l.putin")}</button>${r.items.some((x) => x.qty > 0) ? `<button class="big" id="l-mvfrom">${T("l.mvfrom")}</button>` : ""}</div>` : ""}`;
       } else if (r.type === "shelf" || r.type === "zone") {
         body = `<div class="card"><div class="loc" data-notr>${esc(T("l.shelf", { c: r.code }))}</div></div><div class="card"><ul class="list">${r.items.map((x) => `<li class="tap" data-code="${esc(x.code)}">
           <span class="loc" style="font-size:15px" data-notr>${esc(x.location || "")}</span><div class="grow"><div class="mono small" data-notr>${esc(x.code)}</div><div class="small" data-notr>${esc(nm(x.name_zh, x.name_th))}</div></div>
-          <b>${esc(+(+x.qty).toFixed(3))}</b></li>`).join("") || `<li class="muted">${T("l.empty")}</li>`}</ul></div>`;
+          <b>${esc(qn(x.qty))}</b></li>`).join("") || `<li class="muted">${T("l.empty")}</li>`}</ul></div>`;
       } else if (r.type === "item") {
-        const it = r.item;
+        const it = r.item, ls = (it.locs && it.locs.locations) || [], un = (it.locs && it.locs.unplaced) || 0;
         body = `<div class="card"><div class="item">${img(it.img)}<div class="grow"><div class="mono" data-notr><b>${esc(it.code)}</b></div><div class="nm" data-notr>${esc(nm(it.name_zh, it.name_th))}</div></div>
-            <div class="q">${esc(+(+it.qty).toFixed(3))}</div></div>
-          <p>${T("l.where")}：${it.loc ? `<b class="loc" data-notr>${esc(it.loc.code)}</b><br><span class="small muted">${esc(TH() ? it.loc.human_th : it.loc.human_zh)}</span>` : `<span class="muted">${T("k.noloc")}</span>`}</p></div>
-          ${PERMS["inv.in"] !== false ? `<div class="col"><button class="big primary" id="l-move">${T("l.move")}</button>${it.loc ? `<button class="big danger" id="l-off">${T("l.takeoff")}</button>` : ""}</div>` : ""}`;
+            <div class="q">${esc(qn(it.qty))}</div></div>
+          <p class="small muted">${T("l.where")}</p>
+          <ul class="list">${ls.map((x) => `<li class="tap" data-code="${esc(x.code)}"><span class="loc" style="font-size:18px" data-notr>${esc(x.code)}</span>${x.primary ? " ★" : ""}
+            <span class="grow small muted">${esc(ztName(x.ztype))}</span><b>${esc(qn(x.qty))}</b></li>`).join("")}
+            ${un > 1e-9 ? `<li><span class="warn grow">${T("u.pending")}</span><b>${esc(qn(un))}</b></li>` : ""}${!ls.length && un <= 1e-9 ? `<li class="muted">${T("k.noloc")}</li>` : ""}</ul></div>
+          ${PERMS["inv.in"] !== false ? `<div class="col">${un > 1e-9 ? `<button class="big primary" id="l-goput">${T("l.goput")}</button>` : ""}${ls.length ? `<button class="big" id="l-gomove">${T("l.gomove")}</button>` : ""}</div>` : ""}`;
       } else if (r.type === "sku") body = `<div class="card"><b class="mono" data-notr>${esc(r.code)}</b><p class="warn">${T("l.nofile")}</p></div>`;
       else if (r.type === "order") body = `<div class="card"><p>🧾 <b class="mono" data-notr>${esc(r.order.order_no)}</b></p><button class="big primary" id="l-order">${T("go.order")}</button></div>`;
       else body = lastMsg("bad", T("unknown", { c: r.code }));
-      view().innerHTML = this.modeBar() + (this.msg ? lastMsg(this.msg[0], this.msg[1]) : "") + body;
-      const st = $("#l-stop"); if (st) st.addEventListener("click", () => { this.mode = null; this.msg = null; this.render(); });
-      const put = $("#l-put"); if (put) put.addEventListener("click", () => { this.mode = { put: r.location.code }; this.msg = null; this.render(); });
-      const mv = $("#l-move"); if (mv) mv.addEventListener("click", () => { this.mode = { move: r.item }; this.msg = null; this.render(); });
-      const off = $("#l-off"); if (off) off.addEventListener("click", async () => {
-        if (!(await confirmBox(T("l.takeoff_q", { c: r.item.code })))) return;
-        try { await api("/api/inv/locations/assign", { json: { item_id: r.item.id, code: "" } }); SCAN.ok(); await this.load(r.item.code, false); } catch (e) { SCAN.bad(); toast(e.message, true); }
-      });
+      view().innerHTML = (this.msg ? lastMsg(this.msg[0], this.msg[1]) : "") + body;
+      const put = $("#l-put"); if (put) put.addEventListener("click", () => go("put", "@" + r.location.code));
+      const mf = $("#l-mvfrom"); if (mf) mf.addEventListener("click", () => go("move", r.location.code));
+      const gp = $("#l-goput"); if (gp) gp.addEventListener("click", () => go("put", r.item.code));
+      const gm = $("#l-gomove"); if (gm) gm.addEventListener("click", () => go("move", ((r.item.locs || {}).locations || [])[0].code));
       const od = $("#l-order"); if (od) od.addEventListener("click", () => go("order", r.order.order_no));
       view().querySelectorAll("[data-code]").forEach((li) => li.addEventListener("click", () => this.load(li.dataset.code, false).catch((e) => toast(e.message, true))));
     },
-    async assign(item, code) {
-      const r = await send("/api/inv/locations/assign", { item_id: item.id, code }, `${T("t.loc")}: ${item.code} → ${code}`);
-      SCAN.ok();
-      this.msg = r.queued ? ["warn", T("offline.q")] : ["ok", T("l.put_ok", { c: item.code, l: code })];
+    async scan(code) {
+      try { this.msg = null; await this.load(code); } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; this.render(); }
+    },
+  };
+
+  // ---------------- 上架（v2.52）：扫商品 → 看推荐货位 → 扫货位确认 ----------------
+  SCREENS.put = {
+    list: [], it: null, at: null, msg: null,
+    async show(arg) {
+      this.it = null; this.at = null; this.msg = null;
+      if (!INV) { view().innerHTML = lastMsg("bad", T("k.noinv")); return; }
+      if (arg && arg.startsWith("@")) this.at = arg.slice(1);
+      await this.load();
+      if (arg && !arg.startsWith("@")) await this.scan(arg);
+    },
+    refresh() { this.load().catch(() => {}); },
+    async load() {
+      try { this.list = (await api("/api/inv/wms/pending")).items; } catch (e) { toast(srv(e.message), true); this.list = []; }
+      if (this.it) this.it = this.list.find((x) => x.item.id === this.it.item.id) || null;
+      this.render();
+    },
+    render() {
+      const x = this.it;
+      const msg = this.msg ? lastMsg(this.msg[0], this.msg[1]) : "";
+      if (x) {
+        const s = x.suggest || [];
+        view().innerHTML = `${msg}<div class="card"><div class="row between"><div><div class="mono" data-notr><b>${esc(x.item.code)}</b></div><div class="nm" data-notr>${esc(nm(x.item.name_zh, x.item.name_th))}</div></div>
+            <div style="text-align:right"><div class="small muted">${T("u.pending")}</div><div class="q" style="font-size:28px">${esc(qn(x.qty))}</div></div></div></div>
+          <div class="card"><div class="small muted">${T("u.sug")}</div>${s.length ? s.map((p, i) => `<div class="row between sugrow ${i ? "" : "first"}"><span class="loc" data-notr style="font-size:${i ? 18 : 26}px">${esc(p.code)}</span>
+              <span class="small">${p.qty ? "×" + esc(qn(p.qty)) + " · " : ""}${T("u.r." + p.reason)}</span></div>`).join("") : `<p class="warn">${T("u.nosug")}</p>`}</div>
+          <div class="card col"><div class="small muted">${T("u.qty")}</div>
+            <div class="step"><button id="p-minus">−</button><input id="p-qty" type="number" inputmode="decimal" value="${esc(qn(s[0] && s[0].qty ? s[0].qty : x.qty))}"><button id="p-plus">+</button></div>
+            <div class="mode">${T("u.scanloc")}</div>
+            <button class="big" id="p-back">${T("u.back")}</button></div>`;
+        const q = $("#p-qty");
+        $("#p-minus").addEventListener("click", () => { q.value = Math.max(0, qn(q.value) - 1); });
+        $("#p-plus").addEventListener("click", () => { q.value = qn(q.value) + 1; });
+        $("#p-back").addEventListener("click", () => { this.it = null; this.msg = null; this.render(); });
+        return;
+      }
+      view().innerHTML = `${msg}<p class="hint"><span class="big-ic">📥</span>${this.at ? T("u.scanat", { l: this.at }) : T("u.scan")}</p>
+        <div class="card"><b>${T("u.list")}</b>${this.list.length ? `<ul class="list">${this.list.map((y) => `<li class="tap" data-iid="${y.item.id}"><div class="grow"><div class="mono" data-notr><b>${esc(y.item.code)}</b></div>
+          <div class="small" data-notr>${esc(nm(y.item.name_zh, y.item.name_th))}</div><div class="small muted" data-notr>→ ${esc((y.suggest[0] || {}).code || "—")}</div></div><b>${esc(qn(y.qty))}</b></li>`).join("")}</ul>`
+          : `<p class="muted">${T("u.none")}</p>`}</div>`;
+      view().querySelectorAll("[data-iid]").forEach((li) => li.addEventListener("click", () => { this.it = this.list.find((y) => y.item.id === +li.dataset.iid); this.msg = null; this.render(); }));
+    },
+    async put(code, force) {
+      const x = this.it, qty = qn($("#p-qty") ? $("#p-qty").value : x.qty);
+      try {
+        const r = await send("/api/inv/wms/putaway", { item_id: x.item.id, code, qty, force: !!force }, `${T("t.put")} ${x.item.code} → ${code}`);
+        SCAN.ok();
+        this.msg = r.queued ? ["warn", T("offline.q")] : ["ok", T("l.put_ok", { c: `${x.item.code} ×${qty}`, l: code })];
+        this.it = null;
+        await this.load();
+      } catch (e) {
+        SCAN.bad();
+        if (/放不下/.test(e.message) && !force && (await confirmBox(srv(e.message) + "\n" + T("u.force")))) return this.put(code, true);
+        this.msg = ["bad", srv(e.message)]; this.render();
+      }
     },
     async scan(code) {
       try {
-        if (this.mode) {
-          const r = await api(`/api/mobile/resolve?prefer=location&code=${encodeURIComponent(code)}`);
-          if (this.mode.put) {
-            if (r.type === "item") { await this.assign(r.item, this.mode.put); await this.load(this.mode.put, false); return; }
-            if (r.type === "location") { SCAN.ok(); this.mode = { put: r.location.code }; this.r = r; this.msg = null; this.render(); return; }
-            if (r.type === "sku") { SCAN.bad(); this.msg = ["bad", `${code}：${T("l.nofile")}`]; this.render(); return; }
-          } else if (this.mode.move) {
-            if (r.type === "location") { const it = this.mode.move; this.mode = null; await this.assign(it, r.location.code); await this.load(it.code, false); return; }
-            if (r.type === "item") { SCAN.ok(); this.mode = { move: r.item }; this.r = r; this.msg = null; this.render(); return; }
-          }
-          SCAN.bad(); this.msg = ["bad", T("unknown", { c: code })]; this.render(); return;
+        const r = await api(`/api/mobile/resolve?prefer=location&code=${encodeURIComponent(code)}`);
+        if (r.type === "location") {
+          if (this.it) return this.put(r.location.code);
+          SCAN.ok(); this.at = r.location.code; this.msg = null; this.render(); return;
         }
-        this.msg = null;
-        await this.load(code);
-      } catch (e) { SCAN.bad(); this.msg = ["bad", e.message]; this.render(); }
+        if (r.type === "item") {
+          const y = this.list.find((z) => z.item.id === r.item.id);
+          if (!y) { SCAN.warn(); this.msg = ["warn", T("u.notpending", { c: r.item.code })]; this.render(); return; }
+          SCAN.ok(); this.it = y; this.msg = null;
+          if (this.at) { this.render(); return this.put(this.at); }
+          this.render(); return;
+        }
+        SCAN.bad(); this.msg = ["bad", T("unknown", { c: code })]; this.render();
+      } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; this.render(); }
+    },
+  };
+
+  // ---------------- 移库（v2.52）：扫原货位 → 扫商品（一下 +1）→ 扫目标货位；补货任务点一下照着做 ----------------
+  SCREENS.move = {
+    from: null, lines: {}, task: null, tasks: [], msg: null,
+    async show(arg) {
+      this.from = null; this.lines = {}; this.task = null; this.msg = null;
+      if (!INV) { view().innerHTML = lastMsg("bad", T("k.noinv")); return; }
+      await this.loadTasks();
+      if (arg) await this.scan(arg); else this.render();
+    },
+    refresh() { this.loadTasks().then(() => this.render()).catch(() => {}); },
+    async loadTasks() { try { this.tasks = (await api("/api/inv/wms/tasks")).tasks; } catch { this.tasks = []; } },
+    async setFrom(code) {
+      const r = await api(`/api/inv/locations/find?code=${encodeURIComponent(code)}`);
+      this.from = { code: r.location.code, items: (r.items || []).filter((x) => x.qty > 1e-9) };
+      this.lines = {};
+    },
+    render() {
+      const msg = this.msg ? lastMsg(this.msg[0], this.msg[1]) : "";
+      const f = this.from;
+      const n = Object.values(this.lines).filter((v) => v > 0).length;
+      const step = !f ? 1 : !n ? 2 : 3;
+      view().innerHTML = `${msg}
+        <div class="card steps"><div class="${step === 1 ? "on" : "done"}">① ${T("m.s1")}${f ? ` <b class="mono" data-notr>${esc(f.code)}</b>` : ""}</div>
+          <div class="${step === 2 ? "on" : step > 2 ? "done" : ""}">② ${T("m.s2")}</div><div class="${step === 3 ? "on" : ""}">③ ${T("m.s3")}${this.task ? ` <b class="mono" data-notr>${esc(this.task.to_loc)}</b>` : ""}</div></div>
+        ${f ? `<div class="card"><div class="row between"><span class="loc" data-notr>${esc(f.code)}</span><button class="sm" id="m-reset">${T("m.reset")}</button></div>
+          ${f.items.length ? `<ul class="list">${f.items.map((x) => { const v = this.lines[x.id] || 0; return `<li><div class="grow"><div class="mono" data-notr><b>${esc(x.code)}</b></div>
+            <div class="small" data-notr>${esc(nm(x.name_zh, x.name_th))}</div><div class="small muted">${T("m.have")} ${esc(qn(x.qty))}</div></div>
+            <div class="step" style="width:150px"><button class="sm" data-dec="${x.id}">−</button><input type="number" inputmode="decimal" data-q="${x.id}" value="${v || ""}" placeholder="0" style="min-height:40px;font-size:18px;padding:4px"><button class="sm" data-inc="${x.id}">+</button></div>
+            <button class="sm" data-all="${x.id}">${T("m.all")}</button></li>`; }).join("")}</ul>` : `<p class="muted">${T("l.empty")}</p>`}</div>` : ""}
+        ${!f && this.tasks.length ? `<div class="card"><b>${T("m.tasks")}</b><ul class="list">${this.tasks.map((t) => `<li class="tap" data-task="${t.id}"><div class="grow"><div class="mono" data-notr><b>${esc(t.code)}</b> ×${esc(qn(t.qty))}</div>
+          <div class="small" data-notr>${esc(t.from_loc)} → ${esc(t.to_loc)}</div></div><span class="small muted">${T("m.repl")}</span></li>`).join("")}</ul></div>` : ""}`;
+      const it = (id) => (f ? f.items.find((x) => x.id === +id) : null);
+      const setq = (id, q) => { const x = it(id); this.lines[id] = Math.max(0, Math.min(qn(q), x ? qn(x.qty) : qn(q))); this.render(); };
+      view().querySelectorAll("[data-inc]").forEach((b) => b.addEventListener("click", () => setq(b.dataset.inc, (this.lines[b.dataset.inc] || 0) + 1)));
+      view().querySelectorAll("[data-dec]").forEach((b) => b.addEventListener("click", () => setq(b.dataset.dec, (this.lines[b.dataset.dec] || 0) - 1)));
+      view().querySelectorAll("[data-all]").forEach((b) => b.addEventListener("click", () => setq(b.dataset.all, (it(b.dataset.all) || {}).qty)));
+      view().querySelectorAll("[data-q]").forEach((inp) => inp.addEventListener("change", () => setq(inp.dataset.q, inp.value)));
+      const rs = $("#m-reset"); if (rs) rs.addEventListener("click", () => { this.from = null; this.lines = {}; this.task = null; this.msg = null; this.render(); });
+      view().querySelectorAll("[data-task]").forEach((li) => li.addEventListener("click", async () => {
+        const t = this.tasks.find((x) => x.id === +li.dataset.task);
+        try { await this.setFrom(t.from_loc); this.task = t; this.lines[t.item_id] = Math.min(qn(t.qty), qn(t.available)); this.msg = ["warn", T("m.dotask", { l: t.to_loc })]; this.render(); }
+        catch (e) { toast(srv(e.message), true); }
+      }));
+    },
+    async doMove(to, force) {
+      const lines = Object.entries(this.lines).filter(([, q]) => q > 0).map(([id, q]) => ({ item_id: +id, qty: q }));
+      const body = { from: this.from.code, to, lines, force: !!force };
+      if (this.task && this.task.to_loc === to) body.task_id = this.task.id;
+      try {
+        const r = await send("/api/inv/wms/move", body, `${T("t.move")} ${this.from.code} → ${to}`);
+        SCAN.ok();
+        this.msg = r.queued ? ["warn", T("offline.q")] : ["ok", T("m.ok", { f: this.from.code, t: to, n: lines.length })];
+        this.from = null; this.lines = {}; this.task = null;
+        await this.loadTasks();
+      } catch (e) {
+        SCAN.bad();
+        if (/放不下/.test(e.message) && !force && (await confirmBox(srv(e.message) + "\n" + T("u.force")))) return this.doMove(to, true);
+        this.msg = ["bad", srv(e.message)];
+      }
+      this.render();
+    },
+    async scan(code) {
+      try {
+        const k = code.trim().toUpperCase();
+        if (this.from) {
+          const x = this.from.items.find((y) => String(y.code).toUpperCase() === k);
+          if (x) { SCAN.ok(); this.lines[x.id] = Math.min(qn((this.lines[x.id] || 0) + 1), qn(x.qty)); this.msg = ["ok", `✔ ${x.code}  ${this.lines[x.id]}`]; this.render(); return; }
+        }
+        const r = await api(`/api/mobile/resolve?prefer=location&code=${encodeURIComponent(code)}`);
+        if (r.type === "location") {
+          const has = Object.values(this.lines).some((q) => q > 0);
+          if (this.from && has) return this.doMove(r.location.code);
+          SCAN.ok(); await this.setFrom(r.location.code); this.task = null; this.msg = null; this.render(); return;
+        }
+        if (r.type === "item") { SCAN.warn(); this.msg = ["warn", this.from ? T("m.notfrom", { c: r.item.code, l: this.from.code }) : T("m.s1")]; this.render(); return; }
+        SCAN.bad(); this.msg = ["bad", T("unknown", { c: code })]; this.render();
+      } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; this.render(); }
     },
   };
 
@@ -943,7 +1162,7 @@
             <div class="small muted"><span data-notr>${esc(l.code)}</span> · ${T("r.left")} <b>${+left.toFixed(3)}</b> ${roll ? T("r.roll") : `<span data-notr>${esc(l.unit || "")}</span>`}</div>
             <div class="small muted" style="margin-top:8px">${T("r.got")}</div>
             <div class="step"><button data-m="-">−</button><input type="number" inputmode="decimal" data-r="qty" value="${c != null ? c : +left.toFixed(3)}"><button data-m="+">+</button></div>
-            <input data-r="loc" placeholder="${esc(T("r.loc"))}" value="${esc(l.location || "")}" style="margin-top:8px" data-notr>
+            <input data-r="loc" placeholder="${esc(l.putaway && l.putaway[0] ? T("r.sug", { l: l.putaway[0].code }) : T("r.loc"))}" value="${esc(l.location || "")}" style="margin-top:8px" data-notr>
             <button class="sm" data-iss style="margin-top:8px">${T("r.issue")}</button>
             <div class="col ${this.open[l.id] ? "" : "hidden"}" data-issbox style="margin-top:6px"><select data-r="kind">${["short", "damaged", "wrong", "extra"].map((k) => `<option value="${k}">${T("r.k." + k)}</option>`).join("")}</select>
               <input type="number" inputmode="decimal" data-r="iq" placeholder="${esc(T("r.iq"))}"><input data-r="note" placeholder="${esc(T("r.inote"))}" data-notr></div></div>`; }).join("")}

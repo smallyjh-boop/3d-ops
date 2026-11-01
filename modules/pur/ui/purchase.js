@@ -246,7 +246,8 @@
         <td class="nowrap"><input type="number" min="0" step="${roll ? 1 : "any"}" max="${leftShow}" value="${num(leftShow, 3).replace(/,/g, "")}" data-r="qty" class="pur-num"> ${roll ? Z("卷", "ม้วน") : ""}</td>
         <td><div class="pur-iss"><select data-r="kind"><option value="">—</option>${Object.entries(ISS()).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
           <input type="number" min="0" step="any" data-r="iq" class="pur-num" placeholder="${Z("数量", "จำนวน")}"><input data-r="note" placeholder="${Z("说明", "หมายเหตุ")}" class="pur-note" data-notr></div></td>
-        <td><input data-r="loc" list="pur-locs" value="${esc(l.location || "")}" placeholder="${Z("货位", "ตำแหน่ง")}" class="pur-loc" data-notr></td></tr>`;
+        <td><input data-r="loc" list="pur-locs" value="${esc(l.location || "")}" placeholder="${l.putaway && l.putaway[0] ? esc(Z("建议 ", "แนะนำ ") + l.putaway[0].code) : Z("货位", "ตำแหน่ง")}" class="pur-loc" data-notr>
+          ${l.putaway && l.putaway[0] ? `<div class="small muted" data-notr>📍 ${esc(Z("推荐", "แนะนำ"))} ${l.putaway.map((p) => esc(p.code)).join(" · ")}</div>` : ""}</td></tr>`;
     };
     const m = MODAL.open(`<h3>📥 ${Z("到货入库", "รับของเข้าคลัง")} <span class="mono" data-notr>${esc(po.no)}</span></h3>
       <p class="small"><span data-notr>${esc((po.supplier || {}).name || "")}</span>${po.tracking ? ` · ${Z("运单", "เลขพัสดุ")} <span class="mono" data-notr>${esc(po.tracking)}</span>` : ""}</p>

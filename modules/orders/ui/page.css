@@ -1,5 +1,7 @@
 /* 订单模块的样式（v2.32 起模块自己的样式放这里） */
 .pk-img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; background: #f3f4f6 }
+.pk-loc { margin-top: 3px; font-size: 13px; font-family: inherit; color: #1d4ed8; white-space: nowrap }
+.pk-loc b { font-family: monospace; font-size: 15px; background: #dbeafe; border-radius: 4px; padding: 0 5px }
 .pk-table td { vertical-align: middle }
 /* v2.33 面单模板预览 */
 .lt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px }

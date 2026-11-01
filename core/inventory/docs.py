@@ -151,11 +151,16 @@ def void(doc_id, user=""):
 
 
 # ---------------- 盘点 ----------------
-def stocktake_start(category="", user="", note="", area="", codes=None):
+def stocktake_start(category="", user="", note="", area="", codes=None, item_ids=None, allow_empty=False):
     """开一张盘点单（草稿）：列出这个分类（空 = 全部）所有启用的物品和账面数。
-    v2.35：按货架盘点——area 是区 / 货架 / 货位（例如 A1），codes 是里面的货位编号，只列放在这些格子里的物品。"""
+    v2.35：按货架盘点——area 是区 / 货架 / 货位（例如 A1），codes 是里面的货位编号，只列放在这些格子里的物品。
+    v2.52：按货位盘点（库存模块）——item_ids 给出要列的物品；allow_empty = 一个物品都没有也开（数空货位）。"""
     c = db.conn()
     sql, args = "SELECT * FROM inv_items WHERE active=1", []
+    if item_ids is not None:
+        ids = [int(x) for x in item_ids] or [-1]
+        sql += f" AND id IN ({','.join('?' * len(ids))})"
+        args += ids
     if category:
         sql += " AND category=?"
         args.append(category)
@@ -166,7 +171,7 @@ def stocktake_start(category="", user="", note="", area="", codes=None):
         sql += f" AND location IN ({','.join('?' * len(codes))})"
         args += codes
     items = c.execute(sql + (" ORDER BY location, code" if codes is not None else " ORDER BY category, code"), args).fetchall()
-    if not items:
+    if not items and not allow_empty:
         raise ValueError("这里没有放东西" if codes is not None else "这个分类下没有物品")
     no = _no(c, "stocktake")
     now = ledger._now()

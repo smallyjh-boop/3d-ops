@@ -66,6 +66,15 @@ if not os.path.exists(SEED):
         c.post(f"/api/inv/po/{po['id']}/order", json={})
     except Exception as e:  # noqa: BLE001
         print("inv seed", e)
+    try:   # v2.52 仓库：拣货区 + 备货区货架、库存、补货线、一张按货位盘点单
+        c.post("/api/inv/locations/bulk", json={"zone": "A", "layers": 2, "positions": 3, "name": "拣货架", "props": {"capacity": 20}})
+        c.post("/api/inv/locations/bulk", json={"zone": "R", "layers": 1, "positions": 3, "ztype": "reserve"})
+        w = c.post("/api/inv/items", json={"name_zh": "测试纸箱", "name_th": "กล่องทดสอบ", "category": "pack", "unit": "个", "location": "A1-01-01"}).get_json()["item"]
+        c.post("/api/inv/docs", json={"kind": "purchase", "lines": [{"item_id": w["id"], "qty": 30}]})
+        c.post("/api/inv/locations/props", json={"codes": ["A1-01-01"], "props": {"min_qty": 25}})
+        c.post("/api/inv/stocktake", json={"area": "A1"})
+    except Exception as e:  # noqa: BLE001
+        print("wms seed", e)
     try:
         print("exp", c.post("/api/fin/expenses", json={"date": time.strftime("%Y-%m-%d"), "category": "房租", "amount": 5000, "note": "rent"}).status_code)
     except Exception as e:  # noqa: BLE001

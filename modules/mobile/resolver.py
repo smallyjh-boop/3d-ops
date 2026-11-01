@@ -131,6 +131,9 @@ def _item_out(it, user):
         if lr:
             loc = {"code": lr["code"], "id": lr["id"], "human_zh": locations.human(lr["code"]), "human_th": locations.human(lr["code"], "th")}
     it["loc"] = loc
+    if _inv_on() and it.get("id"):               # v2.52：一个物品可以在几个货位（拣货位 + 备货区）+ 待上架
+        from modules.inv import wms
+        it["locs"] = wms.item_locations(it["id"])
     p, vi = _product_of_sku(it.get("code"))
     it["img"] = _img_of(p, vi)
     if p:
@@ -159,7 +162,7 @@ def _location(code):
     if locations.SHELF_RE.match(s) or locations.ZONE_RE.match(s):
         codes = locations.area_codes(s)
         if codes:
-            items = [x for c_ in codes for x in locations.items_at(c_)]
+            items = [dict(x, location=c_) for c_ in codes for x in locations.items_at(c_)]
             return {"type": "shelf" if locations.SHELF_RE.match(s) else "zone", "code": s, "locations": codes, "items": items}
     return None
 

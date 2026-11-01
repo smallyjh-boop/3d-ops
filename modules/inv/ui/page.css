@@ -31,3 +31,58 @@
 .loc-catbox input { width: auto; margin: 0 }
 .loc-to { max-width: 200px }
 .warn-btn { border-color: #f59e0b; color: #b45309 }
+/* v2.52 仓库：货位图按状态上色（空 / 有货 / 满 / 超容量）、库区类型、盘点 */
+.loc-cell { position: relative }
+.loc-cell.st-empty { border: 1px dashed #cbd5e1; background: #fff }
+.loc-cell.st-partial { border: 1px solid #16a34a; background: #f0fdf4 }
+.loc-cell.st-partial .it { color: #166534; font-weight: 600 }
+.loc-cell.st-full { border: 1px solid #2563eb; background: #dbeafe }
+.loc-cell.st-full .it { color: #1e3a8a; font-weight: 600 }
+.loc-cell.st-over { border: 2px solid #dc2626; background: #fee2e2 }
+.loc-cell.st-over .it { color: #991b1b; font-weight: 700 }
+.loc-cell.low { box-shadow: inset 0 0 0 2px #f59e0b }
+.loc-cell .cap { font-size: 10px; color: #475569; font-family: monospace }
+.loc-cell .lw { position: absolute; top: 1px; right: 3px; font-size: 10px; color: #b45309 }
+.loc-legend .lg.st-empty, .lg-in.st-empty { border: 1px dashed #cbd5e1; background: #fff; color: #64748b }
+.loc-legend .lg.st-partial, .lg-in.st-partial { border: 1px solid #16a34a; background: #f0fdf4; color: #166534 }
+.loc-legend .lg.st-full, .lg-in.st-full { border: 1px solid #2563eb; background: #dbeafe; color: #1e3a8a }
+.loc-legend .lg.st-over, .lg-in.st-over { border: 2px solid #dc2626; background: #fee2e2; color: #991b1b }
+.lg-in { display: inline-block; padding: 0 8px; border-radius: 6px; font-size: 12px }
+.loc-legend { align-items: center }
+.loc-zt { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 10px; padding: 1px 8px; background: #e2e8f0; color: #334155; vertical-align: middle }
+.loc-zt.zt-pick { background: #dcfce7; color: #166534 } .loc-zt.zt-reserve { background: #dbeafe; color: #1e40af }
+.loc-zt.zt-staging { background: #fef9c3; color: #854d0e } .loc-zt.zt-returns { background: #ede9fe; color: #5b21b6 }
+.loc-zt.zt-defect { background: #fee2e2; color: #991b1b } .loc-zt.zt-supply { background: #ffedd5; color: #9a3412 }
+.loc-zone-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px }
+.loc-zone-h h3 { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px }
+.loc-zone-h .loc-sh-tools { margin-left: auto }
+.loc-rack-wrap { max-width: 100%; overflow-x: auto }
+.loc-shelf { overflow: visible }
+.loc-subbar { margin: 4px 0 10px; align-items: center }
+.loc-subbar .ux-tabs { margin: 0 }
+.loc-zchips { margin-bottom: 6px }
+.loc-scan { width: 230px }
+.loc-mq { width: 80px !important; display: inline-block }
+.loc-to { max-width: 170px; display: inline-block }
+.loc-putbar { margin-top: 10px; align-items: center }
+.loc-putbar select { max-width: 320px }
+.loc-set { margin-top: 10px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 10px; background: #f8fafc }
+.loc-set summary { cursor: pointer; font-size: 13px; font-weight: 600 }
+.loc-props { margin: 8px 0 }
+.loc-alerts .ux-card { margin-bottom: 10px }
+.tbl-x { max-width: 100%; overflow-x: auto }
+.st-new select { width: auto; max-width: 260px }
+.st-bar { align-items: center; margin: 4px 0 10px }
+.st-locs { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px }
+.st-loc { margin: 0 }
+.st-loc.done { border-color: #86efac; background: #f7fef9 }
+.st-loc .grid td { vertical-align: middle }
+.st-add { max-width: 170px }
+@media (max-width: 700px) {
+  .loc-scan { width: 100% }
+  .st-locs { grid-template-columns: 1fr }
+  .loc-zone-h .loc-sh-tools { margin-left: 0 }
+  .loc-cell { min-width: 56px }
+  .loc-shelves { --cellw: 58px }
+  .loc-rack th { padding-right: 3px }
+}

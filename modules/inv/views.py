@@ -24,9 +24,17 @@ def listing(view="stock", category="", q=""):
     view = view if view in VIEWS else "stock"
     rows = inv.items(category, q, False, view == "inactive")
     stocked = _stocked_ids()
+    nloc, placed = {}, {}                        # v2.52：放在几个货位、货位上一共多少（其余 = 待上架）
+    try:
+        for r in db.conn().execute("SELECT item_id, COUNT(*) n, SUM(qty) q FROM inv_loc_qty WHERE qty>0 GROUP BY item_id"):
+            nloc[r["item_id"]], placed[r["item_id"]] = r["n"], r["q"] or 0
+    except Exception:  # noqa: BLE001  货位表还没建
+        pass
     out = []
     for it in rows:
         it["stocked"] = it["id"] in stocked
+        it["loc_n"] = nloc.get(it["id"], 0)
+        it["unplaced"] = round(max(0.0, (it.get("qty") or 0) - placed.get(it["id"], 0)), 6) if nloc.get(it["id"]) or it.get("location") else 0
         it["low"] = is_low(it, stocked)
         has = abs(it.get("qty") or 0) > 1e-9 or (it.get("transit") or 0) > 0
         if view == "inactive" and it.get("active"):

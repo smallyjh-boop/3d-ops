@@ -651,6 +651,12 @@ def pack_lookup():
         it.update(m)                          # v2.32：这一行怎么核对：scan 扫商品码 / tap 点一下 / none 不用核对；img 产品图
     o["scan_key"] = scanning.key_setting(cfg)
     _add_pack_info(o)
+    from core import modules as _mods
+    _inv = _mods.public("inv")                 # v2.52：每个商品去哪个货位拿（拣货区在前）
+    if _inv is not None and hasattr(_inv, "where_is"):
+        for it in o.get("items") or []:
+            w = _inv.where_is(it.get("sku") or "") if it.get("sku") else []
+            it["loc"] = w[0][0] if w else ""
     return jsonify(_strip_order(o))
 
 
@@ -728,8 +734,18 @@ def orders_print():
                    "<table><tr><th></th><th>货位</th><th>SKU</th><th>商品</th><th>颜色</th><th>数量</th><th>订单</th></tr>")
         _key = getattr(_inv, "sort_key", None) or (lambda c_: (0, c_))
         _none = (2,)                           # 没有货位的排最后
+        _zone = getattr(_inv, "zone_of", None)     # v2.52：按库区分组（走路顺序：区 → 货架 → 层 → 位）
+        _zn = getattr(_inv, "ztype_name", None)
+        cur_zone = None
         for (sku, color), a in sorted(agg.items(), key=lambda kv: (_key(where[kv[0][0]][0][0]) if where.get(kv[0][0]) else _none, kv[0])):
             w = "、".join(f"{c_} ×{q_:g}" for c_, q_ in where.get(sku) or []) or "—"
+            if _zone:
+                z = _zone(where[sku][0][0]) if where.get(sku) else {"zone": ""}
+                if z["zone"] != cur_zone:
+                    cur_zone = z["zone"]
+                    title = (f"{z['zone']} 区 โซน {z['zone']} · {_zn(z['ztype'])} {_zn(z['ztype'], 'th')}" + (f" · {z['name']}" if z.get("name") else "")
+                             if z["zone"] else "没有货位 ไม่มีตำแหน่ง")
+                    out.append(f"<tr><td colspan='7' style='background:#f5f5f5'><b>📍 {h(title)}</b></td></tr>")
             out.append(f"<tr><td><span class='box'></span></td><td><b>{h(w)}</b></td><td><b>{h(sku)}</b></td><td>{h(a['name'])}</td><td>{h(color)}</td>"
                        f"<td><b>{a['qty']}</b></td><td style='font-size:11px'>{h(', '.join(a['orders']))}</td></tr>")
         out.append("</table>")

@@ -1,8 +1,9 @@
 "use strict";
 // 库存管理（v2.17）：耗材、备件、包材……都是「物品」；数量只能靠单据变（采购入库 / 领用 / 报废 / 调整 / 盘点），每笔都有流水。
 (function () {
-  let META = null, VIEW = "items", CAT = "", ST_DOC = null;
+  let META = null, VIEW = "items", CAT = "";
   const TH = () => window.I18N && I18N.lang === "th";
+  const Z = (zh, th) => (TH() ? th : zh);
   const num = (v, d = 0) => (v == null || v === "" ? "" : Number(v).toLocaleString(undefined, { maximumFractionDigits: d }));
   const catName = (id) => { const c = (META.categories || []).find((x) => x.id === id); return c ? (TH() ? c.th : c.zh) : id; };
   const itName = (it) => (TH() && it.name_th ? it.name_th : it.name_zh) || "";
@@ -36,13 +37,12 @@
     const al = META.alerts || [];
     $("#inv-alerts").innerHTML = al.length ? `<div class="warnbox small"><b>低于补货线</b>：` +
       al.map((a) => `<span class="chip" data-notr>${esc(TH() && a.name_th ? a.name_th : a.name_zh)} ${num(a.qty, 1)}/${num(a.reorder_point, 1)} ${esc(uLab(a.unit))}</span>`).join(" ") + "</div>" : "";
+    if (VIEW === "locations" || VIEW === "stocktake") { const go = VIEW === "locations" ? "inv_locations" : "inv_stocktake"; VIEW = "items"; return goTab(go); }  // v2.52：搬成自己的页面
     if (VIEW === "items" || VIEW === "catalog") return renderItems();
-    if (VIEW === "locations") return window.INVLOC && INVLOC.render($("#inv-body")).catch((e) => toast(e.message, true));
     if (VIEW === "boxes") return renderBoxes().catch((e) => toast(e.message, true));
     if (VIEW === "docs") return renderDocs();
     if (VIEW === "moves") return renderMoves();
     if (VIEW === "expense") return renderExpense();
-    if (VIEW === "stocktake") return renderStocktakes();
   }
 
   // ---------------- 库存 / 物品资料（v2.32：按同行的做法分开，没入过库的不堆在库存里） ----------------
@@ -78,7 +78,7 @@
         ${has("transit") ? `<td>${it.transit ? num(it.transit, 1) : ""}</td>` : ""}
         ${has("reorder") ? `<td>${it.reorder_point == null ? "" : num(it.reorder_point, 1)}</td>` : ""}
         ${has("cost") ? `<td>${it.avg_cost ? "฿" + num(it.avg_cost, it.unit === "g" ? 3 : 2) : ""}</td>` : ""}${has("value") ? `<td>${it.value ? "฿" + num(it.value, 0) : ""}</td>` : ""}
-        ${has("loc") ? `<td class="mono small" data-notr>${it.location ? `<a href="#" data-locgo-code="${esc(it.location)}">${esc(it.location)}</a>` : ""}</td>` : ""}
+        ${has("loc") ? `<td class="mono small" data-notr>${it.location ? `<a href="#" data-locgo-code="${esc(it.location)}">${esc(it.location)}</a>` : ""}${it.loc_n > 1 ? ` <span class="muted" title="${esc(Z(`放在 ${it.loc_n} 个货位`, `อยู่ ${it.loc_n} ช่อง`))}">+${it.loc_n - 1}</span>` : ""}${it.unplaced > 1e-9 ? ` <span class="warn" title="${esc(Z("待上架", "รอจัดเก็บ"))}">📥${num(it.unplaced, 2)}</span>` : ""}</td>` : ""}
         ${catalog ? `<td class="small">${!it.active ? "已停用" : it.stocked ? (Math.abs(it.qty) > 1e-9 ? "有库存" : '<span class="muted">用完了</span>') : '<span class="muted">还没入过库</span>'}</td>` : ""}
         <td class="nowrap"><button class="mini" data-item="${it.id}">查看</button></td></tr>`;
     $("#inv-body").innerHTML = `<div class="row gap wrap" style="margin-bottom:8px"><div class="chips" id="inv-cats">${chips}</div>
@@ -112,9 +112,13 @@
         <label>默认供应商<span class="row gap"><select data-k="supplier_id" data-notr ${edit ? "" : "disabled"}><option value="">—</option>${(SUPS || []).map((x) => `<option value="${x.id}" ${x.id === it.supplier_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
           ${id && window.MODKIT && MODKIT.enabled("pur") ? `<button type="button" class="mini" id="inv-pur" title="${TH() ? "ผู้ขาย ลิงก์ซื้อ ประวัติราคา" : "供应商、购买链接、价格历史、比价"}">🛒 ${TH() ? "ข้อมูลจัดซื้อ" : "采购资料"}</button>` : ""}</span></label>
         ${f("location", "货位（例如 A1-02-03，空 = 没有货位）", 'list="loc-dl" data-notr')}<datalist id="loc-dl" data-notr>${((window.INVLOC && INVLOC.list()) || []).map((l) => `<option value="${esc(l.code)}">${esc(INVLOC.human ? INVLOC.human(l.code) : "")}${l.items ? "" : (TH() ? " ·ว่าง" : " ·空")}</option>`).join("")}</datalist>${f("link", "购买链接")}${f("note", "备注")}
+        <label>${Z("尺寸等级（放哪种货位）", "ขนาด (ใช้ช่องแบบไหน)")}<select data-k="size" ${edit ? "" : "disabled"}><option value="">${Z("不限", "ไม่จำกัด")}</option>
+          ${["S", "M", "L", "XL"].map((x) => `<option value="${x}" ${((r.locs || {}).size || "") === x ? "selected" : ""}>${x} · ${esc(Z({ S: "小", M: "中", L: "大", XL: "特大" }[x], { S: "เล็ก", M: "กลาง", L: "ใหญ่", XL: "ใหญ่พิเศษ" }[x]))}</option>`).join("")}</select></label>
       </div>
-      ${id && r.loc ? `<p class="small">📍 ${r.loc.code ? `<a href="#" data-locgo="${r.loc.id}" class="mono" data-notr>${esc(r.loc.code)}</a> <span data-notr>${esc(TH() ? r.loc.human_th : r.loc.human_zh)}</span>`
+      ${id && r.loc ? `<p class="small">📍 ${r.loc.code ? `<a href="#" data-locgo="${r.loc.id}" class="mono" data-notr>${esc(r.loc.code)}</a> <span data-notr>${esc(TH() ? r.loc.human_th : r.loc.human_zh)}</span> <span class="muted">${Z("（主货位）", "(ตำแหน่งหลัก)")}</span>`
         : `<span class="warn">还没有货位</span>${r.loc.suggest ? ` <span data-notr>（${esc(TH() ? "แนะนำ" : "推荐放")} <b class="mono">${esc(r.loc.suggest)}</b>）</span>` : ""}`}</p>` : ""}
+      ${id && r.locs && (r.locs.locations.length > 1 || r.locs.unplaced > 1e-9) ? `<p class="small" data-notr>${esc(Z("放在：", "อยู่ที่: "))}${r.locs.locations.map((x) => `<a href="#" data-locgo="${x.id}" class="mono">${esc(x.code)}</a> ×${num(x.qty, 2)}`).join(" · ")}
+        ${r.locs.unplaced > 1e-9 ? ` · <span class="warn">${esc(Z("待上架", "รอจัดเก็บ"))} ${num(r.locs.unplaced, 2)}</span>` : ""}</p>` : ""}
       ${id ? `<p class="small">${it.avg_cost === undefined ? (TH() ? `สต็อก ${qtyText(it)}` : `库存 ${qtyText(it)}`) : TH() ? `สต็อก ${qtyText(it)} · ราคาเฉลี่ย ฿${num(it.avg_cost, fil ? 3 : 2)} · มูลค่า ฿${num(it.value, 0)}` : `库存 ${qtyText(it)} · 平均单价 ฿${num(it.avg_cost, fil ? 3 : 2)} · 金额 ฿${num(it.value, 0)}`}
         ${edit ? `<label class="small"><input type="checkbox" data-k="active" ${it.active ? "checked" : ""}> 启用</label>` : ""}</p>` : ""}
       <div class="row gap">${edit ? '<button class="primary" id="inv-it-save">保存</button>' : ""}<button data-mclose>关闭</button></div>
@@ -212,7 +216,7 @@
   async function docView(id) {
     if (!META) META = await api("/api/inv/meta");          // 从订单详情直接打开出库单时，库存页可能还没打开过
     const d = (await api(`/api/inv/docs/${id}`)).doc;
-    if (d.kind === "stocktake" && d.status === "draft") { ST_DOC = d.id; VIEW = "stocktake"; return render(); }
+    if (d.kind === "stocktake" && window.INVST) return INVST.open(d.id);      // v2.52：盘点在自己的页面      // v2.52：盘点在自己的页面
     const m = MODAL.open(`<h3><span data-notr>${esc(d.no)}</span> ${esc(META.doc_kinds[d.kind] || d.kind)}${d.status === "void" ? ' <span class="muted">（已作废）</span>' : ""}</h3>
       <p class="small muted"><span data-notr>${esc(d.created_by || "")}</span> · ${fmtTime(d.created_at)}${d.printer ? ` · <span data-notr>${esc(d.printer)}</span>` : ""}
         ${d.note ? ` · <span data-notr>${esc(d.note)}</span>` : ""}</p>
@@ -260,41 +264,6 @@
     $("#inv-ep").onchange = renderExpense; $("#inv-eg").onchange = renderExpense;
   }
 
-  // ---------------- 盘点 ----------------
-  async function renderStocktakes() {
-    if (ST_DOC) return renderStocktake(ST_DOC);
-    const r = await api("/api/inv/docs?kind=stocktake");
-    const shelves = (window.INVLOC && INVLOC.shelves && INVLOC.shelves()) || [];
-    $("#inv-body").innerHTML = `<div class="row gap" style="margin-bottom:8px">${can("inv.out") ? `<select id="inv-st-cat"><option value="">全部分类</option>${(META.categories || []).map((c) => `<option value="${esc(c.id)}">${esc(TH() ? c.th : c.zh)}</option>`).join("")}</select>
-        ${shelves.length ? `<select id="inv-st-area" data-notr><option value="">${esc(TH() ? "ทุกแร็ค" : "不按货架")}</option>${shelves.map((x) => `<option value="${esc(x)}">${esc(TH() ? "แร็ค " : "货架 ")}${esc(x)}</option>`).join("")}</select>` : ""}
-        <button class="primary" id="inv-st-new">开始盘点</button>` : ""}</div>
-      <p class="muted small">开始盘点后按清单逐个点数（耗材称重，填克数），可以分几次填；确认后按「实盘数 − 账面数」自动调整。盘点期间照常出入库也没关系。</p>
-      <table class="grid small"><thead><tr><th>单号</th><th>分类</th><th>状态</th><th>时间</th><th>经手</th><th></th></tr></thead><tbody>` +
-      (r.docs.map((d) => `<tr><td class="mono" data-notr>${esc(d.no)}</td><td>${(d.ref || "").startsWith("area:") ? `<span data-notr>${esc((TH() ? "แร็ค " : "货架 ") + d.ref.slice(5))}</span>` : d.category ? esc(catName(d.category)) : "全部"}</td>
-        <td>${d.status === "draft" ? '<span class="warn">进行中</span>' : "已确认"}</td><td>${fmtTime(d.created_at)}</td><td data-notr>${esc(d.created_by || "")}</td>
-        <td><button class="mini" data-doc="${d.id}">${d.status === "draft" ? "继续" : "查看"}</button></td></tr>`).join("") || '<tr><td colspan="6" class="muted">还没有盘点记录</td></tr>') + "</tbody></table>";
-    const nb = $("#inv-st-new");
-    if (nb) nb.onclick = () => busy(nb, async () => { const d = (await api("/api/inv/stocktake", { json: { category: $("#inv-st-cat").value, area: ($("#inv-st-area") || {}).value || "" } })).doc; ST_DOC = d.id; render(); });
-  }
-  async function renderStocktake(id) {
-    const d = (await api(`/api/inv/docs/${id}`)).doc;
-    if (d.status !== "draft") { ST_DOC = null; return renderStocktakes(); }
-    $("#inv-body").innerHTML = `<div class="row gap wrap" style="margin-bottom:6px"><b data-notr>${esc(d.no)}</b> <span>${(d.ref || "").startsWith("area:") ? `<span data-notr>${esc((TH() ? "แร็ค " : "货架 ") + d.ref.slice(5))}</span>` : d.category ? esc(catName(d.category)) : "全部"}</span>
-        <button class="mini" id="inv-st-back">← 返回列表</button><button class="primary" id="inv-st-save">保存已填的数</button>
-        ${can("inv.adjust") ? '<button class="danger" id="inv-st-ok">确认盘点（调整库存）</button>' : '<span class="muted small">填完让老板确认</span>'}</div>
-      <table class="grid small" id="inv-st-tbl"><thead><tr><th>编码</th><th>名称</th><th>开单时账面</th><th>现在账面</th><th>实盘数</th><th>差异</th><th>货位</th></tr></thead><tbody>` +
-      d.lines.map((l) => `<tr><td class="mono" data-notr>${esc(l.code)}</td><td data-notr>${esc(TH() && l.name_th ? l.name_th : l.name_zh)}</td>
-        <td>${num(l.expected, 2)}</td><td>${num(l.now_qty, 2)} <span data-notr>${esc(uLab(l.unit))}</span></td>
-        <td><input type="number" step="any" data-line="${l.id}" value="${l.counted ?? ""}" style="width:90px"></td>
-        <td class="${l.diff ? (l.diff < 0 ? "bad" : "ok") : ""}">${l.diff == null ? "" : (l.diff > 0 ? "+" : "") + num(l.diff, 2)}</td><td class="mono" data-notr>${esc(l.location || "")}</td></tr>`).join("") + "</tbody></table>";
-    const counts = () => { const o = {}; $$("#inv-st-tbl [data-line]").forEach((el) => { o[el.dataset.line] = el.value === "" ? null : el.value; }); return o; };
-    $("#inv-st-back").onclick = () => { ST_DOC = null; renderStocktakes(); };
-    $("#inv-st-save").onclick = (e) => busy(e.target, async () => { await api(`/api/inv/stocktake/${d.id}/save`, { json: { counts: counts() } }); toast("已保存"); renderStocktake(d.id); });
-    const okb = $("#inv-st-ok");
-    if (okb) okb.onclick = () => { if (!confirm("确认盘点？有差异的会按实盘数调整库存。")) return;
-      busy(okb, async () => { await api(`/api/inv/stocktake/${d.id}/save`, { json: { counts: counts() } }); await api(`/api/inv/stocktake/${d.id}/confirm`, { method: "POST" }); toast("盘点已确认"); ST_DOC = null; load(); }); };
-  }
-
   // ---------------- 事件 ----------------
   document.addEventListener("click", (e) => {     // 物品弹窗 / 列表里点货位编号 → 打开货位（v2.33）
     const lg = e.target.closest && e.target.closest("#modal-in [data-locgo], #tab-inventory [data-locgo-code]");
@@ -306,7 +275,7 @@
   document.addEventListener("click", (e) => {
     if (!e.target.closest("#tab-inventory")) return;
     const gv = e.target.closest("[data-goiv]"); if (gv) { e.preventDefault(); VIEW = gv.dataset.goiv; SUB = "zero"; return render(); }
-    const v = e.target.closest("[data-iv]"); if (v) { VIEW = v.dataset.iv; if (VIEW !== "stocktake") ST_DOC = null; return render(); }
+    const v = e.target.closest("[data-iv]"); if (v) { VIEW = v.dataset.iv; return render(); }
     const c = e.target.closest("[data-cat]"); if (c && c.closest("#inv-cats")) { CAT = c.dataset.cat; return renderItems(); }
     const it = e.target.closest("[data-item]"); if (it) return itemModal(Number(it.dataset.item)).catch((er) => toast(er.message, true));
     const dk = e.target.closest("[data-newdoc]"); if (dk) return docModal(dk.dataset.newdoc).catch((er) => toast(er.message, true));
@@ -318,6 +287,6 @@
     if (e.target.id === "inv-reload") return load();
     if (e.target.id === "inv-presets") return busy(e.target, async () => { const r = await api("/api/inv/presets", { method: "POST" }); toast(TH() ? `เพิ่ม ${r.added} รายการ` : `新建了 ${r.added} 个常用物品`); load(); });
   });
-  function openStocktake(id) { ST_DOC = id; VIEW = "stocktake"; render(); }
+  function openStocktake(id) { if (window.INVST) INVST.open(id); }
   window.INV = { show, load, docModal, itemModal, openStocktake, can, docView };
 })();

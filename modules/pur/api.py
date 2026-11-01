@@ -41,7 +41,11 @@ def inv_po_list():
 def inv_po_get(pid):
     ensure()
     try:
-        return jsonify({"ok": True, "po": inv.get_po(pid)})
+        po = inv.get_po(pid)
+        if po and po.get("status") in ("ordered", "partial"):   # v2.52：到货时显示上架推荐（库存模块的货位）
+            from .logic import receiving
+            receiving._putaway(po.get("lines") or [])
+        return jsonify({"ok": True, "po": po})
     except ValueError as e:
         return err(str(e), 404)
 

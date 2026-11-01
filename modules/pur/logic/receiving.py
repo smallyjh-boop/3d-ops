@@ -12,6 +12,17 @@ from .store import ensure
 OPEN = ("ordered", "partial")
 
 
+def _putaway(lines):
+    """v2.52：每一行的上架推荐（库存模块的货位）：[{code, qty}]，到货页把第一个货位当输入框的提示。"""
+    loc_mod = modules.public("inv")
+    if loc_mod is None or not hasattr(loc_mod, "putaway_suggest"):
+        return lines
+    for x in lines:
+        left = max(0.0, (x.get("qty") or 0) - (x.get("received") or 0))
+        x["putaway"] = [{"code": s["code"], "qty": s["qty"]} for s in loc_mod.putaway_suggest(x["item_id"], left or None)[:3]] if x.get("item_id") else []
+    return lines
+
+
 def _open_po_brief(p):
     return {k: p.get(k) for k in ("id", "no", "status", "status_zh", "expected_date", "tracking", "carrier", "order_ref", "overdue_days")} | {
         "supplier": (p.get("supplier") or {}).get("name") or "",
@@ -50,9 +61,14 @@ def open_pos():
 def receive(po_id, qtys, issues=None, locations=None, note="", user=""):
     """到货：入库 + 差异 + 放货位。locations：{物品id: 货位编号}（库存模块关着就不放）。"""
     ensure()
+    loc_mod = modules.public("inv")
+    if loc_mod is not None and hasattr(loc_mod, "putaway_batch"):
+        # v2.52：这次到的货按填的货位上架，没填的按上架推荐（同一物品已在的货位 → 附近空位 → 空位）
+        with loc_mod.putaway_batch(locations or {}, user) as pb:
+            po = inv.receive_po(po_id, qtys or {}, user, note or "", issues or [])
+        return {"po": inv.get_po(po["id"]), "placed": pb["placed"], "warnings": pb["warnings"]}
     po = inv.receive_po(po_id, qtys or {}, user, note or "", issues or [])
     placed, warn = [], []
-    loc_mod = modules.public("inv")
     for iid, code in (locations or {}).items():
         code = str(code or "").strip()
         if not code:

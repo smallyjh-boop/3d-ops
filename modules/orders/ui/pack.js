@@ -36,7 +36,7 @@
           : m === "tap" ? (got >= need ? '<span class="ok">✓</span>' : `<button class="mini primary" data-pktap="${esc(k)}">✓ 装好了</button>`)
           : '<span class="small muted">不用核对</span>';
         return `<tr class="${got >= need ? "pk-ok" : ""}"><td>${i.img ? `<img class="pk-img" src="${esc(i.img)}" alt="" loading="lazy">` : ""}</td>
-        <td class="mono" data-notr><b>${esc(i.sku)}</b></td><td data-notr>${esc(i.name || "")}</td><td>${h.colorTxt(i.color)}</td>
+        <td class="mono" data-notr><b>${esc(i.sku)}</b>${i.loc ? `<div class="pk-loc">📍 ${window.I18N && I18N.lang === "th" ? `ไปหยิบที่ <b>${esc(i.loc)}</b>` : `去 <b>${esc(i.loc)}</b> 拿`}</div>` : ""}</td><td data-notr>${esc(i.name || "")}</td><td>${h.colorTxt(i.color)}</td>
         <td><b>${i.qty}</b></td><td><b>${Math.min(got, need)}</b></td><td class="nowrap">${act}</td></tr>`; }).join("")}</tbody></table>
       <div class="pk-box">${window.PACKBOX ? PACKBOX.html(o, "pk-box-sel") : ""}</div>
       ${notReady.length ? `<p class="warn small">注意：这个订单还有 ${notReady.length} 个生产任务没打完（${notReady.map((j) => esc(j.sku) + " " + esc(j.status_zh)).join("、")}）</p>` : ""}
