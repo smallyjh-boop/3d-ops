@@ -53,6 +53,21 @@ def color_table(cfg):
     return out
 
 
+# v2.54.1：没有固定真实颜色的条目（随机颜色 / 多色）：预览、渲染图都用同一个中性暖浅灰（像没上色的 PLA），不再是粉红
+NEUTRAL_HEX = "#CFCBC4"
+NO_FIXED_CODES = ("RND", "MC")
+_LEGACY_NEUTRAL = ("#ff6b6b",)           # 旧版默认值：当作「没设置」
+
+
+def is_no_fixed_code(code):
+    return str(code or "").strip().upper() in NO_FIXED_CODES
+
+
+def valid_hex(s):
+    s = str(s or "").strip()
+    return s if re.fullmatch(r"#[0-9a-fA-F]{6}", s) else ""
+
+
 def is_random(cfg, name):
     c = find_color(cfg, name)
     return bool(c and c[1] == RANDOM_CODE)
@@ -63,7 +78,7 @@ COLOR_HEX = {
     "WH": "#f4f4f2", "BK": "#202124", "GY": "#8a8d91", "SV": "#c7c9cc", "GD": "#d4a937", "RD": "#d62f2f",
     "PK": "#f29bb8", "PU": "#8a4fbf", "BL": "#2456c7", "SB": "#6cb8e8", "GN": "#2e9d4f", "YL": "#f5cd2e",
     "OR": "#f07f22", "BR": "#7a4b2a", "BG": "#e3d3b5", "CL": "#d9eef5", "WD": "#a0703f", "MB": "#e9e7e3",
-    "GW": "#c9f2b8", "RB": "#ff6b6b", "MC": "#ff6b6b", "RND": "#ff6b6b",
+    "GW": "#c9f2b8", "RB": "#ff6b6b", "MC": NEUTRAL_HEX, "RND": NEUTRAL_HEX,
 }
 
 
@@ -73,8 +88,40 @@ def color_hex(cfg):
     raw = {str(r[0]).strip(): (str(r[4]).strip() if isinstance(r, (list, tuple)) and len(r) > 4 else "")
            for r in (cfg.get("color_table") or []) if r}
     for zh, code, th, en in color_table(cfg):
-        out[zh] = {"code": code, "hex": raw.get(zh) or COLOR_HEX.get(code, "#bbbbbb"), "th": th, "en": en}
+        nofix = is_no_fixed_code(code)
+        h = raw.get(zh) or ""
+        if nofix:           # 随机 / 多色：设置里填了合法 #RRGGBB 就用，留空 = 中性浅灰
+            h = valid_hex(h)
+            if h.lower() in _LEGACY_NEUTRAL:
+                h = ""
+            h = h or NEUTRAL_HEX
+        out[zh] = {"code": code, "hex": h or COLOR_HEX.get(code, "#bbbbbb"), "th": th, "en": en, "random": nofix}
     return out
+
+
+def render_hex(cfg, name, default=NEUTRAL_HEX):
+    """颜色名 → 渲染 / 预览用的颜色（所有出图、预览走这一个入口）。随机 / 多色 → 中性浅灰（或设置里填的）。"""
+    row = find_color(cfg, name) if name else None
+    if not row:
+        return default
+    return color_hex(cfg).get(row[0], {}).get("hex") or default
+
+
+def popular_colors(cfg, n=6, products=None):
+    """颜色表里最常用的真实颜色（按产品变体里出现次数；没有数据时按表里顺序），给「随机颜色」角标的小圆点用。
+    返回 [{"zh","hex"}]，不含随机 / 多色 / 透明 / 彩虹。"""
+    chm = color_hex(cfg)
+    skip = {"CL", "RB", "GW", "MB", "WD"}
+    real = [(zh, v) for zh, v in chm.items() if not v.get("random") and v["code"] not in skip]
+    cnt = {}
+    for p in products or []:
+        for v in p.get("variants") or []:
+            k = str(v.get("opt1_zh") or "").strip()
+            if k in chm:
+                cnt[k] = cnt.get(k, 0) + 1
+    order = {zh: i for i, (zh, _v) in enumerate(real)}
+    real.sort(key=lambda x: (-cnt.get(x[0], 0), order[x[0]]))
+    return [{"zh": zh, "hex": v["hex"]} for zh, v in real[:max(1, n)]]
 
 
 def _norm(s):

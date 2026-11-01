@@ -421,6 +421,9 @@ def _add_images(p, items, replace_renders=False, white_bg=False):
             if img.size != (size, size):
                 img = img.resize((size, size), Image.LANCZOS)
         kind = item.get("kind", "")
+        if item.get("random") and kind in ("main", "angle"):      # v2.54.1 随机颜色：灰模型 + 右下角角标
+            from core import colorbadge
+            img, _on = colorbadge.apply(img, cfg, item.get("badge"))
         name = f"{'s' if kind == 'scene' else 'r'}_{uuid.uuid4().hex[:10]}.jpg"
         img.save(os.path.join(store.image_dir(pid, "raw"), name), "JPEG", quality=95, subsampling=0)
         img.save(os.path.join(store.image_dir(pid, "out"), name), "JPEG", quality=95, subsampling=0)

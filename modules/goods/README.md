@@ -43,3 +43,4 @@
 - （系统 v2.53.0）：定价用平台费率引擎（core/pricing.price_variant / price_product 多了 platform、shop 参数，不给 = 默认平台的默认店铺；返回多一个 fee：每个费用项的金额 + 中 / 泰文名 + 来源 实际 / 默认）。产品编辑页：利润格鼠标停上去看平台费用拆分，价格表下面「各店铺的建议价 / 利润」（/api/pricing 的 by_shop，只有老板能看）。
 - （系统 v2.53.0）：编辑页每个 SKU 旁「➕ 生产」、产品库勾选栏「➕ 生产」「🧪 试打」（不用订单直接备货 / 试打，弹窗在生产模块 trial.js；试打只建还没试打验证的盘）。
 - （系统 v2.54.0）：旧「3D选品工具」对接移除后：规格在编辑页随便改（不再有「由选品工具管理 / ERP 自加」锁，规格改名时 core/specs.check_variants 让规格记录跟着改名、克数尺寸不丢）；「选品工具删了也保留」的待确认规格（removed_pending）不再出现、不卡上架检查；产品上已有的 source / curator_listing / ip_risk / draft 数据原样保留（文案参考、侵权提示照常显示），界面文字里的「选品工具」改成「选品」。
+- （系统 v2.54.1）商品图生成：随机颜色变体用中性灰模型 + 右下角「随机颜色」角标（设置 → 图片 →「随机颜色加标识」，生成弹窗也有开关）；/api/products/<pid>/images/rendered 的图片可带 random:true，请求可带 random_badge。/api/colors 每个颜色多一个 random 标记。

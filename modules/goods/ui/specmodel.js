@@ -5,7 +5,7 @@
   const TH = () => window.I18N && I18N.lang === "th";
   const Z = (zh, th) => (TH() ? th : zh);
   const g = (v) => (v == null || v === "" ? "—" : `${Math.round(v * 10) / 10} g`);
-  const sz = (s) => (s && s.length ? s.map((x) => Math.round(x)).join("×") + " mm" : "");
+  const sz = (s) => (s && s.length ? UX.sizeText(s, "×") : "");
 
   async function mount(el, pid, opts = {}) {
     if (!el || !pid) return;

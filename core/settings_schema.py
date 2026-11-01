@@ -42,7 +42,9 @@ MODULES = [
             ("stock_min_change", "变化够几件才列进「库存待同步到平台」"), ("stock_loss_factor", "单件克数 × 损耗系数（支撑、失败）"),
             ("stock_safety_g", "每个颜色留多少克不算（卷尾）")]),
         ("图片", [
-            ("image_size", "输出尺寸（像素）"), ("image_fill_ratio", "产品占画面比例"), ("imgbb_api_key", "imgbb 图床密钥", "password")]),
+            ("image_size", "输出尺寸（像素）"), ("image_fill_ratio", "产品占画面比例"),
+            ("random_badge", "随机颜色加标识（商品图右下角画小圆点 + 文字）", "bool"), ("random_badge_lang", "随机颜色标识的文字", ["thai", "chinese", "bilingual"]),
+            ("imgbb_api_key", "imgbb 图床密钥", "password")]),
         ("场景图 AI（可选，按张收费；多家服务商、按任务选、费用在 系统 → AI 接口）", [
             ("image_provider", "接口类型", ["openai", "gemini", "fal", "replicate"]), ("image_api_key", "接口密钥", "password"),
             ("image_model", "模型（留空=最便宜的：gpt-image-1-mini / gemini-3.1-flash-lite-image；效果更好：gpt-image-1 / gemini-3.1-flash-image）"),

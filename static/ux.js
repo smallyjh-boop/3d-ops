@@ -119,5 +119,19 @@
     else document.dispatchEvent(new CustomEvent("ux-go", { detail: v }));
   });
 
-  window.UX = { kpis, bars, spark, columns, meter, empty, help, card, tabs, dot, head, esc: E };
+  /** v2.54.1 数字显示：四舍五入到 1 位小数并去掉多余的 0（52.18000030517578 → 52.2，18.0 → 18）；只管显示，不改存的数据 */
+  function num(v, d = 1) {
+    const x = Number(v); if (v === null || v === "" || v === undefined || !isFinite(x)) return "";
+    const s = (Math.round(x * 10 ** d) / 10 ** d).toFixed(d);
+    const t = s.includes(".") ? s.replace(/0+$/, "").replace(/\.$/, "") : s;
+    return t === "-0" ? "0" : t;
+  }
+  /** 尺寸数组 → "52.2 × 64.9 × 18 mm"（数组里有不是数字的就返回空串） */
+  function sizeText(a, sep = " × ", unit = " mm") {
+    const z = Array.isArray(a) ? a : a && typeof a === "object" ? [a.x, a.y, a.z] : null;
+    if (!z || !z.length) return "";
+    const p = z.map((x) => num(x));
+    return p.every((x) => x !== "") ? p.join(sep) + unit : "";
+  }
+  window.UX = { num, sizeText, kpis, bars, spark, columns, meter, empty, help, card, tabs, dot, head, esc: E };
 })();

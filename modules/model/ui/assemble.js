@@ -122,7 +122,7 @@ class Assembly {
       return `<label class="${sub ? "pp" : ""}" data-pk="${esc(e.id)}|${part == null ? "" : part}"><input type="checkbox" data-pk-on ${it ? "checked" : ""} ${this.readOnly ? "disabled" : ""}>
         <span class="nm" data-notr title="${esc(name)}">${sub ? "└ " : ""}${esc(name)}</span>
         <input type="number" min="1" max="50" value="${it ? it.qty : 1}" data-pk-qty ${this.readOnly ? "disabled" : ""} title="${Z("几个（例如 4 条腿）", "กี่ชิ้น (เช่น ขา 4 ข้าง)")}"></label>
-        ${!sub && size ? `<div class="muted small" data-notr style="padding-left:20px">${size.map((v) => Math.round(v)).join("×")} mm</div>` : ""}`;
+        ${!sub && size ? `<div class="muted small" data-notr style="padding-left:20px">${UX.sizeText(size, "×")}</div>` : ""}`;
     };
     el.innerHTML = `<div class="small"><b>${Z("零件（展示用）", "ชิ้นงาน (แสดงผล)")}</b> <span class="muted">${Z("勾选 + 数量", "เลือก + จำนวน")}</span></div>
       ${(this.d.library || []).map((e) => `<div class="pf ${e.main ? "main" : ""}">
@@ -242,7 +242,7 @@ class Assembly {
     const tb = this.box.querySelector("[data-asm-rows]");
     const cn = Object.keys(window.COLORS || {});
     tb.innerHTML = this.meshes.map((m, i) => `<tr data-k="${esc(m.userData.key)}"><td><b>${i + 1}</b></td>
-      <td><span data-notr title="${esc(m.userData.name)}">${esc(String(m.userData.name).slice(0, 18))}</span><div class="muted" data-notr>${m.userData.size.map((v) => Math.round(v)).join("×")} mm</div></td>
+      <td><span data-notr title="${esc(m.userData.name)}">${esc(String(m.userData.name).slice(0, 18))}</span><div class="muted" data-notr>${UX.sizeText(m.userData.size, "×")}</div></td>
       <td><select data-asm-pc title="${Z("零件颜色（展示用）", "สีของชิ้น (แสดงผล)")}"><option value="">${Z("款式色", "สีของแบบ")}</option>${cn.map((c) => `<option value="${esc(c)}" ${c === m.userData.colour ? "selected" : ""} data-notr>${esc((TH() && (window.COLORS[c] || {}).th) || c)}</option>`).join("")}</select></td>
       <td><label title="${Z("不显示（例如螺丝、备用件）", "ไม่แสดง")}"><input type="checkbox" data-asm-hide ${m.userData.hidden ? "checked" : ""}>${Z("隐藏", "ซ่อน")}</label></td></tr>`).join("");
     const c = this.box.querySelector("[data-asm-count]");

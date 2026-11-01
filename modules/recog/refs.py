@@ -174,10 +174,10 @@ def build_product(pid, cfg=None, force=False):
             for s, col, _i in vs:
                 code, rgb = _color_rgb(cfg, col)
                 key = code or "_grey"
-                colors[key] = rgb or (175, 175, 175)
+                colors[key] = rgb or render.hex_rgb(codes.NEUTRAL_HEX)
                 skus_of.setdefault(key, []).append(s)
             if not colors:
-                colors, skus_of = {"_grey": (175, 175, 175)}, {"_grey": all_skus}
+                colors, skus_of = {"_grey": render.hex_rgb(codes.NEUTRAL_HEX)}, {"_grey": all_skus}
             for (az, el), ims in render.views(tris, colors):
                 for key, im in ims.items():
                     add(D.describe(im), skus_of[key], "render", f"{az}/{el}/{key}", 0.0 if key == "_grey" else 1.0)
