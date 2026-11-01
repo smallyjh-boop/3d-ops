@@ -966,6 +966,7 @@
         const k = t.dataset.prm;
         pl.params = pl.params || {};
         pl.params[k] = t.type === "checkbox" ? t.checked : t.type === "number" ? (t.value === "" ? 0 : +t.value) : t.value;
+        if (k === "nozzle_temp" || k === "bed_temp") pl.params.temp_material = pl.slots[0].material;   // 温度是给这个材料设的（换材料就作废）
         S.dirty = true; recheck(pl);
         const sm = plEl.querySelector("details.pe-prm > summary"); if (sm) { S.openPrm[pl.id] = true; }
         return;
@@ -973,7 +974,7 @@
       if (t.dataset.prmMat !== undefined && pl) {
         pushPre();
         pl.slots[0].material = t.value;
-        if (pl.params) pl.params.filament = {};            // 换了材料：之前指定的耗材配置作废
+        if (pl.params) { pl.params.filament = {}; pl.params.nozzle_temp = 0; pl.params.bed_temp = 0; delete pl.params.temp_material; }   // 换了材料：之前指定的耗材配置和温度作废
         S.dirty = true; S.openPrm[pl.id] = true; renderPlate(pl); recheck(pl); return;
       }
       if (t.dataset.prmFil !== undefined && pl) {

@@ -157,20 +157,29 @@ def setup_info(product, recipe, printer_idx):
     cfg = load_config()
     names = [x.get("name") for x in cfg.get("printers") or []]
     material = product.get("material") or "PLA"
+    chosen = filament_for(recipe, names[printer_idx])
+    notes = []
     try:
-        _exe, idx, machine, process, filament = slicer.resolve_profiles(
-            cfg, printer_idx, material, filament_for(recipe, names[printer_idx]))
+        _exe, idx, machine, process, filament = slicer.resolve_profiles(cfg, printer_idx, material, chosen, notes, strict=False)
         fc = op.flatten(idx, filament, "filament")
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
+    # v2.55：「和材料是否一致」按用户选的配置算（选错了的会在切片时被换掉，换上去的那个当然一致，不能拿它来显示）
+    chosen_type = op.filament_type(idx, chosen) if chosen else ""
+    if chosen and chosen_type and same_material(chosen_type, material) == "diff":
+        notes.insert(0, {"zh": "选的耗材配置和材料不一致，切片时会自动换", "th": "โปรไฟล์ฟิลาเมนต์ที่เลือกไม่ตรงกับวัสดุ ตอนสไลซ์จะเปลี่ยนให้อัตโนมัติ",
+                         "level": "warn"})
     bt = recipe.get("bed_type") if recipe.get("bed_type") in BED_TEMP_KEYS else None
     bed_key = BED_TEMP_KEYS.get(bt or "textured")
     ftype = _first(fc.get("filament_type")) or ""
+    final_match = same_material(ftype, material) if ftype else None
     return {"machine": machine, "process": process, "filament": filament, "filament_type": ftype,
+            "chosen": chosen, "chosen_type": chosen_type, "warnings": notes,
             "nozzle_temp": recipe.get("nozzle_temp") or _num(_first(fc.get("nozzle_temperature"))),
             "bed_temp": recipe.get("bed_temp") or _num(_first(fc.get(bed_key)) or _first(fc.get("hot_plate_temp"))),
             "temp_custom": bool(recipe.get("nozzle_temp") or recipe.get("bed_temp")),
-            "material_match": same_material(ftype, material) if ftype else None,
+            "material_match": (same_material(chosen_type, material) if chosen_type else final_match) if chosen else final_match,
+            "final_match": final_match,
             "auto": not filament_for(recipe, names[printer_idx])}
 
 
@@ -179,7 +188,7 @@ def filament_choices(printer_idx, material):
     from . import orca_profiles as op
     cfg = load_config()
     try:
-        exe, idx, machine, _process, auto = slicer.resolve_profiles(cfg, printer_idx, material)
+        exe, idx, machine, _process, auto = slicer.resolve_profiles(cfg, printer_idx, material, strict=False)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e), "items": []}
     mat = norm_material(material)
@@ -603,10 +612,21 @@ def report_from(path_3mf, gcode_text, bed):
 
 
 # ---------------- 按方案切片 ----------------
-def slice_product(product, printer_idx, count=None, recipe=None):
-    """按打印方案切片：转方向 → 复制 count 个 → 自动排版 → 切片。返回 (切片文件临时路径, 报告, 方案)"""
+TOP_ONLY_INFILL = {"monotonic", "monotonicline"}     # 顶面图案，不能当填充（按 rectilinear 切）
+
+
+def slice_product(product, printer_idx, count=None, recipe=None, user=""):
+    """按打印方案切片：转方向 → 复制 count 个 → 自动排版 → 切片。返回 (切片文件临时路径, 报告, 方案)
+    v2.55：报告里带 warnings（[{zh, th}]：耗材配置和材料不一致已自动换、顶面图案当了填充…），同时记进操作日志。"""
     from . import specmodel
     recipe = recipe or get(product)
+    pre = []
+    ov = overrides(recipe)
+    if recipe.get("infill_pattern") in TOP_ONLY_INFILL:
+        pat = recipe["infill_pattern"]
+        ov["sparse_infill_pattern"] = "rectilinear"
+        pre.append({"zh": f"填充图案「{pat}」是顶面图案，不能做填充：按 rectilinear 切。请在打印方案里重新选填充图案",
+                    "th": f"รูปแบบเติม「{pat}」เป็นรูปแบบผิวด้านบน ใช้เป็นไส้ในไม่ได้: สไลซ์เป็น rectilinear แทน กรุณาเลือกรูปแบบเติมใหม่"})
     count = int(count or recipe.get("per_plate") or 1)
     mp = specmodel.model_path(product)
     if not mp:
@@ -625,7 +645,7 @@ def slice_product(product, printer_idx, count=None, recipe=None):
         note = ""
         for _try in range(3):
             pname = ((cfg.get("printers") or [])[printer_idx] or {}).get("name", "")
-            res = slicer.orca_slice(cfg, stl, printer_idx, product.get("material") or "PLA", overrides=overrides(recipe),
+            res = slicer.orca_slice(cfg, stl, printer_idx, product.get("material") or "PLA", overrides=ov,
                                     keep_to=os.path.join(work, "keep.gcode.3mf"), copies=count, orient=False,
                                     filament_name=filament_for(recipe, pname), filament_overrides=filament_overrides(recipe))
             kept = res["kept"]
@@ -654,6 +674,11 @@ def slice_product(product, printer_idx, count=None, recipe=None):
         rep["geometry"] = {k: geo[k] for k in ("size_mm", "contact_cm2", "overhang_cm2", "tall_ratio") if k in geo}
         rep["profiles"] = res.get("profiles")
         rep["from_recipe"] = True
+        warns = pre + (res.get("warnings") or [])
+        rep["warnings"] = warns
+        if warns:
+            from . import db
+            db.audit(user, "按方案切片：耗材配置和材料不一致等，已自动调整", product.get("id") or "", "；".join(w["zh"] for w in warns))
         out = tempfile.NamedTemporaryFile(suffix=".gcode.3mf", delete=False).name
         shutil.copyfile(kept, out)
         return out, rep, recipe
