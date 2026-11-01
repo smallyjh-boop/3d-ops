@@ -88,3 +88,9 @@ v2.52.0、v2.53.0 已发布；v2.54.0 已发布
   · 桌面客户端「编辑模式」：软件最大化打开，系统缩成浮条（正在编辑哪一盘 · 保存后自动同步 · 完成 / 放弃），可一键左右分屏；
     把软件窗口嵌进我们窗口（SetParent）只作试验项
   · 网页编辑器 / NAS 网页版：⛶ 全屏（Esc 退出）、分隔条拖动改宽、滚轮缩放 / 平移 / 适合窗口
+- [ ] T37（方案已提，待确认）：展示组装改用可靠来源
+  ① 读 3MF 里作者的「装配视图」位置（Metadata/model_settings.config 的 <assemble><assemble_item object_id instance_id transform offset>，
+     Orca / Bambu 导入代码里有 _handle_start_assemble_item）；和摆盘位置不同才算作者拼过 → 展示直接用
+  ② 没有：「在 Bambu Studio / Orca 中组装」（装配视图），复用 T36 编辑会话，保存回传后读 assemble_item 更新展示
+  ③ 还没有：默认「零件平铺图」+ 商品原图，不显示猜出来的组装；几何自动组合 / AI 组装降为「参考建议」，人工确认才用
+  顺序：①③ 可随 T36 做；② 等 T36 第一步完成后
