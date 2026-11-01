@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         errorPanel = findViewById(R.id.errorPanel)
         lastCode = findViewById(R.id.lastCode)
         feedback = Feedback(this)
-        scanner = Scanner(this, findViewById<PreviewView>(R.id.preview)) { code -> onCode(code) }
+        scanner = Scanner(this, findViewById<PreviewView>(R.id.preview)) { code, kind -> onCode(code, kind) }
 
         // 摄像头小窗 = 屏幕高度的 1/4
         strip.layoutParams = strip.layoutParams.apply { height = maxOf(resources.displayMetrics.heightPixels / 4, dp(140)) }
@@ -375,10 +375,19 @@ class MainActivity : AppCompatActivity() {
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
-    private fun onCode(code: String) {
-        lastCode.text = code
-        js("window.onNativeScan && window.onNativeScan(${JSONObject.quote(code)})")
+    /** 条码：onNativeScan(码)；文字（v1.1）：onNativeScan(文字, "text")——网页再问服务器是系统里的哪个码。 */
+    private fun onCode(code: String, kind: String) {
+        if (kind == "text") {
+            lastCode.text = getString(R.string.text_tag, code)
+            js("window.onNativeScan && window.onNativeScan(${JSONObject.quote(code)}, \"text\")")
+        } else {
+            lastCode.text = code
+            js("window.onNativeScan && window.onNativeScan(${JSONObject.quote(code)})")
+        }
     }
+
+    /** 网页登录后交过来的「像码的文字」正则（/api/mobile/code-patterns）。 */
+    fun setTextPatterns(json: String?) = scanner.textCodes.update(json)
 
     private fun js(s: String) = web.evaluateJavascript(s, null)
 
