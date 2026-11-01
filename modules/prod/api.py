@@ -311,6 +311,21 @@ def printers_get():
     return jsonify({"printers": lst})
 
 
+PRINTER_MOVED = "打印机列表已经变了（有打印机被添加、移除或调整了顺序），为了不发错打印机，这次没有执行。请刷新页面后再操作"
+
+
+def _same_printer(idx, b=None):
+    """v2.54 复审：页面按序号发指令时带上这台打印机的稳定 id（printer_id）。打开页面以后打印机列表改过
+    （删了 / 加了 / 调了顺序），序号对应的已经是别的打印机 → 拒绝，不发错打印机。没带 id 的旧调用照旧按序号。"""
+    pid = (b or {}).get("printer_id") or request.args.get("printer_id")
+    if not pid:
+        return None
+    prs = load_config().get("printers") or []
+    if idx is None or not (0 <= int(idx) < len(prs)) or prs[int(idx)].get("id") != str(pid):
+        return err(PRINTER_MOVED, 409)
+    return None
+
+
 @bp.post("/api/printers/<int:idx>/conn")
 def printer_conn_save(idx):
     b = request.get_json(force=True) or {}
@@ -333,6 +348,9 @@ def printer_conn_save(idx):
 @bp.post("/api/printers/<int:idx>/loaded")
 def printer_loaded(idx):
     """生产员工填写：这台打印机现在装的是什么颜色（没有料盘读数的打印机用）。"""
+    deny = _same_printer(idx, request.get_json(force=True, silent=True))
+    if deny:
+        return deny
     cfg = load_config()
     printers = cfg.get("printers") or []
     if idx >= len(printers):
@@ -394,6 +412,9 @@ def printer_test(idx):
 def printer_netdiag(idx):
     """v2.53.0：网络诊断。端口结果和结论所有人可见；服务器网卡 / 路由 / ARP 只有老板能看。"""
     from core import netdiag
+    deny = _same_printer(idx, request.get_json(force=True, silent=True))
+    if deny:
+        return deny
     cfg = load_config()
     printers = cfg.get("printers") or []
     if idx >= len(printers):
@@ -421,9 +442,13 @@ def printer_netdiag(idx):
 
 @bp.post("/api/printers/<int:idx>/command")
 def printer_command(idx):
-    cmd = (request.get_json(force=True) or {}).get("cmd")
+    b = request.get_json(force=True) or {}
+    cmd = b.get("cmd")
     if cmd not in ("pause", "resume", "stop"):
         return err("不支持的指令")
+    deny = _same_printer(idx, b)
+    if deny:
+        return deny
     try:
         printers_mod.command(idx, cmd)
     except Exception as e:  # 打印机不在线等
@@ -975,6 +1000,9 @@ def printer_print_test(idx):
     if deny:
         return deny
     b = request.get_json(force=True, silent=True) or {}
+    deny = _same_printer(idx, b)
+    if deny:
+        return deny
     user = _uname()
 
     def go():
@@ -997,6 +1025,9 @@ def quality_get():
 @bp.post("/api/maintenance")
 def maintenance_post():
     b = request.get_json(force=True) or {}
+    deny = _same_printer(int(b.get("printer") or 0), b)
+    if deny:
+        return deny
     parts = [p for p in (b.get("parts") or []) if isinstance(p, dict) and p.get("item_id") and p.get("qty")]
     if parts and _need("inv.out"):
         return _need("inv.out")

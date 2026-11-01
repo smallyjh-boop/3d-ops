@@ -47,6 +47,9 @@ def get_config():
     return jsonify(out)
 
 
+MAX_PRINTERS = 5000      # 和 生产 → 打印机 页（/api/fleet）的上限一样
+
+
 @app.post("/api/config")
 def post_config():
     incoming = request.get_json(force=True) or {}
@@ -62,10 +65,13 @@ def post_config():
             if not isinstance(v, list) or not v:
                 return err("打印机设置格式不对")
             from core import fleet
+            if len(v) > MAX_PRINTERS:
+                # v2.54 复审：以前截到前 200 台，后面的会被当成删掉；现在超过上限直接报错，不截断
+                return err(f"打印机太多（{len(v)} 台，上限 {MAX_PRINTERS}）：打印机请在 生产 → 打印机 页管理")
             clean = []
             old_pr = cfg.get("printers") or []
             by_code = {o.get("code"): o for o in old_pr if o.get("code")}
-            for i, pr in enumerate(v[:200]):
+            for i, pr in enumerate(v):
                 try:
                     gph = float(pr.get("g_per_h") or 20)
                 except (TypeError, ValueError):

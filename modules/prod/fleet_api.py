@@ -358,6 +358,14 @@ def _new_printer(cfg, prs, b, errs, code=None):
     bb = dict(b)
     bb.pop("name", None)
     bb.pop("code", None)
+    if p["tech"] != "resin":
+        # v2.54 复审：喷嘴是每台自己的值，要明确填（界面默认显示 0.4 让人确认），不从机型模板 / 同机型别的打印机继承
+        raw_n = b.get("nozzle", (b.get("ovr") or {}).get("nozzle") if isinstance(b.get("ovr"), dict) else None)
+        nz = fleet.clean_value("nozzle", raw_n) if raw_n not in (None, "") else None
+        if nz is None:
+            errs.append(("请确认这台打印机的喷嘴直径（例如 0.4）", "กรุณายืนยันขนาดหัวฉีดของเครื่องนี้ (เช่น 0.4)"))
+        else:
+            bb["ovr"] = dict(bb.get("ovr") if isinstance(bb.get("ovr"), dict) else {}, nozzle=nz)
     _apply_fields(p, bb, cfg, errs)
     if b.get("vendor"):
         _apply_conn(p, b, errs)
@@ -606,13 +614,56 @@ def fleet_add_many():
     """局域网发现 / 导入预览里勾选的设备一起加：{devices: [{model, vendor, host, serial, access_code, port, group, location, role, code}]}。
     先全部检查，有一台不对就一台都不加（返回每行的问题）。"""
     b = request.get_json(force=True) or {}
-    rows = [{"model": d.get("model") or d.get("name"), "vendor": d.get("vendor") or "", "host": d.get("host") or d.get("ip") or "",
-             "serial": d.get("serial") or "", "access_code": d.get("access_code") or "", "port": d.get("port") or "",
-             "group": d.get("group") or b.get("group") or "", "location": d.get("location") or "", "role": d.get("role") or "",
-             "code": d.get("code") or ""} for d in (b.get("devices") or [])[:2000]]
+    stash = _imp_get(b.get("token")) if b.get("token") else None
+    if b.get("token") and stash is None:
+        return err("导入的文件已经过期，请重新选文件")
+    rows = []
+    for d in (b.get("devices") or [])[:5000]:
+        src = {}
+        if stash is not None and str(d.get("row") or "").isdigit() and 1 <= int(d["row"]) <= len(stash):
+            src = stash[int(d["row"]) - 1]          # 导入：访问码等原始值留在服务器上，不经过浏览器
+        ac = d.get("access_code") or ""
+        if ac in ("", "******"):
+            ac = src.get("access_code") or ""
+        rows.append({"model": d.get("model") or d.get("name") or src.get("model"), "vendor": d.get("vendor") or src.get("vendor") or "",
+                     "host": d.get("host") or d.get("ip") or src.get("host") or "", "serial": d.get("serial") or src.get("serial") or "",
+                     "access_code": ac, "port": d.get("port") or src.get("port") or "",
+                     "group": d.get("group") or b.get("group") or "", "location": d.get("location") or "",
+                     "role": d.get("role") or src.get("role") or "", "code": d.get("code") or "",
+                     "nozzle": d.get("nozzle") or src.get("nozzle") or ""})
     if not rows:
         return err("没有要添加的打印机")
     return _commit_rows(rows)
+
+
+# ---------------- 导入预览暂存（v2.54 复审：访问码不回传给浏览器，提交时按 token 取服务器上的原始行） ----------------
+_IMPORTS = {}
+IMP_TTL = 3600
+
+
+def _imp_put(rows):
+    import secrets
+    now = time.time()
+    for k in [k for k, v in _IMPORTS.items() if now - v[0] > IMP_TTL]:
+        _IMPORTS.pop(k, None)
+    tok = secrets.token_urlsafe(16)
+    _IMPORTS[tok] = (now, rows)
+    return tok
+
+
+def _imp_get(tok):
+    v = _IMPORTS.get(str(tok or ""))
+    if not v or time.time() - v[0] > IMP_TTL:
+        return None
+    return v[1]
+
+
+def _mask_rows(res):
+    for r in res:
+        c = (r.get("printer") or {}).get("conn") or {}
+        if c.get("access_code"):
+            c["access_code"] = "******"
+    return res
 
 
 def _commit_rows(rows):
@@ -621,7 +672,7 @@ def _commit_rows(rows):
         res = fleet.validate_import(rows, cfg)
         bad = [r for r in res if not r["ok"]]
         if bad:
-            return jsonify({"ok": False, "rows": res, "error": _e([("有 %d 行不对，没有添加" % len(bad), "มี %d แถวไม่ถูกต้อง ยังไม่ได้เพิ่ม" % len(bad))])}), 400
+            return jsonify({"ok": False, "rows": _mask_rows(res), "error": _e([("有 %d 行不对，没有添加" % len(bad), "มี %d แถวไม่ถูกต้อง ยังไม่ได้เพิ่ม" % len(bad))])}), 400
         if len(prs) + len(res) > 5000:
             return err("打印机最多 5000 台")
         added = []
@@ -651,19 +702,16 @@ def fleet_import():
         return err("文件里没有打印机")
     if request.args.get("commit") == "1":
         return _commit_rows(rows)
-    res = fleet.validate_import(rows, load_config())
-    for r in res:
-        c = r["printer"].get("conn") or {}
-        if c.get("access_code"):
-            c["access_code"] = "******"
-    return jsonify({"rows": res, "ok": sum(1 for r in res if r["ok"]), "bad": sum(1 for r in res if not r["ok"]), "data": rows})
+    res = _mask_rows(fleet.validate_import(rows, load_config()))
+    # 不回传原始行（里面有明文访问码）：存在服务器上，提交时带 token + 行号
+    return jsonify({"rows": res, "ok": sum(1 for r in res if r["ok"]), "bad": sum(1 for r in res if not r["ok"]), "token": _imp_put(rows)})
 
 
 @bp.get("/api/fleet/import-template")
 def fleet_import_template():
-    body = "code,model,ip,serial,access code,group,location,vendor\n" \
-           "P1S-001,Bambu Lab P1S,192.168.1.51,01P00A000000001,12345678,A,A-01-1,bambu\n" \
-           "K1C-001,Creality K1C,192.168.1.61,,,B,B-02-1,creality\n"
+    body = "code,model,ip,serial,access code,group,location,vendor,nozzle\n" \
+           "P1S-001,Bambu Lab P1S,192.168.1.51,01P00A000000001,12345678,A,A-01-1,bambu,0.4\n" \
+           "K1C-001,Creality K1C,192.168.1.61,,,B,B-02-1,creality,0.4\n"
     return app.response_class("﻿" + body, mimetype="text/csv",
                               headers={"Content-Disposition": "attachment; filename=printers_template.csv"})
 

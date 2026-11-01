@@ -22,11 +22,101 @@ from .config import load_config
 
 STATE_ZH = {"idle": "空闲", "printing": "打印中", "paused": "已暂停", "finished": "打印完成", "failed": "失败/已取消",
             "offline": "连不上", "unknown": "未知", "none": "未连接"}
-_status = {}          # 打印机序号 → 状态
 _lock = threading.Lock()
 _events = []          # 状态变化回调 (idx, old, new)
 _mgr = None           # v2.54 连接管理（core/printer_manager.py）：一个事件循环管所有打印机
-_remote = {"on": False, "at": 0.0, "marks": {}, "ids": (None, {})}   # 后台进程模式：从数据库读状态
+_remote = {"on": False, "at": 0.0, "marks": {}}   # 后台进程模式：从数据库读状态
+_MAPS = {"key": None, "p2i": {}, "i2p": {}}
+
+
+class UnknownResult(ConnectionError):
+    """v2.54 复审：指令交给后台进程后 ERP 等不到结果，但后台进程已经在执行 / 执行完了 —— 结果未知，不能当成失败（会重发 → 打两盘）。"""
+
+
+def maps():
+    """打印机稳定 id ↔ 现在的序号。按设置文件的版本缓存（别的进程改了设置也马上认出来），删了打印机马上生效，
+    不用等连接管理下一次对设置。测试里连接管理用自己的设置（cfg_loader）时用它最近一次对到的。"""
+    if _mgr is not None and getattr(_mgr, "cfg_loader", None) is not None:
+        return _mgr.idmap, _mgr.idxmap
+    from . import config as _c
+    key = (_c.file_key(), _c._CACHE["gen"])
+    if _MAPS["key"] != key:
+        prs = _c.load_config().get("printers") or []
+        p2i = {}
+        for i, p in enumerate(prs):
+            p2i[p.get("id") or f"#{i}"] = i
+        _MAPS.update(key=key, p2i=p2i, i2p={i: k for k, i in p2i.items()})
+    return _MAPS["p2i"], _MAPS["i2p"]
+
+
+def pid_of(idx):
+    """序号 → 稳定 id（找不到时用 #序号）。"""
+    if isinstance(idx, str):
+        return idx
+    return maps()[1].get(idx, f"#{idx}")
+
+
+def index_of(pid):
+    """稳定 id → 现在的序号（打印机已经删掉了 → None）。"""
+    if isinstance(pid, int):
+        return pid
+    i = maps()[0].get(pid)
+    if i is None and isinstance(pid, str) and pid.startswith("#") and pid[1:].isdigit():
+        return int(pid[1:])
+    return i
+
+
+class _Status:
+    """v2.54 复审：状态缓存按稳定 id 存（以前按序号存：删了一台以后，连接管理还没对设置前收到的状态会写到别的打印机上）。
+    外面照旧可以按序号读写（_status[0] = …），按序号时用设置里现在的顺序换成 id。"""
+
+    def __init__(self):
+        self.d = {}
+
+    def _k(self, key):
+        return pid_of(key) if isinstance(key, int) else key
+
+    def __getitem__(self, key):
+        return self.d[self._k(key)]
+
+    def __setitem__(self, key, val):
+        self.d[self._k(key)] = val
+
+    def __contains__(self, key):
+        return self._k(key) in self.d
+
+    def get(self, key, default=None):
+        return self.d.get(self._k(key), default)
+
+    def pop(self, key, default=None):
+        return self.d.pop(self._k(key), default)
+
+    def clear(self):
+        self.d.clear()
+
+    def __len__(self):
+        return len(self.d)
+
+    def by_index(self):
+        """{序号: 状态}（按现在的顺序；已经删掉的打印机不出现）。"""
+        out = {}
+        for k, v in list(self.d.items()):
+            i = index_of(k)
+            if i is not None:
+                out[i] = v
+        return out
+
+    def items(self):
+        return self.by_index().items()
+
+    def values(self):
+        return self.by_index().values()
+
+    def keys(self):
+        return self.by_index().keys()
+
+
+_status = _Status()   # 稳定 id → 状态
 
 
 def on_change(fn):
@@ -39,12 +129,12 @@ def conn_cfg(p):
     return c
 
 
-def _store(idx, st):
-    """只记状态，返回 (旧状态, 状态是否变了)。通知由调用的人决定（连接管理在单独的线程里通知）。"""
+def _store(key, st):
+    """只记状态，返回 (旧状态, 状态是否变了)。key = 稳定 id（连接管理 / 后台进程）或序号。通知由调用的人决定。"""
     st["updated"] = st.get("updated") or time.time()
     with _lock:
-        old = _status.get(idx) or {}
-        _status[idx] = st
+        old = _status.get(key) or {}
+        _status[key] = st
     return old, old.get("state") != st.get("state")
 
 
@@ -60,20 +150,31 @@ def _fire(idx, old, st):
             db.release()
 
 
+def fire_pid(pid, old, st):
+    """状态变化通知：通知时才把 id 换成现在的序号（排队期间删了 / 挪了打印机也不会通知到别的打印机上）。"""
+    i = index_of(pid)
+    if i is None:
+        return False
+    _fire(i, old, st)
+    return True
+
+
 def _set(idx, st):
     st["updated"] = time.time()
-    old, changed = _store(idx, st)
+    pid = pid_of(idx)
+    old, changed = _store(pid, st)
     if changed:
-        _fire(idx, old, st)
+        fire_pid(pid, old, st)
 
 
 def mark_sent(idx, name):
     """刚发送：先当作打印中（下一次读取前），这样打完时能识别出是这一盘。"""
+    pid = pid_of(idx)
     with _lock:
-        st = dict(_status.get(idx) or {})
+        st = dict(_status.get(pid) or {})
         st.update(state="printing", file=name, progress=0, updated=time.time())
-        _status[idx] = st
-        _remote["marks"][idx] = st["updated"]
+        _status[pid] = st
+        _remote["marks"][pid] = st["updated"]
 
 
 def reset_status():
@@ -85,14 +186,14 @@ def reset_status():
 
 
 def remap_status(mapping):
-    """v2.54：删了打印机、序号变了 → 状态跟着挪到新序号（不清空，几百台不用全部重新读）。mapping：旧序号 → 新序号 / None。"""
+    """删了打印机、序号变了：状态按稳定 id 存，自动跟着打印机走；只有没有 id 的（#序号）按 mapping 挪。"""
     with _lock:
-        old = dict(_status)
-        _status.clear()
-        for i, st in old.items():
-            j = mapping.get(i, i) if isinstance(i, int) else i
+        for k in [k for k in _status.d if isinstance(k, str) and k.startswith("#") and k[1:].isdigit()]:
+            i = int(k[1:])
+            st = _status.d.pop(k)
+            j = mapping.get(i, i)
             if j is not None:
-                _status[j] = st
+                _status.d[f"#{j}"] = st
     if _mgr:
         _mgr.kick()
 
@@ -102,23 +203,11 @@ def get_status(idx=None):
         _pull_remote()
     with _lock:
         if idx is None:
-            return dict(_status)
+            return {i: dict(v) for i, v in _status.by_index().items()}
         return dict(_status.get(idx) or {})
 
 
 # ---------------- 后台进程模式（PRINTER_WORKER=external）：ERP 从数据库读状态、把指令交给后台进程 ----------------
-def _id_index():
-    """id → 序号（按设置文件的修改时间缓存）。"""
-    from .config import CONFIG_PATH, load_config
-    try:
-        mt = os.path.getmtime(CONFIG_PATH)
-    except OSError:
-        mt = 0
-    if _remote["ids"][0] != mt:
-        _remote["ids"] = (mt, {p.get("id"): i for i, p in enumerate(load_config().get("printers") or []) if p.get("id")})
-    return _remote["ids"][1]
-
-
 def _pull_remote(force=False):
     if not force and time.time() - _remote["at"] < 1.0:
         return
@@ -128,47 +217,67 @@ def _pull_remote(force=False):
         c = db.conn()
         printer_manager.ensure_tables(c)
         rows = c.execute("SELECT pid, idx, data, updated FROM printer_state").fetchall()
-        ids = _id_index()
     except Exception:  # noqa: BLE001  数据库忙：下次再读
         return
     local = set(_mgr.links) if _mgr else set()
     with _lock:
         for r in rows:
-            if r["pid"] in local:
+            pid = r["pid"]
+            if pid in local:
                 continue
-            i = ids.get(r["pid"], None)
-            if i is None:
-                continue
-            if (_remote["marks"].get(i) or 0) > (r["updated"] or 0):
+            if (_remote["marks"].get(pid) or 0) > (r["updated"] or 0):
                 continue           # 刚发送过：还没读到新状态前先当作打印中
             try:
-                _status[i] = json.loads(r["data"] or "{}")
+                _status.d[pid] = json.loads(r["data"] or "{}")
             except ValueError:
                 pass
 
 
-def _remote_call(p, op, payload=None, wait=12):
-    """交给后台进程执行（拓竹的指令要走它一直连着的 MQTT）。等结果，超时报错。"""
+REMOTE_WAIT = 12      # ERP 等后台进程执行指令最多几秒
+UNKNOWN_MSG = "结果未知，请到打印机上确认，不要重发"
+
+
+def _remote_call(p, op, payload=None, wait=None, key=""):
+    """交给后台进程执行（拓竹的指令要走它一直连着的 MQTT），等结果。
+    v2.54 复审：后台进程先「认领」指令（status new → running，只有一个进程能认领成功）再执行；
+    ERP 等不到结果时：后台进程还没认领 → 改成 timeout（之后也不会再执行）→ 报失败；已经认领（running / done）→ 结果未知
+    （UnknownResult，不能当失败，不然员工重发 → 打两盘）。key：幂等键，同一次发送（同一个 key）后台进程只执行一次。"""
     from . import db, printer_manager
+    wait = REMOTE_WAIT if wait is None else wait
     c = db.conn()
     printer_manager.ensure_tables(c)
-    cur = c.execute("INSERT INTO printer_cmds(pid, op, payload, status, created) VALUES(?,?,?, 'new', ?)",
-                    (p.get("id"), op, json.dumps(payload or {}, ensure_ascii=False), time.time()))
+    cur = c.execute("INSERT INTO printer_cmds(pid, op, payload, status, created, ikey) VALUES(?,?,?, 'new', ?, ?)",
+                    (p.get("id"), op, json.dumps(payload or {}, ensure_ascii=False), time.time(), key or ""))
     c.commit()
     cid = cur.lastrowid
     if not wait:
         return None
+
+    def outcome(r):
+        if r["status"] == "done":
+            return True, r["result"]
+        if r["status"] == "error":
+            raise ConnectionError(r["result"] or "打印机后台进程执行失败")
+        if r["status"] == "dup":
+            raise UnknownResult("这次发送后台进程已经执行过了（同一次发送不会执行两次）：" + UNKNOWN_MSG)
+        return False, None
     end = time.time() + wait
     while time.time() < end:
         r = c.execute("SELECT status, result FROM printer_cmds WHERE id=?", (cid,)).fetchone()
-        if r and r["status"] == "done":
-            return r["result"]
-        if r and r["status"] == "error":
-            raise ConnectionError(r["result"] or "打印机后台进程执行失败")
+        if r:
+            done, res = outcome(r)
+            if done:
+                return res
         time.sleep(0.2)
-    c.execute("UPDATE printer_cmds SET status='timeout' WHERE id=? AND status='new'", (cid,))
+    n = c.execute("UPDATE printer_cmds SET status='timeout', done=? WHERE id=? AND status='new'", (time.time(), cid)).rowcount
     c.commit()
-    raise ConnectionError("打印机后台进程没有回应（PRINTER_WORKER=external：确认 python -m core.printer_worker 在运行）")
+    if n:
+        raise ConnectionError("打印机后台进程没有回应，指令没有执行（PRINTER_WORKER=external：确认 python -m core.printer_worker 在运行）")
+    r = c.execute("SELECT status, result FROM printer_cmds WHERE id=?", (cid,)).fetchone()
+    done, res = outcome(r)
+    if done:
+        return res
+    raise UnknownResult("打印机后台进程已经在执行，但还没回结果：" + UNKNOWN_MSG)
 
 
 def _link(idx, p):
@@ -434,8 +543,30 @@ def command(idx, cmd):
         raise ValueError(_no_conn_msg(c))
 
 
-def send_file(idx, local_path, remote_name, kind, ams_slot=None):
-    """传文件并开始打印。返回打印机上的文件名。"""
+_SEND = threading.local()
+
+
+class send_key:
+    """with send_key("…"): send_file(…) —— 这次发送的幂等键（后台进程模式下同一个 key 只执行一次）。
+    用 with 而不是参数：测试 / 别的地方替换 send_file 的写法不用改。"""
+
+    def __init__(self, key):
+        self.key = key
+
+    def __enter__(self):
+        self.prev = getattr(_SEND, "key", "")
+        _SEND.key = self.key
+        return self
+
+    def __exit__(self, *a):
+        _SEND.key = self.prev
+
+
+def send_file(idx, local_path, remote_name, kind, ams_slot=None, key=None):
+    """传文件并开始打印。返回打印机上的文件名。key：幂等键（不给就用 with send_key(…) 设的）。
+    后台进程模式下结果未知时抛 UnknownResult（调用的人不能当成失败）。"""
+    if key is None:
+        key = getattr(_SEND, "key", "") or ""
     cfg = load_config()
     p = (cfg.get("printers") or [])[idx]
     c = conn_cfg(p)
@@ -457,7 +588,7 @@ def send_file(idx, local_path, remote_name, kind, ams_slot=None):
             if link and link.connected:
                 _mgr.call(link.publish(payload))
             else:
-                _remote_call(p, "publish", payload)
+                _remote_call(p, "publish", payload, key=key)
             return name
         # Klipper / Creality 要 G-code
         if kind == "3mf":
