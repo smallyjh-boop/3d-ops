@@ -249,6 +249,48 @@ r = L.post("/api/recog/test", data={"photo": (io.BytesIO(photo), "x.jpg"), "trut
 ok(r["truth"] == "RCG0002-BL" and r["rank"] != 1, "test page: wrong truth → not rank 1")
 ok(L.post("/api/recog/build", json={"pids": ["RCG0002"]}).get_json()["started"] in (True, False), "listing can rebuild")
 
+# ---- 1.1 撤销刚才的确认、参考照片管理（看 / 删 / 改 SKU）
+r = P.post("/api/recog/identify", data={"photo": (io.BytesIO(odd), "p.jpg")}, content_type="multipart/form-data").get_json()
+ok(P.post("/api/recog/confirm", json={"rid": r["rid"], "sku": "RCG0004-GN"}).get_json()["learned"], "packer confirm (wrong) learned")
+n_wrong = len(refs.list_learned("RCG0004"))
+ok(n_wrong == 1, f"wrong photo stored under RCG0004 {n_wrong}")
+ok(P.post("/api/recog/unconfirm", json={"rid": r["rid"]}).status_code == 200 and len(refs.list_learned("RCG0004")) == 0, "undo removes learned photo")
+row = db.conn().execute("SELECT chosen, learned FROM recog_log WHERE rid=?", (r["rid"],)).fetchone()
+ok(row["chosen"] is None and row["learned"] is None, "undo clears choice")
+ok(P.post("/api/recog/confirm", json={"rid": r["rid"], "sku": "RCG0002-BL"}).get_json()["learned"], "re-pick after undo")
+n2 = len(refs.list_learned("RCG0002"))
+ok(P.post("/api/recog/confirm", json={"rid": r["rid"], "sku": "RCG0002-BL"}).status_code == 200 and len(refs.list_learned("RCG0002")) == n2, "confirm twice keeps one photo")
+r2 = C.post("/api/recog/identify", data={"photo": (io.BytesIO(odd), "p.jpg")}, content_type="multipart/form-data").get_json()
+C.post("/api/recog/confirm", json={"rid": r2["rid"], "sku": "RCG0002-BL"})
+ok(P.post("/api/recog/unconfirm", json={"rid": r2["rid"]}).status_code == 400, "packer cannot undo someone else's")
+db.conn().execute("UPDATE recog_log SET chosen_at=chosen_at-3600 WHERE rid=?", (r["rid"],)); db.conn().commit()
+ok(P.post("/api/recog/unconfirm", json={"rid": r["rid"]}).status_code == 400, "packer cannot undo after 10 minutes")
+d = C.get("/api/recog/learned?q=RCG0002").get_json()
+ok(d["total"] >= 2 and all(x["pid"] == "RCG0002" and x["info"]["sku"] == "RCG0002-BL" for x in d["rows"]), f"learned list by product {d['total']}")
+ok(C.get("/api/recog/learned?q=RCG0002-BL").get_json()["total"] == d["total"], "learned list by sku")
+ok(C.get(d["rows"][0]["url"]).status_code == 200, "learned photo served")
+x = d["rows"][0]
+r = C.post("/api/recog/learned/move", json={"pid": x["pid"], "file": x["file"], "sku": "RCG0003-YL"}).get_json()
+ok(r["ok"] and r["pid"] == "RCG0003" and any(y["file"] == r["file"] for y in refs.list_learned("RCG0003", "RCG0003-YL")), f"moved to other product {r}")
+ok(any(m_["kind"] == "photo" and m_["src"] == r["file"] and "RCG0003-YL" in m_["skus"] for m_ in refs.index()["meta"]), "refs rebuilt after move")
+ok(C.post("/api/recog/learned/move", json={"pid": "RCG0003", "file": r["file"], "sku": "NOPE-1"}).status_code == 400, "move to unknown sku refused")
+ok(C.post("/api/recog/learned/delete", json={"pid": "RCG0003", "file": r["file"]}).get_json()["ok"] and all(y["file"] != r["file"] for y in refs.list_learned("RCG0003")), "delete learned")
+ok(not any(m_["kind"] == "photo" and m_["src"] == r["file"] for m_ in refs.index()["meta"]), "refs rebuilt after delete")
+ok(C.post("/api/recog/learned/delete", json={"pid": "RCG0003", "file": "x/../../app.db"}).status_code == 400, "no traversal on delete")
+ok(P.get("/api/recog/learned").status_code == 403 and P.post("/api/recog/learned/delete", json={}).status_code == 403, "packer cannot manage learned photos")
+ok(L.get("/api/recog/learned").status_code == 200, "listing can manage learned photos")
+
+# ---- 随机色 / 透明的规格：提醒员工自己看，不自动用
+synth.make_product("RCG0005", "测试heart", S["heart"], ["透明", "随机颜色"])
+refs.build_product("RCG0005")
+config.save_config({"recog_ai": "off"})
+hp = synth.photo(S["heart"], synth.PALETTE["红色"], rng, ())
+d = C.post("/api/recog/identify", data={"photo": (io.BytesIO(hp), "p.jpg")}, content_type="multipart/form-data").get_json()
+top3 = [c_["sku"] for c_ in d["candidates"][:3]]
+ok(any(s_.startswith("RCG0005") for s_ in top3), f"weak product in top 3 {top3}")
+ok(d["need_pick"] and d["hint"] and set(d["hint"]["kinds"]) & {"clear", "random"} and "ใส" in d["hint"]["th"], f"weak hint + no auto-accept {d.get('hint')}")
+ok(match.weak_kind("透明") == "clear" and match.weak_kind("随机颜色") == "random" and match.weak_kind("红色") == "", "weak colours")
+
 # ---- 设置：关掉
 config.save_config({"recog_on": False})
 ok(C.post("/api/recog/identify", data={"photo": (io.BytesIO(photo), "p.jpg")}, content_type="multipart/form-data").status_code == 400, "off → refused")

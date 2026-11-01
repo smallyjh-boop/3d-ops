@@ -49,6 +49,76 @@ def recog_confirm():
         return err(str(e))
 
 
+@bp.post("/api/recog/unconfirm")
+def recog_unconfirm():
+    """刚才点错了（手机结果页的「撤销」）：删掉这次存成参考图的照片，再让员工重选。"""
+    b = request.get_json(silent=True) or {}
+    try:
+        return jsonify(match.unconfirm(str(b.get("rid") or ""), auth.current_user()))
+    except ValueError as e:
+        return err(str(e))
+
+
+# ---------------- 员工确认过的参考照片（看、删、挪到正确的 SKU） ----------------
+@bp.get("/api/recog/learned")
+def recog_learned():
+    a = request.args
+    q = str(a.get("q") or "").strip()
+    pid, sku = a.get("pid") or "", a.get("sku") or ""
+    if q and not pid and not sku:                     # 商品 360 传来的：SKU 或产品编号
+        if match.sku_info(q):
+            sku, pid = q, match.sku_info(q)["product_id"]
+        else:
+            pid = q.upper()
+    try:
+        rows = refs.list_learned(pid or None, sku or None)
+    except ValueError:
+        rows = []
+    info = {}
+    for r in rows:
+        if r["sku"] not in info:
+            info[r["sku"]] = match.sku_info(r["sku"], r["pid"])
+        r["info"] = info[r["sku"]]
+    return jsonify({"rows": rows[:int(a.get("limit") or 300)], "total": len(rows)})
+
+
+@bp.get("/api/recog/learned/<pid>/<name>")
+def recog_learned_img(pid, name):
+    try:
+        p = refs._learn_path(pid, name)
+    except ValueError:
+        p = None
+    if not p:
+        return err("照片不存在", 404)
+    return send_file(p, mimetype="image/jpeg", max_age=3600)
+
+
+@bp.post("/api/recog/learned/delete")
+def recog_learned_delete():
+    b = request.get_json(silent=True) or {}
+    try:
+        refs.delete_learned(str(b.get("pid") or ""), str(b.get("file") or ""))
+    except ValueError as e:
+        return err(str(e))
+    db.audit(_uname(), "识别：删除参考照片", f"{b.get('pid')}/{b.get('file')}")
+    return jsonify({"ok": True})
+
+
+@bp.post("/api/recog/learned/move")
+def recog_learned_move():
+    b = request.get_json(silent=True) or {}
+    sku = str(b.get("sku") or "").strip()
+    info = match.sku_info(sku) if sku else None
+    if not info:
+        return err("没有这个 SKU")
+    try:
+        nf = refs.move_learned(str(b.get("pid") or ""), str(b.get("file") or ""), info["product_id"], info["sku"])
+    except ValueError as e:
+        return err(str(e))
+    db.audit(_uname(), "识别：参考照片改到别的 SKU", f"{b.get('pid')}/{b.get('file')} → {info['sku']}")
+    return jsonify({"ok": True, "file": nf, "pid": info["product_id"], "sku": info["sku"]})
+
+
 @bp.get("/api/recog/search")
 def recog_search():
     return jsonify({"items": match.search(request.args.get("q"))})

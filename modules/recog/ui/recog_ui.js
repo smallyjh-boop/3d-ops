@@ -159,17 +159,19 @@
     showResult(r, url, o);
   }
   function showResult(r, url, o) {
+    r._url = url;
     const c = r.candidates || [];
     const top3 = c.slice(0, 3);
     const sure = !r.need_pick && top3.length;
     const aiLine = r.ai && r.ai.used
-      ? (r.ai.ok ? `🤖 ${Z("AI 看过", "AI ดูแล้ว")}${r.ai.reason ? `：<span data-notr>${esc(r.ai.reason)}</span>` : ""}` : `🤖 ${Z("AI 没看成，只用本地比对", "AI ดูไม่ได้ ใช้การเทียบในระบบอย่างเดียว")}`)
+      ? (r.ai.ok ? `🤖 ${Z("AI 看过", "AI ดูแล้ว")}${(TH() ? r.ai.reason_th : r.ai.reason) ? `：<span data-notr>${esc(TH() ? r.ai.reason_th : r.ai.reason)}</span>` : ""}` : `🤖 ${Z("AI 没看成，只用本地比对", "AI ดูไม่ได้ ใช้การเทียบในระบบอย่างเดียว")}`)
       : `${Z("只用本地比对", "ใช้การเทียบในระบบอย่างเดียว")}`;
     const b = open(`<div class="rcg-row" style="margin-bottom:8px"><img class="rcg-q" src="${url || esc(r.photo)}" alt="">
         <div><h3>${sure ? Z("是这个吗？", "ใช่อันนี้ไหม?") : Z("像这几个，点对的那个", "คล้ายพวกนี้ กดอันที่ถูก")}</h3>
         <div class="rcg-muted">${aiLine}</div></div></div>
       ${!top3.length ? `<p class="rcg-warn">${Z("没找到像的产品", "ไม่พบสินค้าที่คล้าย")}</p>` : ""}
-      ${!sure && top3.length ? `<p class="rcg-warn">${Z("把握不够：请看清楚再点", "ยังไม่แน่ใจ: ดูให้ดีก่อนกด")}</p>` : ""}
+      ${r.hint ? `<p class="rcg-warn">⚠ ${esc(Z(r.hint.zh, r.hint.th))}</p>` : !sure && top3.length ? `<p class="rcg-warn">${Z("把握不够：请看清楚再点", "ยังไม่แน่ใจ: ดูให้ดีก่อนกด")}</p>` : ""}
+      ${o.undone ? `<p class="rcg-warn">↩ ${Z("已撤销，请重新选对的那个（页面上刚才已经记下的，要在页面上改回来）", "ยกเลิกแล้ว กรุณาเลือกอันที่ถูกใหม่ (ถ้าหน้าจอบันทึกไปแล้ว ให้แก้ที่หน้าจอด้วย)")}</p>` : ""}
       <div class="rcg-col" id="rcg-cands">${top3.map((x, k) => candHtml(x, k, k === 0 && sure)).join("")}</div>
       <div class="rcg-row" style="margin-top:10px"><button class="rcg-btn" style="flex:1" data-a="none">${Z("都不是", "ไม่ใช่สักอัน")}</button>
         <button class="rcg-btn" style="flex:1" data-a="again">📷 ${Z("再拍一张", "ถ่ายใหม่")}</button>
@@ -184,6 +186,58 @@
     call("/api/recog/confirm", { json: { rid: r.rid, sku } }).catch(() => { /* 记不上也不影响 */ });
     close();
     if (o.onPick) o.onPick(sku, "photo");
+    undoBar(r, sku, o);
+  }
+  // 选完以后 10 秒内可以「撤销」：删掉刚存成参考图的照片，重新打开结果让员工选对的
+  let undoT = null;
+  function undoBar(r, sku, o) {
+    css();
+    let b = document.getElementById("rcg-undo");
+    if (!b) {
+      b = document.createElement("div");
+      b.id = "rcg-undo";
+      b.style.cssText = "position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom));z-index:10040;background:#111827;color:#fff;border-radius:12px;padding:8px 10px 8px 14px;display:flex;gap:10px;align-items:center;box-shadow:0 4px 16px rgba(0,0,0,.3);font:15px system-ui,sans-serif;max-width:92vw";
+      document.body.appendChild(b);
+    }
+    b.innerHTML = `<span>✓ <b data-notr>${esc(sku)}</b></span><button class="rcg-btn sm" id="rcg-undo-btn" style="background:#374151;color:#fff;border-color:#4b5563">↩ ${Z("选错了，撤销", "เลือกผิด ยกเลิก")}</button>`;
+    b.style.display = "flex";
+    clearTimeout(undoT);
+    undoT = setTimeout(() => { b.style.display = "none"; }, 10000);
+    b.querySelector("#rcg-undo-btn").onclick = async () => {
+      clearTimeout(undoT); b.style.display = "none";
+      try { await call("/api/recog/unconfirm", { json: { rid: r.rid } }); } catch (e) { beep("error"); open(`<p class="rcg-warn" data-notr>${esc(e.message)}</p><button class="rcg-btn" data-rcg-close>${Z("关闭", "ปิด")}</button>`); return; }
+      showResult(r, r._url, { ...o, undone: true });
+    };
+  }
+
+  // ---------------- 员工确认过的参考照片（识别测试页、商品 360 里用）：看、删、挪到正确的 SKU ----------------
+  async function learned(box, q, opts = {}) {
+    css();
+    box.innerHTML = `<p class="rcg-muted"><span class="rcg-spin"></span>${Z("加载中…", "กำลังโหลด…")}</p>`;
+    let d;
+    try { d = await call(`/api/recog/learned?${q ? "q=" + encodeURIComponent(q) : ""}`); } catch (e) {
+      box.innerHTML = opts.quiet ? "" : `<p class="rcg-warn" data-notr>${esc(e.message)}</p>`; return;
+    }
+    if (!d.rows.length) { box.innerHTML = opts.quiet ? "" : `<p class="rcg-muted">${Z("还没有员工确认过的参考照片", "ยังไม่มีรูปอ้างอิงที่พนักงานยืนยัน")}</p>`; return; }
+    const day = (t) => { const x = new Date(t * 1000); return `${x.getMonth() + 1}/${x.getDate()} ${String(x.getHours()).padStart(2, "0")}:${String(x.getMinutes()).padStart(2, "0")}`; };
+    box.innerHTML = `${opts.title ? `<div style="font-weight:600;margin:6px 0">${opts.title} (${d.total})</div>` : ""}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">${d.rows.map((x, k) => `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:6px;background:#fff">
+        <a href="${esc(x.url)}" target="_blank"><img src="${esc(x.url)}" alt="" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px"></a>
+        <div style="font:600 13px ui-monospace,monospace" data-notr>${esc(x.sku)}</div>
+        <div class="rcg-muted" data-notr style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.info ? [TH() && x.info.title_th ? x.info.title_th : x.info.name_zh, x.info.opt1_zh].filter(Boolean).join(" · ") : "")}</div>
+        <div class="rcg-muted">${day(x.at)}</div>
+        <div style="display:flex;gap:4px;margin-top:4px"><button class="rcg-btn sm" data-mv="${k}" style="flex:1">${Z("改 SKU", "เปลี่ยน SKU")}</button><button class="rcg-btn sm" data-del="${k}" style="color:#b91c1c">${Z("删除", "ลบ")}</button></div></div>`).join("")}</div>`;
+    box.querySelectorAll("[data-del]").forEach((b) => (b.onclick = async () => {
+      const x = d.rows[+b.dataset.del];
+      if (!confirm(Z(`删除这张 ${x.sku} 的参考照片？`, `ลบรูปอ้างอิงของ ${x.sku} นี้?`))) return;
+      try { await call("/api/recog/learned/delete", { json: { pid: x.pid, file: x.file } }); learned(box, q, opts); } catch (e) { alert(e.message); }
+    }));
+    box.querySelectorAll("[data-mv]").forEach((b) => (b.onclick = async () => {
+      const x = d.rows[+b.dataset.mv];
+      const sku = prompt(Z(`这张照片其实是哪个 SKU？（现在是 ${x.sku}）`, `รูปนี้จริงๆ คือ SKU ไหน? (ตอนนี้คือ ${x.sku})`), "");
+      if (!sku) return;
+      try { await call("/api/recog/learned/move", { json: { pid: x.pid, file: x.file, sku: sku.trim() } }); learned(box, q, opts); } catch (e) { alert(e.message); }
+    }));
   }
   function manual(r, o, box) {
     box.innerHTML = `<div style="margin-top:10px"><input class="rcg-in" id="rcg-q" placeholder="${Z("输入 SKU / 产品名搜索", "พิมพ์ SKU / ชื่อสินค้าเพื่อค้นหา")}" autocomplete="off">
@@ -267,5 +321,5 @@
     });
   }
 
-  window.RECOG = { menu, product, ocr, text, close, Z, TH };
+  window.RECOG = { menu, product, ocr, text, close, learned, Z, TH };
 })();

@@ -34,7 +34,8 @@ VARIES = ["base", "rotate", "tilt", "scale", "crop", "bg", "light", "wb", "blur"
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=3)
-    ap.add_argument("--model", default="")
+    ap.add_argument("--model", default="", help="抠图模型文件（复制进去用）")
+    ap.add_argument("--download", action="store_true", help="用设置卡片同一个接口（POST /api/recog/model/download，校验 sha256）下载抠图模型")
     ap.add_argument("--json", default="")
     ap.add_argument("--vary", default="")
     ap.add_argument("--seed", type=int, default=2026)
@@ -52,12 +53,25 @@ def main():
         md = os.path.join(D, "models")
         os.makedirs(md)
         shutil.copy(a.model, os.path.join(md, "u2netp.onnx"))
-    else:
+    elif not a.download:
         os.environ["LH_RECOG_NO_MODEL"] = "1"
     sys.path.insert(0, APP)
     import numpy as np
     from core import db, mesh
     db.conn()
+    if a.download:
+        os.makedirs(os.path.join(D, "tmp"), exist_ok=True)
+        for k in ("LH_NO_MODULE_STARTUP", "LH_NO_TPL_SYNC", "LH_NO_PRESETS", "LH_NO_UPDATE_CHECK"):
+            os.environ.setdefault(k, "1")
+        import app as A
+        db.create_user("evalboss", "secret123", "owner", "Eval")
+        c = A.app.test_client()
+        c.post("/api/auth/login", json={"username": "evalboss", "password": "secret123"})
+        r = c.post("/api/recog/model/download", json={})
+        print("下载抠图模型（设置卡片的接口）：", r.status_code, (r.get_json() or {}).get("model"), flush=True)
+        from modules.recog import refs as _r
+        while _r.JOB["running"]:            # 下载后自动开始的后台重建（这时还没有产品）等它结束
+            time.sleep(0.2)
     from modules.recog import descriptor, match, refs
     from modules.recog.tests import synth
     match.init()

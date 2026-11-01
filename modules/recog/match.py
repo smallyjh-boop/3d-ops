@@ -40,6 +40,9 @@ _lock = threading.Lock()
 def init():
     c = db.conn()
     c.executescript(SCHEMA)
+    cols = {r[1] for r in c.execute("PRAGMA table_info(recog_log)")}
+    if "learned" not in cols:                 # 1.1：这次确认存成了哪张参考照片（撤销用）
+        c.execute("ALTER TABLE recog_log ADD COLUMN learned TEXT")
     c.commit()
 
 
@@ -124,7 +127,17 @@ def sku_info(sku, pid=None):
         vi = (p.get("variants") or []).index(v)
         img = resolver._img_of(p, vi)
     return {"sku": str(sku), "product_id": p["id"], "name_zh": p.get("name_zh") or "", "title_th": (p.get("copy") or {}).get("title_th") or "",
-            "opt1_zh": v.get("opt1_zh") or "", "opt2_zh": v.get("opt2_zh") or "", "img": img}
+            "opt1_zh": v.get("opt1_zh") or "", "opt2_zh": v.get("opt2_zh") or "", "img": img, "weak": weak_kind(v.get("opt1_zh"))}
+
+
+# 照片认不准的颜色：随机色（实物什么颜色都有）、多色 / 彩虹（颜色分布不固定）、透明（拍出来是背景的颜色）
+WEAK = {"RND": "random", "MC": "multi", "RB": "multi", "CL": "clear"}
+
+
+def weak_kind(color_name):
+    from core import codes
+    row = codes.find_color(load_config(), color_name) if color_name else None
+    return WEAK.get(row[1], "") if row else ""
 
 
 # ---------------- 第一步：本地比对 ----------------
@@ -235,7 +248,7 @@ def ai_pick(photo, cands, call=None):
     user = ("The big image on the left (PHOTO) was taken by a staff member. On the right are numbered candidate products:\n"
             + "\n".join(lines) +
             "\nWhich candidate is the same product as the PHOTO (same shape AND same colour/variant)? If none matches, pick 0.\n"
-            'Reply JSON: {"pick": <0-8>, "confidence": <0.0-1.0>, "second": <0-8 or 0>, "reason": "<short, Chinese>"}')
+            'Reply JSON: {"pick": <0-8>, "confidence": <0.0-1.0>, "second": <0-8 or 0>, "reason": "<short, Chinese>", "reason_th": "<the same in Thai>"}')
     sheet = contact_sheet(photo, [(s, _cand_image(s, i)) for s, i in cands])
     buf = io.BytesIO()
     sheet.save(buf, "JPEG", quality=82)
@@ -262,7 +275,8 @@ def ai_pick(photo, cands, call=None):
     except (TypeError, ValueError):
         second = 0
     return {"pick": pick if 0 <= pick <= len(cands) else 0, "confidence": max(0.0, min(1.0, conf)),
-            "second": second if 0 < second <= len(cands) else 0, "reason": str(d.get("reason") or "")[:200]}
+            "second": second if 0 < second <= len(cands) else 0, "reason": str(d.get("reason") or "")[:200],
+            "reason_th": str(d.get("reason_th") or "")[:300]}
 
 
 # ---------------- 整个流程 ----------------
@@ -349,7 +363,12 @@ def identify(raw, user=None, src="", use_ai=None, truth="", ai_call=None):
     else:
         ai["why"] = why
     top = cands[0] if cands else None
-    need_pick = (not top or top["conf"] < s["threshold"]
+    weak = sorted({c["weak"] for c in cands[:3] if c.get("weak")})
+    hint = None
+    if weak:                                   # 随机色 / 多色 / 透明的规格：颜色靠不住，一定让员工自己看清楚再点
+        hint = {"kinds": weak, "zh": "前几个里有随机色 / 多色 / 透明的规格：照片认颜色不可靠，请对一下实物再点",
+                "th": "ใน 3 อันดับแรกมีแบบสีสุ่ม / หลายสี / ใส: ดูสีจากรูปไม่แม่น กรุณาเทียบกับของจริงก่อนกด"}
+    need_pick = bool(weak) or (not top or top["conf"] < s["threshold"]
                  or (len(cands) > 1 and not top.get("ai") and cands[1]["product_id"] != top["product_id"] and cands[1]["score"] > top["score"] - 0.015))
     ms = int((time.time() - t0) * 1000)
     c = db.conn()
@@ -359,27 +378,58 @@ def identify(raw, user=None, src="", use_ai=None, truth="", ai_call=None):
                json.dumps([[x["sku"], x["score"], x["conf"]] for x in cands[:8]]), int(ai["used"]), int(ai["ok"]),
                str(ai.get("pick") or ""), (ai.get("reason") or ai.get("why") or "")[:200], truth or None, ms))
     c.commit()
-    return {"rid": rid, "candidates": cands[:TOP_N], "top": top, "need_pick": bool(need_pick), "ai": ai, "threshold": s["threshold"],
+    return {"rid": rid, "candidates": cands[:TOP_N], "top": top, "need_pick": bool(need_pick), "hint": hint, "ai": ai, "threshold": s["threshold"],
             "ms": ms, "photo": f"/api/recog/query/{rid}"}
 
 
 def confirm(rid, sku, user=None, learn=None):
-    """员工点了「就是它」（sku 空 = 都不是）。照片存成参考图（设置里可以关）。"""
+    """员工点了「就是它」（sku 空 = 都不是）。照片存成参考图（设置里可以关）。同一次识别再确认（撤销后重选）：先删掉上次存的照片。"""
     c = db.conn()
     r = c.execute("SELECT * FROM recog_log WHERE rid=?", (rid,)).fetchone()
     if not r:
         raise ValueError("这次识别的记录找不到了")
-    c.execute("UPDATE recog_log SET chosen=?, chosen_at=? WHERE rid=?", (sku or "", int(time.time()), rid))
+    _forget(r)
+    c.execute("UPDATE recog_log SET chosen=?, chosen_at=?, learned=NULL WHERE rid=?", (sku or "", int(time.time()), rid))
     c.commit()
-    learned = False
+    learned = ""
     if sku and r["kind"] == "product" and (settings()["learn"] if learn is None else learn):
         info = sku_info(sku)
         fp = query_path(rid)
         if info and fp:
             with open(fp, "rb") as f:
-                refs.add_photo(info["product_id"], sku, f.read())
-            learned = True
-    return {"ok": True, "learned": learned}
+                fn = refs.add_photo(info["product_id"], sku, f.read())
+            learned = f"{info['product_id']}/{fn}"
+            c.execute("UPDATE recog_log SET learned=? WHERE rid=?", (learned, rid))
+            c.commit()
+    return {"ok": True, "learned": bool(learned)}
+
+
+def _forget(r):
+    if r["learned"] if "learned" in r.keys() else None:
+        pid, fn = r["learned"].split("/", 1)
+        try:
+            refs.delete_learned(pid, fn)
+        except ValueError:
+            pass
+
+
+UNDO_SECONDS = 600
+
+
+def unconfirm(rid, user=None):
+    """刚才点错了：撤销这次确认（删掉存成参考图的照片）。员工只能撤销自己 10 分钟内的；老板 / 上架都可以。"""
+    c = db.conn()
+    r = c.execute("SELECT * FROM recog_log WHERE rid=?", (rid,)).fetchone()
+    if not r:
+        raise ValueError("这次识别的记录找不到了")
+    u = user or {}
+    if u.get("role") not in ("owner", "listing"):
+        if r["username"] != u.get("username") or time.time() - (r["chosen_at"] or 0) > UNDO_SECONDS:
+            raise ValueError("只能撤销自己 10 分钟内的确认")
+    _forget(r)
+    c.execute("UPDATE recog_log SET chosen=NULL, chosen_at=NULL, learned=NULL WHERE rid=?", (rid,))
+    c.commit()
+    return {"ok": True}
 
 
 def search(q, limit=20):
