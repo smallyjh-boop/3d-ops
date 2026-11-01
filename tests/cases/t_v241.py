@@ -96,7 +96,7 @@ p = store.load(pid); s2 = [v["sku"] for v in p["variants"] if v.get("sku")][:2]
 o5 = C.post("/api/orders/manual", json={"order_no": "BD1", "items": [{"sku": s2[0], "qty": 1, "unit_price": 100}, {"sku": s2[1], "qty": 1, "unit_price": 100}]}).get_json()
 M = dt.date.today().strftime("%Y-%m")
 before = {r["key"]: r["orders"] for r in fin.breakdown(*fin.period(M)[:2], by="product")["rows"]}
-ok(before.get(pid, 0) == sum(1 for x in db.conn().execute("SELECT DISTINCT o.id FROM orders o JOIN order_items i ON i.order_id=o.id WHERE i.product_id=? AND o.status NOT IN ('cancelled','returned','delivery_failed','quote')", (pid,))),
+ok(before.get(pid, 0) == sum(1 for x in db.conn().execute("SELECT DISTINCT o.id FROM orders o JOIN order_items i ON i.order_id=o.id WHERE i.product_id=? AND o.status NOT IN ('cancelled','returned','delivery_failed','quote') AND o.order_time>=? AND o.order_time<?", (pid, *[__import__('time').mktime(d.timetuple()) for d in fin.period(M)[:2]]))),
    f"product order count not doubled ({before.get(pid)})")
 y0 = dt.date.today().replace(month=1, day=1).isoformat()
 r = C.get(f"/api/fin/overview?start={y0}&end={dt.date.today().isoformat()}").get_json()
