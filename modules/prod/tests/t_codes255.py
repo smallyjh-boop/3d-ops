@@ -339,7 +339,10 @@ r = C.post("/api/fleet/printers/" + pa_["id"], json={"code": "ZZ-9"}).get_json()
 ok(calls["po"] == 1 and "ZZ-9" == byid(pa_["id"])["code"] and xa in byid(pa_["id"])["old_codes"], f"single code change: PO refs migrated + old code remembered ({calls})")
 # 复用：另一台改成 A 之前的编码 → A 的旧编码里这个码不能再认（否则旧标签悄悄开错机器），记进 stale_codes
 r = C.post("/api/fleet/printers/" + pb_["id"], json={"code": xa})
-ok(r.status_code == 200 and byid(pb_["id"])["code"] == xa, f"reuse of a freed code allowed {r.get_json() if r.status_code != 200 else ''}")
+ok(r.status_code != 200 and byid(pb_["id"])["code"] == xb, "v2.55.0 review: manual reuse of another printer's old code refused")
+_o = [dict(x) for x in prs()]; _n = [dict(x) for x in prs()]
+_n[1]["code"] = xa                                            # 直接走 helper 模拟重新编号 / 互换造成的复用
+fc.note_code_changes(_o, _n); save_config({"printers": _n})
 ok(xa not in byid(pa_["id"]).get("old_codes", []) and xa in byid(pa_["id"]).get("stale_codes", []), "old code now owned by another printer dropped from old_codes (kept as stale)")
 ok(xb in byid(pb_["id"]).get("old_codes", []), "the other printer remembers its own previous code")
 ok(fleet.index_of(prs(), xa) == prs().index(byid(pb_["id"])), "current code wins when scanning")
@@ -379,6 +382,28 @@ _qr.svg = _osvg
 ok(len(seen) == 3 and all(f"?printer={byid(i)['id']}#" in u for i, u in zip(ids, seen)), f"label QR encodes the stable id {seen[:1]}")
 ok(all(byid(i)["code"] in html for i in ids), "label still prints the readable code")
 ok(fleet.index_of(prs(), byid(ids[0])["id"]) == fleet.index_of(prs(), byid(ids[0])["code"]), "scan accepts both id and code")
+
+
+# ================= 9b 复审：别的机器的旧编码不能分给新机器 =================
+_ps = [dict(x) for x in prs()]
+_a = dict(_ps[0], old_codes=["OLD-ZZ-1"])
+_ps[0] = _a
+_old = "OLD-ZZ-1"
+ok(_old.upper() in fleet.retired_codes(_ps) and _old.upper() not in fleet.retired_codes(_ps, _a["id"]), f"retired_codes lists other printers' old codes {_old}")
+_nm = fleet.next_codes("Bambu Lab P1S", 3, _ps)
+ok(_old.upper() not in {x.upper() for x in _nm}, f"next_codes skips old codes {_nm}")
+_ps2 = [dict(code="P1S-002", old_codes=["P1S-001"], id="a"), dict(code="P1S-003", id="b")]
+ok(fleet.next_codes("Bambu Lab P1S", 1, _ps2) == ["P1S-004"] and fleet.next_codes("Bambu Lab P1S", 1, [dict(code="P1S-002", id="a")]) == ["P1S-001"],
+   "next_codes: free number reused only when no printer remembers it")
+ok(fc.check_code(_old, _ps, exclude_id="zz") is not None and fc.check_code(_old, _ps, exclude_id=_a["id"]) is None,
+   "check_code: another printer's old code refused, the owner may take it back")
+ok(fleet.stale_label([dict(id="a", code="X-1", old_codes=["P-9"]), dict(id="b", code="P-9")], "P-9") is True, "stale_label also covers old_codes of other printers")
+_cur = [dict(x) for x in prs()]
+_real = next((x for p_ in _cur for x in p_.get("old_codes", []) if x.upper() not in {q["code"].upper() for q in _cur}), None)
+ok(_real is not None, f"setup: a real free old code exists {_real}")
+_rows = [{"code": x["code"], "name": x["name"], "g_per_h": 20, "enabled": True} for x in _cur] + [{"code": _real, "name": "Bambu Lab P1S", "g_per_h": 20, "enabled": True}]
+_r = C.post("/api/config", json={"printers": _rows})
+ok(_r.status_code >= 400 and len(prs()) == len(_cur), f"settings page: new printer with another's old code refused {_r.status_code}")
 
 # ================= 10 审计 + 最终一致性 =================
 ok(all(fleet.CODE_RE.match(c) for c in codes()) and len({c.upper() for c in codes()}) == len(codes()), f"all codes valid and unique {codes()}")

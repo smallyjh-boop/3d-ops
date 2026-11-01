@@ -223,8 +223,6 @@ def void(doc_id, user=""):
                 if not sp or sp["status"] != "empty":
                     raise ValueError(f"{ln['name_zh']} 出库的 {p_['code']} 已经不是「用完」状态，不能作废")
         rolled_lines.append((ln, ex))
-    c.execute("UPDATE inv_docs SET status='void', void_by=?, void_at=? WHERE id=?", (user, ledger._now(), d["id"]))
-    c.commit()
     rolled = {}                                         # 物品 → 已经按卷冲回的克数（带正负）
     for ln, ex in rolled_lines:
         from .. import materials
@@ -237,6 +235,8 @@ def void(doc_id, user=""):
             else:
                 r = materials.restore_rolls(ln["material"], ln["color"], ex["prev"], user, f"作废 {d['no']}")
                 rolled[ln["item_id"]] = rolled.get(ln["item_id"], 0.0) - r["grams"]
+    c.execute("UPDATE inv_docs SET status='void', void_by=?, void_at=? WHERE id=?", (user, ledger._now(), d["id"]))   # 按卷冲回都成功了才标作废
+    c.commit()
     for m in mv:
         it = ledger.get_item(m["item_id"])
         q = m["q"] or 0

@@ -218,6 +218,62 @@ for u in ("/api/inv/items?view=stock&page=abc&size=xyz", "/api/inv/items?view=st
 r = C.get("/api/inv/items?view=stock&page=1&size=99999").get_json()
 ok(r.get("ok") and r["size"] <= 200, f"size bounded ({r.get('size')})")
 
+
+# ---------- 复审：打印机槽位不数卷 / 作废放回原货位 / 删除的货位跳过 ----------
+f10 = new_fil("PLA", "紫色", roll_g=1000)
+d = inv.create_doc("purchase", [{"item_id": f10["id"], "rolls": 3, "net_g": 1000}], "", "t")
+p1, p2, p3 = d["spool_codes"]
+flows.spool_put(sid(p1), "F1-01-01", "t"); flows.spool_put(sid(p2), "F1-01-01", "t")
+slotc = flows.slot_loc(db.conn(), "P1S-01", "A2")["code"]
+flows.spool_put(sid(p3), slotc, "t")
+ok(st_of(p3) == "loaded", "setup: roll loaded on printer slot")
+doc = ST.start(slotc + ",F1-01-01", "t")
+try:
+    ST.count(doc["id"], slotc, {str(f10["id"]): {"rolls": 5}}, "t"); e = ""
+except ValueError as ex_:
+    e = str(ex_)
+ok("打印机上的料卷不用数" in e, f"counting rolls on a printer slot refused ({e})")
+ST.count(doc["id"], "F1-01-01", {str(f10["id"]): {"rolls": 4}}, "t")
+ST.confirm(doc["id"], "t")
+ok(st_of(p3) == "loaded" and len(spools("PLA", "紫色")) == 5, "surplus rolls created, loaded roll not displaced")
+# 旧单子里已经有打印机槽位的卷数记录：确认时也不放卷、不顶下机
+doc = ST.start("F1-01-01", "t")
+ST.count(doc["id"], "F1-01-01", {str(f10["id"]): {"rolls": 4}}, "t")
+cn = db.conn()
+slot_id = L.get_loc(slotc)["id"]
+ln_ = cn.execute("SELECT id, extra FROM inv_doc_lines WHERE doc_id=? AND item_id=?", (doc["id"], f10["id"])).fetchone()
+ex_ = json.loads(ln_["extra"]); ex_["by_loc"][str(slot_id)] = [3, 1]; ex_["by_loc"]["999999"] = [2, 0]      # 打印机槽位 + 已删除的货位
+cn.execute("UPDATE inv_doc_lines SET extra=? WHERE id=?", (json.dumps(ex_), ln_["id"])); cn.commit()
+try:
+    ST.confirm(doc["id"], "t"); e = ""
+except Exception as ex2:
+    e = repr(ex2)
+ok(e == "" and st_of(p3) == "loaded", f"confirm skips printer-slot and deleted locations, loaded roll stays ({e})")
+
+# 出库作废：放回原来的货位
+f11 = new_fil("PLA", "青色", roll_g=1000)
+d = inv.create_doc("purchase", [{"item_id": f11["id"], "rolls": 2, "net_g": 1000}], "", "t")
+q1, q2 = d["spool_codes"]
+flows.spool_put(sid(q1), "F1-01-03", "t"); flows.spool_put(sid(q2), "F1-01-04", "t")
+iss = inv.create_doc("issue", [{"item_id": f11["id"], "rolls": 2}], "", "t")
+ok(loc_of(q1) is None, "emptied roll lost its location")
+inv.void_doc(iss["id"], "t")
+ok(loc_of(q1) == "F1-01-03" and loc_of(q2) == "F1-01-04", f"void restores rolls to original locations {loc_of(q1)} {loc_of(q2)}")
+
+# 作废：按卷冲回失败时单据不标作废
+f12 = new_fil("PLA", "棕色", roll_g=1000)
+d = inv.create_doc("purchase", [{"item_id": f12["id"], "rolls": 1, "net_g": 1000}], "", "t")
+_orig_disc = materials.discard_rolls
+def _boom(*a, **k):
+    raise RuntimeError("boom")
+materials.discard_rolls = _boom
+try:
+    inv.void_doc(d["id"], "t"); e = ""
+except RuntimeError as ex3:
+    e = str(ex3)
+materials.discard_rolls = _orig_disc
+ok(e == "boom" and inv.doc(d["id"])["status"] == "done", "void: roll reversal failed -> doc stays done")
+
 src = open(os.path.join(APP, "modules/inv/ui/stocktake.js"), encoding="utf-8").read()
 ok("shelf_rolls" in src and "book_loaded" in src, "stocktake page shows shelf rolls / loaded separately")
 print("ERRORS", E_)

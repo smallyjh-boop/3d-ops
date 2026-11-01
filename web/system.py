@@ -112,6 +112,11 @@ def post_config():
             dup = {c for c in codes_in if codes_in.count(c) > 1}
             if dup:
                 return err("机器编码重复了：" + "、".join(sorted(dup)))
+            cur_old = {str(o.get("code") or "").upper() for o in old_pr}
+            for p_ in clean:                   # v2.55.0 复审：别的机器的旧编码（旧标签还贴着）不能分给新机器；互换现有编码不受影响
+                cu = p_["code"].upper()
+                if cu and cu not in cur_old and cu in fleet.retired_codes(old_pr, p_.get("id")):
+                    return err(f"机器编码「{p_['code']}」是别的打印机以前用过的编码（旧标签还贴着），不能再用")
             fleet.ensure_codes(clean)
             busy = fleet.busy_codes(old_pr, clean)
             if busy:

@@ -175,6 +175,8 @@ def check_code(code, printers, exclude_id=None):
     for q in printers:
         if q.get("id") != exclude_id and str(q.get("code") or "").upper() == code:
             return (f"机器编码「{code}」已经有了", f"รหัสเครื่อง «{code}» มีอยู่แล้ว")
+    if code in fleet.retired_codes(printers, exclude_id):
+        return (f"机器编码「{code}」是别的打印机以前用过的编码（旧标签还贴着），不能再用", f"รหัส «{code}» เคยเป็นของเครื่องอื่น (ป้ายเก่ายังติดอยู่) ใช้ซ้ำไม่ได้")
     return None
 
 
@@ -183,7 +185,7 @@ def code_for(p, pool, cfg, rule_override=None):
     问题：None / 'dup'（规则里没有顺序号，拼出来重复）/ 'long'（超过 16 位）/ 'empty'。"""
     rid, rule, rs = rule_for(p, cfg, rule_override)
     toks = tokens(p, rule, rs)
-    used = {str(q.get("code") or "").upper() for q in pool}
+    used = {str(q.get("code") or "").upper() for q in pool} | fleet.retired_codes(pool, p.get("id"))
     seqb = next((b for b in rule["blocks"] if b["t"] == "seq"), None)
     if not toks:
         return "", "empty"

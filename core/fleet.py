@@ -446,13 +446,23 @@ def stale_label(printers, key):
     owner = next((p for p in printers if str(p.get("code") or "").upper() == s), None)
     if not owner:
         return False
-    return any(s in [str(x).upper() for x in (p.get("stale_codes") or [])] and p is not owner for p in printers)
+    return any(s in [str(x).upper() for x in list(p.get("stale_codes") or []) + list(p.get("old_codes") or [])] and p is not owner for p in printers)
+
+
+def retired_codes(printers, exclude_id=None):
+    """别的打印机还留着的旧编码（old_codes / stale_codes，大写）：以前印的标签还指着它们，不能再分给新机器。"""
+    out = set()
+    for p in printers:
+        if exclude_id is not None and p.get("id") == exclude_id:
+            continue
+        out.update(str(x).upper() for x in list(p.get("old_codes") or []) + list(p.get("stale_codes") or []))
+    return out
 
 
 def next_codes(name, n, printers, width=3):
     """批量添加的自动编码：P1S-001、P1S-002 …（跳过已经用掉的号）。"""
     pre = prefix_for(name)
-    used = {str(p.get("code") or "").upper() for p in printers}
+    used = {str(p.get("code") or "").upper() for p in printers} | retired_codes(printers)
     out, k = [], 1
     while len(out) < n:
         c = f"{pre}-{k:0{width}d}"

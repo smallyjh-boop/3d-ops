@@ -71,6 +71,7 @@ def count(doc_id, code, counts, user="", complete=True):
     if not c.execute("SELECT 1 FROM inv_loc_count_locs WHERE doc_id=? AND loc_id=?", (d["id"], loc["id"])).fetchone():
         raise ValueError(f"{loc['code']} 不在这张盘点单的范围里")
     got, extras = {}, {}
+    on_printer = bool(flows.printer_of(loc["code"]))
     lst = units.loc_stats(c)
     for k, v in (counts or {}).items():
         r = c.execute("SELECT * FROM inv_items WHERE id=? OR UPPER(code)=UPPER(?)", (int(k) if str(k).isdigit() else -1, str(k))).fetchone()
@@ -78,6 +79,8 @@ def count(doc_id, code, counts, user="", complete=True):
             raise ValueError(f"没有物品 {k}")
         if not isinstance(v, dict) and flows.spool_item(c, r["id"]):
             raise ValueError(f"{r['code']} 是按卷管的耗材：要数卷数或者称重，不能直接填克数")
+        if isinstance(v, dict) and on_printer:   # v2.55.0 复审：打印机槽位上的料卷是「在机」状态，不用数（多出来的卷放进来会把真正装着的那卷顶下机）
+            raise ValueError(f"{loc['code']} 是打印机上的位置：打印机上的料卷不用数")
         if isinstance(v, dict):                  # v2.55：耗材数卷 {rolls: n} / 称重 {weigh: [{code, gross}]}
             here = (lst.get((r["material"], r["color"])) or {}).get(loc["id"]) or {"rolls": 0, "grams": 0.0, "loaded": 0, "shelf": 0}
             q, ex = inv.resolve_count(dict(r), v, wms.loc_qty(c, r["id"], loc["id"]), here["shelf"])     # 账面卷数 = 架子上的（在机上的拿不走，不算）
@@ -194,6 +197,12 @@ def _confirm_loc_rolls(c, it, ex, d, user):
     for lid_s, (cnt, sys0) in (ex.get("by_loc") or {}).items():
         lid = int(lid_s)
         loc = c.execute("SELECT code FROM inv_locations WHERE id=?", (lid,)).fetchone()
+        if not loc:
+            logging.getLogger("3dops").warning("盘点 %s：货位 #%s 已经删除，跳过按卷调整", d["no"], lid)
+            continue
+        if flows.printer_of(loc["code"]):
+            logging.getLogger("3dops").warning("盘点 %s：%s 是打印机上的位置，跳过按卷调整", d["no"], loc["code"])
+            continue
         rows = c.execute("SELECT s.code FROM spools s JOIN inv_spool_loc l ON l.spool_id=s.id WHERE l.loc_id=? AND s.material=? AND s.color=? "
                          "AND s.status IN ('sealed','open') AND (s.status='sealed' OR s.remaining_g>0) "
                          "ORDER BY CASE s.status WHEN 'sealed' THEN 0 ELSE 1 END, CASE s.status WHEN 'open' THEN s.remaining_g ELSE 0 END, s.id",

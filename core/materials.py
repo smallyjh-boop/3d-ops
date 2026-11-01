@@ -333,6 +333,13 @@ def take_rolls(material, color, count=0, codes=None, user="", reason="领用"):
     total = sum(max(0.0, r["remaining_g"] or 0) for r in rows)
     ids = [r["id"] for r in rows]
     prev = [{"code": r["code"], "status": r["status"], "remaining_g": max(0.0, float(r["remaining_g"] or 0))} for r in rows]
+    try:                                    # 记下每卷原来放在哪个货位（用完时货位会被拿掉，作废要放回原处）
+        for pv, r in zip(prev, rows):
+            lr = c.execute("SELECT loc_id FROM inv_spool_loc WHERE spool_id=?", (r["id"],)).fetchone()
+            if lr and lr["loc_id"]:
+                pv["loc_id"] = lr["loc_id"]
+    except Exception:  # noqa: BLE001  库存模块没开 / 没有这张表
+        pass
     for r in rows:
         c.execute("UPDATE spools SET remaining_g=0, status='empty', printer=NULL, slot=NULL, emptied_at=?, updated_at=? WHERE id=?",
                   (now, now, r["id"]))
@@ -381,6 +388,13 @@ def restore_rolls(material, color, prev, user="", reason="作废"):
         c.execute("UPDATE spools SET remaining_g=?, status=?, printer=NULL, slot=NULL, emptied_at=NULL, updated_at=? WHERE id=?",
                   (float(p["remaining_g"]), p["status"], now, r["id"]))
         total += float(p["remaining_g"])
+        if p.get("loc_id"):                 # 放回原来的货位（货位已经删了 / 停用就算了，由库存模块推荐新的）
+            try:
+                if c.execute("SELECT 1 FROM inv_locations WHERE id=? AND active=1", (int(p["loc_id"]),)).fetchone():
+                    c.execute("INSERT INTO inv_spool_loc(spool_id, loc_id, updated_at) VALUES(?,?,?) ON CONFLICT(spool_id) DO UPDATE SET "
+                              "loc_id=excluded.loc_id, updated_at=excluded.updated_at", (r["id"], int(p["loc_id"]), now))
+            except Exception:  # noqa: BLE001
+                pass
     _sync(c, k)
     if total > 0:
         _logrow(c, k, total / 1000.0, f"{reason} {len(rows)} 卷（{'、'.join(r['code'] for r, _p in rows)}）", user)
