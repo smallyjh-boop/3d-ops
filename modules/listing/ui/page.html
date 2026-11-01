@@ -5,6 +5,7 @@
   <div class="lw-top">
     <div class="seg" id="lw-plat"><button data-plat="lazada" class="on">Lazada</button><button data-plat="shopee">Shopee</button></div>
     <div class="seg" id="lw-view"><button data-view="main" class="on">上架商品</button><button data-view="batches">批次记录</button><button data-view="stock">库存同步</button></div>
+    <select id="lw-shop" title="选店铺：所有分类按这个店铺算"><option value="0">全部店铺</option></select>
     <span class="small muted" id="exp-tplbar">类目模板库：<span id="exp-tplinfo">…</span> <a href="#" data-goto-cfg="goods">管理 →</a></span>
   </div>
   <!-- 老代码还在用的筛选值（平台、状态）：由上面的按钮和流程条设置 -->
@@ -15,10 +16,7 @@
   <div id="lw-main">
     <div class="lw-flow" id="lw-flow"></div>
     <div class="lw-body">
-      <aside class="card lw-groups">
-        <div class="row between"><b>分组</b><button id="exp-newgroup" class="mini">＋ 新建</button></div>
-        <div id="lw-grp"></div>
-      </aside>
+      <aside class="card lw-groups"><div id="lw-gp"></div></aside>
       <div class="lw-list">
         <div class="row gap wrap lw-filter">
           <input id="exp-q" placeholder="搜索编码 / 名称 / 类目 / SKU" style="width:240px">
@@ -38,9 +36,11 @@
       <span class="lw-sep"></span>
       <span id="lw-acts"></span>
       <span class="lw-sep"></span>
-      <details class="lw-menu"><summary class="btn mini">分组 ▾</summary><div class="lw-pop">
-        <label class="small">加入分组<select id="exp-addgroup"><option value="">（选分组）</option></select></label>
-        <button class="mini" id="lw-ungroup">移出当前分组</button>
+      <span id="lw-mk"><button class="mini" data-wbmk="list">要上架</button><button class="mini" data-wbmk="price">要改价</button><button class="mini" data-wbmk="img">要改图</button><button class="mini" data-wbmk="off">取消标记</button></span>
+      <details class="lw-menu"><summary class="btn mini">标签 ▾</summary><div class="lw-pop">
+        <button id="exp-newgroup" class="mini">＋ 新建标签</button>
+        <label class="small">加入标签<select id="exp-addgroup"><option value="">（选分组）</option></select></label>
+        <button class="mini hidden" id="lw-ungroup">移出当前分组</button>
       </div></details>
       <details class="lw-menu"><summary class="btn mini">更多 ▾</summary><div class="lw-pop lw-pop-wide">
         <div class="small muted">表格上架（特殊情况用）</div>

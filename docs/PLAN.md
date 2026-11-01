@@ -16,10 +16,11 @@
 - [x] T10：「返回」回到原来的地方（v2.53.0）｜static/nav.js + 各入口｜测试 tests/cases/t_nav253.py
 - [x] T11：模型区改进（v2.53.0）：展示 / 打印分开、组装选零件 + 按接合位置自动组合、默认收起、按规格（不只尺寸）设置展示和打印方案、总览表、一键切片、组装生成打印方案、爆炸图、撤销｜modules/model、modules/goods、core/specmodel.py、core/modellib.py
 - [x] T12：仓库全部物品进货位（v2.53.0）：料卷货位、生产区 / 待检区、采购 / 生产 / 发货 / 退货走货位、补货提醒、按库区算库存金额、手机操作、迁移｜modules/inv、core/materials.py、modules/pur、modules/mobile
-- [ ] T14：产品库 + 采集箱自动 / 动态分组（v2.53.0）：在线 / 未上线、进度、待处理、销售表现、类目来源、手动只做标记、保存视图｜modules/goods、modules/curate
-- [ ] T15：选品候选池整理 + 清理（v2.53.0）｜modules/curate
-- [ ] T16：上架工作台自动分类（v2.53.0）｜modules/listing
+- [x] T14：产品库 + 采集箱自动 / 动态分组（v2.53.0）：在线 / 未上线、进度、待处理、销售表现、类目来源、手动只做标记、保存视图｜modules/goods、modules/curate
+- [x] T15：选品候选池整理 + 清理（v2.53.0）｜modules/curate
+- [x] T16：上架工作台自动分类（v2.53.0）｜modules/listing
 - [x] T17：库存同步重做（v2.53.0）：规则、对照总表、快速修改、预警、记录｜modules/listing、core/connectors/lazada.py
+- [ ] T18：打印机「网络诊断」按钮（端口逐个测、超时 / 拒绝、NAS 网口和路由、识别同网段两网口）｜core/printers.py、modules/prod
 - [ ] T13：发 v2.53.0｜测试交给 test-runner、发版前 reviewer 审查、泰文缺口交给 translator
 
 ## 不做的事

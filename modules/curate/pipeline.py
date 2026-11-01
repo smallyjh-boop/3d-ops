@@ -37,6 +37,11 @@ def _loop():
             for _ in range(50):
                 if not run_once():
                     break
+            try:
+                from . import pool
+                pool.auto_clean()          # v2.53：每天一次（同样的规则，上限）
+            except Exception:  # noqa: BLE001
+                pass
             if time.time() - last_cal > 600:
                 last_cal = time.time()
                 calibrate()

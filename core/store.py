@@ -101,8 +101,12 @@ def load(pid):
     return p
 
 
+REV = [0]        # v2.53：每保存一次 +1（产品库分组的缓存按它判断过期）
+
+
 def save(product):
     _ensure()
+    REV[0] += 1
     safe_id(product["id"])
     product["updated_at"] = int(time.time())
     path = os.path.join(PRODUCTS_DIR, product["id"] + ".json")

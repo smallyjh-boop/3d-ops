@@ -23,9 +23,11 @@
   const LS = (k, d) => { try { return JSON.parse(localStorage.getItem("cur_" + k)) ?? d; } catch { return d; } };
   const LSset = (k, v) => { try { localStorage.setItem("cur_" + k, JSON.stringify(v)); } catch { /* 忽略 */ } };
   const EXT_TIP = () => Z("要有一台装了扩展、登录了原站的 Chrome 开着", "ต้องมี Chrome ที่ติดตั้งส่วนขยายและล็อกอินเว็บต้นทางเปิดอยู่");
-  let CUR = "cur_cand", OV = null, IN = null;
+  let CUR = "cur_cand", OV = null, IN = null, IN_SPEC = null;
   let FC = Object.assign({ min: "0", platform: "", cat: "", ex: "", new: "", q: "", status: "open", bad: "" }, LS("fc", {}));
-  let IF = LS("ifolder", "all"), IQ = "";
+  let CSPEC = null, CVIEWS = [], CAT_TH = {}, CVLOADED = false;
+  let CGS = { top: "top:todo" }, CV = 0;          // 候选池自动分组 / 视图
+  let IF = LS("ifolder", "all"), IQ = "", IGS = {}, IV = 0;   // IGS：自动分组选中的 {段落: 分组键}；IV：用的视图
   const SEL = new Set(), ISEL = new Set();
 
   function sec() { return $("#tab-curate"); }
@@ -81,6 +83,7 @@
     if (CUR === "cur_cand" && SEL.size) {
       h = `<span class="fb-n">${Z("已选", "เลือก")} <b>${SEL.size}</b></span>
         <button class="primary-lite" data-c-bulk="collect">✓ ${Z("采用所选", "ใช้ที่เลือก")}</button>
+        <button data-c-bulk="later">👀 ${Z("稍后看", "ดูทีหลัง")}</button><button data-c-bulk="seen">${Z("标为已看", "ทำเครื่องหมายว่าดูแล้ว")}</button>
         <button data-c-bulk="ignore">${Z("忽略所选", "ข้ามที่เลือก")}</button>
         <button data-c-bulk="reread" title="${esc(Z("让扩展重新读这些模型的详情页，改正标题、作者、图片", "ให้ส่วนขยายอ่านหน้ารายละเอียดใหม่ แก้ชื่อ ผู้ออกแบบ รูป"))}">↻ ${Z("重新读取", "อ่านใหม่")}</button>
         <button class="mini" data-c-bulk="clear">✕ ${Z("清除", "ล้าง")}</button>`;
@@ -95,7 +98,8 @@
     } else if (CUR === "cur_inbox" && ISEL.size) {
       h = `<span class="fb-n">${Z("已选", "เลือก")} <b>${ISEL.size}</b></span>
         <button class="primary-lite" data-i-bulk="to_library">→ ${Z("转入产品库", "ย้ายเข้าคลังสินค้า")}</button>
-        <button data-i-bulk="folder">📁 ${Z("移到文件夹", "ย้ายไปโฟลเดอร์")}</button>
+        <button data-i-bulk="mk_into">➜ ${Z("标记 要转入", "ทำเครื่องหมาย ต้องย้ายเข้า")}</button><button data-i-bulk="mk_later">👀 ${Z("标记 再看看", "ทำเครื่องหมาย ดูอีกที")}</button><button data-i-bulk="mk_off" class="mini">${Z("取消标记", "ยกเลิกเครื่องหมาย")}</button>
+        <button data-i-bulk="folder">🏷 ${Z("加标签", "เพิ่มแท็ก")}</button>
         <button data-i-bulk="download">⬇ ${Z("下载模型文件", "ดาวน์โหลดไฟล์โมเดล")}</button>
         <button data-i-bulk="copy">✨ ${Z("AI 写文案", "AI เขียนข้อความ")}</button>
         <button data-i-bulk="delete" class="fb-del">${Z("删除", "ลบ")}</button>
@@ -107,9 +111,25 @@
   }
 
   // ======================= 候选池 =======================
+  const _owner0 = () => !!(OV && OV.owner);
   async function candPage(box) {
-    const qs = new URLSearchParams(Object.entries(FC).filter(([, v]) => v !== "" && v != null)).toString();
-    const d = await api("/api/cur/candidates?" + qs);
+    const gks = GRP.sels(CGS).join(",");
+    const qp = new URLSearchParams(Object.entries(FC).filter(([k, v]) => v !== "" && v != null && !(gks && (k === "status" || k === "ex"))));
+    if (gks) qp.set("gk", gks);
+    const d = await api("/api/cur/candidates?" + qp.toString());
+    const gs = d.groups, gn = gs.n, pk = d.pool;
+    const cspec = CSPEC = {
+      sel: CGS, views: CVIEWS, viewOn: CV,
+      top: [{ key: "", label: Z("全部", "ทั้งหมด"), n: gs.total }, { key: "top:todo", label: Z("待看", "รอดู"), n: gn["top:todo"] || 0, tone: "warn" }, { key: "top:hi", label: Z("高分待看", "คะแนนสูงรอดู"), n: gn["top:hi"] || 0, tone: "ok" }, { key: "top:done", label: Z("已处理", "จัดการแล้ว"), n: gn["top:done"] || 0 }],
+      sections: [
+        { id: "pg", title: Z("1. 进度", "1. ความคืบหน้า"), items: [["new", "新发现", "ค้นพบใหม่"], ["seen", "已看未处理", "ดูแล้วยังไม่จัดการ"], ["later", "稍后看", "ดูทีหลัง"], ["adopted", "已采用（进了采集箱）", "ใช้แล้ว (เข้ากล่องเก็บ)"], ["ignored", "已忽略", "ข้ามแล้ว"], ["excluded", "规则排除", "ถูกคัดออกตามกฎ"]].map(([k, zh, th]) => ({ key: "pg:" + k, label: Z(zh, th), n: gn["pg:" + k] || 0 })) },
+        { id: "sc", title: Z("2. 分数", "2. คะแนน"), items: [["high", "高分（≥70）", "สูง (≥70)"], ["mid", "中（50–69）", "กลาง (50–69)"], ["low", "低（<50）", "ต่ำ (<50)"]].map(([k, zh, th]) => ({ key: "sc:" + k, label: Z(zh, th), n: gn["sc:" + k] || 0 })) },
+        { id: "site", title: Z("3. 来源网站", "3. เว็บต้นทาง"), items: gs.sites.map((x) => ({ key: x.key, label: x.name, n: x.n, raw: true })) },
+        { id: "wt", title: Z("4. 关注巡逻", "4. ตระเวนติดตาม"), items: gs.watches.map((x) => ({ key: x.key, label: x.name, n: x.n, raw: true })).concat(gn["wt:none"] ? [{ key: "wt:none", label: Z("手动 / 其他", "ด้วยตนเอง / อื่น ๆ"), n: gn["wt:none"] }] : []) },
+        { id: "cat", title: Z("5. 类目", "5. หมวดหมู่"), items: gs.cats.map((x) => ({ key: x.key, label: TH() ? (CAT_TH[x.name] || x.name) : x.name, n: x.n, raw: true })) },
+      ],
+      foot: `<a class="small" data-c-gclear>${Z("清除选择", "ล้างการเลือก")}</a> · <a class="small" data-c-saveview>⭐ ${Z("保存为视图", "บันทึกเป็นมุมมอง")}</a>${_owner0() ? ` · <a class="small" data-c-clean>🧹 ${Z("清理", "ทำความสะอาด")}</a>` : ""}`,
+    };
     const k = d.kpi;
     const hist = d.hist.map((v, i) => ({ label: `${i * 10}–${i * 10 + 9}`, value: v, tone: i >= 7 ? "ok" : "" }));
     const plats = [...new Set(d.rows.map((r) => r.platform))];
@@ -129,8 +149,13 @@
       + `<div class="cur-grid2">${UX.card({ title: Z("分数分布", "การกระจายคะแนน"), help: Z("不含被排除的。分数 = 六项加权：泰国需求、生产效率、利润、竞争少、原站热度、上架难度（权重在设置 → 商品）", "ไม่รวมที่ถูกคัดออก คะแนน = 6 ด้านถ่วงน้ำหนัก (ตั้งค่า → สินค้า)"),
         body: UX.columns(hist, { h: 90, from: "0", to: "100" }) })}
       ${UX.card({ title: Z("排除原因", "เหตุผลที่คัดออก"), body: UX.bars(d.reasons.map((r) => ({ label: TH() && r.reason_th ? r.reason_th : r.reason, value: r.n, tone: "bad" })), { empty: Z("没有被排除的", "ไม่มีที่ถูกคัดออก") }) })}</div>
+      ${UX.card({ title: Z("候选池概况", "ภาพรวมคลังผู้สมัคร"), help: Z("采用率 = 已采用 ÷ 看过的（不含规则排除的）。清理掉的也算（只留指纹）", "อัตราการใช้ = ใช้แล้ว ÷ ที่เห็น (ไม่รวมที่ถูกคัดออก)"),
+        body: UX.kpis([{ label: Z("候选总数", "ผู้สมัครทั้งหมด"), value: n0(pk.total) }, { label: Z("本周新增", "ใหม่สัปดาห์นี้"), value: n0(pk.new_week), tone: "info" },
+          { label: Z("待看", "รอดู"), value: n0(pk.review), tone: pk.review ? "warn" : "ok" }, { label: Z("采用率", "อัตราการใช้"), value: pk.rate + "%", sub: `${pk.adopted} / ${n0(pk.adopted && pk.rate ? Math.round(pk.adopted * 100 / pk.rate) : 0)}` }])
+          + `<div class="cur-grid2">${UX.bars(pk.by_site.map((x) => ({ label: x.name, value: x.rate, text: `${x.rate}%（${x.adopted}/${x.seen}）`, raw: true })), { empty: Z("还没有数据", "ยังไม่มีข้อมูล") })}
+          ${UX.bars(pk.by_watch.map((x) => ({ label: x.name, value: x.rate, text: `${x.rate}%（${x.adopted}/${x.seen}）`, raw: true })), { empty: Z("还没有关注巡逻的数据", "ยังไม่มีข้อมูลการตระเวน") })}</div>` })}
       ${UX.card({ title: Z("候选模型", "โมเดลผู้สมัคร"),
-        body: `<div class="cur-fbar cur-frow">
+        body: `<div class="cur-pool"><aside class="card cur-folders" data-c-panel>${GRP.html(cspec)}</aside><div class="cur-pool-main"><div class="cur-fbar cur-frow">
           <select data-fc="min" title="${esc(Z("最低分", "คะแนนขั้นต่ำ"))}">${["0", "40", "50", "60", "70", "80"].map((v) => opt(v, FC.min, v === "0" ? Z("全部分数", "ทุกคะแนน") : `≥ ${v}`)).join("")}</select>
           <select data-fc="platform"><option value="">${Z("全部网站", "ทุกเว็บ")}</option>${plats.concat(FC.platform && !plats.includes(FC.platform) ? [FC.platform] : []).map((p) => `<option value="${esc(p)}" ${p === FC.platform ? "selected" : ""} data-notr>${esc((d.rows.find((r) => r.platform === p) || {}).platform_name || p)}</option>`).join("")}</select>
           <select data-fc="cat"><option value="">${Z("全部类目", "ทุกหมวด")}</option>${d.cats.map((c) => `<option value="${esc(c.name)}" ${c.name === FC.cat ? "selected" : ""}>${esc(TH() ? c.th : c.name)}</option>`).join("")}</select>
@@ -142,9 +167,66 @@
         ${d.rows.length ? `<div class="cur-wrap"><table class="grid cur-tbl"><thead><tr><th><input type="checkbox" data-c-all ${d.rows.length && d.rows.every((r) => SEL.has(r.id)) ? "checked" : ""}></th><th>${Z("分", "คะแนน")}</th><th>${Z("模型", "โมเดล")}</th>
           <th>${Z("估算", "ประมาณ")}</th><th>${Z("泰国市场", "ตลาดไทย")}</th><th>${Z("AI 判断", "AI ประเมิน")}</th><th></th></tr></thead><tbody>${d.rows.map((r) => candRow(r, d.radar)).join("")}</tbody></table></div>`
           : UX.empty(Z("还没有候选。点上面的「🧩 打开模型站去采集」，装好浏览器扩展（3.1 以上）后打开 MakerWorld / Printables / Thingiverse 的搜索页、分类页，系统会自动给每个模型打分并记到这里；也可以在「关注巡逻」里添加关注让扩展每天自动找。",
-            "ยังไม่มีผู้สมัคร กด「🧩 เปิดเว็บโมเดลเพื่อเก็บ」ด้านบน ติดตั้งส่วนขยาย (3.1 ขึ้นไป) แล้วเปิดหน้าค้นหา / หมวดหมู่ของ MakerWorld / Printables / Thingiverse ระบบจะให้คะแนนแต่ละโมเดลอัตโนมัติ หรือเพิ่มการติดตามใน「ตระเวนติดตาม」"))}` })}
+            "ยังไม่มีผู้สมัคร กด「🧩 เปิดเว็บโมเดลเพื่อเก็บ」ด้านบน ติดตั้งส่วนขยาย (3.1 ขึ้นไป) แล้วเปิดหน้าค้นหา / หมวดหมู่ของ MakerWorld / Printables / Thingiverse ระบบจะให้คะแนนแต่ละโมเดลอัตโนมัติ หรือเพิ่มการติดตามใน「ตระเวนติดตาม」"))}</div></div>` })}
       <p class="small muted">${Z("校准：", "การปรับเทียบ: ")}${d.calib.n >= 5 ? Z(`实测时长约是 AI 估算的 ${d.calib.m} 倍、克数 ${d.calib.g} 倍（${d.calib.n} 个样本，其中 ${d.calib.production || 0} 个来自 ERP 生产记录）`, `เวลาจริงประมาณ ${d.calib.m} เท่าของที่ AI ประมาณ กรัม ${d.calib.g} เท่า (${d.calib.n} ตัวอย่าง)`)
         : Z(`要至少 5 个「估算过、又有实测」的模型才开始校准（现在 ${d.calib.n || 0} 个）`, `ต้องมีอย่างน้อย 5 โมเดลที่มีทั้งค่าประมาณและค่าจริงจึงจะปรับเทียบ (ตอนนี้ ${d.calib.n || 0})`)}</p>`;
+    GRP.bind(box.querySelector("[data-c-panel]"), cspec, () => { CV = 0; SEL.clear(); render(); });
+    if (!CVLOADED) { CVLOADED = true; api("/api/goods/views?scope=cand").then((r) => { CVIEWS = r.views || []; if (CVIEWS.length) render(); }).catch(() => {}); }
+  }
+  // ---- 清理（预览 → 勾选 → 执行）、回收站、自动清理设置（v2.53）----
+  const CLS = () => ({ excl: Z("规则排除，超过 N 天没再看到", "ถูกคัดออกตามกฎ และไม่พบอีกเกิน N วัน"), low: Z("低分（< N 分）且 N 天没再看到", "คะแนนต่ำ (< N) และไม่พบอีก N วัน"),
+    ignored: Z("已忽略，超过 N 天", "ข้ามแล้ว เกิน N วัน"), adopted: Z("已采用（已经在采集箱 / 产品库里）", "ใช้แล้ว (อยู่ในกล่องเก็บ / คลังสินค้า)"),
+    dup: Z("重复（同作者同标题，合并成一个，留数据最好的）", "ซ้ำ (ผู้ออกแบบ+ชื่อเดียวกัน รวมเป็นหนึ่ง เก็บอันที่ดีที่สุด)"), watchdel: Z("来自已删除的关注巡逻", "มาจากการตระเวนที่ลบแล้ว") });
+  async function cleanDialog() {
+    const info = await api("/api/cur/pool/info");
+    const S = info.settings;
+    const box = MODAL.open(`<h3>🧹 ${Z("清理候选池", "ทำความสะอาดคลังผู้สมัคร")}</h3><div data-cl-body></div>`);
+    const draw = async () => {
+      const opts = {}; box.querySelectorAll("[data-cl-o]").forEach((i) => (opts[i.dataset.clO] = i.value));
+      const pv = await api("/api/cur/pool/preview", { json: { opts } });
+      const st = pv.storage, cls = CLS();
+      box.querySelector("[data-cl-body]").innerHTML = `<p class="small muted">${Z("清理掉的先进回收站 7 天（能恢复），之后只留指纹，不会再存。", "ที่ล้างจะอยู่ในถังขยะ 7 วัน (กู้คืนได้) หลังจากนั้นเหลือเพียงลายนิ้วมือ จะไม่ถูกเก็บอีก")}</p>
+        <div class="small">${Z("候选池", "คลัง")} <b>${st.candidates}</b> · ${st.cand_mb} MB · ${Z("回收站", "ถังขยะ")} <b>${st.trash}</b> (${st.trash_mb} MB) · ${Z("缩略图缓存", "แคชรูปย่อ")} ${st.thumbs_mb} MB · ${Z("指纹", "ลายนิ้วมือ")} ${st.gone}</div>
+        <table class="grid" style="margin:8px 0"><tbody>${pv.classes.map((c) => `<tr><td><input type="checkbox" data-cl-c="${c.id}" ${c.n ? "checked" : "disabled"}></td><td>${cls[c.id]}</td><td class="nowrap"><b>${c.n}</b> ${Z("个", "รายการ")}</td><td class="nowrap muted">${c.mb} MB</td></tr>`).join("")}</tbody></table>
+        <div class="row gap wrap small">${[["excl_days", Z("排除 N 天", "คัดออก N วัน")], ["low_score", Z("低分 <", "คะแนนต่ำ <")], ["low_days", Z("低分 N 天", "ต่ำ N วัน")], ["ignored_days", Z("忽略 N 天", "ข้าม N วัน")]].map(([k, l]) => `<label>${l} <input type="number" min="0" data-cl-o="${k}" value="${opts[k] != null && opts[k] !== "" ? esc(opts[k]) : S[k]}" style="width:70px"></label>`).join("")}</div>
+        <div class="row gap" style="margin-top:10px"><button class="primary" data-cl-go>${Z(`清理所选（共 ${pv.total} 个，约 ${pv.mb} MB）`, `ล้างที่เลือก (${pv.total} รายการ ~${pv.mb} MB)`)}</button><button data-cl-trash>🗑 ${Z("回收站", "ถังขยะ")} (${st.trash})</button><button data-mclose>${Z("关闭", "ปิด")}</button></div>
+        <hr><b>${Z("自动清理", "ล้างอัตโนมัติ")}</b>
+        <div class="row gap wrap small" style="margin-top:6px"><label class="chk"><input type="checkbox" data-cl-auto ${S.auto ? "checked" : ""}> ${Z("每天自动清理一次（排除 / 低分 / 忽略 / 重复 / 已删除巡逻）", "ล้างอัตโนมัติวันละครั้ง")}</label>
+          <label>${Z("池子上限", "เพดานคลัง")} <input type="number" min="0" data-cl-cap value="${S.cap}" style="width:80px"></label>
+          <button class="mini" data-cl-save>${Z("保存设置", "บันทึกการตั้งค่า")}</button><button class="mini" data-cl-now>${Z("现在自动清一次", "ล้างอัตโนมัติตอนนี้")}</button></div>`;
+    };
+    await draw();
+    box.onchange = (e) => { if (e.target.closest("[data-cl-o]")) draw().catch((er) => toast(er.message, true)); };
+    box.onclick = async (e) => {
+      const t = (q) => e.target.closest(q);
+      try {
+        if (t("[data-cl-go]")) {
+          const classes = [...box.querySelectorAll("[data-cl-c]:checked")].map((i) => i.dataset.clC);
+          if (!classes.length) return toast(Z("先勾选要清理的类", "เลือกประเภทที่จะล้างก่อน"), true);
+          const opts = {}; box.querySelectorAll("[data-cl-o]").forEach((i) => (opts[i.dataset.clO] = i.value));
+          const r = await api("/api/cur/pool/clean", { json: { opts, classes } });
+          toast(Z(`已清理 ${r.removed} 个（约 ${r.mb} MB），在回收站里 7 天内可以恢复`, `ล้างแล้ว ${r.removed} รายการ (~${r.mb} MB) กู้คืนได้ใน 7 วัน`)); await draw(); return render();
+        }
+        if (t("[data-cl-save]")) {
+          await api("/api/cur/pool/settings", { json: { auto: box.querySelector("[data-cl-auto]").checked, cap: box.querySelector("[data-cl-cap]").value, ...Object.fromEntries([...box.querySelectorAll("[data-cl-o]")].map((i) => [i.dataset.clO, i.value])) } });
+          return toast(Z("已保存", "บันทึกแล้ว"));
+        }
+        if (t("[data-cl-now]")) { const r = await api("/api/cur/pool/auto", { json: {} }); toast(Z(`自动清理：清了 ${r ? r.removed : 0} 个`, `ล้างอัตโนมัติ: ${r ? r.removed : 0} รายการ`)); await draw(); return render(); }
+        if (t("[data-cl-trash]")) return trashDialog();
+      } catch (er) { toast(er.message, true); }
+    };
+  }
+  async function trashDialog() {
+    const info = await api("/api/cur/pool/info");
+    const box = MODAL.open(`<h3>🗑 ${Z("回收站（7 天后彻底删除，只留指纹）", "ถังขยะ (ลบถาวรใน 7 วัน เหลือเพียงลายนิ้วมือ)")}</h3>
+      ${info.trash.length ? `<div style="max-height:50vh;overflow:auto"><table class="grid"><tbody>${info.trash.map((r) => `<tr><td><input type="checkbox" data-tr-c="${esc(r.skey)}"></td><td data-notr>${esc((r.title || r.skey).slice(0, 70))}</td><td class="muted small" data-notr>${esc(r.reason)}</td><td class="muted small">${fmtTime(r.at).slice(5, 10)}</td></tr>`).join("")}</tbody></table></div>` : UX.empty(Z("回收站是空的", "ถังขยะว่าง"))}
+      <div class="row gap" style="margin-top:10px"><button class="primary" data-tr-go>${Z("恢复所选", "กู้คืนที่เลือก")}</button><button class="danger" data-tr-purge>${Z("立刻清空", "ล้างทันที")}</button><button data-mclose>${Z("关闭", "ปิด")}</button></div>`);
+    box.onclick = async (e) => {
+      try {
+        if (e.target.closest("[data-tr-go]")) { const sk = [...box.querySelectorAll("[data-tr-c]:checked")].map((i) => i.dataset.trC); if (!sk.length) return; const r = await api("/api/cur/pool/restore", { json: { skeys: sk } }); toast(Z(`已恢复 ${r.restored} 个`, `กู้คืน ${r.restored} รายการ`)); MODAL.close(); return render(); }
+        if (e.target.closest("[data-tr-purge]")) { if (!confirm(Z("彻底删除回收站里的全部内容？（指纹还在，不会再存）", "ลบถาวร?"))) return; await api("/api/cur/pool/purge", { json: {} }); MODAL.close(); return toast(Z("已清空", "ล้างแล้ว")); }
+      } catch (er) { toast(er.message, true); }
+    };
   }
   function marketCell(mk, radar) {
     if (!mk) {
@@ -188,22 +270,37 @@
   const chipLic = (r) => (r.license === "pending" ? pill(`⚖ ${Z("许可待核验", "รอตรวจสัญญาอนุญาต")}`, r.license_auto === "禁止商用" ? "bad" : "warn", r.license_name) : pill(`⚖ ${Z("许可已核验", "ตรวจสัญญาแล้ว")}`, "ok"));
   const chipImg = (r) => (r.images === "source" ? pill(`🖼 ${Z("原站图", "รูปต้นทาง")}`, "warn", Z("原站图片，可能有水印，建议换成自己拍的或去水印", "รูปจากเว็บต้นทาง อาจมีลายน้ำ แนะนำเปลี่ยนเป็นรูปถ่ายเองหรือลบลายน้ำ"))
     : r.images === "own" ? pill(`🖼 ${Z("已换图", "เปลี่ยนรูปแล้ว")}`, "ok") : pill(`🖼 ${Z("没有图片", "ไม่มีรูป")}`, ""));
+  const I_PG = () => [["dl", Z("待下载文件", "รอดาวน์โหลดไฟล์"), "warn"], ["copy", Z("文件就绪 / 待写文案", "ไฟล์พร้อม / รอเขียนข้อความ"), "warn"], ["lic", Z("许可待核", "รอตรวจสัญญาอนุญาต"), "warn"], ["ready", Z("可转入产品库", "พร้อมย้ายเข้าคลัง"), "ok"], ["done", Z("已转入", "ย้ายเข้าคลังแล้ว"), ""]];
+  const I_TD = () => [["dlfail", Z("下载失败", "ดาวน์โหลดไม่สำเร็จ")], ["suspect", Z("采集可能出错", "การเก็บอาจผิดพลาด")], ["srcimg", Z("原站图片待替换", "รูปต้นทางรอเปลี่ยน")], ["ams", Z("多色（需要 AMS）", "หลายสี (ต้องมี AMS)")], ["risk", Z("许可有风险", "สัญญาอนุญาตมีความเสี่ยง")]];
+  function inboxSpec(d) {
+    const n = d.summary.n, it = (arr, p) => arr.map(([k, label, tone]) => ({ key: p + k, label, n: n[p + k] || 0, tone: n[p + k] && tone ? tone : (p === "td:" && n[p + k] ? "warn" : "") }));
+    return {
+      sel: IGS, views: d.views, viewOn: IV,
+      top: [{ key: "", label: Z("全部", "ทั้งหมด"), n: d.summary.total }, { key: "td:any", label: Z("待处理", "รอจัดการ"), n: n["td:any"] || 0, tone: "warn" }, { key: "pg:ready", label: Z("可转入", "พร้อมย้าย"), n: n["pg:ready"] || 0, tone: "ok" }],
+      sections: [
+        { id: "pg", title: Z("1. 进度", "1. ความคืบหน้า"), items: it(I_PG(), "pg:") },
+        { id: "td", title: Z("2. 待处理", "2. รอจัดการ"), items: it(I_TD(), "td:") },
+        { id: "sc", title: Z("3. 分数", "3. คะแนน"), items: [{ key: "sc:high", label: Z("高分（≥70）", "คะแนนสูง (≥70)"), n: n["sc:high"] || 0 }, { key: "sc:mid", label: Z("一般", "ปานกลาง"), n: n["sc:mid"] || 0 }] },
+        { id: "site", title: Z("4. 来源网站", "4. เว็บต้นทาง"), items: d.summary.sites.map((x) => ({ key: x.key, label: x.key.slice(5), n: x.n, raw: true })) },
+        { id: "cat", title: Z("5. 类目", "5. หมวดหมู่"), items: d.summary.cats.map((c) => ({ key: c.key, label: TH() && c.th ? c.th : c.name, n: c.n, raw: true })).concat(n["ct:none"] ? [{ key: "ct:none", label: Z("未分类", "ยังไม่จัดหมวด"), n: n["ct:none"] }] : []) },
+        { id: "mk", title: Z("6. 手动标记", "6. ทำเครื่องหมายเอง"), items: [{ key: "mk:into", label: "➜ " + Z("要转入", "ต้องย้ายเข้า"), n: n["mk:into"] || 0 }, { key: "mk:later", label: "👀 " + Z("再看看", "ดูอีกที"), n: n["mk:later"] || 0 }]
+          .concat(d.tags.map((g) => ({ key: "tg:" + g.id, label: g.name, n: n["tg:" + g.id] || 0, raw: true }))),
+          foot: `<a class="small" data-i-newfolder>＋ ${Z("新建标签", "สร้างแท็ก")}</a>` },
+      ],
+      foot: `<a class="small" data-i-gclear>${Z("清除选择", "ล้างการเลือก")}</a> · <a class="small" data-i-saveview>⭐ ${Z("保存为视图", "บันทึกเป็นมุมมอง")}</a>`,
+    };
+  }
   async function inboxPage(box) {
-    const d = IN = await api("/api/cur/inbox?" + new URLSearchParams({ folder: IF, q: IQ }).toString());
+    const d = IN = await api("/api/cur/inbox?" + new URLSearchParams({ folder: "all", q: IQ, all: "1" }).toString());
     const f = d.folders;
-    for (const id of [...ISEL]) if (!d.rows.some((r) => r.product_id === id)) ISEL.delete(id);
-    const fo = (key, label, n, extra = "") => `<div class="cur-fo ${IF === key ? "on" : ""}" data-i-folder="${esc(key)}">${label}<span class="muted">${n}</span>${extra}</div>`;
+    const spec = IN_SPEC = inboxSpec(d);
+    const showDone = IGS.pg === "pg:done";
+    d.shown = d.rows.filter((r) => (showDone ? !r.inbox : r.inbox) && GRP.match(r, IGS));
+    for (const id of [...ISEL]) if (!d.shown.some((r) => r.product_id === id)) ISEL.delete(id);
     const k = d.kpi;
     const ext = d.ext || {};
     box.innerHTML = `<div class="cur-inbox">
-      <aside class="card cur-folders">
-        ${fo("all", `📥 ${Z("全部", "ทั้งหมด")}`, f.all)}
-        <div class="cur-fo-h">${Z("按类目", "ตามหมวด")}</div>
-        ${f.cats.map((c) => fo("cat:" + c.name, `<span data-notr>${esc(TH() && c.th ? c.th : c.name)}</span>`, c.n)).join("")}
-        ${fo("nocat", Z("未分类", "ยังไม่จัดหมวด"), f.nocat)}
-        <div class="cur-fo-h row between">${Z("我的文件夹", "โฟลเดอร์ของฉัน")} <button class="mini" data-i-newfolder>＋</button></div>
-        ${f.groups.map((g) => fo("g:" + g.id, `📁 <span data-notr>${esc(g.name)}</span>`, g.n)).join("") || `<div class="small muted">${Z("还没有文件夹（和产品库的分组是同一套，转入产品库后还在）", "ยังไม่มีโฟลเดอร์ (ใช้ร่วมกับกลุ่มสินค้าในคลัง)")}</div>`}
-      </aside>
+      <aside class="card cur-folders" data-i-panel>${GRP.html(spec)}</aside>
       <div class="cur-in-main">
         ${UX.kpis([
           { label: Z("采集箱里", "ในกล่องเก็บ"), value: n0(k.total), help: Z("采用 / 采集的模型先放在这里，不进产品库；整理好点「转入产品库」", "โมเดลที่ใช้ / เก็บจะอยู่ที่นี่ก่อน ยังไม่เข้าคลังสินค้า จัดให้เรียบร้อยแล้วกด「ย้ายเข้าคลังสินค้า」") },
@@ -213,12 +310,13 @@
           { label: Z("还在用原站图", "ยังใช้รูปต้นทาง"), value: n0(k.source_img), tone: k.source_img ? "warn" : "ok", help: Z("原站图片可能有水印 / 版权，建议换成自己拍的或去水印", "รูปจากเว็บต้นทางอาจมีลายน้ำ / ลิขสิทธิ์") },
         ])}
         <div class="cur-fbar cur-frow"><input type="search" data-i-q value="${esc(IQ)}" placeholder="${Z("搜索编号 / 品名 / 原站标题 / 作者", "ค้นหารหัส / ชื่อ / ชื่อต้นทาง / ผู้ออกแบบ")}">
-          <label class="chk"><input type="checkbox" data-i-all ${d.rows.length && d.rows.every((r) => ISEL.has(r.product_id)) ? "checked" : ""}> ${Z("全选", "เลือกทั้งหมด")}</label>
+          <label class="chk"><input type="checkbox" data-i-all ${d.shown.length && d.shown.every((r) => ISEL.has(r.product_id)) ? "checked" : ""}> ${Z("全选", "เลือกทั้งหมด")}</label>
           <span class="cur-sp"></span>${!ext.online ? `<span class="small warn-t">⚠ ${Z("没有在线的扩展，模型文件不会下载", "ไม่มีส่วนขยายออนไลน์ ไฟล์จะไม่ถูกดาวน์โหลด")}（${EXT_TIP()}）</span>` : `<span class="small ok">● ${Z("扩展在线", "ส่วนขยายออนไลน์")}</span>`}</div>
-        ${d.rows.length ? `<div class="cur-cards">${d.rows.map(inboxCard).join("")}</div>`
-          : UX.empty(IF === "all" && !IQ ? Z("采集箱是空的。点上面的「＋ 贴链接采集」，或在候选池点「采用」、在模型网站上点扩展的「＋ 采集」。", "กล่องเก็บว่าง กด「＋ วางลิงก์เพื่อเก็บ」ด้านบน หรือกด「ใช้」ในคลังผู้สมัคร / 「＋ เก็บ」บนเว็บโมเดล")
+        ${d.shown.length ? `<div class="cur-cards">${d.shown.map(inboxCard).join("")}</div>`
+          : UX.empty(!Object.keys(IGS).length && !IQ ? Z("采集箱是空的。点上面的「＋ 贴链接采集」，或在候选池点「采用」、在模型网站上点扩展的「＋ 采集」。", "กล่องเก็บว่าง กด「＋ วางลิงก์เพื่อเก็บ」ด้านบน หรือกด「ใช้」ในคลังผู้สมัคร / 「＋ เก็บ」บนเว็บโมเดล")
             : Z("这个文件夹里没有", "ไม่มีในโฟลเดอร์นี้"))}
       </div></div>`;
+    GRP.bind(box.querySelector("[data-i-panel]"), spec, () => { IV = 0; ISEL.clear(); render(); });
   }
   function inboxCard(r) {
     const g = (IN.folders.groups || []).filter((x) => r.groups.map(String).includes(String(x.id)));
@@ -229,7 +327,7 @@
         <div><span class="mono" data-p360="${esc(r.product_id)}" data-notr>${esc(r.product_id)}</span> <b data-notr>${esc(r.name || r.title_original)}</b>${r.score != null ? ` <span class="cur-sc ${scTone(r.score)}" title="${esc(Z("推荐分", "คะแนนแนะนำ"))}">${Math.round(r.score)}</span>` : ""}</div>
         <div class="small muted">${r.url ? link(r.url, r.platform || r.url) : ""}${r.author ? ` · <span data-notr>${esc(r.author)}</span>` : ""}${r.category ? ` · <span data-notr>${esc(r.category)}</span>` : ""}${g.map((x) => ` · 📁 <span data-notr>${esc(x.name)}</span>`).join("")}${r.adopted_at ? ` · ${fmtTime(r.adopted_at).slice(0, 10)}` : ""}</div>
         ${r.title_th ? `<div class="small clamp1" data-notr>${esc(r.title_th)}</div>` : ""}
-        <div class="cur-chips">${chipFiles(r.files)} ${chipCopy(r.copy)} ${chipLic(r)} ${chipImg(r)}${r.ip ? " " + pill(Z("侵权待确认", "รอยืนยันลิขสิทธิ์"), "bad") : ""}${r.model ? " " + pill("🧊 " + Z("3D 模型", "โมเดล 3D"), "ok") : ""}</div>
+        <div class="cur-chips">${chipFiles(r.files)} ${chipCopy(r.copy)} ${chipLic(r)} ${chipImg(r)}${r.ip ? " " + pill(Z("侵权待确认", "รอยืนยันลิขสิทธิ์"), "bad") : ""}${r.model ? " " + pill("🧊 " + Z("3D 模型", "โมเดล 3D"), "ok") : ""}${Object.keys(r.marks || {}).map((k) => " " + pill(k === "into" ? "➜ " + Z("要转入", "ต้องย้ายเข้า") : "👀 " + Z("再看看", "ดูอีกที"), "warn")).join("")}${r.multi ? " " + pill("🎨 AMS", "warn") : ""}</div>
       </div>
       <div class="cur-ic-act">
         <button class="mini primary-lite" data-c-prod="${esc(r.product_id)}">✏ ${Z("编辑", "แก้ไข")}</button>
@@ -243,6 +341,14 @@
   async function inboxAction(action, ids, btn) {
     if (!ids.length) return toast(Z("先勾选", "เลือกก่อน"), true);
     if (action === "folder") return moveFolder(ids);
+    if (action.startsWith("mk_")) {
+      const run0 = async () => {
+        if (action === "mk_off") { for (const m of ["into", "later"]) await api("/api/goods/marks", { json: { ids, mark: m, on: false, scope: "inbox" } }); }
+        else await api("/api/goods/marks", { json: { ids, mark: action.slice(3), on: true, scope: "inbox" } });
+        ids.forEach((x) => ISEL.delete(x)); toast(Z("已更新标记", "อัปเดตเครื่องหมายแล้ว")); await show(CUR);
+      };
+      return btn ? busy(btn, run0) : run0();
+    }
     if (action === "delete" && !confirm(Z(`删除 ${ids.length} 个采集的产品草稿？图片、模型文件一起删；候选池里标成「已忽略」，以后还能恢复重新采用。`, `ลบสินค้าฉบับร่าง ${ids.length} รายการ? รูปและไฟล์จะถูกลบด้วย ในคลังผู้สมัครจะเป็น「ข้ามแล้ว」 กู้คืนได้ภายหลัง`))) return;
     const run = async () => {
       const r = await api("/api/cur/inbox/action", { json: { action, ids } });
@@ -489,6 +595,7 @@
     if ((b = t("[data-ux-go]"))) {
       const g = b.dataset.uxGo;
       if (g.startsWith("tab:")) return;
+      CGS = {}; CV = 0;
       if (g === "cand:hi") Object.assign(FC, { min: String(OV.alert_score || 70), ex: "", new: "", bad: "" });
       else if (g === "cand:new") Object.assign(FC, { new: "1", min: "0", bad: "" });
       else if (g === "cand:ex") Object.assign(FC, { ex: "1", status: "all", min: "0", bad: "" });
@@ -510,6 +617,15 @@
     if ((b = t("[data-c-badonly]"))) { FC.bad = FC.bad ? "" : "1"; if (FC.bad) Object.assign(FC, { ex: "1", status: "all", min: "0" }); LSset("fc", FC); return render(); }
     if ((b = t("[data-c-all]"))) { s.querySelectorAll("[data-c-sel]").forEach((x) => { x.checked = b.checked; (b.checked ? SEL.add(+x.dataset.cSel) : SEL.delete(+x.dataset.cSel)); }); return floatBar(); }
     if ((b = t("[data-c-sel]"))) { (b.checked ? SEL.add(+b.dataset.cSel) : SEL.delete(+b.dataset.cSel)); return floatBar(); }
+    if ((b = t("[data-c-gclear]"))) { CGS = {}; CV = 0; return render(); }
+    if ((b = t("[data-c-saveview]"))) {
+      const nm = prompt(Z("视图名称（例如：高分 MakerWorld 新品）", "ชื่อมุมมอง")); if (!nm) return;
+      try { const r = await api("/api/goods/views", { json: { name: nm, scope: "cand", state: { sel: { ...CGS }, fc: { ...FC } } } }); CVIEWS = r.views; toast(Z("已保存视图", "บันทึกมุมมองแล้ว")); } catch (err) { toast(err.message, true); }
+      return render();
+    }
+    if (CUR === "cur_cand" && (b = t("[data-grp-vdel]"))) { e.stopPropagation(); const r = await api(`/api/goods/views/${b.dataset.grpVdel}?scope=cand`, { method: "DELETE" }); CVIEWS = r.views; if (CV === +b.dataset.grpVdel) CV = 0; return render(); }
+    if (CUR === "cur_cand" && (b = t("[data-grp-view]"))) { const v = CVIEWS.find((x) => x.id === +b.dataset.grpView); if (v) { CGS = { ...((v.state || {}).sel || {}) }; Object.assign(FC, (v.state || {}).fc || {}); CV = v.id; SEL.clear(); } return render(); }
+    if ((b = t("[data-c-clean]"))) return cleanDialog();
     if ((b = t("[data-c-bulk]"))) {
       const ids = [...SEL];
       if (b.dataset.cBulk === "clear") { SEL.clear(); return render(); }
@@ -517,7 +633,7 @@
       return busy(b, async () => {
         if (b.dataset.cBulk === "collect") toast(collectMsg(await api("/api/cur/candidates/adopt", { json: { ids } })));
         else if (b.dataset.cBulk === "reread") toast(rereadMsg(await api("/api/cur/candidates/recollect", { json: { ids } })));
-        else await api("/api/cur/candidates/status", { json: { ids, status: "ignored" } });
+        else await api("/api/cur/candidates/status", { json: { ids, status: b.dataset.cBulk === "later" ? "later" : b.dataset.cBulk === "seen" ? "seen" : "ignored" } });
         SEL.clear();
         await show(CUR);
       });
@@ -530,13 +646,21 @@
     }
     if ((b = t("[data-c-prod]"))) { e.stopPropagation(); if (window.openProduct) return openProduct(b.dataset.cProd, true); return goTab("library"); }
     // 采集箱
+    if ((b = t("[data-i-gclear]"))) { IGS = {}; IV = 0; IQ = ""; ISEL.clear(); return render(); }
+    if ((b = t("[data-i-saveview]"))) {
+      const nm = prompt(Z("视图名称（例如：高分待核许可）", "ชื่อมุมมอง")); if (!nm) return;
+      try { await api("/api/goods/views", { json: { name: nm, scope: "inbox", state: { sel: { ...IGS }, q: IQ } } }); toast(Z("已保存视图", "บันทึกมุมมองแล้ว")); } catch (err) { toast(err.message, true); }
+      return render();
+    }
+    if ((b = t("[data-grp-vdel]"))) { e.stopPropagation(); await api(`/api/goods/views/${b.dataset.grpVdel}?scope=inbox`, { method: "DELETE" }); if (IV === +b.dataset.grpVdel) IV = 0; return render(); }
+    if ((b = t("[data-grp-view]"))) { const v = ((IN && IN.views) || []).find((x) => x.id === +b.dataset.grpView); if (v) { IGS = { ...((v.state || {}).sel || {}) }; IQ = (v.state || {}).q || ""; IV = v.id; ISEL.clear(); } return render(); }
     if ((b = t("[data-i-folder]"))) { IF = b.dataset.iFolder; LSset("ifolder", IF); ISEL.clear(); return render(); }
     if ((b = t("[data-i-newfolder]"))) {
       const n = prompt(Z("新文件夹名称（例如：猫用品、车载、待拍照）", "ชื่อโฟลเดอร์ใหม่")); if (!n) return;
       try { await api("/api/groups", { json: { name: n } }); render(); } catch (err) { toast(err.message, true); }
       return;
     }
-    if ((b = t("[data-i-all]"))) { (IN ? IN.rows : []).forEach((r) => (b.checked ? ISEL.add(r.product_id) : ISEL.delete(r.product_id))); s.querySelectorAll("[data-i-sel]").forEach((x) => { x.checked = b.checked; x.closest(".cur-ic").classList.toggle("sel", b.checked); }); return floatBar(); }
+    if ((b = t("[data-i-all]"))) { (IN ? IN.shown : []).forEach((r) => (b.checked ? ISEL.add(r.product_id) : ISEL.delete(r.product_id))); s.querySelectorAll("[data-i-sel]").forEach((x) => { x.checked = b.checked; x.closest(".cur-ic").classList.toggle("sel", b.checked); }); return floatBar(); }
     if ((b = t("[data-i-sel]"))) { (b.checked ? ISEL.add(b.dataset.iSel) : ISEL.delete(b.dataset.iSel)); b.closest(".cur-ic").classList.toggle("sel", b.checked); return floatBar(); }
     if ((b = t("[data-i-bulk]"))) { if (b.dataset.iBulk === "clear") { ISEL.clear(); return render(); } return inboxAction(b.dataset.iBulk, [...ISEL], b); }
     if ((b = t("[data-i-to]"))) return inboxAction("to_library", [b.dataset.iTo], b);
@@ -669,11 +793,15 @@
   if (window.NAV) {
     NAV.keep(SUBS.map(([k]) => k).concat("curate"), {
       form: false,
-      get: () => ({ IF, IQ, FC: { ...FC }, QF: { ...QF } }),
+      get: () => ({ IF, IQ, IGS: { ...IGS }, IV, CGS: { ...CGS }, CV, FC: { ...FC }, QF: { ...QF } }),
       set: (s) => {
         if (!s) return;
         if (s.IF != null) { IF = s.IF; LSset("ifolder", IF); }
         if (s.IQ != null) IQ = s.IQ;
+        if (s.IGS) IGS = { ...s.IGS };
+        if (s.IV != null) IV = s.IV;
+        if (s.CGS) CGS = { ...s.CGS };
+        if (s.CV != null) CV = s.CV;
         if (s.FC) FC = Object.assign(FC, s.FC);
         if (s.QF) QF = Object.assign(QF, s.QF);
       },

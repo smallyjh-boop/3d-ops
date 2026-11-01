@@ -12,7 +12,7 @@ import time
 
 from core import store
 
-from . import db, sites, watch
+from . import db, rules, sites, watch
 
 
 def exported(p):
@@ -38,8 +38,9 @@ def migrate(force=False):
     return n
 
 
-def _products():
-    out = []
+def _products(done=False):
+    """采集箱里的产品；done=True 时再加上最近转入产品库的（「已转入」分组用，最近 200 个）。"""
+    out, gone = [], []
     for item in store.list_products():
         try:
             p = store.load(item["id"])
@@ -47,7 +48,10 @@ def _products():
             continue
         if p.get("inbox"):
             out.append(p)
-    return out
+        elif done and p.get("inbox_out_at"):
+            gone.append(p)
+    gone.sort(key=lambda p: -(p.get("inbox_out_at") or 0))
+    return out + gone[:200]
 
 
 def count():
@@ -83,13 +87,56 @@ def row(p, cands=None, names=None, ext=None, ai=True):
     lc = p.get("license_check") or {}
     cd = cands.get(p["id"], {})
     img = next((f"/files/{p['id']}/{'out' if i.get('processed') else 'raw'}/{i['file']}" for i in p.get("images") or [] if i.get("file")), "")
-    return {"product_id": p["id"], "name": p.get("name_zh") or "", "title_th": cp.get("title_th") or "", "title_original": s.get("title_original") or "",
+    r = {"product_id": p["id"], "name": p.get("name_zh") or "", "title_th": cp.get("title_th") or "", "title_original": s.get("title_original") or "",
             "url": s.get("source_url") or "", "platform": s.get("platform") or "", "author": s.get("author") or "",
             "thumb": img or cd.get("thumb") or "", "score": cd.get("score"), "category": _cat(p, cands, names),
             "adopted_at": s.get("imported_at") or 0, "groups": p.get("groups") or [],
             "files": fs, "copy": copy, "license": lc.get("status") or "", "license_auto": lc.get("auto") or "", "license_name": lc.get("name") or "",
             "images": image_state(p), "n_images": len(p.get("images") or []), "model": bool(p.get("model")),
-            "specs": len(p.get("specs") or []), "ip": (p.get("ip_risk") or {}).get("status") == "pending"}
+            "specs": len(p.get("specs") or []), "ip": (p.get("ip_risk") or {}).get("status") == "pending",
+            "inbox": bool(p.get("inbox")), "site": s.get("platform") or "", "multi": bool(cd.get("multi")), "bad": cd.get("bad") or "",
+            "marks": {k: v for k, v in (p.get("marks") or {}).items() if k in ("into", "later")}}
+    r["gk"] = gkeys(r)
+    return r
+
+
+def gkeys(r):
+    """自动分组键（v2.53，和产品库同一套做法）：进度（互斥）· 待处理（叠加）· 分数段 · 来源网站 · 类目 · 标记 · 标签。"""
+    fs = r["files"]
+    gk = set()
+    if not r["inbox"]:
+        gk.add("pg:done")
+    elif not fs["ok"]:
+        gk.add("pg:dl")
+    elif r["copy"] != "done":
+        gk.add("pg:copy")
+    elif r["license"] == "pending":
+        gk.add("pg:lic")
+    else:
+        gk.add("pg:ready")
+    if r["inbox"]:
+        todo = set()
+        if fs["failed"]:
+            todo.add("dlfail")
+        if r["bad"] or fs.get("collect") == "failed":
+            todo.add("suspect")
+        if r["images"] == "source":
+            todo.add("srcimg")
+        if r["multi"]:
+            todo.add("ams")
+        if r["ip"] or r["license_auto"] == "禁止商用":
+            todo.add("risk")
+        gk.update("td:" + x for x in todo)
+        if todo:
+            gk.add("td:any")
+        if r["score"] is not None:
+            gk.add("sc:high" if r["score"] >= 70 else "sc:mid")
+        if r["site"]:
+            gk.add("site:" + r["site"])
+        gk.add("ct:" + r["category"] if r["category"] else "ct:none")
+        gk.update("mk:" + k for k in r["marks"])
+        gk.update(f"tg:{g}" for g in r["groups"])
+    return sorted(gk)
 
 
 def listing(args):
@@ -99,11 +146,17 @@ def listing(args):
     migrate()
     names = {x["id"]: x["name"] for x in categories.library()}
     c = db.conn()
-    cands = {r["product_id"]: dict(r) for r in c.execute("SELECT product_id, category, score, thumb FROM cur_candidates WHERE product_id<>''")}
+    cands = {}
+    for x in c.execute("SELECT product_id, category, score, thumb, ai, capture_bad FROM cur_candidates WHERE product_id<>''"):
+        d = dict(x)
+        d["multi"] = bool(rules.flags(db.jl(d.pop("ai", ""))))
+        d["bad"] = d.pop("capture_bad", "") or ""
+        cands[x["product_id"]] = d
     ext = watch.ext_status()
     ai = cand.ai_on()
-    rows = [row(p, cands, names, ext, ai) for p in _products()]
-    rows.sort(key=lambda r: -(r["adopted_at"] or 0))
+    allrows = [row(p, cands, names, ext, ai) for p in _products(done=True)]
+    allrows.sort(key=lambda r: -(r["adopted_at"] or 0))
+    rows = [r for r in allrows if r["inbox"]]
     cats, groups = {}, {}
     for r in rows:
         cats[r["category"] or ""] = cats.get(r["category"] or "", 0) + 1
@@ -114,7 +167,9 @@ def listing(args):
                "cats": [{"name": k, "th": CATEGORY_TH.get(k, ""), "n": v} for k, v in sorted(cats.items(), key=lambda x: -x[1]) if k],
                "groups": [{"id": g["id"], "name": g["name"], "n": groups.get(g["id"], 0)} for g in extras.groups()]}
     f = str(args.get("folder") or "all")
-    if f == "nocat":
+    if args.get("all"):                 # v2.53：左边的自动分组在页面上筛（要整个列表）；「已转入」的也带上
+        rows = allrows
+    elif f == "nocat":
         rows = [r for r in rows if not r["category"]]
     elif f.startswith("cat:"):
         rows = [r for r in rows if r["category"] == f[4:]]
@@ -126,7 +181,16 @@ def listing(args):
     k = {"total": folders["all"], "lic_pending": sum(1 for r in rows if r["license"] == "pending"),
          "no_files": sum(1 for r in rows if not r["files"]["ok"]), "no_copy": sum(1 for r in rows if r["copy"] != "done"),
          "source_img": sum(1 for r in rows if r["images"] == "source")}
-    return {"rows": rows, "folders": folders, "kpi": k, "ext": ext, "ai": ai}
+    from core import prodgroups
+    prodgroups.migrate()
+    n = {}
+    for r in allrows:
+        for x in r["gk"]:
+            n[x] = n.get(x, 0) + 1
+    summary = {"total": folders["all"], "n": n, "sites": sorted(({"key": x, "n": v} for x, v in n.items() if x.startswith("site:")), key=lambda z: -z["n"]),
+               "cats": [{"key": "ct:" + c["name"], "name": c["name"], "th": c["th"], "n": c["n"]} for c in folders["cats"]]}
+    return {"rows": rows, "folders": folders, "kpi": k, "ext": ext, "ai": ai, "summary": summary, "views": prodgroups.views("inbox"),
+            "tags": prodgroups.tags()}
 
 
 def to_library(ids, who=""):

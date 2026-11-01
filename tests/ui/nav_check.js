@@ -61,20 +61,20 @@ async function curateFlow(pg) {
   ok(d.ids.length >= 1, `inbox has products ${d.ids}`);
   const pid = d.ids[0];
   await pg.evaluate(() => goTab("cur_inbox"));
-  await waitFor(pg, () => document.querySelector("#tab-curate [data-i-folder]"));
-  await pg.click(`#tab-curate [data-i-folder="g:${d.gid}"]`);
-  await waitFor(pg, (g) => { const x = document.querySelector("#tab-curate .cur-fo.on"); return x && x.dataset.iFolder === "g:" + g; }, d.gid);
+  await waitFor(pg, () => document.querySelector("#tab-curate [data-grp-k]"));
+  await pg.click(`#tab-curate [data-grp-k="mk|tg:${d.gid}"]`);        // v2.53：自动分组面板里的自定义标签
+  await waitFor(pg, (g) => { const x = document.querySelector("#tab-curate .grp3.on[data-grp-k=\"mk|tg:" + g + "\"]"); return !!x; }, d.gid);
   await pg.fill("#tab-curate [data-i-q]", pid);
   await waitFor(pg, (p) => { const c = document.querySelectorAll("#tab-curate .cur-ic"); return c.length >= 1 && [...c].every((x) => x.textContent.includes(p)); }, pid);
   await sleep(300);
   let y = await pg.evaluate(() => { const m = document.documentElement.scrollHeight - innerHeight; const y = Math.max(0, Math.min(m, Math.round(m * 0.7))); scrollTo(0, y); return Math.round(scrollY); });
   ok(y > 40, `inbox page scrolled (${y})`);
   const check = async (how) => {
-    const s = await pg.evaluate(() => ({ tab: CUR_TAB, folder: (document.querySelector("#tab-curate .cur-fo.on") || {}).dataset?.iFolder,
+    const s = await pg.evaluate(() => ({ tab: CUR_TAB, folder: ((document.querySelector("#tab-curate .grp3.on[data-grp-k^=\"mk|\"]") || {}).dataset || {}).grpK,
       q: (document.querySelector("#tab-curate [data-i-q]") || {}).value, y: Math.round(scrollY),
       hl: [...document.querySelectorAll("#tab-curate .nav-hl")].map((x) => x.textContent.slice(0, 80)) }));
     ok(s.tab === "cur_inbox", `${how}: back in 采集箱 (${s.tab})`);
-    ok(s.folder === "g:" + d.gid, `${how}: same folder (${s.folder})`);
+    ok(s.folder === "mk|tg:" + d.gid, `${how}: same folder (${s.folder})`);
     ok(s.q === pid, `${how}: same search (${s.q})`);
     ok(Math.abs(s.y - y) <= 4, `${how}: same scroll (${s.y} vs ${y})`);
     ok(s.hl.some((t) => t.includes(pid)), `${how}: edited card highlighted ${JSON.stringify(s.hl)}`);

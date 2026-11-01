@@ -10,17 +10,26 @@ PATTERNS = []
 
 
 # ---------------- 产品 ----------------
-@bp.get("/api/products")
-def products():
+def _rows(want):
+    """产品库列表（含 v2.53 自动分组键 gk、手动标记 marks）。want：""（不要采集箱的）/ "1"（只要采集箱）/ "all"。"""
+    from core import prodgroups, pricing as _pr, stockcalc
+    from . import groups as _g
     cfg = load_config()
+    S = prodgroups.settings()
     lib = categories.library()
     names = {c["id"]: c["name"] for c in lib}
     names_th = {c["id"]: " > ".join(c["path"].split(" > ")[-2:]) for c in lib if c["path"]}
-    out = []
+    paths = {c["id"]: c["path"] or c["name"] for c in lib}
+    out, ps = [], {}
     from core import modules as _mods
     pub = _mods.public("listing")
     online = pub.online_shops() if pub else {}         # v2.44：在哪些店铺在线（上架模块的在线商品）
-    want = request.args.get("inbox") or ""          # v2.50.1 选品的采集箱：默认不算（all = 都要，1 = 只要采集箱里的）
+    first_live = pub.online_first_live() if pub and hasattr(pub, "online_first_live") else {}
+    try:
+        avail = stockcalc.available(cfg, fresh=False)
+    except Exception:  # noqa: BLE001
+        avail = None
+    now = time.time()
     for item in store.list_products():
         p = store.load(item["id"])
         if (want == "1" and not p.get("inbox")) or (want not in ("1", "all") and p.get("inbox")):
@@ -47,8 +56,74 @@ def products():
             "thumb": next((f"/files/{p['id']}/{'out' if im.get('processed') else 'raw'}/{im['file']}" for im in p.get("images", []) if im.get("file")), ""),
         })
         out.append(item)
+        ps[p["id"]] = (p, errs)
     _enrich_products(out)
-    return jsonify(out)
+    for item in out:           # 自动分组（要销量 / 切片状态，所以放在 _enrich_products 后面）
+        p, errs = ps[item["id"]]
+        try:
+            prices = _pr.price_product(cfg, p)
+        except Exception:  # noqa: BLE001
+            prices = []
+        smin = None
+        if any(o.get("status") == "live" for o in item["online"]) or (item["lz"]["status"] == "live") or (item["sp"]["status"] == "live"):
+            try:
+                comp = stockcalc.compute(p, cfg, avail)
+                vals = [r["stock"] for r in comp if isinstance(r.get("stock"), (int, float))]
+                smin = min(vals) if vals else None
+                item["sku_stock"] = {(r.get("sku") or "").upper(): r["stock"] for r in comp if r.get("sku") and isinstance(r.get("stock"), (int, float))}
+            except Exception:  # noqa: BLE001
+                smin = None
+        item["err_txt"] = [str(x) for x in errs][:30]
+        item["sp_err_txt"] = [str(x) for x in _check_shopee(cfg, p)[0]][:30] if item["sp_errors"] else []
+        item["title_len"] = len((p.get("copy") or {}).get("title_th") or "")
+        item["white_bg"] = bool(p.get("white_bg"))
+        item["n_img"] = len(p.get("images") or [])
+        item["sku_price"] = {(v.get("sku") or "").upper(): pr.get("final_price") for v, pr in zip(p.get("variants") or [], prices) if v.get("sku")}
+        item["price_sig"] = prodgroups.sig_price(prices)
+        item["img_sig"] = prodgroups.sig_img(p)
+        _g.classify(item, p, errs, prices, paths.get((p.get("category") or {}).get("id"), ""), smin, first_live.get(p["id"]), S, now)
+    _g.finish(out, S)
+    return out
+
+
+_ROWS_CACHE = {}
+
+
+def cached_rows():
+    """产品库全部（不含采集箱）的行，3 秒内、产品没改过就用缓存（上架工作台的自动分组也用）。"""
+    key = store.REV[0]
+    hit = _ROWS_CACHE.get("v")
+    if hit and hit[0] == key and time.time() - hit[1] < 3:
+        return hit[2]
+    rows = [i for i in _rows("all") if not i.get("inbox")]
+    _ROWS_CACHE["v"] = (key, time.time(), rows)
+    return rows
+
+
+@bp.get("/api/products")
+def products():
+    return jsonify(_rows(request.args.get("inbox") or ""))
+
+
+_LIB_CACHE = {}
+
+
+@bp.get("/api/goods/library")
+def goods_library():
+    """产品库一次取完：产品 + 分组键 + 各分组个数 + 保存的视图 + 标签 + 阈值（服务器算，3 秒内、产品没改过就用缓存）。"""
+    from core import prodgroups
+    from . import groups as _g
+    prodgroups.migrate()
+    key = (store.REV[0], request.args.get("inbox") or "all")
+    hit = _LIB_CACHE.get("v")
+    if hit and hit[0] == key and time.time() - hit[1] < 3 and not request.args.get("fresh"):
+        return jsonify(hit[2])
+    allr = _rows("all")
+    rows = [i for i in allr if not i.get("inbox")]
+    res = {"items": rows, "inbox": len(allr) - len(rows), "summary": _g.summary(rows),
+           "views": prodgroups.views("goods"), "tags": prodgroups.tags(), "settings": prodgroups.settings()}
+    _LIB_CACHE["v"] = (key, time.time(), res)
+    return jsonify(res)
 
 
 @bp.post("/api/products/new")
@@ -934,6 +1009,53 @@ def groups_assign():
     b = request.get_json(force=True) or {}
     n = extras.group_assign(b.get("ids") or [], int(b.get("group") or 0), bool(b.get("add", True)))
     return jsonify({"changed": n, "groups": extras.groups()})
+
+
+@bp.post("/api/goods/marks")
+def goods_marks():
+    """手动标记：{ids, mark: upload|edit, on, note}。"""
+    from core import prodgroups
+    b = request.get_json(force=True) or {}
+    try:
+        n = prodgroups.set_mark([str(x) for x in b.get("ids") or []][:2000], b.get("mark"), bool(b.get("on", True)), b.get("note"),
+                                _uname(), b.get("scope") or "goods")
+    except ValueError as e:
+        return err(str(e), 400)
+    return jsonify({"changed": n})
+
+
+@bp.get("/api/goods/views")
+def goods_views():
+    from core import prodgroups
+    return jsonify({"views": prodgroups.views(request.args.get("scope") or "goods")})
+
+
+@bp.post("/api/goods/views")
+def goods_views_save():
+    from core import prodgroups
+    b = request.get_json(force=True) or {}
+    try:
+        return jsonify({"views": prodgroups.view_save(b.get("name"), b.get("state"), b.get("scope") or "goods", _uname())})
+    except ValueError as e:
+        return err(str(e), 400)
+
+
+@bp.delete("/api/goods/views/<int:vid>")
+def goods_views_del(vid):
+    from core import prodgroups
+    return jsonify({"views": prodgroups.view_delete(vid, request.args.get("scope") or "goods")})
+
+
+@bp.post("/api/goods/group-settings")
+def goods_group_settings():
+    from core import prodgroups
+    if not auth.is_owner():
+        return err("只有老板能改阈值", 403)
+    try:
+        return jsonify({"settings": prodgroups.save_settings(request.get_json(force=True) or {})})
+    except ValueError as e:
+        return err(str(e), 400)
+
 
 
 # ---------------- 规格确认、按耗材算的库存（v2.16） ----------------

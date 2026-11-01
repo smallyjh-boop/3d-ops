@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from core.config import load_config
 
-from . import db, rules, sites
+from . import pool, db, rules, sites
 
 
 def ai_on(cfg=None):
@@ -96,6 +96,11 @@ def capture_check(url, title, author="", thumb="", thumb_w=0):
     return ""
 
 
+GONE_BADGE = {"score": 0, "parts": {}, "excluded": "已忽略 / 已清理", "excluded_th": "", "category": "", "category_th": "", "est": "", "measured": False,
+              "single": None, "flags": [], "reason": "", "reason_th": "", "keywords": [], "price": "", "ai": False, "ai_error": "", "status": "ignored",
+              "product_id": "", "capture_bad": "", "capture_bad_th": "", "refreshing": False}
+
+
 def upsert(items, who="", watch_id=0):
     """扩展交来列表页的卡片：存下来、打分。返回 {原链接: 角标}。
     卡片读错了（标题是作者名、图是头像）：标「采集可能出错」不交给 AI；已经存着正确资料的不会被错的覆盖。"""
@@ -111,6 +116,9 @@ def upsert(items, who="", watch_id=0):
         if not k:
             continue
         row = c.execute("SELECT * FROM cur_candidates WHERE skey=?", (k,)).fetchone()
+        if not row and pool.is_gone(k):          # v2.53：清理掉 / 忽略后清掉的，只留指纹，不再存
+            out[str(it.get("url"))] = GONE_BADGE
+            continue
         metrics = {str(a)[:20]: str(b)[:20] for a, b in (it.get("metrics") or {}).items()} if isinstance(it.get("metrics"), dict) else {}
         if row:
             old = db.jl(row["metrics"])
@@ -128,6 +136,8 @@ def upsert(items, who="", watch_id=0):
             reset_ai = True                                                       # 原来读错了，现在对了：重新让 AI 判断
         ai = {} if reset_ai else (db.jl(row["ai"]) if row else {})
         pp, ex, cat, sc = compute(cfg, {"title": title, "author": author, "metrics": metrics}, ai, db.jl(row["real"]) if row else None)
+        if (ex or sc < pool.settings()["junk_score"]) and not (row and (row["product_id"] or row["status"] == "adopted")):
+            thumb, author, metrics, pp = "", "", {}, {}              # v2.53：规则排除 / 分数很低的只留指纹 + 标题，不存图片和细节
         if row:
             c.execute("UPDATE cur_candidates SET url=?, title=?, thumb=CASE WHEN ?<>'' THEN ? ELSE thumb END, author=?, metrics=?, score=?, parts=?, "
                       "excluded=?, category=?, last_seen=?, watch_id=CASE WHEN watch_id=0 THEN ? ELSE watch_id END, capture_bad=? WHERE skey=?",
@@ -263,7 +273,7 @@ def listing(args, owner=True):
         where.append("platform=?"); a.append(args["platform"])
     if args.get("cat"):
         where.append("category=?"); a.append(args["cat"])
-    if str(args.get("ex")) != "1":
+    if str(args.get("ex")) != "1" and not args.get("gk"):
         where.append("excluded=''")
     if str(args.get("new")) == "1":
         where.append("new_at>=?"); a.append(db.day_start())
@@ -273,7 +283,13 @@ def listing(args, owner=True):
         where.append("capture_bad<>''")
     if args.get("q"):
         where.append("(title LIKE ? OR author LIKE ?)"); a += [f"%{args['q']}%"] * 2
-    st = args.get("status") or "open"
+    gk = [x for x in str(args.get("gk") or "").split(",") if x]
+    alert = rules.tf(load_config().get("cur_alert_score"), 70)
+    idx, gn = pool.group_index(alert)
+    if gk:                                        # v2.53 自动分组：几个并起来；这时状态由分组决定
+        ok_ids = [i for i, g in idx.items() if all(x in g for x in gk)]
+        where.append(f"id IN ({','.join(str(int(i)) for i in ok_ids) or '0'})")
+    st = "all" if gk else (args.get("status") or "open")
     if st == "open":
         where.append("status=''")
     elif st != "all":
@@ -305,6 +321,8 @@ def listing(args, owner=True):
     cats = [{"name": r[0], "th": rules.CATEGORY_TH.get(r[0], r[0])} for r in c.execute("SELECT DISTINCT category FROM cur_candidates WHERE category<>'' ORDER BY category")]
     res = {"rows": out, "kpi": k, "radar": demand.has_radar(), "hist": hist, "reasons": reasons, "cats": cats, "ai": ai_on(cfg), "calib": calib(),
            "alert_score": rules.tf(cfg.get("cur_alert_score"), 70)}
+    res["groups"] = pool.summary(gn)
+    res["pool"] = pool.kpis()
     if not owner:
         for r in res["rows"]:
             r["parts"].pop("profit", None)
@@ -313,8 +331,11 @@ def listing(args, owner=True):
 
 
 def set_status(ids, status):
-    if status not in ("", "ignored"):
+    if status not in ("", "ignored", "later", "seen"):
         raise ValueError("状态不对")
+    if status == "seen":
+        return pool.set_seen(ids)
     c = db.conn()
-    c.executemany("UPDATE cur_candidates SET status=? WHERE id=? AND status<>'adopted'", [(status, int(i)) for i in ids])
+    c.executemany("UPDATE cur_candidates SET status=?, seen_at=CASE WHEN ?<>'' THEN ? ELSE seen_at END WHERE id=? AND status<>'adopted'",
+                  [(status, status, time.time(), int(i)) for i in ids])
     c.commit()
