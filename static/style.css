@@ -851,20 +851,40 @@ tr.nav-hl>td{animation:navhl 2.4s ease-out}
 @media (max-width:900px){.lib-groups,.lw-groups,.cur-folders{max-width:100%;overflow:hidden}.grp3-top,.grp3-shops{flex-wrap:nowrap;overflow-x:auto}}
 #lw-shop{width:auto;min-width:140px;max-width:220px}
 /* v2.53：打印机设置表格不撑出卡片（窄屏横向滚动），输入框不换行挤压 */
-#printer-table{width:auto;min-width:100%}
-#printer-table td{white-space:nowrap}
-#printer-table th{white-space:normal;vertical-align:bottom;font-size:12px;line-height:1.25}
-#printer-table td,#printer-table th{padding-left:4px;padding-right:4px}
-#printer-table input:not([type=checkbox]),#printer-table select{padding:4px 6px;font-size:13px;min-width:0}
-#printer-table [data-p=code]{width:70px!important}
-#printer-table [data-p=note]{width:70px!important}
-#printer-table [data-p=tech]{width:72px!important}
-#printer-table [data-p=g_per_h]{width:48px!important}
-#printer-table [data-p=nozzle]{width:46px!important}
-#printer-table [data-p=plate]{width:88px}
-#printer-table td:last-child button{padding:3px 8px;font-size:12px}
-#printer-table [data-p=orca_machine],#printer-table [data-p=orca_process]{width:128px!important}
-#printer-table [data-p=orca_filament]{width:112px!important}
-#printer-table [data-p=name]{width:112px!important}
-#printer-table td:last-child{display:flex;flex-direction:column;gap:3px;align-items:stretch}
-#printer-table th:nth-child(5),#printer-table th:nth-child(6){width:44px}
+#tpl-table{width:auto;min-width:100%}
+#tpl-table td{white-space:nowrap}
+#tpl-table th{white-space:normal;vertical-align:bottom;font-size:12px;line-height:1.25}
+#tpl-table td,#tpl-table th{padding-left:4px;padding-right:4px}
+#tpl-table input:not([type=checkbox]),#tpl-table select{padding:4px 6px;font-size:13px;min-width:0}
+#tpl-table [data-p=code]{width:70px!important}
+#tpl-table [data-p=note]{width:70px!important}
+#tpl-table [data-p=tech]{width:72px!important}
+#tpl-table [data-p=g_per_h]{width:48px!important}
+#tpl-table [data-p=nozzle]{width:46px!important}
+#tpl-table [data-p=plate]{width:88px}
+#tpl-table td:last-child button{padding:3px 8px;font-size:12px}
+#tpl-table [data-p=orca_machine],#tpl-table [data-p=orca_process]{width:128px!important}
+#tpl-table [data-p=orca_filament]{width:112px!important}
+#tpl-table [data-p=name]{width:112px!important}
+#tpl-table td:last-child{display:flex;flex-direction:column;gap:3px;align-items:stretch}
+/* v2.54 生产 → 打印机：机群地图（每台一个色块）、列表、抽屉 */
+.fl-legend{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:6px;color:var(--muted)}
+.fl-lg{display:inline-flex;align-items:center;gap:4px}
+.fl-grp{margin:6px 0 10px}.fl-grp-h{margin-bottom:3px}
+.fl-tiles{display:flex;flex-wrap:wrap;gap:3px}
+.fl-t{display:inline-block;width:14px;height:14px;border-radius:3px;background:#d1d5db;cursor:pointer;box-sizing:border-box}
+.fl-t.fl-printing{background:var(--ux-ok)}.fl-t.fl-idle{background:#93c5fd}.fl-t.fl-error{background:var(--ux-bad)}
+.fl-t.fl-offline{background:var(--ux-warn)}.fl-t.fl-none{background:#e5e7eb}
+.fl-t.fl-pz{outline:2px dashed #6b7280;outline-offset:-2px}.fl-t.fl-mt{border:3px solid #7c3aed}.fl-t.fl-off{opacity:.35}
+.fl-t:hover{transform:scale(1.4)}
+.fl-filters{margin-bottom:6px}.fl-filters select,.fl-filters input{width:auto;max-width:100%}.fl-bulk select{width:auto}
+.fl-bulk{padding:6px 8px;background:#f8fafc;border:1px solid var(--line);border-radius:6px;margin-bottom:6px}
+.fl-table{min-width:820px}.fl-table tbody tr{cursor:pointer}.fl-table tbody tr:hover{background:#f8fafc}.fl-table tr.sel{background:#eff6ff}
+.fl-table td{vertical-align:top}.fl-bar{height:6px;margin:3px 0 1px;min-width:80px}
+.fl-pager{margin-top:6px;align-items:center}
+#fl-drawer{z-index:45}#fl-drawer.hidden{display:none}
+.fl-sec{border-top:1px solid var(--line);padding:8px 0}.fl-sec>summary{cursor:pointer;margin-bottom:6px}
+.fl-ovr tr.fl-has td{background:#fffbeb}.fl-ovr input,.fl-ovr select{width:100%;min-width:90px}
+.fl-test{border-left:4px solid var(--line);padding:6px 10px;margin-top:8px}
+.fl-dev input,.fl-dev select{padding:3px 5px;font-size:12px}
+@media (max-width:600px){.fl-din{padding:12px}.fl-filters input{width:100%!important}}

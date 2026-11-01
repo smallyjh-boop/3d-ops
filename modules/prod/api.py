@@ -6,7 +6,7 @@ from web.common import *  # noqa: F401,F403
 from core import trial
 
 bp = Blueprint("m_prod", __name__)
-PREFIXES = ['/api/print-files', '/api/trial', '/api/slicer', '/api/printers', '/api/printer-models', '/api/jobs', '/api/spools', '/api/materials', '/api/files', '/print/spools', '/print/jobs', '/api/sliced', '/api/runs', '/api/quality', '/api/production', '/api/maintenance', '/api/calib']
+PREFIXES = ['/api/fleet', '/print/fleet-labels', '/api/print-files', '/api/trial', '/api/slicer', '/api/printers', '/api/printer-models', '/api/jobs', '/api/spools', '/api/materials', '/api/files', '/print/spools', '/print/jobs', '/api/sliced', '/api/runs', '/api/quality', '/api/production', '/api/maintenance', '/api/calib']
 PATTERNS = [r"^/api/stock(/make)?$", '^/api/products/[^/]+/recipe(/slice)?$']
 
 
@@ -1126,3 +1126,6 @@ def stock_get():
 @bp.get("/api/maintenance")
 def maintenance_get():
     return jsonify({"printers": production.maintenance_status()})
+
+
+from . import fleet_api  # noqa: E402,F401  v2.54 打印机机群（同一个 bp）

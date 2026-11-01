@@ -56,7 +56,7 @@ def post_config():
     for k, v in incoming.items():
         if k not in cfg or k in ("template_defaults", "category_memory", "shopee_cat_map",
                                  "est_calibration", "est_calibration_n", "ai_providers", "ai_tasks", "ai_limits", "ai_prices",
-                                 "ai_v2", "ai_migrated", "scene_templates"):
+                                 "ai_v2", "ai_migrated", "scene_templates", "printer_models", "printer_workers", "_fleet254"):
             continue
         if k == "printers":
             if not isinstance(v, list) or not v:
@@ -88,8 +88,20 @@ def post_config():
                     clean[-1]["ams"] = pr.get("ams") not in (False, "false", "0", 0, "")
                 # 连接设置（IP/访问码）在打印机页单独保存：按机器编码保留原来的
                 prev = by_code.get(code) if code else (old_pr[i] if i < len(old_pr) and not old_pr[i].get("code") else None)
+                if prev is None and code and i < len(old_pr) and old_pr[i].get("code") \
+                        and old_pr[i]["code"] not in {str(x.get("code") or "").strip().upper() for x in v}:
+                    prev = old_pr[i]           # v2.54：同一行改了编码 = 同一台（稳定 id 不变）
                 if prev and prev.get("conn"):
                     clean[-1]["conn"] = prev["conn"]
+                if prev:
+                    # v2.54：v2.54 的字段（id、分组、位置、用途、专用生产单、暂停、单台覆盖）这里不改，原样保留；
+                    # 模板字段和读出来时一样 = 没改 → 继续跟随机型模板，改了才算这台的单独设置
+                    for kk in ("id", "group", "location", "role", "dedicated_po", "paused", "ovr", "_eff"):
+                        if kk in prev:
+                            clean[-1][kk] = prev[kk]
+                    if prev.get("name") != clean[-1]["name"]:
+                        clean[-1].pop("_eff", None)
+                        clean[-1]["ovr"] = {}
             codes_in = [p["code"] for p in clean if p["code"]]
             dup = {c for c in codes_in if codes_in.count(c) > 1}
             if dup:

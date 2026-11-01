@@ -22,14 +22,16 @@ MODULE = {
         {"tab": "materials", "mod": "inv", "zh": "耗材料卷", "th": "ม้วนฟิลาเมนต์", "roles": "owner,production", "ghost": True, "parent": "inventory"},
         {"tab": "stock", "mod": "inv", "zh": "成品备货", "th": "เตรียมสต็อกสินค้า", "roles": "owner,production", "ghost": True, "parent": "inventory"},
     ],
-    "owner_only": [("POST", r"^/api/print-files/\d+/confirm-printer$")],
+    # v2.54：打印机机群的写操作（添加 / 修改 / 批量 / 发现 / 导入 / 模板）只有老板能做；生产员工能看总览、详情、打标签
+    "owner_only": [("POST", r"^/api/print-files/\d+/confirm-printer$"), ("POST", r"^/api/fleet"), ("DELETE", r"^/api/fleet")],
     # v2.53：备货 / 试打 / 打印测试任务：生产角色也能用（接口里再核对一次角色：别的角色不行）
     "production_allow": [("POST", r"^/api/(jobs/stock|trial|trial/check-file|trial/job/\d+/result|trial/\d+/retry|printers/\d+/print-test)$"),
-                         ("GET", r"^/api/trial/(skus|printers|pending|history|stats|job/\d+)$")],
+                         ("GET", r"^/api/trial/(skus|printers|pending|history|stats|job/\d+)$"),
+                         ("GET", r"^/api/fleet(/meta|/printers/[^/]+)?$"), ("GET", r"^/print/fleet-labels$")],
     "settings_module": "orders",
     "settings": [("成品库存怎么用", [
         ("stock_auto_use", "订单的商品有成品库存时，自动「用库存发」（先占住数量，发货出库时才扣库存；不够的部分才排打印）", "bool")])],
     "config_defaults": {"stock_auto_use": True},
     "events": {"order.changed": events.on_order_changed, "chain.reschedule": events.on_reschedule},
-    "ui": {"inline": True, "html": "page.html", "eager_js": ["recipe.js", "trial.js", "prod.js", "files.js", "spools.js", "materials.js"], "page_js": [], "boot_js": []},
+    "ui": {"inline": True, "html": "page.html", "eager_js": ["recipe.js", "trial.js", "fleet.js", "prod.js", "files.js", "spools.js", "materials.js"], "page_js": [], "boot_js": []},
 }

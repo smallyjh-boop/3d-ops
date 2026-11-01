@@ -33,8 +33,9 @@
   }
   function show(name) {
     clearInterval(PR_TIMER); clearInterval(BOARD_TIMER);
+    if (window.FLEET) FLEET.stop();
     if (name === "production") { loadBoard(); BOARD_TIMER = setInterval(() => { if (!document.hidden && !$("#modal:not(.hidden)")) loadBoard().catch(() => {}); }, 20000); }
-    if (name === "printers") { loadPrinters(); PR_TIMER = setInterval(() => loadPrinters().catch(() => {}), 10000); }
+    if (name === "printers" && window.FLEET) FLEET.show();     // v2.54：打印机页 = 机群总览 + 抽屉（modules/prod/ui/fleet.js）
     if (name === "recipes") loadRecipes();
     if (name === "stock") loadStock();
     if (name === "quality") { loadQuality(); loadCalib().catch(() => {}); }
@@ -314,91 +315,23 @@
   });
 
   // ---------------- 打印机 ----------------
-  function prCard(p) {
-    const h = H();
-    const st = p.status || {};
-    const c = p.conn || {};
-    const own = h.isOwner();
-    const prog = st.state === "printing" || st.state === "paused";
-    const m = p.maintenance;
-    return `<div class="card lane pr-card" data-pi="${p.index}">
-      <div class="row between"><h3><span class="pcode" data-notr>${esc(p.code || "")}</span> <span data-notr>${esc(p.name)}</span>${p.enabled === false ? ' <span class="pill">停用</span>' : ""}</h3>${h.stChip(st, p.status_zh)}</div>
-      ${prog ? `<div class="bar"><div style="width:${Number(st.progress) || 0}%"></div></div>` : ""}
-      <div class="small">${st.file ? `文件：<span data-notr>${esc(st.file)}</span><br>` : ""}
-        ${st.layer != null && st.total_layers ? `层 ${st.layer}/${st.total_layers} · ` : ""}
-        ${st.nozzle != null ? `喷头 ${h.num(st.nozzle, 0)}°C · 热床 ${h.num(st.bed, 0)}°C` : ""}
-        ${st.error ? `<div class="bad">${esc(st.error)}</div>` : ""}</div>
-      ${p.run ? `<div class="small">这一盘：<b class="mono" data-notr data-p360="${esc(p.run.sku)}">${esc(p.run.sku)}</b> ${h.colorTxt(p.run.color)} × ${p.run.count}
-        ${p.run.alert ? `<div class="alert-box">⚠ ${esc(p.run.alert)}</div>` : ""}</div>` : ""}
-      ${h.trayHtml(st)}
-      <label class="small">现在装的料（没有料盘读数时填，例如：白色,黑色）
-        <span class="row gap"><input data-loaded value="${esc(c.loaded || "")}" list="color-list" data-notr><button class="mini" data-saveloaded>保存</button></span></label>
-      ${c.type && c.type !== "none" ? `<div class="row gap wrap">
-        ${st.state === "printing" ? '<button data-pcmd="pause">⏸ 暂停</button>' : ""}
-        ${st.state === "paused" ? '<button data-pcmd="resume">▶ 继续</button>' : ""}
-        ${prog ? '<button class="danger" data-pcmd="stop">⏹ 取消打印</button>' : ""}</div>` : ""}
-      ${m ? `<details class="maint" ${m.items.some((x) => x.due) ? "open" : ""}><summary>保养（累计打印 ${m.hours} 小时）${m.items.some((x) => x.due) ? ' <span class="pill bad-pill">该保养了</span>' : ""}</summary>
-        ${m.items.map((it) => `<div class="row between small ${it.due ? "bad" : ""}"><span>${esc(it.label)}：每 ${it.every_h} 小时，已 ${it.since_h} 小时</span>
-          <button class="mini" data-maint="${it.item}">已保养</button></div>`).join("")}</details>` : ""}
-      ${own ? `<div class="small muted">连接方式：${esc(CONN_ZH[c.type || "none"] || c.type)}${c.detected && c.type === "auto" ? "：" + esc(CONN_ZH[c.detected] || c.detected) : ""} · <a href="#" data-goto-cfg="production">连接设置 →</a></div>` : ""}
-    </div>`;
+  // v2.54：打印机页搬到 fleet.js（机群总览、列表、抽屉）。保养记录的「用了哪些备件」对话框还在这里，抽屉调用它。
+  async function maintDialog(i, item, done) {
+    let parts = [];
+    try { parts = (await api("/api/inv/items?category=part")).items; } catch { parts = []; }
+    if (!parts.length) { await api("/api/maintenance", { json: { printer: +i, item } }); toast("已记录保养"); if (done) done(); return; }
+    const m = modal(`<h3>记录保养：<span data-notr>${esc(item)}</span></h3>
+      <p class="muted small">这次用了备件就选上（从库存领用出库，记到这台打印机的支出）；没用备件直接确认。</p>
+      <div class="row gap wrap"><select id="mt-part" data-notr><option value="">没用备件</option>${parts.map((p) => `<option value="${p.id}">${esc(p.code)} · ${esc(p.name_zh)}（${p.qty} ${esc(p.unit)}）</option>`).join("")}</select>
+        <input id="mt-qty" type="number" value="1" min="0" step="any" style="width:70px"><input id="mt-note" placeholder="备注" style="width:160px"></div>
+      <div class="row gap" style="margin-top:8px"><button class="primary" id="mt-ok">确认</button><button data-mclose>取消</button></div>`);
+    m.querySelector("#mt-ok").onclick = (e) => busy(e.target, async () => {
+      const pid = m.querySelector("#mt-part").value;
+      await api("/api/maintenance", { json: { printer: +i, item, note: m.querySelector("#mt-note").value,
+        parts: pid ? [{ item_id: +pid, qty: +m.querySelector("#mt-qty").value || 1 }] : [] } });
+      toast("已记录保养"); closeModal(); if (done) done();
+    });
   }
-  async function loadPrinters() {
-    if (document.activeElement && document.activeElement.closest && document.activeElement.closest("#pr-cards")) return;
-    if (Object.entries(LOCKS).some(([k, v]) => k.startsWith("printer-conn-") && v.editing)) return;   // 正在改连接设置时不刷新
-    const r = await api("/api/printers");
-    const open = new Set($$("#pr-cards details.conn[open]").map((d) => d.closest("[data-pi]").dataset.pi));
-    $("#pr-cards").innerHTML = r.printers.map(prCard).join("") || '<p class="muted">还没有打印机（系统 → 设置 → 生产 添加）</p>';
-    open.forEach((i) => { const d = $(`#pr-cards [data-pi="${i}"] details.conn`); if (d) d.open = true; });
-  }
-  $("#btn-pr-reload").addEventListener("click", (e) => busy(e.target, loadPrinters));
-  $("#pr-cards").addEventListener("click", async (e) => {
-    const card = e.target.closest("[data-pi]");
-    if (!card) return;
-    const i = card.dataset.pi, t = e.target;
-    const conn = () => { const o = {}; card.querySelectorAll("[data-c]").forEach((x) => (o[x.dataset.c] = x.type === "checkbox" ? x.checked : x.value)); return o; };
-    try {
-      if (t.dataset.pcmd !== undefined) {
-        if (t.dataset.pcmd === "stop" && !confirm("确定取消这台打印机正在打的任务？")) return;
-        await busy(t, () => api(`/api/printers/${i}/command`, { json: { cmd: t.dataset.pcmd } }));
-        toast("指令已发送"); setTimeout(loadPrinters, 2500);
-      }
-      if (t.dataset.saveloaded !== undefined) {
-        await api(`/api/printers/${i}/loaded`, { json: { loaded: card.querySelector("[data-loaded]").value } });
-        toast("已保存，排单会优先用这台打印机打这些颜色");
-      }
-      if (t.dataset.maint) {
-        // v2.18：保养时可以选用掉的备件（从库存领用，记到这台打印机）
-        let parts = [];
-        try { parts = (await api("/api/inv/items?category=part")).items; } catch { parts = []; }
-        if (!parts.length) {
-          await api("/api/maintenance", { json: { printer: +i, item: t.dataset.maint } }); toast("已记录保养"); document.activeElement.blur(); loadPrinters();
-        } else {
-          const item = t.dataset.maint;
-          const m = modal(`<h3>记录保养：<span data-notr>${esc(item)}</span></h3>
-            <p class="muted small">这次用了备件就选上（从库存领用出库，记到这台打印机的支出）；没用备件直接确认。</p>
-            <div class="row gap wrap"><select id="mt-part" data-notr><option value="">没用备件</option>${parts.map((p) => `<option value="${p.id}">${esc(p.code)} · ${esc(p.name_zh)}（${p.qty} ${esc(p.unit)}）</option>`).join("")}</select>
-              <input id="mt-qty" type="number" value="1" min="0" step="any" style="width:70px"><input id="mt-note" placeholder="备注" style="width:160px"></div>
-            <div class="row gap" style="margin-top:8px"><button class="primary" id="mt-ok">确认</button><button data-mclose>取消</button></div>`);
-          m.querySelector("#mt-ok").onclick = (e) => busy(e.target, async () => {
-            const pid = m.querySelector("#mt-part").value;
-            await api("/api/maintenance", { json: { printer: +i, item, note: m.querySelector("#mt-note").value,
-              parts: pid ? [{ item_id: +pid, qty: +m.querySelector("#mt-qty").value || 1 }] : [] } });
-            toast("已记录保养"); closeModal(); loadPrinters();
-          });
-        }
-      }
-      if (t.dataset.csave !== undefined) {
-        await busy(t, () => api(`/api/printers/${i}/conn`, { json: conn() })); toast("已保存"); document.activeElement.blur(); loadPrinters();
-      }
-      if (t.dataset.ctest !== undefined) {
-        await busy(t, () => api(`/api/printers/${i}/conn`, { json: conn() }));
-        const r = await api(`/api/printers/${i}/test`, { json: {} }).catch((err) => { toast(err.message, true); return null; });
-        if (r) toast(`连接成功：${CONN_ZH[r.type] || r.type}，状态：${r.status_zh}`);
-        document.activeElement.blur(); loadPrinters();
-      }
-    } catch (err) { toast(err.message, true); }
-  });
 
   // ---------------- 打印方案列表 ----------------
   let RC_ALL = [];
@@ -552,56 +485,16 @@
   });
 
 
-  // v2.27：打印机连接设置搬到 设置 → 生产（每台单独「✏ 修改」）
+  // v2.54：每台打印机的连接设置搬到 生产 → 打印机（点一台打开右边的详情）；设置页这里只放一个入口
   async function connSettings(box) {
     if (!box) return;
-    if (Object.entries(LOCKS).some(([k, v]) => k.startsWith("cfg-prconn-") && v.editing)) return;
-    const h = H();
-    const r = await api("/api/printers");
-    box.innerHTML = `<h3>打印机连接</h3><p class="muted small">连上以后生产看板能看到实时状态、一键开始打印、打完自动记录。每台打印机单独修改。</p>` +
-      (r.printers.map((p) => { const c = p.conn || {}, st = p.status || {};
-        return `<div class="sub-card pr-conn" data-pi="${p.index}"><div class="row between"><b><span class="pcode" data-notr>${esc(p.code || "")}</span> <span data-notr>${esc(p.name)}</span></b>
-          <span class="row gap">${h.stChip(st, p.status_zh)}<span class="lockbar pr-lockbar"></span></span></div>
-        <div class="form2 pr-connform">
-            <label>连接方式<select data-c="type">${Object.entries(CONN_ZH).map(([k, v]) => `<option value="${k}" ${k === (c.type || "none") ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
-            <label>IP 地址<input data-c="host" value="${esc(c.host || "")}" placeholder="例如 192.168.31.50" data-notr></label>
-            <label>序列号（拓竹）<input data-c="serial" value="${esc(c.serial || "")}" data-notr></label>
-            <label>访问码（拓竹）<input data-c="access_code" type="password" autocomplete="new-password" value="${esc(c.access_code || "")}" data-notr></label>
-            <label>端口（一般不用填）<input data-c="port" value="${esc(c.port || "")}" data-notr></label>
-            <label class="row" style="align-self:end"><input type="checkbox" data-c="auto_complete" ${c.auto_complete === false ? "" : "checked"}> 打印机报告完成时自动记录</label>
-          </div>
-          <p class="muted small">拓竹：打印机屏幕 → 设置 → 网络（WLAN）里看 IP 和访问码，序列号在 设置 → 设备信息。新固件需要打开「局域网模式」和「开发者模式」才能由第三方软件发送打印。<br>
-            Creality K1：屏幕 设置 → 网络 看 IP。原厂固件和 root 过的（Fluidd/Mainsail）都可以，选「自动识别」即可。</p>
-            <div class="row gap"><button class="mini" data-ctest>测试连接</button><button class="mini" data-cdiag>网络诊断</button></div></div>`; }).join("") || '<p class="muted">还没有打印机（在上面「打印机与 OrcaSlicer 配置文件」里添加）</p>');
-    $$(".pr-conn", box).forEach((card) => {
-      const i = card.dataset.pi, f = card.querySelector(".pr-connform");
-      const id = "cfg-prconn-" + i;
-      if (LOCKS[id]) LOCKS[id].editing = false;
-      lockBox(f, { id, bar: card.querySelector(".pr-lockbar"), label: "✏ 修改",
-        onCancel: () => { LOCKS[id].editing = false; connSettings(box); },
-        onSave: async () => {
-          const o = {}; f.querySelectorAll("[data-c]").forEach((x) => (o[x.dataset.c] = x.type === "checkbox" ? x.checked : x.value));
-          await api(`/api/printers/${i}/conn`, { json: o }); toast("已保存");
-          LOCKS[id].editing = false; setTimeout(() => connSettings(box), 100);
-        } });
-    });
-    if (window.TRIAL && TRIAL.can()) {      // v2.53：🧪 打印测试（20 mm 立方体）放在「测试连接」旁边
-      $$(".pr-conn [data-ctest]", box).forEach((b) => b.insertAdjacentHTML("afterend", ` <button class="mini" data-tr-ptest="${b.closest("[data-pi]").dataset.pi}" title="${Z("给这台打印机的机型切一个 20 mm 立方体，走正常发送 / 开始 / 打完回报，用来验证整条链路", "สไลซ์ลูกบาศก์ 20 มม. ตามรุ่นเครื่องนี้ แล้วส่ง/เริ่ม/รายงานเมื่อเสร็จตามขั้นตอนปกติ เพื่อทดสอบทั้งระบบ")}">🧪 ${Z("打印测试", "ทดสอบพิมพ์")}</button>`));
-    }
+    box.innerHTML = `<div class="row between wrap gap"><div><h3>${Z("打印机", "เครื่องพิมพ์")}</h3>
+      <p class="muted small">${Z("每台打印机的连接（IP、序列号、访问码）、测试连接、打印测试、网络诊断、分组 / 位置、批量添加和导入，都在 生产 → 打印机。",
+        "การเชื่อมต่อของแต่ละเครื่อง (IP, ซีเรียล, รหัสเข้าถึง) ทดสอบการเชื่อมต่อ ทดสอบพิมพ์ วินิจฉัยเครือข่าย กลุ่ม / ตำแหน่ง เพิ่มหลายเครื่องและนำเข้า อยู่ที่ การผลิต → เครื่องพิมพ์")}</p></div>
+      <button class="primary" data-goto-printers>${Z("打开打印机页 →", "เปิดหน้าเครื่องพิมพ์ →")}</button></div>`;
     if (!box.dataset.bound) {
       box.dataset.bound = "1";
-      box.addEventListener("click", async (e) => {
-        const t = e.target;
-        if (t.dataset.cdiag !== undefined) { netDiag(t.closest("[data-pi]").dataset.pi, t); return; }
-        if (t.dataset.ctest === undefined) return;
-        const card = t.closest("[data-pi]"), i = card.dataset.pi;
-        const o = {}; card.querySelectorAll("[data-c]").forEach((x) => (o[x.dataset.c] = x.type === "checkbox" ? x.checked : x.value));
-        try {
-          if (LOCKS["cfg-prconn-" + i] && LOCKS["cfg-prconn-" + i].editing) await api(`/api/printers/${i}/conn`, { json: o });
-          const r2 = await busy(t, () => api(`/api/printers/${i}/test`, { json: {} }));
-          if (r2) toast(`连接成功：${CONN_ZH[r2.type] || r2.type}，状态：${r2.status_zh}`);
-        } catch (err) { toast(err.message, true); }
-      });
+      box.addEventListener("click", (e) => { if (e.target.closest("[data-goto-printers]")) goTab("printers"); });
     }
   }
   // v2.53：网络诊断（结论 + 端口表 + 服务器网络信息）。结论的中 / 泰文由服务器给，这里按界面语言挑
@@ -631,5 +524,5 @@
       <table class="tbl"><thead><tr><th>${Z("端口", "พอร์ต")}</th><th>${Z("用途", "การใช้งาน")}</th><th>${Z("结果", "ผลลัพธ์")}</th><th>errno</th></tr></thead><tbody>${rows}</tbody></table>
       ${netHtml}`);
   }
-  window.PROD = { show, loadBoard, startDialog, connSettings };
+  window.PROD = { show, loadBoard, startDialog, connSettings, netDiag, maintDialog };
 })();

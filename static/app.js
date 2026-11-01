@@ -284,20 +284,23 @@ async function loadConfig() {
   $("#color-list").innerHTML = Object.keys(COLORS).map((zh) => `<option value="${esc(thUi && COLORS[zh].th ? COLORS[zh].th : zh)}">${esc(COLORS[zh].code || "")} · ${esc(thUi ? zh : COLORS[zh].th || "")}</option>`).join("");
   return r;
 }
-const PRINTERS_CARD = () => `<div class="card cfg-group"><h3>打印机与 OrcaSlicer 配置文件</h3>
-      <p class="muted small">「每小时克数」用于估算打印时长。OrcaSlicer 自动切片会用下面三项配置：点「自动匹配配置」会按打印机名称自动选好 OrcaSlicer 自带的配置（不需要先在 OrcaSlicer 里保存预设）；也可以在输入框里点一下从列表里选。产品材质不是 PLA 时，会自动换成对应材质的耗材配置。估算校准系数：<b>${CFG.est_calibration}</b>（已用 ${CFG.est_calibration_n} 次真实切片校准）</p>
-      <p class="small">同一机型的打印机共用切片文件和打印方案，排单时互为备用：一台停用或连不上，任务会自动转到其他机器。每台机器有一个<b>机器编码</b>（例如 P1S-01），建议打印出来贴在机器上，生产看板、任务和打印记录都按编码显示。</p>
-      <div class="row gap wrap pr-bulk">
-        <label class="small">批量添加<select id="pr-add-model">${(window.PR_MODELS || []).map((m) => `<option value="${esc(m.name)}" data-notr>${esc(m.name)}</option>`).join("")}<option value="">其他机型（自己填名称）</option></select></label>
-        <label class="small">台数<input id="pr-add-n" type="number" min="1" max="50" value="1" style="width:60px"></label>
-        <button id="pr-add" class="mini">＋ 添加</button>
-        <span class="small muted">共 ${(CFG.printers || []).length} 台：${prCountByModel()}</span></div>
-      <div class="tbl-scroll"><table class="grid" id="printer-table"><thead><tr><th>机器编码</th><th>机型</th><th>备注（位置等）</th><th>类型</th><th>启用</th><th title="有 AMS（自动换料系统），能打多色。多色的生产任务只排给勾了的打印机">有 AMS / 多色</th><th>每小时克数</th><th title="发送切片文件前核对：文件的喷嘴直径要和这里一样">喷嘴 mm</th><th title="填了就核对切片文件用的热床板；不填不核对">现在装的热床板</th><th title="OrcaSlicer 打印机配置 (machine)">打印机配置</th><th title="OrcaSlicer 工艺配置 (process)">工艺配置</th><th title="OrcaSlicer 耗材配置 (filament)">耗材配置</th><th></th></tr></thead><tbody>
-      ${(CFG.printers || []).map((p, i) => printerRow(p, i)).join("")}
+// v2.54：设置里只放「机型模板」（同机型的打印机共用：喷嘴、热床板、每小时克数、AMS、OrcaSlicer 配置）；每台打印机在 生产 → 打印机
+const ZZ = (zh, th) => (window.I18N && I18N.lang === "th" ? th : zh);
+const PRINTERS_CARD = () => `<div class="card cfg-group"><h3>${ZZ("机型模板", "แม่แบบรุ่นเครื่องพิมพ์")}</h3>
+      <p class="muted small">${ZZ("同一机型的打印机都用这里的设置：喷嘴、现在装的热床板（发送切片文件前核对）、每小时克数（估算时长）、有没有 AMS（多色只排给有 AMS 的）、OrcaSlicer 自动切片用的三项配置（点「自动匹配配置」按机型名自动选好）。某一台不一样（例如换了 0.6 喷嘴）在 生产 → 打印机 点那一台，在「单独设置」里改。",
+        "เครื่องพิมพ์รุ่นเดียวกันใช้ค่าตรงนี้ร่วมกัน: หัวฉีด แผ่นฐานที่ใส่อยู่ (ตรวจก่อนส่งไฟล์สไลซ์) กรัมต่อชั่วโมง (ประมาณเวลา) มี AMS หรือไม่ (งานหลายสีจัดให้เฉพาะเครื่องที่มี AMS) โปรไฟล์ OrcaSlicer สามรายการ (กด «จับคู่โปรไฟล์อัตโนมัติ» เลือกตามชื่อรุ่นให้เอง) ถ้ามีเครื่องไหนต่างไป (เช่น เปลี่ยนหัวฉีด 0.6) ไปที่ การผลิต → เครื่องพิมพ์ กดที่เครื่องนั้นแล้วแก้ใน «ค่าเฉพาะเครื่อง»")}
+        ${ZZ("估算校准系数", "ค่าปรับเทียบการประมาณ")}：<b>${CFG.est_calibration}</b>（${ZZ(`已用 ${CFG.est_calibration_n} 次真实切片校准`, `ปรับเทียบจากการสไลซ์จริง ${CFG.est_calibration_n} ครั้ง`)}）</p>
+      <div class="row gap wrap"><button class="mini" data-goto-printers>${ZZ("打印机（每台的连接、分组、批量添加）→", "เครื่องพิมพ์ (การเชื่อมต่อ กลุ่ม เพิ่มหลายเครื่อง) →")}</button>
+        <span class="small muted">${ZZ(`共 ${(CFG.printers || []).length} 台`, `ทั้งหมด ${(CFG.printers || []).length} เครื่อง`)}：${prCountByModel()}</span></div>
+      <div class="tbl-scroll"><table class="grid" id="tpl-table"><thead><tr><th>${ZZ("机型", "รุ่น")}</th><th>${ZZ("台数", "จำนวน")}</th>
+        <th title="${ZZ("有 AMS（自动换料系统），能打多色。多色的生产任务只排给有 AMS 的打印机", "มี AMS (ระบบเปลี่ยนเส้นอัตโนมัติ) พิมพ์หลายสีได้ งานหลายสีจะจัดให้เฉพาะเครื่องที่มี AMS")}">AMS / ${ZZ("多色", "หลายสี")}</th>
+        <th>${ZZ("每小时克数", "กรัมต่อชั่วโมง")}</th><th title="${ZZ("发送切片文件前核对：文件的喷嘴直径要和这里一样", "ตรวจก่อนส่งไฟล์สไลซ์: ขนาดหัวฉีดในไฟล์ต้องตรงกับค่านี้")}">${ZZ("喷嘴 mm", "หัวฉีด มม.")}</th>
+        <th title="${ZZ("填了就核对切片文件用的热床板；不填不核对", "ถ้ากรอกจะตรวจแผ่นฐานในไฟล์สไลซ์ ถ้าไม่กรอกจะไม่ตรวจ")}">${ZZ("现在装的热床板", "แผ่นฐานที่ใส่อยู่")}</th>
+        <th>${ZZ("打印机配置", "โปรไฟล์เครื่อง")}</th><th>${ZZ("工艺配置", "โปรไฟล์กระบวนการ")}</th><th>${ZZ("耗材配置", "โปรไฟล์เส้นพลาสติก")}</th><th></th></tr></thead><tbody>
+      ${(window.PR_TPLS || []).map((t, i) => tplRow(t, i)).join("")}
       </tbody></table></div>
       <datalist id="dl-machine"></datalist>
-      <datalist id="dl-models">${(window.PR_MODELS || []).map((m) => `<option value="${esc(m.name)}">`).join("")}</datalist>
-      <div class="row gap wrap"><button id="btn-automatch" class="primary">自动匹配配置</button><button id="btn-find-profiles">查找 OrcaSlicer 和配置文件</button>${window.IN_DOCKER ? "" : '<button id="btn-pick-orca">手动选择程序…</button>'}<span id="profiles-info" class="muted small"></span></div>
+      <div class="row gap wrap"><button id="btn-automatch" class="primary">${ZZ("自动匹配配置", "จับคู่โปรไฟล์อัตโนมัติ")}</button><button id="btn-find-profiles">${ZZ("查找 OrcaSlicer 和配置文件", "ค้นหา OrcaSlicer และไฟล์โปรไฟล์")}</button>${window.IN_DOCKER ? "" : `<button id="btn-pick-orca">${ZZ("手动选择程序…", "เลือกโปรแกรมเอง…")}</button>`}<span id="profiles-info" class="muted small"></span></div>
       <pre id="slice-log" class="small hidden" style="white-space:pre-wrap;background:#f3f4f6;padding:8px;border-radius:6px;max-height:260px;overflow:auto"></pre>
     </div>`;
 const COLORS_CARD = () => `<div class="card cfg-group"><h3>颜色代码表</h3>
@@ -392,19 +395,17 @@ function cfgStopEdits() {
 async function saveCfgCard(card) {
   const body = {};
   card.querySelectorAll("[data-c]").forEach((el) => (body[el.dataset.c] = el.value));
-  if (card.querySelector("#printer-table")) body.printers = collectPrinters();
+  if (card.querySelector("#tpl-table")) {          // v2.54：机型模板单独保存
+    window.PR_TPLS = (await api("/api/fleet/templates", { json: { templates: collectTemplates() } })).templates;
+  }
   if (card.querySelector("#pack-rules")) body.inv_pack_rules = collectPackRules();
-  if (!Object.keys(body).length) return;
+  if (!Object.keys(body).length) { await loadConfig(); toast("已保存"); return; }
   const r = await api("/api/config", { json: body });
   CFG = r.config; renderSummary(r.summary); await loadConfig(); toast("已保存");
-  $$("#printer-table tbody tr").forEach((tr, i) => {
-    const p = (CFG.printers || [])[i]; const inp = tr.querySelector('[data-p="code"]');
-    if (p && inp) inp.value = p.code || "";
-  });
 }
 function cfgLockCards() {
   $$("#cfg-form .cfg-group").forEach((card, i) => {
-    if (card.hasAttribute("data-lock-skip") || card.id === "sys-remote" || !card.querySelector("[data-c], #printer-table, #pack-rules")) return;
+    if (card.hasAttribute("data-lock-skip") || card.id === "sys-remote" || !card.querySelector("[data-c], #tpl-table, #pack-rules")) return;
     const h = card.querySelector("h3"); if (!h) return;
     const mod = card.closest("[data-cfgmod]").dataset.cfgmod;
     let bar = card.querySelector(":scope > .row > .lockbar");
@@ -415,7 +416,7 @@ function cfgLockCards() {
     }
     const id = `cfg-${mod}-${i}`;
     if (LOCKS[id]) LOCKS[id].editing = false;
-    lockBox(card, { id, bar, label: "✏ 修改", keep: "[data-test], #btn-find-profiles, .cfg-head",
+    lockBox(card, { id, bar, label: "✏ 修改", keep: "[data-test], #btn-find-profiles, .cfg-head, [data-goto-printers]",
       onEdit: () => {
         if (cfgEditingOther(id) && !confirm("另一张卡片还没保存，先放弃那边的修改？")) { LOCKS[id].editing = false; LOCKS[id].apply(); return; }
         Object.entries(LOCKS).forEach(([k, v]) => { if (k.startsWith("cfg-") && k !== id && v.editing) { v.editing = false; v.apply(); } });
@@ -426,6 +427,7 @@ function cfgLockCards() {
 async function renderSettings() {
   const r = await loadConfig();
   if (!window.PR_MODELS) { try { window.PR_MODELS = (await api("/api/printer-models")).models; } catch { window.PR_MODELS = []; } }
+  try { window.PR_TPLS = (await api("/api/fleet/templates")).templates; } catch { window.PR_TPLS = []; }   // v2.54 机型模板
   if (!CFG_SCHEMA) CFG_SCHEMA = (await api("/api/settings/schema")).modules;
   try { INV_ITEMS_CFG = (await api("/api/inv/items")).items.filter((x) => x.category !== "filament" && x.category !== "goods"); } catch { INV_ITEMS_CFG = []; }
   if (!CFG_SCHEMA.some((m) => m.id === CFG_MOD)) CFG_MOD = CFG_SCHEMA[0].id;
@@ -449,40 +451,33 @@ function renderSummary(s) {
     <div>每月总机时<b>${s.monthly_machine_hours} 小时</b></div>
     <div class="muted small" style="max-width:360px">机时成本 = 电费 + 固定成本 ÷ 每月总机时。开机率越高，每小时分摊越低。</div>`;
 }
-const PLATES = [["", "不核对"], ["Textured PEI Plate", "纹理 PEI 板"], ["Smooth PEI Plate", "光面 PEI 板"], ["Cool Plate", "低温板"],
-  ["Engineering Plate", "工程板"], ["High Temp Plate", "高温板"], ["SuperTack Plate", "超粘板"]];
-// v2.52：有 AMS / 多色（没设置过时按机型：拓竹 A1 / P1S / P2S / X1 / H2 算有，P1P、创想 K1 / K1C / K1 Max 算没有；和 core/fleet.is_multicolor 一样）
-function amsDefault(p) {
-  if (p.ams === true || p.ams === false) return p.ams;
-  if (p.tech === "resin") return false;
-  const n = String(p.name || "").toLowerCase();
-  return /bambu|^a1|p1s|p2s|x1|h2[sd]/.test(n) && !/p1p/.test(n);
-}
-function printerRow(p, i) {
-  return `<tr data-i="${i}">
-        <td><input data-p="code" value="${esc(p.code || "")}" placeholder="自动编号" style="width:84px" class="mono" data-notr></td>
-        <td><input data-p="name" list="dl-models" value="${esc(p.name)}" title="${esc(p.name)}" style="width:120px" data-notr></td>
-        <td><input data-p="note" value="${esc(p.note || "")}" style="width:80px" data-notr></td>
-        <td><select data-p="tech" style="width:90px"><option value="fdm" ${p.tech !== "resin" ? "selected" : ""}>FDM</option>${p.tech === "resin" || !window.MODKIT || MODKIT.enabled("resin") ? `<option value="resin" ${p.tech === "resin" ? "selected" : ""}>光固化</option>` : ""}</select></td>
-        <td><input type="checkbox" data-p="enabled" ${p.enabled === false ? "" : "checked"}></td>
-        <td><input type="checkbox" data-p="ams" ${amsDefault(p) ? "checked" : ""} title="有 AMS / 多色"></td>
-        <td><input data-p="g_per_h" value="${esc(p.g_per_h)}" style="width:60px"></td>
-        <td>${p.tech === "resin" ? '<input type="hidden" data-p="nozzle" value="0.4"><span class="muted small">—</span>' : `<input data-p="nozzle" value="${esc(p.nozzle ?? 0.4)}" style="width:52px">`}</td>
-        <td>${p.tech === "resin" ? '<input type="hidden" data-p="plate" value="">' : `<select data-p="plate">${PLATES.map(([v, l]) => `<option value="${v}" ${(p.plate || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`}</td>
-        <td><input data-p="orca_machine" list="dl-machine" value="${esc(p.orca_machine || "")}" title="${esc(p.orca_machine || "")}" placeholder="自动" style="width:140px"></td>
-        <td><input data-p="orca_process" list="dl-process-${i}" value="${esc(p.orca_process || "")}" title="${esc(p.orca_process || "")}" placeholder="自动" style="width:140px"><datalist id="dl-process-${i}"></datalist></td>
-        <td><input data-p="orca_filament" list="dl-filament-${i}" value="${esc(p.orca_filament || "")}" title="${esc(p.orca_filament || "")}" placeholder="自动" style="width:120px"><datalist id="dl-filament-${i}"></datalist></td>
-        <td class="nowrap">${p.tech === "resin" ? '<span class="small muted">光固化：电脑上切好上传</span>' : `<button class="mini" data-test="${i}">测试切片</button>`} <button class="mini danger" data-prdel>删除</button></td></tr>`;
+const PLATES = () => [["", ZZ("不核对", "ไม่ตรวจ")], ["Textured PEI Plate", ZZ("纹理 PEI 板", "แผ่น PEI ผิวหยาบ")], ["Smooth PEI Plate", ZZ("光面 PEI 板", "แผ่น PEI ผิวเรียบ")], ["Cool Plate", ZZ("低温板", "แผ่นอุณหภูมิต่ำ")],
+  ["Engineering Plate", ZZ("工程板", "แผ่นวิศวกรรม")], ["High Temp Plate", ZZ("高温板", "แผ่นอุณหภูมิสูง")], ["SuperTack Plate", ZZ("超粘板", "แผ่นยึดติดสูง")]];
+// 机型模板的一行（v2.54）：空 = 机型默认（每小时克数按常用机型表、AMS 按机型、喷嘴 0.4、热床板不核对、Orca 配置自动匹配）
+function tplRow(t, i) {
+  const v = t.saved || {}, eff = t.template || {}, resin = t.tech === "resin";
+  const ams = v.ams === true ? "true" : v.ams === false ? "false" : "";
+  return `<tr data-i="${i}" data-tpl="${esc(t.name)}">
+        <td data-notr><b>${esc(t.name)}</b></td>
+        <td class="small">${t.count}${t.overrides ? ` <span class="muted" title="${ZZ("有单独设置的台数", "จำนวนเครื่องที่มีค่าเฉพาะ")}">（✱${t.overrides}）</span>` : ""}</td>
+        <td>${resin ? '<span class="muted small">—</span>' : `<select data-p="ams"><option value="" ${ams === "" ? "selected" : ""}>${ZZ("按机型", "ตามรุ่น")}（${t.ams_default ? ZZ("有", "มี") : ZZ("没有", "ไม่มี")}）</option><option value="true" ${ams === "true" ? "selected" : ""}>${ZZ("有", "มี")}</option><option value="false" ${ams === "false" ? "selected" : ""}>${ZZ("没有", "ไม่มี")}</option></select>`}</td>
+        <td><input data-p="g_per_h" value="${esc(v.g_per_h ?? "")}" placeholder="${esc(eff.g_per_h ?? 20)}" style="width:60px"></td>
+        <td>${resin ? '<span class="muted small">—</span>' : `<input data-p="nozzle" value="${esc(v.nozzle ?? "")}" placeholder="0.4" style="width:52px">`}</td>
+        <td>${resin ? "" : `<select data-p="plate">${PLATES().map(([pv, l]) => `<option value="${pv}" ${(v.plate || "") === pv ? "selected" : ""}>${l}</option>`).join("")}</select>`}</td>
+        <td><input data-p="orca_machine" list="dl-machine" value="${esc(v.orca_machine || "")}" title="${esc(v.orca_machine || "")}" placeholder="${ZZ("自动", "อัตโนมัติ")}" style="width:140px" ${resin ? "disabled" : ""}></td>
+        <td><input data-p="orca_process" list="dl-process-${i}" value="${esc(v.orca_process || "")}" title="${esc(v.orca_process || "")}" placeholder="${ZZ("自动", "อัตโนมัติ")}" style="width:140px" ${resin ? "disabled" : ""}><datalist id="dl-process-${i}"></datalist></td>
+        <td><input data-p="orca_filament" list="dl-filament-${i}" value="${esc(v.orca_filament || "")}" title="${esc(v.orca_filament || "")}" placeholder="${ZZ("自动", "อัตโนมัติ")}" style="width:120px" ${resin ? "disabled" : ""}><datalist id="dl-filament-${i}"></datalist></td>
+        <td class="nowrap">${resin ? `<span class="small muted">${ZZ("光固化：电脑上切好上传", "เรซิน: สไลซ์บนคอมแล้วอัปโหลด")}</span>` : t.first != null ? `<button class="mini" data-test="${t.first}">${ZZ("测试切片", "ทดสอบสไลซ์")}</button>` : ""}</td></tr>`;
 }
 function prCountByModel() {
   const n = {}; (CFG.printers || []).forEach((p) => (n[p.name] = (n[p.name] || 0) + 1));
   return Object.entries(n).map(([k, v]) => `<span data-notr>${esc(k)}</span> × ${v}`).join("，");
 }
-// 打印机配置下拉：点输入框时按这一行选的打印机加载兼容的工艺/耗材
+// 打印机配置下拉：点输入框时按这一行选的打印机配置加载兼容的工艺/耗材
 let PRESET_MACHINES = null;
 document.addEventListener("focusin", async (e) => {
   const k = e.target.dataset && e.target.dataset.p;
-  if (!k || !k.startsWith("orca_")) return;
+  if (!k || !k.startsWith("orca_") || !e.target.closest("#tpl-table")) return;
   const tr = e.target.closest("tr"); const i = tr.dataset.i;
   try {
     if (k === "orca_machine") {
@@ -497,88 +492,60 @@ document.addEventListener("focusin", async (e) => {
     $(`#dl-filament-${i}`).innerHTML = r.filaments.map((n) => `<option value="${esc(n)}">`).join("");
   } catch { /* 没装 OrcaSlicer 时忽略 */ }
 });
-function collectPrinters() {
-  return $$("#printer-table tbody tr").map((tr) => {
-    const o = {}; tr.querySelectorAll("[data-p]").forEach((el) => (o[el.dataset.p] = el.type === "checkbox" ? el.checked : el.value)); return o;
+function collectTemplates() {
+  const out = {};
+  $$("#tpl-table tbody tr").forEach((tr) => {
+    const o = {}; tr.querySelectorAll("[data-p]").forEach((el) => { if (!el.disabled) o[el.dataset.p] = el.value; });
+    out[tr.dataset.tpl] = o;
   });
+  return out;
 }
-$("#cfg-form").addEventListener("change", (e) => {
-  // 选了常用机型：自动填每小时克数
-  if (e.target.dataset && e.target.dataset.p === "name") {
-    const m = (window.PR_MODELS || []).find((x) => x.name === e.target.value);
-    const tr = e.target.closest("tr");
-    const g = tr.querySelector('[data-p="g_per_h"]');
-    if (m && g) g.value = m.g_per_h || 20;
-    const t = tr.querySelector('[data-p="tech"]');
-    if (m && t) t.value = m.tech || "fdm";
-    const am = tr.querySelector('[data-p="ams"]');
-    if (am) am.checked = amsDefault({ name: e.target.value, tech: (m && m.tech) || "fdm" });
-  }
-});
 $("#cfg-form").addEventListener("click", async (e) => {
-  if (e.target.id === "pr-add") {
-    const model = $("#pr-add-model").value, n = Math.max(1, Math.min(50, +$("#pr-add-n").value || 1));
-    const m = (window.PR_MODELS || []).find((x) => x.name === model);
-    const tb = $("#printer-table tbody");
-    for (let k = 0; k < n; k++) {
-      const i = tb.children.length;
-      tb.insertAdjacentHTML("beforeend", printerRow({ name: model || "", g_per_h: m ? (m.g_per_h || 20) : 20, enabled: true, tech: (m && m.tech) || "fdm" }, i));
-    }
-    toast(`已添加 ${n} 行，点「保存」后自动编号`);
-    return;
-  }
-  if (e.target.dataset && e.target.dataset.prdel !== undefined) {
-    const tr = e.target.closest("tr");
-    const code = tr.querySelector('[data-p="code"]').value || "新打印机";
-    if ($$("#printer-table tbody tr").length <= 1) { toast("至少要保留一台打印机", true); return; }
-    if (!confirm(`删除打印机 ${code}？\n排给它的任务会自动转到其他机器；打印记录保留。点「保存」后生效。`)) return;
-    tr.remove();
-    return;
-  }
+  if (e.target.closest("[data-goto-printers]")) { goTab("printers"); return; }
   if (e.target.id === "btn-automatch") {
     await busy(e.target, async () => {
-      const r = await api("/api/slicer/automatch", { json: { printers: collectPrinters(), force: true } });
-      CFG.printers = r.printers;
-      $$("#printer-table tbody tr").forEach((tr, i) => {
-        for (const k of ["orca_machine", "orca_process", "orca_filament"]) tr.querySelector(`[data-p="${k}"]`).value = r.printers[i][k] || "";
+      const rows = $$("#tpl-table tbody tr");
+      const prs = rows.map((tr) => ({ name: tr.dataset.tpl, orca_machine: tr.querySelector('[data-p="orca_machine"]').value, orca_process: tr.querySelector('[data-p="orca_process"]').value, orca_filament: tr.querySelector('[data-p="orca_filament"]').value }));
+      const r = await api("/api/slicer/automatch", { json: { printers: prs, force: true } });
+      rows.forEach((tr, i) => {
+        for (const k of ["orca_machine", "orca_process", "orca_filament"]) { const el = tr.querySelector(`[data-p="${k}"]`); if (!el.disabled) el.value = r.printers[i][k] || ""; }
       });
-      $("#profiles-info").textContent = `OrcaSlicer：${r.orca || "没有找到"}`;
-      if (r.missing.length) toast(`这些打印机没能自动匹配，请手动选择打印机配置：${r.missing.join("、")}`, true);
-      else toast("已自动匹配并保存，可以点「测试切片」");
+      $("#profiles-info").textContent = `OrcaSlicer：${r.orca || ZZ("没有找到", "ไม่พบ")}`;
+      if (r.missing.length) toast(ZZ(`这些机型没能自动匹配，请手动选择打印机配置：${r.missing.join("、")}`, `รุ่นเหล่านี้จับคู่อัตโนมัติไม่ได้ กรุณาเลือกโปรไฟล์เครื่องเอง: ${r.missing.join(", ")}`), true);
+      else toast(ZZ("已自动匹配，点「保存」后生效", "จับคู่อัตโนมัติแล้ว กด «บันทึก» เพื่อใช้งาน"));
     });
   }
   if (e.target.id === "btn-find-profiles") {
     await busy(e.target, async () => {
       const r = await api("/api/slicer/info");
       const n = r.presets && r.presets.machine !== undefined ? r.presets.machine + r.presets.process + r.presets.filament : 0;
-      $("#profiles-info").textContent = `OrcaSlicer：${r.orca || "没有找到"}；找到 ${n} 个配置文件（在输入框里点一下即可选择）`;
+      $("#profiles-info").textContent = `OrcaSlicer：${r.orca || ZZ("没有找到", "ไม่พบ")}；${ZZ(`找到 ${n} 个配置文件（在输入框里点一下即可选择）`, `พบไฟล์โปรไฟล์ ${n} ไฟล์ (กดที่ช่องเพื่อเลือก)`)}`;
       const inp = document.querySelector('[data-c="orca_path"]');
       if (r.orca) { CFG.orca_path = r.orca; if (inp) inp.value = r.orca; }
       const log = $("#slice-log");
       if (!r.orca) {
         log.classList.remove("hidden");
-        log.textContent = "没有自动找到 OrcaSlicer，请点「手动选择程序…」，在弹出的窗口里找到 orca-slicer.exe（或桌面上的 OrcaSlicer 快捷方式）。\n\n查找过程：\n" + (r.tried || []).join("\n");
+        log.textContent = ZZ("没有自动找到 OrcaSlicer，请点「手动选择程序…」，在弹出的窗口里找到 orca-slicer.exe（或桌面上的 OrcaSlicer 快捷方式）。", "ไม่พบ OrcaSlicer อัตโนมัติ กรุณากด «เลือกโปรแกรมเอง…» แล้วเลือก orca-slicer.exe (หรือทางลัด OrcaSlicer บนเดสก์ท็อป)") + "\n\n" + (r.tried || []).join("\n");
       }
     });
   }
   if (e.target.id === "btn-pick-orca") {
     await busy(e.target, async () => {
-      toast("请在电脑上弹出的窗口里选择 orca-slicer.exe（窗口可能在浏览器后面）");
+      toast(ZZ("请在电脑上弹出的窗口里选择 orca-slicer.exe（窗口可能在浏览器后面）", "กรุณาเลือก orca-slicer.exe ในหน้าต่างที่เปิดขึ้น (อาจอยู่หลังเบราว์เซอร์)"));
       const r = await api("/api/slicer/pick", { json: {} });
       const inp = document.querySelector('[data-c="orca_path"]');
       CFG.orca_path = r.orca; if (inp) inp.value = r.orca;
       $("#profiles-info").textContent = `OrcaSlicer：${r.orca}`;
-      toast("已保存 OrcaSlicer 路径");
+      toast(ZZ("已保存 OrcaSlicer 路径", "บันทึกตำแหน่ง OrcaSlicer แล้ว"));
     });
   }
   const t = e.target.dataset.test;
   if (t !== undefined) {
     await busy(e.target, async () => {
-      await api("/api/config", { json: { printers: collectPrinters() } });
       const log = $("#slice-log"); log.classList.remove("hidden");
       try {
         const r = await api("/api/slicer/test", { json: { printer: Number(t) } });
-        log.textContent = `✓ 测试成功：20mm 立方体 ${r.grams} g，${r.hours} h\n\n${r.log || ""}`;
+        log.textContent = `✓ ${ZZ("测试成功：20mm 立方体", "ทดสอบสำเร็จ: ลูกบาศก์ 20 มม.")} ${r.grams} g，${r.hours} h\n\n${r.log || ""}`;
       } catch (err) { log.textContent = "✗ " + err.message; }
     });
   }

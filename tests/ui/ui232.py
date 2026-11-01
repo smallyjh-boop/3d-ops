@@ -54,7 +54,7 @@ async def main():
         await pg.evaluate("CFG_MOD='orders'; goTab('settings')"); await pg.wait_for_timeout(1500)
         s1 = await pg.evaluate("!!document.querySelector('[data-c=scan_order_key]')")
         await pg.evaluate("CFG_MOD='production'; goTab('settings')"); await pg.wait_for_timeout(1500)
-        s2 = await pg.evaluate("!!document.querySelector('#printer-table [data-p=nozzle]')")
+        s2 = await pg.evaluate("!!document.querySelector('#tpl-table [data-p=nozzle]')")
         print(" v232 settings:", s1, s2)
         if not (s1 and s2): ERR.append("v232 settings")
         if LANG=="th": miss|=set(await pg.evaluate(JS,"#tab-settings"))
