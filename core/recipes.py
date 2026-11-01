@@ -27,10 +27,10 @@ SUPPORT_ZH = {"none": "不要支撑", "tree": "树状支撑", "normal": "普通�
 DEFAULT = {"orientation": "bottom", "supports": "none", "support_build_plate_only": True, "support_angle": 30,
            "layer_height": 0.2, "walls": 2, "top_bottom": 4, "infill_pct": 15, "infill_pattern": "gyroid", "brim": False,
            "bed_type": "auto", "per_plate": 1, "gap_mm": 6, "notes": "", "nozzle_temp": 0, "bed_temp": 0, "filament": {}}
-MATERIALS = ["PLA", "PETG", "TPU", "ABS", "ASA", "PLA-CF", "PETG-CF", "PA", "PC",
+MATERIALS = ["PLA", "PLA-SILK", "PETG", "TPU", "ABS", "ASA", "PLA-CF", "PETG-CF", "PA", "PC",
              "RESIN", "RESIN-ABS", "RESIN-WASH", "RESIN-TOUGH", "RESIN-8K"]   # RESIN* = 光固化树脂
 # 各材料合理的喷嘴温度范围（超出提醒）
-TEMP_RANGE = {"PLA": (190, 235), "PETG": (220, 265), "TPU": (200, 250), "ABS": (230, 280), "ASA": (230, 280),
+TEMP_RANGE = {"PLA": (190, 235), "PLA-SILK": (200, 240), "PETG": (220, 265), "TPU": (200, 250), "ABS": (230, 280), "ASA": (230, 280),
               "PLA-CF": (200, 240), "PETG-CF": (230, 270), "PA": (250, 300), "PC": (250, 310)}
 BED_TEMP_KEYS = {"cool": "cool_plate_temp", "engineering": "eng_plate_temp", "smooth": "hot_plate_temp",
                  "textured": "textured_plate_temp"}
@@ -115,6 +115,8 @@ def norm_material(m):
     m = str(m or "PLA").upper().replace(" ", "").replace("_", "-")
     if "树脂" in m or m in ("SLA", "LCD", "MSLA"):
         return "RESIN"
+    if "丝" in m or "SILK" in m:     # 丝绸 / 丝光 / SILK / SILK PLA / PLA SILK+：就是加了光泽剂的 PLA
+        return "PLA-SILK"
     return {"PLA+": "PLA", "PLAPLUS": "PLA", "PETG+": "PETG", "PA6": "PA", "NYLON": "PA"}.get(m, m)
 
 

@@ -252,7 +252,7 @@ ok("temp_material" in pj, "editor records which material the temperatures were s
 
 # ================= 第二轮复审 =================
 # R1 槽 1 不是产品材料的盘：喷嘴 / 热床温度和耗材配置一起清掉（迁移、原来面板保存、换材料），切片时再按 temp_material 核对
-# Y1 自动选到的耗材配置还是别的材料（丝绸料 / 不认识的 → 打印机默认 PLA）→ 不切，说清楚（每槽都查）
+# Y1 自动选到的耗材配置还是别的材料（不认识的 → 打印机默认 PLA）→ 不切，说清楚（每槽都查）；丝绸料算 PLA 一类，照常切
 # Y2 切片前的配置信息按「选的」配置算是否一致，带提示
 # Y3 按主模型缩放的规格：签名和读的先后无关（_migrate 不改 p），试打写回后切片结果还有效
 # Y4 展示用到的切开的零件不清掉；顶面图案（monotonic）不当填充；按方案切片（slice_product）的提示记日志、返回前台
@@ -344,20 +344,25 @@ if slicer.find_orca(cfg):
     c2["printers"][0]["orca_filament"] = PLA_PROF          # 打印机设置里的默认耗材：PLA
     save_config(c2)
     c2 = load_config()
-    for mat in ("SILK", "XYZ"):
+    for mat in ("XYZ",):
         try:
             slicer.resolve_profiles(c2, 0, mat)
             ok(False, f"{mat}: auto-picked PLA profile should be refused")
         except slicer.SliceError as e:
             ok(f"找不到 {mat} 的耗材配置" in str(e) and "ไม่พบ" in str(e), f"{mat}: refused with a clear message: {str(e)[:80]}")
     ok(slicer.resolve_profiles(c2, 0, "PLA")[4] == PLA_PROF, "PLA still uses the printer's PLA profile")
+    # 丝绸料 = PLA 一类（温度一样）：不拦，优先 Generic PLA Silk，没有就普通 PLA
+    for mat in ("SILK", "PLA Silk", "丝绸料"):
+        fs = slicer.resolve_profiles(c2, 0, mat)[4]
+        ok("PLA" in (op.filament_type(idx, fs) or "") and "silk" in fs.lower(), f"{mat}: sliced with a PLA Silk profile {fs}")
+    ok(recipes.same_material("丝绸料", "PLA") == "close" and recipes.same_material("SILK", "PETG") == "diff", "silk is PLA family")
     ok("PC" in (op.filament_type(idx, slicer.resolve_profiles(c2, 0, "PC")[4]) or ""), "PC: a PC profile is found")
     nts = []
-    slicer.resolve_profiles(c2, 0, "SILK", None, nts, strict=False)
-    ok(nts and nts[-1]["level"] == "error" and "SILK" in nts[-1]["zh"], "strict=False: reason in notes instead")
+    slicer.resolve_profiles(c2, 0, "XYZ", None, nts, strict=False)
+    ok(nts and nts[-1]["level"] == "error" and "XYZ" in nts[-1]["zh"], "strict=False: reason in notes instead")
     # 两槽：槽 2 是没有配置的材料 → 整盘不切
     mp = pp.get_plan(store.load(PID), "")
-    two = plate("p5", ["PLA", "SILK"], [item("d1", 60, 60, 1), item("d2", 160, 60, 2)], params=dict(mp["plates"][0]["params"]))
+    two = plate("p5", ["PLA", "XYZ"], [item("d1", 60, 60, 1), item("d2", 160, 60, 2)], params=dict(mp["plates"][0]["params"]))
     mp["plates"].append(two)
     mp["schemes"] = {"白色": {"1": "白色", "2": "黑色"}}
     pp.save_plan(PID, "", mp, "boss")
@@ -366,7 +371,7 @@ if slicer.find_orca(cfg):
         pp.slice_plate(PID, "", "p5", "白色", None, "boss")
         ok(False, "slot 2 with no matching profile should not slice")
     except slicer.SliceError as e:
-        ok("SILK" in str(e) and len(CAP) == n0_, f"per slot: refused before running OrcaSlicer {str(e)[:60]}")
+        ok("XYZ" in str(e) and len(CAP) == n0_, f"per slot: refused before running OrcaSlicer {str(e)[:60]}")
     # ---------- Y2. 切片前信息：按选的配置算 ----------
     pr = dict(store.load(PID), material="PETG")
     st = recipes.setup_info(pr, {"filament": {"Bambu Lab P1S": PLA_PROF}}, 0)

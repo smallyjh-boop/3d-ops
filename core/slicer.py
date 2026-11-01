@@ -639,7 +639,7 @@ def filament_mismatch(idx, filament_name, material):
 
 
 def no_profile_msg(material, got="", got_type=""):
-    """找不到这个材料的耗材配置（自动选到的是别的材料，例如 PC / 丝绸料选到了打印机默认的 PLA）。中文 + 泰文。"""
+    """找不到这个材料的耗材配置（自动选到的是别的材料，例如 PC 选到了打印机默认的 PLA）。中文 + 泰文。"""
     extra = f"（自动选到的「{got}」是 {got_type}，不能用）" if got else ""
     extra_th = f" (โปรไฟล์ที่เลือกอัตโนมัติ「{got}」เป็น {got_type} ใช้ไม่ได้)" if got else ""
     return (f"找不到 {material} 的耗材配置，请在打印机设置里选{extra}"
@@ -650,7 +650,7 @@ def resolve_profiles(cfg, printer_index=0, material="PLA", filament_name=None, n
     """这台打印机切片用哪套配置：返回 (orca 程序, 配置索引, 打印机配置, 工艺配置, 耗材配置)。
     filament_name：打印方案里指定的耗材配置（留空 = 按材料自动选）。
     v2.55：指定的配置材料和 material 不一样时不用它（按材料自动选），原因写进 notes（[{zh, th}]）。
-    v2.55：自动选出来的配置还是别的材料（PC / 丝绸料 / 不认识的材料 → 打印机默认的 PLA）→ 抛 SliceError，不切；
+    v2.55：自动选出来的配置还是别的材料（PC / 不认识的材料 → 打印机默认的 PLA；丝绸 PLA 算 PLA 一类，不拦）→ 抛 SliceError，不切；
     strict=False（只看配置、列可选配置时）不抛，原因写进 notes。"""
     exe = find_orca(cfg)
     if not exe:

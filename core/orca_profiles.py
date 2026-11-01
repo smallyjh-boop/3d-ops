@@ -272,6 +272,11 @@ def match_process(idx, machine):
 
 
 def match_filament(idx, machine, material="PLA"):
+    from .recipes import norm_material
+    if norm_material(material) == "PLA-SILK":    # 丝绸 PLA：优先「Generic PLA Silk」，没有就用普通 PLA（温度一样，都继承 PLA）
+        fils = filaments_for(idx, machine)
+        silk = [n for n in fils if re.search(r"(^|\s)generic pla[ -]?silk(\s*@.*)?$", n.lower())]
+        return silk[0] if silk else match_filament(idx, machine, "PLA")
     mat = (material or "PLA").upper().strip()
     fils = filaments_for(idx, machine)  # 已按「专用配置优先」排好序
     pat = re.compile(r"(^|\s)generic " + re.escape(mat.lower()) + r"(\s*@.*)?$")

@@ -1730,7 +1730,7 @@ def plate_checks(p, plate, fps, printers=None):
     if not temps_ok(p, plate):
         add("warn", "这一盘设的温度不是给槽 1 这个材料的（换过材料）：切片时不用，按耗材配置里的温度。需要的话重新设温度",
             "อุณหภูมิที่ตั้งไว้ไม่ใช่ของวัสดุช่อง 1 (เปลี่ยนวัสดุแล้ว): ตอนสไลซ์จะไม่ใช้ ใช้อุณหภูมิจากโปรไฟล์แทน ตั้งใหม่ได้ถ้าต้องการ")
-    rng = recipes.TEMP_RANGE.get(mat)
+    rng = recipes.TEMP_RANGE.get(recipes.norm_material(mat))
     t = prm.get("nozzle_temp") if temps_ok(p, plate) else 0
     if rng and t and not (rng[0] <= t <= rng[1]):
         add("warn", f"喷嘴温度 {t}°C 不在 {mat} 的常用范围（{rng[0]}–{rng[1]}°C）",
