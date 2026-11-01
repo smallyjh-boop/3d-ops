@@ -41,7 +41,8 @@ NEW_COLS = (("status", "TEXT DEFAULT 'draft'"), ("version", "INTEGER DEFAULT 1")
             ("verified_by", "TEXT"), ("verified_at", "REAL"), ("verify_note", "TEXT"),
             ("actual_grams", "REAL"), ("actual_hours", "REAL"), ("photo", "TEXT"),
             ("spec", "TEXT DEFAULT ''"),          # v2.22：这个文件是哪个规格的（规格有自己的模型时；空 = 主模型）
-            ("plate_id", "TEXT DEFAULT ''"))      # v2.52：打印方案里的哪一盘（几盘的方案每盘一个文件；空 = 整件）
+            ("plate_id", "TEXT DEFAULT ''"),      # v2.52：打印方案里的哪一盘（几盘的方案每盘一个文件；空 = 整件）
+            ("scale", "REAL"))                    # v2.53.1：「按主模型缩放 N%」的规格的文件按几 % 切的（空 = 不缩放）
 
 
 def init():
@@ -106,7 +107,8 @@ def _report_for_upload(path, kind, bed):
 
 
 def add(src_path, filename, product_id, printer, sku="", per_plate=1, color="", note="", user="", material="PLA",
-        grams=None, hours=None, move=False, recipe=None, report=None, checks=None, source="upload", bed=None, spec="", plate_id=""):
+        grams=None, hours=None, move=False, recipe=None, report=None, checks=None, source="upload", bed=None, spec="", plate_id="", scale=None):
+    """scale（v2.53.1）：按主模型缩放的规格的文件按几 % 切的；不填时按这个规格现在的缩放比例记（上传 / 替换的文件）。"""
     kind = _kind(filename)
     if kind == "resin":
         # 光固化：从文件里读时间 / 树脂用量（读不到的由人手填）
@@ -158,10 +160,20 @@ def add(src_path, filename, product_id, printer, sku="", per_plate=1, color="", 
     stored = f"{fid}_{_safe(filename)}"
     dst = os.path.join(FILE_DIR, stored)
     (shutil.move if move else shutil.copyfile)(src_path, dst)
-    c.execute("UPDATE print_files SET stored=?, size=?, spec=?, plate_id=? WHERE id=?",
-              (stored, os.path.getsize(dst), spec, (plate_id or "").strip(), fid))
+    if scale is None and spec:
+        scale = _spec_scale(product_id, spec)
+    c.execute("UPDATE print_files SET stored=?, size=?, spec=?, plate_id=?, scale=? WHERE id=?",
+              (stored, os.path.getsize(dst), spec, (plate_id or "").strip(), scale, fid))
     c.commit()
     return get(fid)
+
+
+def _spec_scale(product_id, spec):
+    try:
+        from . import specmodel, store
+        return specmodel.follow_scale(store.load(product_id), spec)
+    except (FileNotFoundError, OSError, ValueError):
+        return None
 
 
 def ensure_params(f):
@@ -240,6 +252,11 @@ def update(fid, **kw):
         sets["per_plate"] = max(1, int(sets["per_plate"]))
     if not sets:
         return get(fid)
+    if "spec" in sets:          # 人工改了规格：缩放比例按这个规格现在的记（v2.53.1）
+        sets["spec"] = str(sets["spec"]).strip()
+        old = get(fid)
+        if old and sets["spec"] != (old.get("spec") or ""):
+            sets["scale"] = _spec_scale(old["product_id"], sets["spec"]) if sets["spec"] else None
     c = db.conn()
     c.execute(f"UPDATE print_files SET {', '.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), fid))
     c.commit()
@@ -331,13 +348,12 @@ def candidates(product_id, sku, printer_name, color="", usable_only=True, plate_
     rows = [r for r in rows if _printer_ok(r["printer"], printer_name)]
     if plate_id is not None:
         rows = [r for r in rows if (r.get("plate_id") or "") == plate_id]
-    # v2.22：规格有自己的模型时只用这个规格的文件；没有（用主模型）时只用主模型的文件
+    # v2.22 / v2.53.1：规格有自己的模型或自己的打印方案（含「按主模型缩放 N%」）时只用这个规格的文件（缩放比例也要对），
+    # 没有时只用主模型的文件。SKU 专用的文件也要规格对得上（以前 SKU 对上就用，会把主模型 100% 的文件给缩放的规格）
     try:
         from . import specmodel, store
         p = store.load(product_id)
-        sp = specmodel.spec_of_sku(p, sku)
-        want = sp if (sp and specmodel.own(p, sp)) else ""
-        rows = [r for r in rows if (r.get("spec") or "") == want or (r["sku"] and r["sku"] == (sku or "").strip().upper())]
+        rows = [r for r in rows if not specmodel.file_error(r, p, sku)]
     except FileNotFoundError:
         pass
     if usable_only:

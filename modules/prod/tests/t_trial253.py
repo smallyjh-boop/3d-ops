@@ -132,8 +132,19 @@ ok(r2.status_code == 400 and "喷嘴不对" in (r2.get_json().get("error") or ""
 cfg = load_config(); cfg["printers"][0]["nozzle"] = 0.4; save_config(cfg)
 r3 = PC.post(f"/api/jobs/{tj['id']}/start", json={"printer": 0, "send": False, "confirm": {}}).get_json()
 ok("error" in r3, "bed-clear confirmation still required")
-r3 = PC.post(f"/api/jobs/{tj['id']}/start", json={"printer": 0, "send": False, "confirm": CONFIRM}).get_json()
-ok(r3.get("run_id") and r3["count"] == 1, f"trial started with unverified file {r3.get('run_id')}")
+# v2.53.1：试打任务只能用建任务时定好的文件（别的产品的 / 同产品别的盘的文件都不行，也不会被当成复核过）
+for bad_f, why in ((fs, "another product's file"), (f_p2, "another plate's file")):
+    rb = PC.post(f"/api/jobs/{tj['id']}/start", json={"printer": 0, "send": False, "confirm": CONFIRM, "file_id": bad_f["id"]})
+    ok(rb.status_code == 400 and "只能用建任务时选的切片文件" in (rb.get_json().get("error") or ""), f"trial with {why} refused: {rb.get_json().get('error')}")
+try:
+    production.start_run(tj["id"], 0, file_id=fs["id"], send=False, user="boss", confirm=CONFIRM); ok(False, "foreign file refused (core)")
+except ValueError as e:
+    ok("只能用建任务时选的切片文件" in str(e), f"core start_run refuses a foreign file for a trial: {e}")
+ok(not db.conn().execute("SELECT 1 FROM print_runs WHERE file_id=? AND product_id=?", (fs["id"], P2)).fetchall(), "no run with the foreign file")
+ok(production.job_file_error(dict(tj, kind="trial"), fs) and production.job_file_error(dict(tj, kind="trial"), print_files.get(f_p1["id"])) == "",
+   "job_file_error: trial file only")
+r3 = PC.post(f"/api/jobs/{tj['id']}/start", json={"printer": 0, "send": False, "confirm": CONFIRM, "file_id": f_p1["id"]}).get_json()
+ok(r3.get("run_id") and r3["count"] == 1 and r3["file"]["id"] == f_p1["id"], f"trial started with unverified file {r3.get('run_id')}")
 try:
     trial.submit_result(tj["id"], True, dest="stock", user="pong"); ok(False, "result before the print ends refused")
 except ValueError as e:
@@ -266,6 +277,41 @@ c6 = C.post("/api/trial/check-file", json={"product_id": "3DP0005", "slice": Fal
 ok(not c6.get("ok", False), f"no file -> not ok {c6.get('error') or c6.get('errors')}")
 # 没有可用机型
 ok(C.post("/api/trial/check-file", json={"product_id": P2, "plate_id": "zz"}).status_code == 400, "unknown plate refused")
+
+# ---------- v2.53.1 打印测试任务（kind=test, product_id=""）完整走 start_run（job_colours / material_check 等不报错） ----------
+ftc = gfile("cube_test.gcode", 1, 5, 0.3, pid="__test__", plate="")
+c_ = db.conn()
+def test_job(fid):
+    jid_ = c_.execute("""INSERT INTO jobs(product_id, sku, name, color, material, qty, grams_each, hours_each, printer, pin, file_id, status,
+                        kind, priority_job, note, created_at, updated_at, updated_by) VALUES('', 'TEST-CUBE', '打印测试', '', 'PLA', 1, 5, 0.3, 0, 1, ?, 'todo',
+                        'test', 1, '打印测试', 0, 0, 'boss')""", (fid,)).lastrowid
+    c_.commit()
+    return jid_
+tjid = test_job(ftc["id"])
+ok(production.job_colours("", "TEST-CUBE", "") == [] and production.job_plates("", "TEST-CUBE", "") == [], "test job: no colours / plates")
+so = production.send_options(tjid, 0)
+ok([f["id"] for f in so["files"]] == [ftc["id"]] and so["usable_files"] == [ftc["id"]], f"test job send options {so['usable_files']}")
+rt0 = production.start_run(tjid, 0, None, [], None, False, "boss", CONFIRM)
+ok(rt0.get("run_id") and rt0["file"]["id"] == ftc["id"] and rt0["count"] == 1 and rt0["alloc"] == {str(tjid): 1} and not rt0["colours"],
+   f"test job start_run(send=False) runs through {rt0.get('run_id')}")
+production.finish_run(rt0["run_id"], "boss")
+ok(c_.execute("SELECT status FROM jobs WHERE id=?", (tjid,)).fetchone()["status"] == "done", "test job done after the run")
+tjid = test_job(ftc["id"])
+try:
+    production.start_run(tjid, 0, None, [], fs["id"], False, "boss", CONFIRM); ok(False, "test job with a product file refused")
+except ValueError as e:
+    ok("只能用建任务时选的切片文件" in str(e), f"test job with another file refused: {e}")
+pr._status[0] = {"state": "idle"}
+n_sent = len(SENT)
+rt1 = production.start_run(tjid, 0, None, [], None, True, "boss", CONFIRM)
+ok(rt1.get("run_id") and len(SENT) == n_sent + 1 and SENT[-1][0] == 0, f"test job start_run(send=True) sends the cube {SENT[-1:]}")
+production.cancel_run(rt1["run_id"], "boss")
+pr._status.pop(0, None)
+c_.execute("DELETE FROM jobs WHERE kind='test'"); c_.commit()
+print_files.update(ftc["id"], active=0)            # 下面的真打印测试要自己切立方体
+# 测试任务用了不是立方体的文件 → 拒绝
+fake = dict(kind="test", file_id=fs["id"], product_id="", sku="TEST-CUBE")
+ok("测试立方体" in production.job_file_error(fake, fs), "job_file_error: test job only takes the test cube")
 
 # ---------- 🧪 打印测试 ----------
 cfg = load_config()

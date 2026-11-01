@@ -109,7 +109,8 @@ def printer_options(pid, spec="", plate_id="", sku=""):
 
 
 def _resolve(pid, spec, plate_id, sku=""):
-    """(产品, 规格, 方案, 盘)。plate_id 不填 = 方案第一盘。"""
+    """(产品, 规格, 方案, 盘)。plate_id 不填 = 方案第一盘。
+    v2.53.1：方案按 plan_key（= 切片文件的规格）取：跟着主模型的规格用主模型的方案，按主模型缩放的规格用缩放后的方案。"""
     from . import specmodel, store
     pp = _plan_mod()
     if not pp:
@@ -118,10 +119,13 @@ def _resolve(pid, spec, plate_id, sku=""):
         p = store.load(pid)
     except FileNotFoundError:
         raise ValueError("产品不存在")
+    sku_spec = specmodel.spec_of_sku(p, sku) if sku else ""
     if spec in (None, ""):
-        spec = specmodel.spec_of_sku(p, sku) if sku else ""
+        spec = sku_spec
     spec = (spec or "").strip()
-    plan = pp.get_plan(p, spec)
+    if sku and sku_spec and sku_spec != spec:
+        raise ValueError(f"SKU {sku} 是规格「{sku_spec}」的，不是「{spec or '主模型'}」的")
+    plan = pp.get_plan(p, specmodel.file_spec(p, spec))
     plates = plan.get("plates") or []
     if not plates:
         raise ValueError("这个产品没有打印方案，请先在产品编辑页的「打印方案」里摆盘")
@@ -171,9 +175,9 @@ def _plate_file(p, pid, spec, plate_id, sku, idx, user, slice_now=True):
     if not slice_now:
         return None, False
     pp = _plan_mod()
-    from . import slicer
+    from . import slicer, specmodel
     try:
-        r = pp.slice_plate(pid, spec, plate_id, colour, idx, user)
+        r = pp.slice_plate(pid, specmodel.file_spec(p, spec), plate_id, colour, idx, user)     # v2.53.1：按这个规格的方案（缩放后）切
     except slicer.SliceError as e:
         raise ValueError(f"这一盘还没有切片文件，现在切片没有成功：{e}")
     return r["file"], True
@@ -199,6 +203,9 @@ def create_trial(pid, sku="", spec=None, plate_id="", printer=None, file_id=None
     sc = slicecheck.check(f, idx)
     if not sc["ok"]:
         raise ValueError("不能用这个切片文件试打：" + "；".join(sc["errors"]))
+    ferr = _file_mismatch(f, p, sku, plate_id, len(plan.get("plates") or []) == 1)     # v2.53.1：规格 / 缩放比例 / 盘
+    if ferr:
+        raise ValueError(ferr)
     n = max(1, int(f.get("per_plate") or plate.get("sets") or 1))
     j = production.create_job(pid, sku, n, "trial", None, user, "试打" + (f"（{source}）" if source else ""),
                               priority=1, printer=idx, file_id=f["id"])
@@ -236,6 +243,17 @@ def create_trials(pid, sku="", spec=None, plate_id="", printer=None, user="", so
     if not made and errs:
         raise ValueError("；".join(errs))
     return {"trials": made, "skipped": skipped, "errors": errs}
+
+
+def _file_mismatch(f, p, sku, plate_id, single=False):
+    """v2.53.1：试打 / 检查用的文件必须是这个规格（缩放比例）、这一盘的。对得上 → ""。"""
+    from . import specmodel
+    err = specmodel.file_error(f, p, sku)
+    if err:
+        return err
+    if (f.get("plate_id") or "") != plate_id and not (single and not f.get("plate_id")):
+        return f"文件尺寸 / 规格和任务不一致（文件 #{f.get('id')}）：不是打印方案里这一盘的切片文件"
+    return ""
 
 
 def _file_brief(f):
@@ -613,6 +631,10 @@ def check_file(pid, spec=None, plate_id="", printer=None, file_id=None, sku="", 
         return res
     f = print_files.ensure_params(f)
     res["file"] = _file_brief(f)
+    # 0. v2.53.1 文件的产品 / 规格 / 缩放比例 / 盘要和这一盘一致（按主模型缩放的规格不能用主模型 100% 的文件）
+    ferr = _file_mismatch(f, p, sku, plate_id, len(plan.get("plates") or []) == 1)
+    if ferr:
+        _chk(res, "spec", "error", ferr, "ขนาด / สเปกของไฟล์ไม่ตรงกับงาน (เป็นไฟล์ของรุ่นย่อย / ถาดอื่น หรือสเกลไม่ตรง) ห้ามส่งพิมพ์ ให้สไลซ์ใหม่")
     # 1. 机型 / 喷嘴 / 热床板 / FDM（slicecheck）
     sc = slicecheck.check(f, idx)
     if sc["ok"]:

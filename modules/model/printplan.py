@@ -866,9 +866,10 @@ def job_colours(product_id, sku, colour=""):
     if not colour:
         colour = next(((v.get("opt1_zh") or "") for v in p.get("variants") or [] if (v.get("sku") or "").upper() == (sku or "").upper()), "")
     plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
-    if spec not in plans and "" not in plans:
+    key = plan_key(p, spec)          # v2.53.1：有自己模型 / 自己方案的规格用自己的（不再借主模型的方案）
+    if key not in plans:
         return []
-    u = usage(p, spec if spec in plans else "", colour)
+    u = usage(p, key, colour)
     return [{"colour": c["colour"], "material": c["material"], "grams": round(c["grams"] + c.get("purge_g", 0), 1)} for c in u["colours"]]
 
 
@@ -877,9 +878,9 @@ def _plan_for_sku(p, sku):
     from core import specmodel
     spec = specmodel.spec_of_sku(p, sku)
     plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
-    key = spec if spec in plans else ("" if "" in plans else None)
-    if key is None:
-        return spec, None
+    key = plan_key(p, spec)          # v2.53.1：有自己模型但没保存方案的规格不借主模型的盘
+    if key not in plans:
+        return key, None
     plan = get_plan(p, key) if (plans.get(key) or {}).get("follow") else (plans.get(key) or {})
     return key, (plan if plan.get("plates") else None)
 
@@ -975,13 +976,13 @@ def apply_actual(pid, spec, plate_id, grams, hours, sku=""):
     spec = (spec or "").strip()
     p = store.load(pid)
     plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
-    key = spec if spec in plans else ("" if "" in plans else None)
-    saved = plans.get(key) if key is not None else None
+    key = plan_key(p, spec)          # v2.53.1：和切片文件同一个规格（按主模型缩放的规格写自己的，不写主模型）
+    saved = plans.get(key)
     grams = float(grams) if grams not in (None, "") else None
     hours = float(hours) if hours not in (None, "") else None
     if not saved or saved.get("default") or not (saved.get("plates") or saved.get("follow")):
         out = []
-        plan = get_plan(p, spec)
+        plan = get_plan(p, key)
         sets = max(1, int(next((x.get("sets") or 1 for x in plan.get("plates") or [] if x["id"] == plate_id), 1)))
         for v in p.get("variants") or []:
             if (v.get("opt2_zh") or "").strip() != spec:
@@ -994,7 +995,7 @@ def apply_actual(pid, spec, plate_id, grams, hours, sku=""):
             out.append(v.get("sku") or "")
         store.save(p)
         return out
-    plan = get_plan(p, spec if key == spec else "")
+    plan = get_plan(p, key)
     plate = next((x for x in plan.get("plates") or [] if x["id"] == plate_id), None)
     if not plate:
         return []
@@ -1194,7 +1195,9 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
     f = print_files.add(res["kept"], fname.replace(".3mf", ".gcode.3mf"), pid, pname, "", int(plate.get("sets") or 1), "",
                         "按打印方案（摆好的盘）切片" + (f"，{ams_line(usage(p, spec, colour)['colours'])}" if multi else ""), user,
                         fils[0]["material"], res.get("grams"), res.get("hours"), move=True, source="plan", spec=spec,
-                        plate_id=plate_id)        # v2.52：记下是哪一盘（几盘的方案生产时每盘用自己的文件）
+                        plate_id=plate_id,        # v2.52：记下是哪一盘（几盘的方案生产时每盘用自己的文件）
+                        scale=round(float(plan["scale"]), 1) if plan.get("follow") and plan.get("scale") else None)  # v2.53.1：缩放比例
+    f = print_files.ensure_params(f)          # v2.53.1：马上读切片参数（机型 / 喷嘴），排单 / 开始打印才认得出这个文件能用
     return {"sliced": sliced, "file": f}
 
 
@@ -1205,9 +1208,10 @@ def _spec_colour(p, spec):
 
 
 def plan_key(p, spec):
-    """生产时这个规格用哪份方案：规格自己的（保存过 / 按主模型缩放）> 主模型的。"""
-    plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
-    return spec if (spec in plans and (plans[spec].get("plates") or plans[spec].get("follow"))) else ""
+    """生产时这个规格用哪份方案：规格自己的（保存过 / 按主模型缩放 / 有自己的模型）> 主模型的。
+    v2.53.1：和切片文件的规格（specmodel.file_spec）是同一个，生产 / 试打 / 写回都按它。"""
+    from core import specmodel
+    return specmodel.file_spec(p, spec)
 
 
 def plan_summary(p, spec="", cfg=None):
