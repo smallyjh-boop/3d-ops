@@ -24,7 +24,8 @@ def box(w, d, h):
     f = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
     return v[np.array(f)]
 
-save_config({"printers": [{"code": "P1S-01", "name": "Bambu Lab P1S", "g_per_h": 22, "enabled": True, "tech": "fdm"}]})
+save_config({"printers": [{"code": "P1S-01", "name": "Bambu Lab P1S", "g_per_h": 22, "enabled": True, "tech": "fdm"},
+                          {"code": "K1C-01", "name": "Creality K1C", "g_per_h": 18, "enabled": True, "tech": "fdm"}]})
 PID = "3DP0002"
 p = store.load(PID)
 p["variants"] = [{"opt1_zh": "白色", "opt2_zh": "", "sku": "3DP0002-WH", "grams": 30, "hours": 1.5}]
@@ -60,6 +61,13 @@ for m in re.finditer(r"^G1 [^\n]*X([\d.]+) Y([\d.]+)[^\n]*E[\d.]", gc, re.M):
     xs.append(float(m.group(1))); ys.append(float(m.group(2)))
 ok(xs and min(xs) < 50 and min(ys) < 50 and max(xs) > 160 and max(ys) > 175, f"positions kept: X {min(xs):.0f}–{max(xs):.0f}, Y {min(ys):.0f}–{max(ys):.0f}")
 ok("T1" in gc or "M620 S1" in gc, "G-code switches to filament 2")
+# 机型核对（放错打印文件会损坏机器）：系统用 OrcaSlicer 切出来的文件要认得出是 P1S 的，只能发 P1S，发 K1C 必须被拦
+from modules.prod import slicecheck
+fobj = print_files.ensure_params(print_files.get(r["file"]["id"]))
+ok(slicecheck.file_model(fobj)[0] == "Bambu Lab P1S", f"system-sliced file recognised as P1S {slicecheck.file_model(fobj)}")
+ok(slicecheck.check(fobj, 0)["ok"], f"P1S file -> P1S allowed {slicecheck.check(fobj, 0)['errors']}")
+sc1 = slicecheck.check(fobj, 1)
+ok(not sc1["ok"] and any("机型不对" in e or "不能发到" in e for e in sc1["errors"]), f"P1S file -> K1C blocked {sc1['errors']}")
 u = pp.usage(store.load(PID), "", "白色")
 ok(not u["est"], "usage now from slicer (not 估)")
 sys.exit(1 if E_ else 0)
