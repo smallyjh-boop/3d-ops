@@ -818,3 +818,35 @@ html.in-app .m-app-chip{display:inline-flex}
 .nav-hl{animation:navhl 2.4s ease-out}
 tr.nav-hl>td{animation:navhl 2.4s ease-out}
 @keyframes navhl{0%,35%{background-color:#fde68a;box-shadow:0 0 0 2px #f59e0b}100%{background-color:transparent;box-shadow:0 0 0 0 transparent}}
+
+/* v2.53 自动分组面板（产品库 / 采集箱 / 候选池共用，static/groups.js） */
+.grp3-top{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.grp3-shops{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 8px}
+.grp3{display:inline-flex;gap:6px;align-items:center;padding:3px 9px;border-radius:12px;cursor:pointer;font-size:13px;border:1px solid transparent}
+.grp3:hover{background:#f3f4f6}
+.grp3.on{background:#eff6ff;color:#1d4ed8;font-weight:600;border-color:#bfdbfe}
+.grp3-n{color:#6b7280;font-size:12px}
+.grp3-big{border:1px solid #d0d5dd;background:#fff;font-size:14px;padding:5px 12px}
+.grp3.t-ok .grp3-n{color:#15803d}.grp3.t-warn .grp3-n{color:#b45309}.grp3.t-bad .grp3-n{color:#b91c1c}
+.grp3-sec{border-top:1px solid var(--line,#e5e7eb);padding:6px 0}
+.grp3-sec>summary{cursor:pointer;font-weight:600;font-size:13px;list-style:none}
+.grp3-help{margin-left:6px;color:#9ca3af;font-weight:400;cursor:help}
+.grp3-items{display:flex;flex-direction:column;gap:1px;margin-top:4px}
+.grp3-items .grp3{display:flex;justify-content:space-between;border-radius:6px}
+.grp3.ind1{margin-left:12px}.grp3.ind2{margin-left:24px}
+.grp3-views{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.grp3-view{display:inline-flex;gap:6px;border:1px dashed #94a3b8;border-radius:12px;padding:2px 9px;font-size:12px;cursor:pointer}
+.grp3-view.on{background:#fef9c3}.grp3-view a{color:#9ca3af;cursor:pointer}
+.grp3-foot{margin-top:6px}
+.grp3-foot a,.grp3-items a{cursor:pointer;color:var(--accent,#2563eb)}
+@media (max-width:900px){
+  .lib-groups,.cur-folders{padding:6px 8px}
+  .grp3-sec>summary{display:inline-block;margin-right:6px}
+  .grp3-sec{border-top:0;display:flex;gap:6px;align-items:center;overflow-x:auto;white-space:nowrap}
+  .grp3-sec .grp3-items{flex-direction:row;margin-top:0}
+  .grp3-sec:not([open]) .grp3-items{display:none}
+  .grp3-items .grp3{display:inline-flex}
+}
+.lib-wrap>*,.cur-inbox>*,.lw-body>*{min-width:0}
+@media (max-width:900px){.lib-groups,.lw-groups,.cur-folders{max-width:100%;overflow:hidden}.grp3-top,.grp3-shops{flex-wrap:nowrap;overflow-x:auto}}
+#lw-shop{width:auto;min-width:140px;max-width:220px}

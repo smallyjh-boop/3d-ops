@@ -287,6 +287,10 @@ def _save_from_client(pid, p):
             if (v.get("sku") or "").upper() in _cu:
                 v["colour_usage"], v["purge_g"] = _cu[(v.get("sku") or "").upper()]
         p["groups"] = old.get("groups") or []
+        if old.get("marks"):
+            p["marks"] = old["marks"]                  # v2.53：「要上传 / 要修改」标记有单独的接口，页面上可能过时
+        else:
+            p.pop("marks", None)
         p["source"] = old.get("source")            # 选品工具来源信息、下载的原始文件
         p["source_files"] = old.get("source_files")
         for k in ("edit_rev", "edited_by", "edited_at"):

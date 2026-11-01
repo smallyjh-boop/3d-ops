@@ -12,9 +12,7 @@
   </div>
   <div class="lib-wrap">
     <aside class="lib-groups card">
-      <div class="row between"><b>分组</b><button class="mini" id="btn-grp-new">＋ 新建</button></div>
       <div id="grp-list"></div>
-      <p class="muted small">勾选产品后，可以「加入分组」。一个产品可以放进多个分组。</p>
     </aside>
     <div class="lib-main">
       <div class="row gap wrap lib-filter">
@@ -23,11 +21,14 @@
         <select id="lib-print"><option value="">打印：全部</option><option value="nomodel">没有 3D 模型</option><option value="nofile">没有可用切片文件</option><option value="reviewed">未试打</option><option value="verified">已试打验证</option></select>
         <select id="lib-sort"><option value="updated">最近修改</option><option value="id">编号</option><option value="sold">近 30 天销量</option><option value="name">品名</option></select>
         <span id="lib-count" class="muted small"></span>
+        <button class="mini" id="btn-lib-saveview" title="把现在选的分组、搜索和下拉筛选存成一个视图，以后一键回来">⭐ 保存为视图</button>
+        <button class="mini hidden" id="btn-lib-gset" title="热销 / 滞销 / 新品 / 利润低 的标准">⚙ 分组标准</button>
         <a href="#" id="lib-inbox" class="lib-inbox hidden" data-needmod="curate" title="选品采用的模型先放在「选品 → 采集箱」，整理好「转入产品库」才出现在这里">📥 采集箱 <b id="lib-inbox-n"></b></a>
       </div>
       <div id="lib-bulk" class="ord-bulk">
         <span id="lib-selinfo" class="small muted">勾选产品后批量处理</span>
-        <select id="lib-grp-pick"></select><button id="btn-grp-add">加入分组</button><button id="btn-grp-rm">移出分组</button>
+        <button id="btn-mk-upload" title="要上传：上传成功后自动取消">⬆ 标记 要上传</button><button id="btn-mk-edit">✏ 标记 要修改</button><button id="btn-mk-off" class="mini">取消标记</button>
+        <select id="lib-grp-pick"></select><button id="btn-grp-add">加标签</button><button id="btn-grp-rm">去掉标签</button>
         <button id="btn-seo-sel" data-needmod="seo">🔍 搜索优化选中</button>
         <button id="btn-lib-scene">🖼 批量 AI 场景图</button>
         <button id="btn-lib-zip">⬇ 下载模型和切片文件</button>
@@ -35,7 +36,7 @@
         <button id="btn-lib-clear" class="mini">取消勾选</button>
       </div>
       <table class="grid" id="lib-table">
-        <thead><tr><th><input type="checkbox" id="lib-all"></th><th></th><th>编码</th><th>品名</th><th>分组</th><th>SKU / 颜色</th><th>Lazada 类目</th><th>状态</th><th>打印</th><th>近30天</th><th>更新</th><th></th></tr></thead>
+        <thead><tr><th><input type="checkbox" id="lib-all"></th><th></th><th>编码</th><th>品名</th><th>进度 / 标记</th><th>SKU / 颜色</th><th>Lazada 类目</th><th>状态</th><th>打印</th><th>近30天</th><th>更新</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
       <p id="lib-empty" class="muted hidden">还没有产品，点右上角「新建产品」开始。</p>

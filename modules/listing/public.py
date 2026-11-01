@@ -8,6 +8,17 @@ def online_shops():
     return online.all_platforms()
 
 
+def online_first_live():
+    """v2.53（产品库自动分组：新品 / 滞销）：{产品编号: 最早在售的时间（Unix 秒，平台上建商品的时间）}。"""
+    from core import db
+    from . import online
+    online.init()
+    out = {}
+    for r in db.conn().execute("SELECT product_id, MIN(created) t FROM online_items WHERE product_id IS NOT NULL AND status='live' AND created>0 GROUP BY product_id"):
+        out[r["product_id"]] = r["t"]
+    return out
+
+
 def online_skus():
     """v2.46（运营分析：商品生命周期、售价低于最低价）：{SellerSku 大写: [{platform, shop_id, item_id, status, created, price}]}。
     status 是统一的叫法（live 在售 / uploaded 审核中 / rejected / inactive / deleted）；price = 平台上实际卖的价（有促销价用促销价）；

@@ -51,6 +51,7 @@ PRODUCTION_ALLOW = [
     ("POST", r"^/api/bg/(clear|[a-f0-9]+/retry)$"),
     ("GET", r"^/api/(config|colors|me|products|categories|scenes|slicer/info|slicer/presets|shopee/tree)$"),
     ("GET", r"^/api/products/[^/]+$"),
+    ("GET", r"^/api/goods/(library|views)$"),                # v2.53 产品库（自动分组）；售价字段下面会去掉
     ("POST", r"^/api/client-(error|timing)$"),
     ("GET", r"^/api/calib$"),
     ("GET", r"^/files/"),
@@ -206,7 +207,7 @@ def strip_prices(obj, user):
         return obj
     hide = set(PRICE_HIDE)
     if user["role"] == "production":
-        hide |= {"final_price", "list_price", "special_price", "price"}
+        hide |= {"final_price", "list_price", "special_price", "price", "sku_price", "price_sig"}
     if isinstance(obj, dict):
         return {k: strip_prices(v, user) for k, v in obj.items() if k not in hide}
     if isinstance(obj, list):

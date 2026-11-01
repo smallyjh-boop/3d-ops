@@ -123,3 +123,7 @@ button.mini.ghost:hover, button.ghost:hover { color: #b91c1c; border-color: #fec
 #tab-curate .cur-jobs button.mini.ghost { padding: 0 6px }
 #tab-curate .cur-sitetbl { margin-top: 8px }
 .cur-float select { width: auto; background: #1f2937; color: #fff; border-color: #374151; padding: 5px 8px }
+/* v2.53 候选池：左边自动分组 + 右边列表 */
+.cur-pool{display:grid;grid-template-columns:230px 1fr;gap:14px;align-items:start}
+.cur-pool-main{min-width:0}
+@media (max-width:900px){.cur-pool{grid-template-columns:1fr}}

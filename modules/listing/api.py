@@ -54,6 +54,23 @@ def online_active():
         return err(str(e))
 
 
+@bp.get("/api/listing/wb")
+def listing_wb():
+    """上架工作台的自动分类（v2.53）：平台 + 店铺（shop=0 全部店铺）→ 每个产品的分类键、各分类个数、店铺列表、保存的视图。"""
+    from core import prodgroups
+    from . import wbgroups
+    a = request.args
+    plat = a.get("platform") if a.get("platform") in ("lazada", "shopee") else "lazada"
+    try:
+        sid = int(a.get("shop") or 0)
+    except ValueError:
+        sid = 0
+    res = wbgroups.compute(plat, sid)
+    res["views"] = prodgroups.views("wb")
+    res["settings"] = prodgroups.settings()
+    return jsonify(res)
+
+
 # ---------------- v2.41.2：直接推到 Lazada（接口） ----------------
 @bp.post("/api/listing/lazada/push")
 def lazada_push_products():
@@ -63,10 +80,11 @@ def lazada_push_products():
     if not ids:
         return err("请至少选择一个产品")
     user, force = _uname(), bool(b.get("force"))
+    shop_id = int(b.get("shop_id") or 0) or None          # v2.53：铺货机会 → 上到选定的店铺
 
     def run():
         try:
-            return jsonify(lazada_push.push(ids, user, force=force))
+            return jsonify(lazada_push.push(ids, user, force=force, shop_id=shop_id))
         except lazada_push.PushError as e:
             return err(str(e))
     return maybe_async(f"推送到 Lazada（{len(ids)} 个）", run, "lz_push")      # v2.43：?async=1 时后台跑，任务中心看进度

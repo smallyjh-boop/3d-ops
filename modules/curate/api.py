@@ -10,7 +10,7 @@ from flask import Blueprint, g, jsonify, request
 from core import auth
 from core.config import load_config
 
-from . import cand, db, demand, inbox, pipeline, sites, watch
+from . import cand, db, demand, inbox, pipeline, pool, sites, watch
 
 bp = Blueprint("m_curate", __name__)
 PREFIXES = ["/api/cur/", "/api/v1/curate/"]
@@ -80,6 +80,83 @@ def cur_candidates():
 def cur_cand_status():
     b = _b()
     return _go(lambda: cand.set_status(b.get("ids") or [], b.get("status") or "") or {})
+
+
+@bp.get("/api/cur/pool/info")
+def cur_pool_info():
+    """候选池的存储、清理设置、回收站（v2.53）。"""
+    def go():
+        pool.ensure()
+        return {"settings": pool.settings(), "storage": pool.storage(), "trash": pool.trash_list(), "kpi": pool.kpis()}
+    return _go(go)
+
+
+@bp.post("/api/cur/pool/preview")
+def cur_pool_preview():
+    return _go(lambda: pool.preview(_b().get("opts") or {}))
+
+
+@bp.post("/api/cur/pool/clean")
+def cur_pool_clean():
+    b = _b()
+
+    def go():
+        if not _owner():
+            raise PermissionError
+        r = pool.run(b.get("opts") or {}, b.get("classes") or [])
+        if b.get("cap"):
+            r["capped"] = pool.enforce_cap()
+        return r
+    try:
+        return _go(go)
+    except PermissionError:
+        return _e("只有老板能清理候选池", 403)
+
+
+@bp.post("/api/cur/pool/settings")
+def cur_pool_settings():
+    b = _b()
+
+    def go():
+        if not _owner():
+            raise PermissionError
+        return {"settings": pool.save_settings(b)}
+    try:
+        return _go(go)
+    except PermissionError:
+        return _e("只有老板能改", 403)
+
+
+@bp.post("/api/cur/pool/auto")
+def cur_pool_auto():
+    """马上跑一次自动清理（设置页「现在清一次」）。"""
+    def go():
+        if not _owner():
+            raise PermissionError
+        return pool.auto_clean(force=True)
+    try:
+        return _go(go)
+    except PermissionError:
+        return _e("只有老板能清理候选池", 403)
+
+
+@bp.post("/api/cur/pool/restore")
+def cur_pool_restore():
+    b = _b()
+    return _go(lambda: {"restored": pool.restore(b.get("skeys") or [])})
+
+
+@bp.post("/api/cur/pool/purge")
+def cur_pool_purge():
+    """立刻清空回收站（只留指纹）。"""
+    def go():
+        if not _owner():
+            raise PermissionError
+        return {"purged": pool.purge_expired(force=True)}
+    try:
+        return _go(go)
+    except PermissionError:
+        return _e("只有老板能清理候选池", 403)
 
 
 @bp.post("/api/cur/candidates/recollect")

@@ -35,10 +35,10 @@ class PushError(Exception):
     pass
 
 
-def shop():
-    """(店铺 id, 连接器)：店铺对接里启用的 Lazada 店铺（有好几个时用第一个）。"""
+def shop(shop_id=None):
+    """(店铺 id, 连接器)：店铺对接里启用的 Lazada 店铺（有好几个时用第一个；shop_id 指定了就用那个，v2.53 铺货机会用）。"""
     from core import db
-    r = db.conn().execute("SELECT id FROM shops WHERE platform='lazada' AND enabled=1 ORDER BY id").fetchone()
+    r = db.conn().execute("SELECT id FROM shops WHERE platform='lazada' AND enabled=1 AND (? IS NULL OR id=?) ORDER BY id", (shop_id, shop_id)).fetchone()
     if not r:
         raise PushError("还没有启用的 Lazada 店铺（设置 → AI 与对接 → 店铺对接，授权后勾「启用自动同步」）")
     s = integrations.get_shop_raw(r["id"])
@@ -308,11 +308,14 @@ def _check(cfg, p, cat):
     return lazada_template.check_product(p, pricing.price_product(cfg, p), cat, cfg)
 
 
-def push(pids, user="", force=False):
+def push(pids, user="", force=False, shop_id=None):
     """推一批产品。返回 {ok:[{id, item_id, created}], failed:[{id, error}], errors, warnings}（errors 有就没推）。"""
     from core import listing, stockcalc
     cfg = load_config()
-    sid, conn = shop()
+    sid, conn = shop(shop_id)
+    from core import db as _db
+    _r = _db.conn().execute("SELECT id FROM shops WHERE platform='lazada' AND enabled=1 ORDER BY id").fetchone()
+    primary = _r["id"] if _r else sid
     prods = [store.load(i) for i in pids]
     errors, warnings = [], []
     for p in prods:
@@ -327,7 +330,8 @@ def push(pids, user="", force=False):
         from core import bgjobs
         for i, p in enumerate(prods):
             bgjobs.note(stage=f"{i + 1}/{len(prods)}")          # 任务中心显示进度（v2.43）
-            state = dict(p.get("lazada_api") or {})
+            alt = bool(shop_id) and shop_id != primary        # v2.53：铺货到第二个店铺——记录单独存，不动主店铺的 item_id / 上架状态
+            state = dict(((p.get("lazada_api_shops") or {}).get(str(sid)) if alt else p.get("lazada_api")) or {})
             try:
                 cat = categories.get((p.get("category") or {}).get("id"))
                 if not cat or not cat.get("cat_id"):
@@ -346,6 +350,11 @@ def push(pids, user="", force=False):
                     if x.get("seller_sku") and x.get("sku_id"):
                         state.setdefault("skus", {})[x["seller_sku"]] = x["sku_id"]
                 state.update(at=time.time(), error="", by=user)
+                if alt:
+                    p.setdefault("lazada_api_shops", {})[str(sid)] = state
+                    store.save(p)
+                    done.append({"id": p["id"], "item_id": state.get("item_id"), "created": created, "shop_id": sid})
+                    continue
                 p["lazada_api"] = state
                 if not p.get("exported_at"):
                     p["exported_at"] = int(time.time())     # SKU 锁定（和导出表格一样）
@@ -357,7 +366,10 @@ def push(pids, user="", force=False):
                 done.append({"id": p["id"], "item_id": state.get("item_id"), "created": created})
             except Exception as e:  # noqa: BLE001  一个失败不影响别的
                 state.update(error=str(e)[:500], at=time.time())
-                p["lazada_api"] = state            # 搬过的图片记住，下次不重复搬
+                if alt:
+                    p.setdefault("lazada_api_shops", {})[str(sid)] = state
+                else:
+                    p["lazada_api"] = state            # 搬过的图片记住，下次不重复搬
                 store.save(p)
                 failed.append({"id": p["id"], "error": str(e)})
     finally:

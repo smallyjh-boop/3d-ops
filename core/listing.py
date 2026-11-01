@@ -85,6 +85,9 @@ def _set(p, platform, status, batch=None, note=None, user=""):
     elif status != "failed":
         cur.pop("note", None)
     lst[platform] = cur
+    if status in ("uploaded", "live") and isinstance(p.get("marks"), dict):     # v2.53：「要上传」标记上传成功后自动清掉
+        p["marks"].pop("upload", None)
+        p["marks"].pop("list", None)                     # 上架工作台的「要上架」
 
 
 def create_batch(platform, pids, files, name="", group_id=None, user=""):
