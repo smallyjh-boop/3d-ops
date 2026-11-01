@@ -11,7 +11,7 @@
   const stName = (o) => (TH() ? o.status_th : o.status_zh);
   const stChip = (o) => `<span class="po-st po-${o.status}">${E(stName(o))}</span>${o.paused ? ` <span class="po-st po-paused">⏸ ${E(Z("已暂停", "หยุดชั่วคราว"))}</span>` : ""}`;
   const srcName = (o) => (TH() ? o.source_th : o.source_zh);
-  let ST = "active", Q = "", D = null, TIMER = null;
+  let ST = "active", Q = "", D = null, SG = null, TIMER = null;
   const canEdit = () => !window.ME || ME.role === "owner" || ME.role === "production";
   const prs = () => (typeof CFG !== "undefined" && CFG && CFG.printers) || [];
   const prCode = (i) => { const p = prs()[i]; return p ? (p.code || p.name) : "#" + (i + 1); };
@@ -20,6 +20,7 @@
     const root = document.getElementById("po-root");
     if (!root) return;
     D = await api(`/api/porders?status=${ST === "all" ? "" : ST}&q=${encodeURIComponent(Q)}`);
+    try { SG = await api("/api/porders/suggest"); } catch { SG = null; }       // v2.55 顶部「建议生产」卡片
     render();
     clearInterval(TIMER);
     TIMER = setInterval(() => { if (!document.hidden && root.isConnected && !root.closest(".hidden") && !document.querySelector("#modal:not(.hidden)")) load().catch(() => {}); }, 30000);
@@ -43,6 +44,9 @@
           <button id="po-orders" title="${E(Z("把今天所有还没开始的订单任务归到一张单，方便一起看进度", "รวมงานออเดอร์วันนี้ที่ยังไม่เริ่มไว้ในใบเดียว"))}">📋 ${E(Z("今天订单汇总", "สรุปออเดอร์วันนี้"))}</button>` : ""}
           <button id="po-reload">${E(Z("刷新", "รีเฟรช"))}</button></div></div>
       <p class="muted small">${E(Z("生产单 = 一批要生产的成品。下达后变成打印任务，进度、预计完成、用料和成本都在这里；订单自己的打印任务不受影响。可以指定专用打印机。", "ใบสั่งผลิต = สินค้าชุดหนึ่งที่ต้องผลิต เมื่อสั่งผลิตจะกลายเป็นงานพิมพ์ ดูความคืบหน้า เวลาเสร็จ วัสดุและต้นทุนได้ที่นี่ งานพิมพ์ของออเดอร์ไม่ได้รับผลกระทบ กำหนดเครื่องพิมพ์เฉพาะได้"))}</p>
+      ${canEdit() && SG ? (SG.products ? `<div class="po-sugcard"><div><b>💡 ${E(Z(`建议生产：${SG.products} 个产品`, `แนะนำให้ผลิต: ${SG.products} สินค้า`))}</b>
+        <span class="small muted">${E(Z(`共 ${num(SG.units)} 件 · 按急迫程度排好，和「成品备货 → 一键补货」同一套算法`, `รวม ${num(SG.units)} ชิ้น เรียงตามความเร่งด่วน คำนวณแบบเดียวกับ「เติมสต็อกอัตโนมัติ」`))}</span></div>
+        <button class="primary" id="po-sug">${E(Z("查看并新建", "ดูและสร้าง"))}</button></div>` : `<div class="small muted">✓ ${E(Z("现在没有需要补的成品。", "ตอนนี้ไม่มีสินค้าที่ต้องเติม"))}</div>`) : ""}
       ${UX.kpis([
         { label: Z("进行中", "กำลังดำเนินการ"), value: act.length, sub: Z(`还差 ${num(units)} 件`, `เหลือ ${num(units)} ชิ้น`), icon: "🏭" },
         { label: Z("草稿", "ฉบับร่าง"), value: c.draft || 0, tone: c.draft ? "warn" : "", sub: Z("还没下达", "ยังไม่สั่งผลิต") },
@@ -70,6 +74,7 @@
           || `<tr><td colspan="9" class="muted">${E(Z("还没有生产单。到「仓库 → 库存 → 成品备货」点「一键补货」，或者在这里新建。", "ยังไม่มีใบสั่งผลิต ไปที่「คลัง → สต็อก → เตรียมสต็อกสินค้า」กด「เติมสต็อกอัตโนมัติ」 หรือสร้างที่นี่"))}</td></tr>`}</tbody></table></div>`;
     document.getElementById("po-reload").onclick = (e) => busy(e.target, load);
     const n = document.getElementById("po-new"); if (n) n.onclick = () => editModal(null);
+    const sg = document.getElementById("po-sug"); if (sg) sg.onclick = () => editModal(null, "sug");
     const so = document.getElementById("po-orders");
     if (so) so.onclick = (e) => busy(e.target, async () => {
       const o = await api("/api/porders/from-orders", { json: { scope: "today" } });
@@ -123,26 +128,139 @@
     });
   }
 
-  // ---------------- 新建 / 改草稿 ----------------
-  async function editModal(o) {
-    let skus = [];
-    try { skus = (await api("/api/inv/gs/products")).products.flatMap((p) => p.skus.map((s) => [s, p.name])); } catch { /* 仓库模块关了：手输 */ }
-    const row = (sku = "", qty = 1) => `<tr><td><input class="po-sku mono" list="po-skus" value="${E(sku)}" placeholder="SKU" data-notr style="width:170px"></td>
-      <td><input type="number" min="1" class="po-qty" value="${qty}" style="width:80px"></td><td><button class="mini" data-rm>✕</button></td></tr>`;
+  // ---------------- 新建 / 改草稿：像逛产品库一样选产品（v2.55） ----------------
+  // 左：页签「建议生产」（系统按急迫排好）/「全部产品」（按近 30 天销量排，可搜、可按类目 / 标签 / 状态筛，点开看规格）；右（手机在下）：已选清单 + 合计 + 交期等。
+  async function editModal(o, tab0) {
+    let SUG = [], PRD = { products: [], categories: [], tags: [] }, failed = false;
+    const m0 = MODAL.open(`<p class="muted">${E(Z("加载中…", "กำลังโหลด…"))}</p>`);
+    m0.classList.add("wide", "xwide");
+    try { SUG = (await api("/api/porders/suggest")).items; } catch { failed = true; }
+    try { PRD = await api("/api/porders/picker"); } catch { failed = true; }
+    const INFO = {};                                     // SKU → 名称 / 规格 / 图 / 每件克数 / 机时
+    PRD.products.forEach((p) => p.skus.forEach((s) => { INFO[s.sku] = { name: p.name, color: s.color, spec: s.spec, img: s.img || p.img, g: s.grams_each, h: s.hours_each }; }));
+    SUG.forEach((s) => { INFO[s.sku] = Object.assign(INFO[s.sku] || {}, { name: s.name, color: s.color, spec: s.spec, img: s.img, g: s.grams_each, h: s.hours_each }); });
+    const SEL = new Map();                               // SKU → 数量（保持加入顺序）
+    if (o) o.lines.forEach((l) => { SEL.set(l.sku, l.qty); if (!INFO[l.sku]) INFO[l.sku] = { name: l.name, color: l.color }; });
+    let tab = tab0 || (o ? "all" : (SUG.length ? "sug" : "all")), q = "", cat = "", tag = "", auto = "";
+    const open = new Set();
+    const nm = (s) => (INFO[s] && INFO[s].name) || s;
+    const spec = (s) => [INFO[s] && INFO[s].color, INFO[s] && INFO[s].spec].filter(Boolean).join(" / ");
+    const im = (u) => (u ? `<img class="pk-img" src="${E(u)}" loading="lazy" alt="">` : `<span class="pk-img pk-noimg"></span>`);
+    const ctx = { prs: prs() };
+
     const m = MODAL.open(`<div class="row between"><h3>${E(o ? Z("改生产单 ", "แก้ใบสั่งผลิต ") + o.no : Z("新建生产单", "สร้างใบสั่งผลิต"))}</h3><button class="mini" data-mclose>${E(Z("关闭", "ปิด"))}</button></div>
-      <datalist id="po-skus">${skus.map(([s, n]) => `<option value="${E(s)}">${E(n)}</option>`).join("")}</datalist>
-      <table class="grid small"><thead><tr><th>SKU</th><th>${E(Z("数量", "จำนวน"))}</th><th></th></tr></thead><tbody id="po-lines">${o ? o.lines.map((l) => row(l.sku, l.qty)).join("") : row()}</tbody></table>
-      <button class="mini" id="po-addrow">＋ ${E(Z("加一行", "เพิ่มแถว"))}</button>
-      <div class="form2" style="margin-top:8px"><label>${E(Z("交期", "กำหนดส่ง"))}<input type="date" id="po-due" value="${o && o.due ? new Date(o.due * 1000).toISOString().slice(0, 10) : ""}"></label>
-        <label>${E(Z("备注", "หมายเหตุ"))}<input id="po-note" value="${E(o ? o.note || "" : "")}" data-notr></label>
-        <label class="row"><input type="checkbox" id="po-pri" ${o && o.priority ? "checked" : ""}> ${E(Z("加急", "ด่วน"))}</label></div>
-      <div class="row gap"><button class="primary" id="po-save">${E(o ? Z("保存", "บันทึก") : Z("保存为草稿", "บันทึกเป็นฉบับร่าง"))}</button>
-        ${o ? "" : `<button id="po-save-rel">${E(Z("保存并下达", "บันทึกและสั่งผลิต"))}</button>`}<button data-mclose>${E(Z("取消", "ยกเลิก"))}</button></div>`);
-    const lines = () => [...m.querySelectorAll("#po-lines tr")].map((tr) => ({ sku: tr.querySelector(".po-sku").value.trim(), qty: +tr.querySelector(".po-qty").value || 0 })).filter((l) => l.sku);
-    m.querySelector("#po-addrow").onclick = () => m.querySelector("#po-lines").insertAdjacentHTML("beforeend", row());
-    m.querySelector("#po-lines").onclick = (e) => { if (e.target.dataset.rm !== undefined) { e.target.closest("tr").remove(); } };
+      ${failed ? `<div class="warnbox small">${E(Z("产品数据没加载全，部分内容可能缺失。", "โหลดข้อมูลสินค้าไม่ครบ"))}</div>` : ""}
+      <div class="pk-wrap"><div class="pk-left">
+        ${UX.tabs([["sug", Z("建议生产", "แนะนำให้ผลิต"), SUG.length], ["all", Z("全部产品", "สินค้าทั้งหมด"), PRD.products.length]], tab, "pk-tab")}
+        <div id="pk-filters" class="row gap wrap pk-filters"></div>
+        <div id="pk-list" class="pk-list"></div></div>
+      <div class="pk-right"><h4>${E(Z("已选", "ที่เลือก"))} <span id="pk-cnt" class="muted small"></span></h4>
+        <div id="pk-sel" class="pk-sel"></div><div id="pk-tot" class="pk-tot"></div>
+        <div class="form2" style="margin-top:8px"><label>${E(Z("交期", "กำหนดส่ง"))}<input type="date" id="po-due" value="${o && o.due ? new Date(o.due * 1000).toISOString().slice(0, 10) : ""}"></label>
+          <label>${E(Z("备注", "หมายเหตุ"))}<input id="po-note" value="${E(o ? o.note || "" : "")}" data-notr></label>
+          <label class="row"><input type="checkbox" id="po-pri" ${o && o.priority ? "checked" : ""}> ${E(Z("加急", "ด่วน"))}</label></div>
+        <div class="po-prs small"><b>${E(Z("专用打印机", "เครื่องพิมพ์เฉพาะ"))}</b>：${E(Z("不选 = 任何打印机。", "ไม่เลือก = เครื่องใดก็ได้"))}<br>
+          ${ctx.prs.map((p, i) => `<label class="row" style="display:inline-flex;margin-right:10px"><input type="checkbox" data-pr="${i}" ${o && o.printer_idx.includes(i) ? "checked" : ""}> <span data-notr>${E(p.code || p.name)}</span></label>`).join("") || `<span class="muted">—</span>`}</div>
+        <div class="row gap wrap" style="margin-top:8px"><button class="primary" id="po-save">${E(o ? Z("保存", "บันทึก") : Z("保存为草稿", "บันทึกเป็นฉบับร่าง"))}</button>
+          ${o ? "" : `<button id="po-save-rel">${E(Z("保存并下达", "บันทึกและสั่งผลิต"))}</button>`}<button data-mclose>${E(Z("取消", "ยกเลิก"))}</button></div></div></div>`);
+    m.classList.add("wide", "xwide");
+
+    const qtyIn = (sku, def) => `<input type="number" min="0" class="pk-q" data-sku="${E(sku)}" value="${SEL.has(sku) ? SEL.get(sku) : ""}" placeholder="${def == null ? "" : def}" style="width:74px">`;
+    const sugRow = (s) => `<div class="pk-row ${s.level ? "lv-" + s.level : ""}" data-sku="${E(s.sku)}">
+      <label class="pk-chk"><input type="checkbox" data-pk-chk="${E(s.sku)}" ${SEL.has(s.sku) ? "checked" : ""}></label>${im(s.img)}
+      <div class="pk-info"><b data-notr>${E(s.name)}</b> <span class="muted small" data-notr>${E([s.color, s.spec].filter(Boolean).join(" / "))}</span> <span class="mono small muted" data-notr>${E(s.sku)}</span>
+        <div class="pk-reason">${E(TH() ? s.reason_th : s.reason_zh)}</div>
+        <div class="pk-nums small"><span>${E(Z("近7天", "7 วัน"))} <b>${s.sold7}</b></span><span>${E(Z("近30天", "30 วัน"))} <b>${s.sold30}</b></span><span>${E(Z("可售", "ขายได้"))} <b>${s.sellable}</b></span>
+          <span>${E(Z("在做", "กำลังทำ"))} <b>${s.making}</b></span><span>${E(Z("目标", "เป้า"))} <b>${s.target}</b></span><span>${E(Z("缺口", "ขาด"))} <b>${s.gap}</b></span>
+          <span>${E(Z("能卖", "พอขาย"))} <b>${s.cover_days == null ? "—" : s.cover_days + Z("天", " วัน")}</b></span>${s.per_plate > 1 ? `<span>${E(Z("每盘", "ต่อถาด"))} <b>${s.per_plate}</b></span>` : ""}</div></div>
+      <div class="pk-qty"><span class="small muted">${E(Z("建议", "แนะนำ"))}</span> ${qtyIn(s.sku, s.qty)}</div></div>`;
+    const prodRow = (p) => {
+      const on = open.has(p.id), n = p.skus.filter((s) => SEL.has(s.sku)).length;
+      return `<div class="pk-prod ${on ? "open" : ""}"><div class="pk-row pk-ph" data-pk-open="${E(p.id)}">${im(p.img)}
+        <div class="pk-info"><b data-notr>${E(p.name)}</b> ${n ? `<span class="pill">${E(Z(`已选 ${n}`, `เลือก ${n}`))}</span>` : ""}
+          <div class="pk-nums small"><span>${E(Z("近30天", "30 วัน"))} <b>${p.sold30}</b></span><span>${E(Z("近7天", "7 วัน"))} <b>${p.sold7}</b></span><span>${E(Z("可售", "ขายได้"))} <b>${p.sellable}</b></span>
+            ${p.category ? `<span class="muted" data-notr>${E(p.category)}</span>` : ""}<span class="muted">${p.skus.length} SKU</span></div></div><span class="pk-arrow">${on ? "▾" : "▸"}</span></div>
+        ${on ? `<div class="pk-skus">${p.skus.map((s) => `<div class="pk-row pk-sr" data-sku="${E(s.sku)}"><div class="pk-info"><b data-notr>${E([s.color, s.spec].filter(Boolean).join(" / ") || s.sku)}</b> <span class="mono small muted" data-notr>${E(s.sku)}</span>
+          <div class="pk-nums small"><span>${E(Z("近7天", "7 วัน"))} <b>${s.sold7}</b></span><span>${E(Z("近30天", "30 วัน"))} <b>${s.sold30}</b></span><span>${E(Z("可售", "ขายได้"))} <b>${s.sellable}</b></span><span>${E(Z("在做", "กำลังทำ"))} <b>${s.making}</b></span></div></div>
+          <div class="pk-qty">${qtyIn(s.sku)}</div></div>`).join("")}</div>` : ""}</div>`;
+    };
+    const filters = () => {
+      const f = m.querySelector("#pk-filters");
+      if (tab === "sug") { f.innerHTML = `<button class="mini" id="pk-addall">＋ ${E(Z("全部加入", "เพิ่มทั้งหมด"))}</button><button class="mini" id="pk-clr">${E(Z("取消全选", "ยกเลิกทั้งหมด"))}</button><span class="small muted">${E(Z("勾选后可改数量。数量 = 缺口（含订单还没打的）补到整盘。", "ติ๊กแล้วแก้จำนวนได้ จำนวน = ส่วนที่ขาด (รวมออเดอร์ที่ยังไม่พิมพ์) ปัดเป็นเต็มถาด"))}</span>`; return; }
+      const A = [["", Z("全部", "ทั้งหมด")], ["hot", Z("有销量", "มียอดขาย")], ["below", Z("低于目标", "ต่ำกว่าเป้า")], ["out", Z("缺货", "ของหมด")], ["nosale", Z("没销量", "ไม่มียอดขาย")]];
+      f.innerHTML = `<input id="pk-q" type="search" placeholder="${E(Z("搜产品 / SKU", "ค้นหาสินค้า / SKU"))}" value="${E(q)}" data-notr>
+        <select id="pk-cat"><option value="">${E(Z("全部类目", "ทุกหมวด"))}</option>${PRD.categories.map((c) => `<option ${c === cat ? "selected" : ""} data-notr>${E(c)}</option>`).join("")}</select>
+        <select id="pk-tag"><option value="">${E(Z("全部标签", "ทุกแท็ก"))}</option>${PRD.tags.map((t) => `<option value="${E(t.id)}" ${String(t.id) === tag ? "selected" : ""} data-notr>${E(t.name)}</option>`).join("")}</select>
+        <span class="row gap wrap">${A.map(([k, t]) => `<button class="mini ${auto === k ? "primary" : ""}" data-pk-auto="${k}">${E(t)}</button>`).join("")}</span>`;
+      const qi = f.querySelector("#pk-q"); let t; qi.oninput = () => { clearTimeout(t); t = setTimeout(() => { q = qi.value; list(); }, 200); };
+      f.querySelector("#pk-cat").onchange = (e) => { cat = e.target.value; list(); };
+      f.querySelector("#pk-tag").onchange = (e) => { tag = e.target.value; list(); };
+    };
+    const list = () => {
+      const box = m.querySelector("#pk-list");
+      if (tab === "sug") {
+        box.innerHTML = SUG.map(sugRow).join("") || `<p class="muted">${E(Z("现在没有需要补的：库存都够目标，也没有订单等着打。可以到「全部产品」手动选。", "ตอนนี้ไม่มีรายการที่ต้องผลิต เลือกเองได้ที่「สินค้าทั้งหมด」"))}</p>`;
+        return;
+      }
+      const kw = q.trim().toLowerCase();
+      const ps = PRD.products.filter((p) => (!cat || p.category === cat) && (!tag || p.tags.includes(tag)) && (!auto || p.gk.includes(auto))
+        && (!kw || (p.name + " " + p.id).toLowerCase().includes(kw) || p.skus.some((s) => s.sku.toLowerCase().includes(kw))));
+      box.innerHTML = ps.map(prodRow).join("") || `<p class="muted">${E(Z("没有符合的产品。", "ไม่พบสินค้า"))}</p>`;
+    };
+    const num1 = (v, d = 1) => Number(v).toLocaleString(undefined, { maximumFractionDigits: d });
+    const totals = () => {
+      let u = 0, g = 0, h = 0, unk = 0;
+      SEL.forEach((qty, s) => { u += qty; const i = INFO[s] || {}; if (i.g) g += i.g * qty; else unk++; if (i.h) h += i.h * qty; });
+      m.querySelector("#pk-cnt").textContent = SEL.size ? `(${SEL.size})` : "";
+      m.querySelector("#pk-tot").innerHTML = SEL.size ? `<div class="pk-totline"><span>${E(Z("合计", "รวม"))}: <b>${SEL.size}</b> SKU · <b>${num(u)}</b> ${E(Z("件", "ชิ้น"))}</span>
+        <span>${E(Z("预计用料", "วัสดุโดยประมาณ"))} <b>${num(g)}</b> g</span><span>${E(Z("预计机时", "ชั่วโมงเครื่อง"))} <b>${num1(h)}</b> h</span></div>${unk ? `<div class="small muted">${E(Z(`${unk} 个 SKU 没有克数 / 机时资料，没算进去`, `${unk} SKU ไม่มีข้อมูลกรัม / ชั่วโมง ไม่ได้รวม`))}</div>` : ""}` : "";
+    };
+    const selList = () => {
+      m.querySelector("#pk-sel").innerHTML = [...SEL].map(([s, qty]) => { const i = INFO[s] || {}; return `<div class="pk-srow" data-sku="${E(s)}">${im(i.img)}
+        <div class="pk-info"><b class="mono small" data-notr>${E(s)}</b><div class="small muted" data-notr>${E(nm(s))} ${E(spec(s))}</div>
+          <div class="small muted">${i.g ? num(i.g * qty) + " g" : "—"} · ${i.h ? num1(i.h * qty) + " h" : "—"}</div></div>
+        <input type="number" min="1" class="pk-sq" data-sku="${E(s)}" value="${qty}" style="width:70px"><button class="mini" data-pk-rm="${E(s)}">✕</button></div>`; }).join("")
+        || `<p class="small muted">${E(Z("还没选。从左边勾选或填数量。", "ยังไม่ได้เลือก ติ๊กหรือกรอกจำนวนทางซ้าย"))}</p>`;
+      totals();
+    };
+    const setQ = (sku, qty) => {
+      if (qty > 0) SEL.set(sku, qty); else SEL.delete(sku);
+    };
+    const syncLeft = () => {          // 左边勾选 / 数量跟 SEL 对齐（不重画，保持焦点）
+      m.querySelectorAll("#pk-list [data-pk-chk]").forEach((x) => { x.checked = SEL.has(x.dataset.pkChk); });
+      m.querySelectorAll("#pk-list .pk-q").forEach((x) => { if (document.activeElement !== x) x.value = SEL.has(x.dataset.sku) ? SEL.get(x.dataset.sku) : ""; });
+    };
+    m.onclick = (e) => {
+      const t = e.target;
+      const tb = t.closest("[data-ux-tab]");
+      if (tb && tb.closest("[data-ux-group='pk-tab']")) { tab = tb.dataset.uxTab; m.querySelectorAll("[data-ux-group='pk-tab'] [data-ux-tab]").forEach((x) => x.classList.toggle("on", x === tb)); filters(); list(); return; }
+      const op = t.closest("[data-pk-open]");
+      if (op && !t.closest("input")) { const id = op.dataset.pkOpen; open.has(id) ? open.delete(id) : open.add(id); list(); return; }
+      const au = t.closest("[data-pk-auto]"); if (au) { auto = au.dataset.pkAuto; filters(); list(); return; }
+      const rm = t.closest("[data-pk-rm]"); if (rm) { SEL.delete(rm.dataset.pkRm); selList(); syncLeft(); return; }
+      if (t.closest("#pk-addall")) { SUG.forEach((s) => { if (!SEL.has(s.sku)) SEL.set(s.sku, s.qty); }); selList(); syncLeft(); return; }
+      if (t.closest("#pk-clr")) { SUG.forEach((s) => SEL.delete(s.sku)); selList(); syncLeft(); }
+    };
+    m.onchange = (e) => {
+      const t = e.target;
+      if (t.dataset.pkChk) { const s = SUG.find((x) => x.sku === t.dataset.pkChk); if (t.checked) SEL.set(t.dataset.pkChk, SEL.get(t.dataset.pkChk) || (s ? s.qty : 1)); else SEL.delete(t.dataset.pkChk); selList(); syncLeft(); }
+      else if (t.classList.contains("pk-q")) { setQ(t.dataset.sku, Math.floor(+t.value || 0)); selList(); syncLeft(); }
+      else if (t.classList.contains("pk-sq")) { setQ(t.dataset.sku, Math.floor(+t.value || 0)); selList(); syncLeft(); }
+    };
+    m.oninput = (e) => {       // 边输入边更新合计（不重画列表，焦点不丢）
+      const t = e.target;
+      if (t.classList.contains("pk-sq") || t.classList.contains("pk-q")) {
+        const n = Math.floor(+t.value || 0);
+        if (n > 0) { SEL.set(t.dataset.sku, n); totals(); const ck = m.querySelector(`#pk-list [data-pk-chk="${CSS.escape(t.dataset.sku)}"]`); if (ck) ck.checked = true; }
+      }
+    };
+    filters(); list(); selList();
+
     const save = (release) => async () => {
-      const body = { lines: lines(), due: m.querySelector("#po-due").value || null, note: m.querySelector("#po-note").value, priority: m.querySelector("#po-pri").checked ? 1 : 0, release };
+      const lines = [...SEL].map(([sku, qty]) => ({ sku, qty }));
+      if (!lines.length) { toast(Z("还没选产品", "ยังไม่ได้เลือกสินค้า"), true); return; }
+      const pr = [...m.querySelectorAll("[data-pr]:checked")].map((x) => { const p = ctx.prs[+x.dataset.pr] || {}; return p.id || p.code || +x.dataset.pr; });
+      const body = { lines, due: m.querySelector("#po-due").value || null, note: m.querySelector("#po-note").value, priority: m.querySelector("#po-pri").checked ? 1 : 0, printers: pr, release };
       const r = o ? await api("/api/porders/" + o.id, { json: body }) : await api("/api/porders", { json: body });
       MODAL.close(); toast(Z("已保存 ", "บันทึกแล้ว ") + r.no); await load(); openModal(r.id);
     };
@@ -150,5 +268,5 @@
     const sr = m.querySelector("#po-save-rel"); if (sr) sr.onclick = (e) => busy(e.target, save(true));
   }
 
-  window.PO = { load, open: openModal };
+  window.PO = { load, open: openModal, pick: editModal };
 })();

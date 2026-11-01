@@ -672,3 +672,134 @@ def sheet_html(po_id, lang="zh"):
             f"<div>{_qr.svg(po['no'], 28)}</div></div>"
             f"<table><thead><tr><th>SKU</th><th>{T('商品', 'สินค้า')}</th><th>{T('数量', 'จำนวน')}</th><th>{T('已完成', 'เสร็จแล้ว')}</th><th>✓</th></tr></thead><tbody>{rows}</tbody></table>"
             f"</body></html>")
+
+
+# ---------------- 新建生产单：选产品（v2.55） ----------------
+# 「建议生产」清单和成品备货的「一键补货」用同一套计算（core/inventory/goodsstock.rows / 缺口、在做、整盘取整都在那边），这里只补：
+# 订单待打件数（订单任务还没开始打的）、近 7 天销量、理由文案、预计克数 / 机时。已经有补货草稿的 SKU，「在做」里已算，所以不会再被建议。
+def _est_of(sku, idx):
+    from . import orders
+    hit = idx.get(sku)
+    if not hit:
+        return None, None
+    info = orders._variant_info(*hit) or {}
+    g, h = info.get("grams"), info.get("hours")
+    return (float(g) if g else None), (float(h) if h else None)
+
+
+def _order_pending(c):
+    """{SKU: 订单任务还没打的件数}（任务还在排队、没上批次）。"""
+    out = {}
+    for r in c.execute("SELECT UPPER(sku) sku, SUM(MAX(qty-COALESCE(qty_done,0),0)) q FROM jobs "
+                       "WHERE kind='order' AND status='todo' AND run_id IS NULL GROUP BY UPPER(sku)"):
+        if (r["q"] or 0) > 0:
+            out[r["sku"]] = int(r["q"])
+    return out
+
+
+def _reason(r, op, s7):
+    zh, th = [], []
+    if op > 0:
+        zh.append(f"订单还有 {op} 件没打")
+        th.append(f"ออเดอร์ยังไม่ได้พิมพ์ {op} ชิ้น")
+    free, cd = r.get("free") or 0, r.get("cover_days")
+    if s7 > 0 and free <= 0:
+        zh.append(f"近 7 天卖 {s7} 个，已经没货了")
+        th.append(f"7 วันที่ผ่านมาขาย {s7} ชิ้น ของหมดแล้ว")
+    elif s7 > 0 and cd is not None:
+        d = int(cd) if float(cd).is_integer() else round(cd, 1)
+        zh.append(f"近 7 天卖 {s7} 个，库存只够 {d} 天")
+        th.append(f"7 วันที่ผ่านมาขาย {s7} ชิ้น สต็อกพอ {d} วัน")
+    elif r.get("gap", 0) > 0:
+        zh.append(f"低于目标 {r['target']} 个，差 {r['gap']} 个" + (f"（在做 {r['making']}）" if r.get("making") else ""))
+        th.append(f"ต่ำกว่าเป้า {r['target']} ชิ้น ขาด {r['gap']}" + (f" (กำลังทำ {r['making']})" if r.get("making") else ""))
+    return "；".join(zh), " · ".join(th)
+
+
+def suggest():
+    """建议生产清单（只含自产）：按急迫排序——先订单待打，再库存能撑的天数从少到多，再近 7 天销量。
+    数量 = (缺口 + 订单待打) 往上取整到整盘。已经够了 / 已有补货草稿盖住的不出现。"""
+    import math
+    from . import orders, production
+    from .inventory import goodsstock as gs
+    c = db.conn()
+    allr = gs.rows(c)
+    op_map, s7m = _order_pending(c), gs._sold(c, 7)
+    idx = orders.sku_index()
+    production._REQ_CACHE = {}
+    try:
+        items = []
+        for r in allr:
+            if r["type"] != "own" or not r["in_library"]:
+                continue
+            op = max(0, op_map.get(r["sku"], 0) - r["making"])
+            if r["gap"] <= 0 and op <= 0:
+                continue
+            per = production.sku_per_plate(r["sku"])
+            need = r["gap"] + op
+            qty = int(math.ceil(need / per) * per) if per > 1 else need
+            s7 = int(s7m.get(r["sku"], 0))
+            g, h = _est_of(r["sku"], idx)
+            zh, th = _reason(r, op, s7)
+            cd = r["cover_days"]
+            lvl = "bad" if (op > 0 or r["free"] <= 0 or (cd is not None and cd <= 2)) else ("warn" if cd is not None and cd <= 7 else "")
+            items.append({"sku": r["sku"], "product_id": r["product_id"], "name": r["name"], "color": r["color"], "spec": r["spec"], "img": r["img"],
+                          "category": r["category"], "sold7": s7, "sold30": int(r["sold30"]), "sellable": r["free"], "making": r["making"],
+                          "target": r["target"], "gap": r["gap"], "cover_days": cd, "order_pending": op, "per_plate": per, "qty": qty,
+                          "grams_each": g, "hours_each": h, "reason_zh": zh, "reason_th": th, "level": lvl})
+    finally:
+        production._REQ_CACHE = None
+    items.sort(key=lambda x: (x["order_pending"] <= 0, (x["cover_days"] if x["cover_days"] is not None else (0 if x["sellable"] <= 0 else 99999)),
+                              -x["sold7"], x["sku"]))
+    products = len({x["product_id"] or x["sku"] for x in items})
+    return {"items": items, "products": products, "units": sum(x["qty"] for x in items)}
+
+
+def picker():
+    """全部产品（选产品用）：按近 30 天销量从高到低；每个产品带规格 SKU（销量 / 库存 / 在做 / 预计克数 机时）、类目、标签、自动分组键 gk。
+    外购的 SKU 不列（生产单只管自己打的）。"""
+    from . import orders, store
+    from .inventory import goodsstock as gs
+    c = db.conn()
+    rs = {r["sku"]: r for r in gs.rows(c)}
+    s7m, s30m = gs._sold(c, 7), gs._sold(c, 30)
+    idx = orders.sku_index()
+    out, cats = [], set()
+    for it in store.list_products():
+        try:
+            p = store.load(it["id"])
+        except Exception:  # noqa: BLE001
+            continue
+        skus = []
+        for v in p.get("variants") or []:
+            sku = (v.get("sku") or "").strip().upper()
+            if not sku:
+                continue
+            r = rs.get(sku)
+            if (r and r["type"] == "buy") or (not r and gs._is_buy(p, v, None)):
+                continue
+            g, h = _est_of(sku, idx)
+            skus.append({"sku": sku, "color": v.get("opt1_zh") or "", "spec": v.get("opt2_zh") or "", "img": gs._img(p, v),
+                         "sold7": int(s7m.get(sku, 0)), "sold30": int(s30m.get(sku, 0)), "sellable": (r["free"] if r else 0),
+                         "making": (r["making"] if r else 0), "target": (r["target"] if r else 0), "gap": (r["gap"] if r else 0),
+                         "grams_each": g, "hours_each": h})
+        if not skus:
+            continue
+        cat = gs._cat_of(p)
+        if cat:
+            cats.add(cat)
+        sold30 = sum(s["sold30"] for s in skus)
+        gk = ["hot" if sold30 > 0 else "nosale"]
+        if any(s["gap"] > 0 for s in skus):
+            gk.append("below")
+        if any(s["sold7"] > 0 and s["sellable"] <= 0 for s in skus):
+            gk.append("out")
+        out.append({"id": p["id"], "name": p.get("name_zh") or p["id"], "category": cat, "img": gs._img(p), "tags": [str(x) for x in p.get("groups") or []],
+                    "sold7": sum(s["sold7"] for s in skus), "sold30": sold30, "sellable": sum(s["sellable"] for s in skus), "gk": gk, "skus": skus})
+    out.sort(key=lambda x: (-x["sold30"], -x["sold7"], x["name"]))
+    try:
+        from . import prodgroups
+        tags = prodgroups.tags()
+    except Exception:  # noqa: BLE001
+        tags = []
+    return {"products": out, "categories": sorted(cats), "tags": tags}

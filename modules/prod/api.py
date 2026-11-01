@@ -1176,6 +1176,20 @@ def po_list():
     return jsonify({"orders": po.listing(request.args.get("status") or "", (request.args.get("q") or "").strip()), "counts": po.counts()})
 
 
+@bp.get("/api/porders/suggest")
+def po_suggest():
+    """v2.55 建议生产清单（和成品备货的一键补货同一套计算，只含自产）。"""
+    from core import po
+    return jsonify(po.suggest())
+
+
+@bp.get("/api/porders/picker")
+def po_picker():
+    """v2.55 新建生产单：全部产品（按近 30 天销量排）。"""
+    from core import po
+    return jsonify(po.picker())
+
+
 @bp.get("/api/porders/<int:pid>")
 def po_get(pid):
     from core import po

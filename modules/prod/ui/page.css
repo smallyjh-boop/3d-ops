@@ -17,3 +17,23 @@
 .po-pill.paused { background: #f5f3ff; color: #7c3aed; border-color: #ddd6fe }
 .pill.po-badge { background: #eff6ff; color: #1d4ed8; cursor: pointer }
 @media (max-width: 700px) { .po-tools input[type=search] { min-width: 0; flex: 1 } }
+
+/* v2.55 新建生产单：选产品 */
+.po-sugcard { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0; padding: 10px 14px; border: 1px solid #fde68a; background: #fffbeb; border-radius: 10px }
+.pk-wrap { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); gap: 14px; align-items: start; margin-top: 6px }
+.pk-left { min-width: 0 } .pk-right { position: sticky; top: 0; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc }
+.pk-filters { margin: 6px 0; align-items: center } .pk-filters input[type=search] { min-width: 160px; flex: 1 }
+.pk-list { max-height: 62vh; overflow-y: auto }
+.pk-row { display: flex; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 1px solid #eef2f7 }
+.pk-row.lv-bad { border-left: 3px solid #ef4444 } .pk-row.lv-warn { border-left: 3px solid #f59e0b }
+.pk-img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; flex: none; background: #e5e7eb } .pk-noimg { display: inline-block }
+.pk-info { flex: 1; min-width: 0 } .pk-reason { font-size: 13px; color: #b45309; margin: 2px 0 }
+.pk-nums { display: flex; flex-wrap: wrap; gap: 4px 12px; color: #64748b } .pk-nums b { color: #0f172a }
+.pk-qty { display: flex; align-items: center; gap: 4px; flex: none }
+.pk-ph { cursor: pointer } .pk-arrow { color: #64748b }
+.pk-skus { margin: 0 0 6px 56px; border-left: 2px solid #e2e8f0; padding-left: 8px }
+.pk-sel { max-height: 36vh; overflow-y: auto } .pk-srow { display: flex; gap: 6px; align-items: center; padding: 4px 0; border-bottom: 1px solid #e2e8f0 } .pk-srow .pk-img { width: 36px; height: 36px }
+.pk-totline { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; padding: 6px 8px; background: #eff6ff; border-radius: 8px }
+@media (max-width: 800px) { .pk-wrap { grid-template-columns: 1fr } .pk-right { position: static } .pk-list { max-height: 50vh } .pk-row { flex-wrap: wrap } .pk-qty { margin-left: auto } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .po-sugcard { background: #3a2f12; border-color: #7a5d12 } :root:not([data-theme="light"]) .pk-right { background: #1e293b; border-color: #334155 } :root:not([data-theme="light"]) .pk-nums b { color: #e2e8f0 } :root:not([data-theme="light"]) .pk-totline { background: #1e3a5f } }
+:root[data-theme="dark"] .po-sugcard { background: #3a2f12; border-color: #7a5d12 } :root[data-theme="dark"] .pk-right { background: #1e293b; border-color: #334155 } :root[data-theme="dark"] .pk-nums b { color: #e2e8f0 } :root[data-theme="dark"] .pk-totline { background: #1e3a5f }
