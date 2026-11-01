@@ -189,6 +189,17 @@ def write_flat(idx, name_or_path, kind, out_dir, machine_name=None, overrides=No
     return path, cfg
 
 
+def filament_type(idx, name):
+    """耗材配置的材料（filament_type，按继承合并后），读不到返回空。"""
+    try:
+        v = flatten(idx, name, "filament").get("filament_type")
+    except ProfileError:
+        return ""
+    if isinstance(v, list):
+        v = v[0] if v else ""
+    return str(v or "").strip()
+
+
 # ---------------- 自动匹配 ----------------
 def _norm(s):
     return re.sub(r"[^a-z0-9]+", "", (s or "").lower())

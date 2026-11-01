@@ -678,6 +678,10 @@ def print_plan_op(pid):
     """v2.55 编辑器的多选操作（复制 / 删除 / 镜像 / 旋转 / 缩放 / 换槽 / 方向 / 对齐 / 分布 / 成组 / 拆分 / 移到别的盘 / 单独参数 / 切割…），
     不保存，返回改好的方案。{spec, plan, op: {op, plate, uids, …}}（见 printplan.apply_op）"""
     b = request.get_json(force=True) or {}
+    if (b.get("op") or {}).get("op") == "cut":       # 切割会往模型库里写两个新文件：和别的改模型库的接口一样要权限
+        no = _need("models.change")
+        if no:
+            return no
 
     def go():
         try:
@@ -785,7 +789,7 @@ def print_plan_slice(pid):
         try:
             r = _pp.slice_plate(pid, (b.get("spec") or "").strip(), b.get("plate_id") or "p1", (b.get("colour") or "").strip(),
                                 None if b.get("printer") in (None, "") else int(b["printer"]), _uname())
-            return jsonify({"ok": True, "sliced": r["sliced"], "file_id": (r.get("file") or {}).get("id")})
+            return jsonify({"ok": True, "sliced": r["sliced"], "file_id": (r.get("file") or {}).get("id"), "warnings": r.get("warnings") or []})
         except slicer.SliceError as e:
             return err(f"切片没有成功：{e}（没有 OrcaSlicer 时克数、冲刷废料按估算，标「估」）")
         except (ValueError, OSError) as e:
