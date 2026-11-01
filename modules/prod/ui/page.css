@@ -37,3 +37,16 @@
 @media (max-width: 800px) { .pk-wrap { grid-template-columns: 1fr } .pk-right { position: static } .pk-list { max-height: 50vh } .pk-row { flex-wrap: wrap } .pk-qty { margin-left: auto } }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .po-sugcard { background: #3a2f12; border-color: #7a5d12 } :root:not([data-theme="light"]) .pk-right { background: #1e293b; border-color: #334155 } :root:not([data-theme="light"]) .pk-nums b { color: #e2e8f0 } :root:not([data-theme="light"]) .pk-totline { background: #1e3a5f } }
 :root[data-theme="dark"] .po-sugcard { background: #3a2f12; border-color: #7a5d12 } :root[data-theme="dark"] .pk-right { background: #1e293b; border-color: #334155 } :root[data-theme="dark"] .pk-nums b { color: #e2e8f0 } :root[data-theme="dark"] .pk-totline { background: #1e3a5f }
+/* v2.55 打印机编码规则 */
+.cd-blks { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 }
+.cd-blk { display: flex; gap: 4px; align-items: center; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc }
+.cd-mv { display: inline-flex; gap: 2px; margin-left: 4px }
+.cd-prev { margin: 8px 0; padding: 8px 10px; background: #f8fafc; border-radius: 8px }
+.cd-ex { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px }
+.cd-chip { display: inline-flex; flex-direction: column; padding: 4px 8px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff }
+.cd-chip.bad { border-color: #fecaca; background: #fef2f2 }
+.rn-conflict td { background: #fef2f2 }
+.rn-same td { color: #94a3b8 }
+@media (prefers-color-scheme: dark) { .cd-blk, .cd-prev { background: #1e293b; border-color: #334155 } .cd-chip { background: #1e3a5f; border-color: #1d4ed8 } .cd-chip.bad, .rn-conflict td { background: #450a0a; border-color: #991b1b } }
+.cd-blk b { white-space: nowrap }
+.cd-blk select { width: auto; min-width: 96px }

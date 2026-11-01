@@ -47,6 +47,8 @@ def _now():
 def init():
     c = db.conn()
     c.executescript(SCHEMA)
+    if "pid" not in [r[1] for r in c.execute("PRAGMA table_info(inv_printer_locs)")]:
+        c.execute("ALTER TABLE inv_printer_locs ADD COLUMN pid TEXT")          # v2.55：按打印机稳定 id 对（改编码 / 互换编码货架不串）
     c.commit()
     try:
         migrate(c)
@@ -149,6 +151,9 @@ def sync_printers(c=None, commit=True):
     from core import fleet
     c = c or db.conn()
     prs = load_config().get("printers") or []
+    cols = [r[1] for r in c.execute("PRAGMA table_info(inv_printer_locs)")]
+    if "pid" not in cols:
+        c.execute("ALTER TABLE inv_printer_locs ADD COLUMN pid TEXT")
     rows = {r["code"]: dict(r) for r in c.execute("SELECT * FROM inv_printer_locs")}
     if not prs and not rows:
         return {}
@@ -158,31 +163,60 @@ def sync_printers(c=None, commit=True):
     used = {r["shelf"] for r in rows.values()}
     consumed = set()
     out = {}
+    # v2.55：先按稳定 id 认货架（改编码、两台互换编码，货架跟着打印机走）；没有 id 记录的旧行再按编码、序号认
+    by_pid = {r["pid"]: r for r in rows.values() if r.get("pid")}
+    live = {p.get("id") for _i, _c, p in cur if p.get("id")}
+    match = {}
     for i, code, p in cur:
+        r = by_pid.get(p.get("id")) if p.get("id") else None
+        if r:
+            match[i] = r
+            consumed.add(r["code"])
+    for i, code, p in cur:
+        if i in match:
+            continue
         r = rows.get(code)
+        if r and r["code"] not in consumed and (not r.get("pid") or r.get("pid") == p.get("id") or r.get("pid") not in live):
+            match[i] = r
+            consumed.add(r["code"])
+    for i, code, p in cur:
+        if i in match:
+            continue
+        old = next((x for x in rows.values() if x["idx"] == i and x["code"] not in consumed and (not x.get("pid") or x.get("pid") not in live)
+                    and x["code"] not in codes), None)
+        if old:
+            match[i] = old
+            consumed.add(old["code"])
+    renames = [(match[i]["code"], code) for i, code, p in cur if i in match and match[i]["code"] != code]
+    targets = {n for _o, n in renames}
+    for r in rows.values():                               # 已删掉的打印机留下的旧行占着新编码：先让开
+        if r["code"] not in consumed and r["code"] in targets:
+            newc = f"~old{r['shelf']}~"
+            c.execute("UPDATE inv_printer_locs SET code=? WHERE code=?", (newc, r["code"]))
+            r["code"] = newc
+    for k, (o, _n) in enumerate(renames):                 # 两步改名：A↔B 互换时主键不冲突
+        c.execute("UPDATE inv_printer_locs SET code=? WHERE code=?", (f"~~tmp{k}~~", o))
+    for k, (_o, n) in enumerate(renames):
+        c.execute("UPDATE inv_printer_locs SET code=? WHERE code=?", (n, f"~~tmp{k}~~"))
+    for i, code, p in cur:
+        r = match.get(i)
         if r:
             shelf = r["shelf"]
         else:
-            old = next((x for x in rows.values() if x["idx"] == i and x["code"] not in codes and x["code"] not in consumed), None)
-            if old:
-                shelf = old["shelf"]
-                consumed.add(old["code"])
-                c.execute("DELETE FROM inv_printer_locs WHERE code=?", (old["code"],))
-            else:
-                shelf = next((s for s in range(1, 100) if s not in used), None)
-                if shelf is None:
-                    continue
-            used.add(shelf)
-        c.execute("INSERT INTO inv_printer_locs(code, shelf, name, idx, active, updated_at) VALUES(?,?,?,?,1,?) "
+            shelf = next((s_ for s_ in range(1, 100) if s_ not in used), None)
+            if shelf is None:
+                continue
+        used.add(shelf)
+        c.execute("INSERT INTO inv_printer_locs(code, shelf, name, idx, active, updated_at, pid) VALUES(?,?,?,?,1,?,?) "
                   "ON CONFLICT(code) DO UPDATE SET shelf=excluded.shelf, name=excluded.name, idx=excluded.idx, active=1, "
-                  "updated_at=excluded.updated_at", (code, shelf, str(p.get("name") or "")[:40], i, _now()))
+                  "updated_at=excluded.updated_at, pid=excluded.pid", (code, shelf, str(p.get("name") or "")[:40], i, _now(), p.get("id")))
         _ensure(c, z, shelf, 1, 1, code)
         if fleet.tech_of(p) != "resin" and fleet.is_multicolor(p):
             for pos in range(1, 5):
                 _ensure(c, z, shelf, 2, pos, code)
         c.execute("UPDATE inv_locations SET active=1, note=? WHERE zone=? AND shelf=?", (code, z, shelf))
         out[code] = shelf
-    gone = [r for code, r in rows.items() if code not in codes and code not in consumed and r["active"]]
+    gone = [r for code, r in rows.items() if r["code"] not in consumed and r["active"]]
     if gone:
         wms._tl.syncing = True
         try:

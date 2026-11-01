@@ -59,7 +59,7 @@ def post_config():
     for k, v in incoming.items():
         if k not in cfg or k in ("template_defaults", "category_memory", "shopee_cat_map",
                                  "est_calibration", "est_calibration_n", "ai_providers", "ai_tasks", "ai_limits", "ai_prices",
-                                 "ai_v2", "ai_migrated", "scene_templates", "printer_models", "printer_workers", "_fleet254"):
+                                 "ai_v2", "ai_migrated", "scene_templates", "printer_models", "printer_workers", "printer_code_rules", "_fleet254"):
             continue
         if k == "printers":
             if not isinstance(v, list) or not v:
@@ -102,7 +102,7 @@ def post_config():
                 if prev:
                     # v2.54：v2.54 的字段（id、分组、位置、用途、专用生产单、暂停、单台覆盖）这里不改，原样保留；
                     # 模板字段和读出来时一样 = 没改 → 继续跟随机型模板，改了才算这台的单独设置
-                    for kk in ("id", "group", "location", "role", "dedicated_po", "paused", "ovr", "_eff"):
+                    for kk in ("id", "group", "location", "role", "dedicated_po", "paused", "ovr", "_eff", "old_codes"):
                         if kk in prev:
                             clean[-1][kk] = prev[kk]
                     if prev.get("name") != clean[-1]["name"]:

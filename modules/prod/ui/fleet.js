@@ -106,7 +106,7 @@
         <option value="pause">${esc(Z("暂停接单（保养）", "หยุดรับงาน (บำรุงรักษา)"))}</option><option value="resume">${esc(Z("恢复接单", "รับงานต่อ"))}</option>
         <option value="role">${esc(Z("设用途…", "ตั้งการใช้งาน…"))}</option><option value="group">${esc(Z("设分组…", "ตั้งกลุ่ม…"))}</option><option value="location">${esc(Z("设位置…", "ตั้งตำแหน่ง…"))}</option>
         <option value="nozzle">${esc(Z("单独设喷嘴…", "ตั้งหัวฉีดเฉพาะเครื่อง…"))}</option><option value="plate">${esc(Z("单独设热床板…", "ตั้งแผ่นฐานเฉพาะเครื่อง…"))}</option>
-        <option value="dedicate">${esc(Z("专门打某个生产单…", "ใช้พิมพ์ใบสั่งผลิตเดียว…"))}</option><option value="labels">${esc(Z("打印二维码标签", "พิมพ์ป้าย QR"))}</option>
+        <option value="dedicate">${esc(Z("专门打某个生产单…", "ใช้พิมพ์ใบสั่งผลิตเดียว…"))}</option><option value="renumber">${esc(Z("按规则重新编号…", "เปลี่ยนรหัสตามกฎ…"))}</option><option value="labels">${esc(Z("打印二维码标签", "พิมพ์ป้าย QR"))}</option>
         <option value="remove">${esc(Z("移除", "นำออก"))}</option></select>
       ${n ? `<a href="#" data-flclr>${esc(Z("取消勾选", "ยกเลิกที่เลือก"))}</a>` : ""}</div>`;
   }
@@ -148,7 +148,7 @@
     const el = root();
     if (!el || !DATA) return;
     const btns = own() ? `<button class="primary" data-fladd>＋ ${esc(Z("添加", "เพิ่ม"))}</button><button data-fldisc>🔍 ${esc(Z("局域网发现", "ค้นหาในเครือข่าย"))}</button>
-      <button data-flimp>📥 ${esc(Z("导入 Excel / CSV", "นำเข้า Excel / CSV"))}</button>` : "";
+      <button data-flimp>📥 ${esc(Z("导入 Excel / CSV", "นำเข้า Excel / CSV"))}</button><button data-flcodes title="${esc(Z("编码规则", "กฎรหัสเครื่อง"))}">⚙ ${esc(Z("编码规则", "กฎรหัส"))}</button>` : "";
     el.innerHTML = UX.head(Z("打印机", "เครื่องพิมพ์"), `${btns}<a class="btn" target="_blank" href="/print/fleet-labels?lang=${LANG()}${Q.group !== "*" ? "&group=" + encodeURIComponent(Q.group) : ""}">🏷 ${esc(Z("二维码标签", "ป้าย QR"))}</a><button data-flreload>${esc(Z("刷新", "รีเฟรช"))}</button>`,
       Z("每台打印机一行；点一行打开右边的详情：连接设置、测试连接、打印测试、网络诊断、保养、打印记录、这台的单独设置。喷嘴、热床板、OrcaSlicer 配置、每小时克数在 系统 → 设置 → 生产 →「机型模板」里按机型设置，这里只改和模板不一样的地方。",
         "เครื่องละหนึ่งแถว กดที่แถวเพื่อเปิดรายละเอียดด้านขวา: ตั้งค่าการเชื่อมต่อ ทดสอบการเชื่อมต่อ ทดสอบพิมพ์ วินิจฉัยเครือข่าย บำรุงรักษา ประวัติการพิมพ์ ค่าเฉพาะเครื่อง หัวฉีด แผ่นฐาน โปรไฟล์ OrcaSlicer และกรัมต่อชั่วโมง ตั้งตามรุ่นที่ ระบบ → ตั้งค่า → การผลิต → «แม่แบบรุ่น» ที่นี่แก้เฉพาะส่วนที่ต่างจากแม่แบบ")) +
@@ -228,7 +228,7 @@
       ${(c.type || "none") !== "none" ? `<div class="row gap wrap">${st.state === "printing" ? `<button data-flcmd="pause">⏸ ${esc(Z("暂停", "หยุดชั่วคราว"))}</button>` : ""}
         ${st.state === "paused" ? `<button data-flcmd="resume">▶ ${esc(Z("继续", "พิมพ์ต่อ"))}</button>` : ""}${prog ? `<button class="danger" data-flcmd="stop">⏹ ${esc(Z("取消打印", "ยกเลิกการพิมพ์"))}</button>` : ""}</div>` : ""}`;
     const basic = `<div class="form2">
-      <label>${esc(Z("机器编码", "รหัสเครื่อง"))}<input data-flb="code" value="${esc(p.code || "")}" ${dis} data-notr></label>
+      <label>${esc(Z("机器编码（英文 / 数字 / - _，不分大小写不能重复）", "รหัสเครื่อง (อังกฤษ / ตัวเลข / - _ ห้ามซ้ำ ไม่แยกตัวพิมพ์)"))}<input data-flb="code" value="${esc(p.code || "")}" maxlength="16" ${dis} data-notr></label>
       <label>${esc(Z("机型", "รุ่น"))}<select data-flb="name" ${dis} data-notr>${models.map((m) => `<option value="${esc(m.name)}" ${m.name === p.name ? "selected" : ""}>${esc(m.name)}</option>`).join("")}${models.some((m) => m.name === p.name) ? "" : `<option selected>${esc(p.name)}</option>`}</select></label>
       <label>${esc(Z("分组", "กลุ่ม"))}<input data-flb="group" value="${esc(p.group || "")}" list="fl-groups" placeholder="${esc(Z("例如 A 区", "เช่น โซน A"))}" ${dis} data-notr></label>
       <label>${esc(Z("位置（货架-层-位）", "ตำแหน่ง (ชั้นวาง-ชั้น-ช่อง)"))}<input data-flb="location" value="${esc(p.location || "")}" placeholder="A-03-2" ${dis} data-notr></label>
@@ -298,7 +298,8 @@
     const t = e.target, D = DET;
     if (!D) return;
     const id = D.printer.id, idx = D.row.index;
-    const save = async (body, btn) => { DET = await busy(btn, () => api(U("/api/fleet/printers/" + encodeURIComponent(id)), { json: body })); drawerEl().querySelector(".fl-din").innerHTML = drawerHtml(DET); toast(Z("已保存", "บันทึกแล้ว")); load(true).catch(() => {}); };
+    const save = async (body, btn) => { DET = await busy(btn, () => api(U("/api/fleet/printers/" + encodeURIComponent(id)), { json: body })); drawerEl().querySelector(".fl-din").innerHTML = drawerHtml(DET); toast(Z("已保存", "บันทึกแล้ว")); load(true).catch(() => {});
+      if (DET.renumber_suggest && DET.renumber_suggest.length && window.FLEETCODES) setTimeout(() => FLEETCODES.suggest(DET.renumber_suggest, () => { META = null; load(); refreshDrawer().catch(() => {}); }), 50); };
     try {
       if (t.dataset.flclose !== undefined) closeDrawer();
       else if (t.dataset.flsavebasic !== undefined) await save(collect("[data-flb]", "flb"), t);
@@ -337,7 +338,7 @@
     const m = MODAL.open(`<h3>${esc(Z("添加打印机", "เพิ่มเครื่องพิมพ์"))}</h3>
       <div class="form2"><label>${esc(Z("机型", "รุ่น"))}<select id="fa-model" data-notr>${modelOpts(first.name)}</select></label>
         <label>${esc(Z("台数", "จำนวนเครื่อง"))}<input id="fa-n" type="number" min="1" max="500" value="1"></label>
-        <label>${esc(Z("机器编码（空 = 自动，例如 P1S-001）", "รหัสเครื่อง (ว่าง = อัตโนมัติ เช่น P1S-001)"))}<input id="fa-code" data-notr></label>
+        <label>${esc(Z("机器编码（空 = 按编码规则自动，例如 P1S-001）", "รหัสเครื่อง (ว่าง = อัตโนมัติตามกฎรหัส เช่น P1S-001)"))}<input id="fa-code" data-notr></label>
         <label>${esc(Z("分组", "กลุ่ม"))}<input id="fa-group" list="fa-groups" data-notr><datalist id="fa-groups">${(META.groups || []).map((g) => `<option value="${esc(g)}">`).join("")}</datalist></label>
         <label>${esc(Z("位置", "ตำแหน่ง"))}<input id="fa-loc" placeholder="A-03-2" data-notr></label>
         <label id="fa-nzl">${esc(Z("喷嘴直径 mm（请确认，每台单独记）", "ขนาดหัวฉีด มม. (กรุณายืนยัน บันทึกแยกแต่ละเครื่อง)"))}<input id="fa-nozzle" type="number" min="0.1" max="2" step="0.05" value="0.4"></label>
@@ -383,7 +384,7 @@
         <td><select data-fdk="vendor">${Object.keys(META.vendors).map((k) => `<option value="${k}" ${k === d.vendor ? "selected" : ""}>${esc(Z(META.vendors[k].zh, META.vendors[k].th))}</option>`).join("")}</select></td>
         ${kind === "disc" ? `<td><input data-fdk="access_code" style="width:90px" placeholder="${d.vendor === "bambu" ? "12345678" : ""}" data-notr></td>` : ""}
         <td><input data-fdk="nozzle" type="number" min="0.1" max="2" step="0.05" value="${esc(d.nozzle || "0.4")}" style="width:60px"></td>
-        <td><input data-fdk="code" value="${esc(d.code || "")}" placeholder="${esc(Z("自动", "อัตโนมัติ"))}" style="width:90px" data-notr></td>
+        <td><input data-fdk="code" value="${esc(d.code || "")}" placeholder="${esc(d.code_suggest || Z("自动", "อัตโนมัติ"))}" style="width:90px" data-notr></td>
         <td><input data-fdk="group" value="${esc(d.group || "")}" style="width:70px" data-notr></td><td><input data-fdk="location" value="${esc(d.location || "")}" style="width:80px" data-notr></td>
         <td class="small">${d.exists ? esc(Z(`已有：${d.exists}`, `มีแล้ว: ${d.exists}`)) : ""}${d.lan_mode === false ? `<span class="bad">${esc(Z("没开局域网模式", "ยังไม่เปิดโหมด LAN"))}</span>` : ""}
           ${(d.errors || []).map((x) => `<div class="bad">${esc(Z(x[0], x[1]))}</div>`).join("")}${(d.warnings || []).map((x) => `<div class="muted">${esc(Z(x[0], x[1]))}</div>`).join("")}</td></tr>`).join("")}</tbody></table></div>`;
@@ -422,7 +423,7 @@
     m.querySelector("#fd-go").onclick = (e) => busy(e.target, async () => {
       try {
         const r = await api(U("/api/fleet/discover"), { json: { cidr: m.querySelector("#fd-cidr").value.trim() } });
-        list = r.devices.map((d) => Object.assign(d, { code: d.code_suggest || "" }));
+        list = r.devices.map((d) => Object.assign(d, { code: "" }));      // 空 = 添加时按编码规则（带上填的分组 / 位置）自动编；d.code_suggest 只做提示
         m.querySelector("#fd-res").innerHTML = `<p class="small">${esc(Z(`扫了 ${r.scanned} 个地址，找到 ${list.length} 台`, `สแกน ${r.scanned} ที่อยู่ พบ ${list.length} เครื่อง`))}</p>` + (list.length ? devRows(list, "disc") : "");
         m.querySelector("#fd-add").classList.toggle("hidden", !list.length);
       } catch (err) { toast(err.message, true); }
@@ -460,6 +461,7 @@
     const body = { action: act };
     if (SEL.size) body.ids = [...SEL]; else if (Q.group !== "*") body.group = Q.group; else return;
     const n = SEL.size || (DATA.groups[Q.group] || {}).n || 0;
+    if (act === "renumber") { if (window.FLEETCODES) FLEETCODES.renumber(SEL.size ? { ids: [...SEL] } : { group: Q.group }, () => { META = null; load(); }); return; }
     if (act === "labels") { window.open(`/print/fleet-labels?lang=${LANG()}&` + (SEL.size ? "ids=" + [...SEL].join(",") : "group=" + encodeURIComponent(Q.group)), "_blank"); return; }
     if (["role", "group", "location", "nozzle", "plate", "dedicate"].includes(act)) {
       let ask = "";
@@ -485,7 +487,10 @@
         MODAL.open(`<h3>${esc(Z("测试连接结果", "ผลทดสอบการเชื่อมต่อ"))}</h3><p>${esc(Z(`${r.results.length - bad.length} 台成功，${bad.length} 台失败`, `สำเร็จ ${r.results.length - bad.length} เครื่อง ล้มเหลว ${bad.length} เครื่อง`))}${r.skipped ? esc(Z(`（另外 ${r.skipped} 台没测：一次最多 200 台）`, ` (ไม่ได้ทดสอบอีก ${r.skipped} เครื่อง: ครั้งละไม่เกิน 200)`)) : ""}</p>
           <div class="tbl-scroll" style="max-height:60vh"><table class="grid small">${r.results.map((x) => `<tr><td class="mono" data-notr>${esc(x.code)}</td><td>${x.ok ? "✅" : "❌"}</td><td data-notr>${esc(x.message || "")}</td></tr>`).join("")}</table></div>
           <button data-mclose>${esc(Z("关闭", "ปิด"))}</button>`);
-      } else toast(Z(`已处理 ${r.n} 台`, `ดำเนินการแล้ว ${r.n} เครื่อง`));
+      } else {
+        toast(Z(`已处理 ${r.n} 台`, `ดำเนินการแล้ว ${r.n} เครื่อง`));
+        if (r.renumber_suggest && r.renumber_suggest.length && window.FLEETCODES) setTimeout(() => FLEETCODES.suggest(r.renumber_suggest, () => { META = null; load(); }), 50);
+      }
       if (act === "remove") SEL.clear();
       META = null; load();
     } catch (err) { toast(err.message, true); }
@@ -497,12 +502,13 @@
     if (!r || !r.contains(e.target)) return;
     const t = e.target;
     if (t.matches("[data-flsel], [data-flall]")) return;
-    const ad = t.closest("[data-fladd],[data-fldisc],[data-flimp],[data-flreload],[data-flpg],[data-flclr]");
+    const ad = t.closest("[data-fladd],[data-fldisc],[data-flimp],[data-flcodes],[data-flreload],[data-flpg],[data-flclr]");
     if (ad) {
       e.preventDefault();
       if (ad.dataset.fladd !== undefined) meta().then(addDialog);
       if (ad.dataset.fldisc !== undefined) meta().then(discoverDialog);
       if (ad.dataset.flimp !== undefined) meta().then(importDialog);
+      if (ad.dataset.flcodes !== undefined && window.FLEETCODES) FLEETCODES.rulesDialog().catch((er) => toast(er.message, true));
       if (ad.dataset.flreload !== undefined) busy(ad, () => { META = null; return load(); });
       if (ad.dataset.flpg) { Q.page = Math.max(1, Q.page + +ad.dataset.flpg); load(); }
       if (ad.dataset.flclr !== undefined) { SEL.clear(); render(); }

@@ -128,6 +128,7 @@ DEFAULT_CONFIG = {
     ],
     "default_printer": 0,
     "printer_models": {},                # v2.54 机型模板：{机型: {nozzle, plate, g_per_h, ams, orca_*}}；每台打印机只存单独设置（ovr）
+    "printer_code_rules": {},            # v2.55 打印机编码规则：{rules, default, groups, group_codes}（见 core/fleetcodes.py；空 = 机型-顺序号）
     "printer_workers": {},               # v2.54 打印机连接分给几个后台进程：{进程 id: [分组, …]}（没分的归默认进程）
     "orca_path": "",                     # 留空自动查找 orca-slicer.exe
     "est_infill": 0.15,                  # 估算用：填充率
