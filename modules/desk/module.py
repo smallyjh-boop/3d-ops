@@ -16,8 +16,9 @@ MODULE = {
     "depends": [],
     "order": 80,
     "settings_cards": ["addons"],
-    "public_paths": ["/api/desktop/dl/"],
+    "public_paths": ["/api/desktop/dl/", "/api/desktop/st/"],      # st = 切片软件自检的测试文件（带一次性密钥）
     "owner_only": [("*", r"^/api/desktop/devices")],
-    "production_allow": [("POST", r"^/api/desktop/(pair|dltoken)$"), ("GET", r"^/api/desktop/package$")],
+    "production_allow": [("POST", r"^/api/desktop/(pair|dltoken)$"), ("GET", r"^/api/desktop/package$"),
+                         ("POST", r"^/api/desktop/selftest/(start|report)$"), ("GET", r"^/api/desktop/selftest/log$")],
     "ui": {"boot_js": ["boot.js"], "page_js": []},
 }

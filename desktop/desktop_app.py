@@ -250,11 +250,70 @@ def restart():
 
 
 # ---------------- 网页里能调用的（window.pywebview.api.*） ----------------
+_SLICERS = {"at": 0, "data": None}
+JOBS = {}                                 # v2.56：在切片软件里编辑的会话 {sid: slicer_edit.EditJob}
+
+
+def slicers(force=False):
+    """本机的 Bambu Studio / OrcaSlicer（一分钟内用缓存）。"""
+    import slicer_edit
+    if force or not _SLICERS["data"] or time.time() - _SLICERS["at"] > 60:
+        try:
+            _SLICERS["data"] = slicer_edit.detect()
+        except Exception:  # noqa: BLE001
+            _SLICERS["data"] = {"bambu": None, "orca": None}
+        _SLICERS["at"] = time.time()
+    return _SLICERS["data"]
+
+
 class Api:
     def info(self):
         return {"desktop": True, "version": VERSION, "device_id": C["device_id"], "device_name": _pc_name(),
                 "paired_user": C.get("user") or "", "server": STATE["server"], "servers": servers(),
-                "autostart": autostart_get(), "accel": ACCEL.info()}
+                "autostart": autostart_get(), "accel": ACCEL.info(), "slicers": slicers(), "edit": True}
+
+    # ---- v2.56（T36）在切片软件里编辑：下载 → 用软件打开（最大化）→ 保存后自动回传 ----
+    def slicers(self, force=False):
+        import slicer_edit
+        return {"found": slicers(bool(force)), "download": slicer_edit.DOWNLOAD, "names": slicer_edit.APPS}
+
+    def edit_in_slicer(self, info):
+        """info = 网页开始编辑拿到的 {sid, app, download, upload, filename, folder}。"""
+        import slicer_edit
+        info = dict(info or {})
+        if not str(info.get("download") or "").startswith(("/api/slicer-edit/", "/api/desktop/st/")):
+            return {"status": "error", "error": "地址不对"}
+        old = JOBS.get(str(info.get("sid")))
+        if old:
+            old.stop("replaced")
+        job = slicer_edit.EditJob(info, STATE["server"], slicers())
+        try:
+            st = job.start()
+        except Exception as e:  # noqa: BLE001
+            return {"status": "error", "error": str(e)}
+        if st.get("status") == "editing":
+            JOBS[job.sid] = job
+        return dict(st, download_links=slicer_edit.DOWNLOAD)
+
+    def edit_status(self, sid):
+        j = JOBS.get(str(sid))
+        return dict(j.state) if j else {"status": "none"}
+
+    def edit_stop(self, sid, status="done"):
+        j = JOBS.pop(str(sid), None)
+        return j.stop(status if status in ("done", "abandoned") else "done") if j else {"status": "none"}
+
+    def split_screen(self, sid):
+        import slicer_edit
+        j = JOBS.get(str(sid))
+        if not j or not j.proc:
+            return {"ok": False, "msg": "没有正在编辑的软件窗口"}
+        ok, msg = slicer_edit.split_screen(j.proc.pid, "3D")
+        return {"ok": ok, "msg": msg}
+
+    def selftest_checks(self, detected, runs, split=None):
+        import slicer_edit
+        return slicer_edit.selftest_checks(detected, runs, tuple(split) if split else None)
 
     def paired(self, server, key, worker_name, user):
         C.update(key=key, worker_name=worker_name, user=user)

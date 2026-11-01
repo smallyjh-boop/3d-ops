@@ -179,7 +179,10 @@ def is_plain(p, r):
     if r["poses"]:
         return False
     e = _main_entry(p)
-    return bool(e) and all(it["id"] == e["id"] and int(it.get("qty") or 1) == 1 for it in r["items"])
+    if not e or not all(it["id"] == e["id"] and int(it.get("qty") or 1) == 1 for it in r["items"]):
+        return False
+    # v2.56（T37）：多个组件的文件不直接用文件本身（文件里是摆盘位置）：要按作者装配 / 平铺图拼
+    return len(r["items"]) <= 1
 
 
 def token(p, r):
@@ -259,24 +262,109 @@ def _geo(pid, p, items):
     return out
 
 
-def _default_poses(items, geo):
-    """没保存姿势时：同一个文件里的不同组件（各一个）→ 文件里原来的位置；否则排成一排（底面放地上）。"""
+class _Poses(dict):
+    source = "layout"          # author 作者装配 / file 文件里的组装位置 / layout 零件平铺图
+
+
+_AUTHOR = {}
+
+
+def author_of(pid, e):
+    """v2.56（T37 ①）：3MF 里作者的「装配视图」位置（Bambu Studio / Orca 的 assemble_item），和摆盘位置不同才算。
+    返回 {组件序号: (R, t)}（从文件里的摆盘位置到装配位置）或 None。按文件改动时间缓存。"""
+    fp = modellib.path_of(pid, e) if e else None
+    if not fp or not fp.lower().endswith(".3mf") or not os.path.exists(fp):
+        return None
+    key = (fp, os.path.getmtime(fp))
+    if key not in _AUTHOR:
+        from core import mesh
+        try:
+            with open(fp, "rb") as f:
+                d = mesh.assembly_3mf(f.read())
+        except Exception:  # noqa: BLE001  读不了就当没有
+            d = None
+        out = None
+        if d and any(x is not None and (np.abs(x[0] - np.eye(3)).max() > 1e-3 or np.abs(x[1]).max() > 0.5) for x in d):
+            out = {i: x for i, x in enumerate(d) if x is not None}
+        if len(_AUTHOR) > 100:
+            _AUTHOR.clear()
+        _AUTHOR[key] = out
+    return _AUTHOR[key]
+
+
+def _author_for(pid, p, items):
+    """这些展示零件里有作者装配位置的：{(文件, 组件序号): (R, t)}"""
+    lib = _lib(p)
+    out = {}
+    for it in items or []:
+        if it.get("part") in (None, ""):
+            continue
+        a = author_of(pid, lib.get(it["id"]))
+        if a and int(it["part"]) in a:
+            out[(it["id"], int(it["part"]))] = a[int(it["part"])]
+    return out
+
+
+def _bbox_overlap(geo, keys):
+    """文件里原来的位置不像摆盘（零件有的悬空 / 俯视外框互相重叠很多）→ 文件里本来就是组装好的样子。
+    摆盘的零件都放在热床上（最低点 z≈0）、互相不重叠。"""
+    bs = [(geo[k]["center"] - geo[k]["size"] / 2, geo[k]["center"] + geo[k]["size"] / 2) for k in keys]
+    if any(float(lo[2]) > 1.0 for lo, _hi in bs):
+        return True
+    for i in range(len(bs)):
+        for j in range(i + 1, len(bs)):
+            d = np.minimum(bs[i][1], bs[j][1])[:2] - np.maximum(bs[i][0], bs[j][0])[:2]
+            if (d > 0).all():
+                small = min(float(np.prod(np.maximum(bs[i][1] - bs[i][0], 1e-6)[:2])), float(np.prod(np.maximum(bs[j][1] - bs[j][0], 1e-6)[:2])))
+                if float(np.prod(d)) > 0.2 * small:
+                    return True
+    return False
+
+
+def _default_poses(items, geo, author=None):
+    """没保存姿势时（v2.56 T37 ③：不再默认显示几何 / AI 猜的组装）：
+    1. 作者装配（3MF 的装配视图位置）→ 直接用（最高优先）
+    2. 同一个文件里的不同组件、文件里的位置零件互相穿插（本来就是组装好的）→ 文件里的位置
+    3. 其它 → 零件平铺图（整齐排开，底面放地上；界面上带零件名）"""
+    from . import mating as _m
     inst = instances(items)
+    out = _Poses()
+    if author and all((it["id"], it.get("part")) in author for _k, it, _n in inst):
+        for k, it, _n in inst:
+            g = geo[(it["id"], it.get("part"))]
+            R, t = author[(it["id"], it.get("part"))]
+            c = np.asarray(g["center"], dtype=np.float64)
+            out[k] = {"pos": [round(float(x), 2) for x in c @ R + t], "rot": [round(float(x), 2) for x in _m.euler_of(R.T)]}
+        out.source = "author"
+        return out
     same = len({it["id"] for _k, it, _n in inst}) == 1 and all(int(it.get("qty") or 1) == 1 for it in items) \
         and len({it.get("part") for it in items}) == len(items)
-    out = {}
-    if same:
+    if same and len(inst) > 1 and _bbox_overlap(geo, [(it["id"], it.get("part")) for _k, it, _n in inst]):
         for k, it, _n in inst:
             g = geo[(it["id"], it.get("part"))]
             out[k] = {"pos": [round(float(x), 2) for x in g["center"]], "rot": [0.0, 0.0, 0.0]}
+        out.source = "file"
         return out
-    x = 0.0
+    # 零件平铺图：按网格排开（每行约 √n 个），零件之间留 8 mm
     sizes = [geo[(it["id"], it.get("part"))]["size"] for _k, it, _n in inst]
-    total = sum(float(s[0]) for s in sizes) + 5.0 * max(0, len(sizes) - 1)
-    x = -total / 2
-    for (k, it, _n), s in zip(inst, sizes):
-        out[k] = {"pos": [round(x + float(s[0]) / 2, 3), 0.0, round(float(s[2]) / 2, 3)], "rot": [0.0, 0.0, 0.0]}
-        x += float(s[0]) + 5.0
+    n = len(inst)
+    cols = max(1, int(math.ceil(math.sqrt(n))))
+    rows = [list(range(i, min(n, i + cols))) for i in range(0, n, cols)]
+    gap = 8.0
+    y = 0.0
+    depth_total = sum(max(float(sizes[i][1]) for i in r) for r in rows) + gap * max(0, len(rows) - 1)
+    y = depth_total / 2
+    for r in rows:
+        dmax = max(float(sizes[i][1]) for i in r)
+        width = sum(float(sizes[i][0]) for i in r) + gap * (len(r) - 1)
+        x = -width / 2
+        for i in r:
+            k = inst[i][0]
+            s_ = sizes[i]
+            out[k] = {"pos": [round(x + float(s_[0]) / 2, 3), round(y - dmax / 2, 3), round(float(s_[2]) / 2, 3)], "rot": [0.0, 0.0, 0.0]}
+            x += float(s_[0]) + gap
+        y -= dmax + gap
+    out.source = "layout"
     return out
 
 
@@ -302,7 +390,7 @@ def get(pid, spec=""):
     if not r["items"]:
         raise ValueError("还没有模型文件（先上传 3D 模型）")
     geo = _geo(pid, p, r["items"])
-    dflt = _default_poses(r["items"], geo)
+    dflt = _default_poses(r["items"], geo, _author_for(pid, p, r["items"]))
     rows = []
     lib = _lib(p)
     for n, (k, it, _i) in enumerate(instances(r["items"])):
@@ -322,7 +410,9 @@ def get(pid, spec=""):
             "has_pose": bool(r["poses"]), "plain": is_plain(p, r), "token": token(p, r),
             "updated_at": D.get("updated_at"), "updated_by": D.get("updated_by"), "ai": bool(D.get("ai")), "auto": D.get("auto"),
             "source": first.get("id"), "source_name": first.get("orig_name") or first.get("file") or "",
-            "main_merged": bool((_main_entry(p) or {}).get("origin") == "merged")}
+            "main_merged": bool((_main_entry(p) or {}).get("origin") == "merged"),
+            # v2.56（T37）：没保存过姿势时显示的是什么：author 作者装配 / file 文件里的组装位置 / layout 零件平铺图
+            "default_source": dflt.source, "saved_pose": bool(r["poses"])}
 
 
 # ---------------- 保存 ----------------
@@ -475,7 +565,7 @@ def assembled_tris(pid, spec=""):
 def _assemble(pid, p, r, poses=None, offsets=None):
     geo = _geo(pid, p, r["items"])
     poses = poses if poses is not None else r["poses"]
-    dflt = _default_poses(r["items"], geo)
+    dflt = _default_poses(r["items"], geo, _author_for(pid, p, r["items"]))
     out = []
     for k, it, _n in instances(r["items"]):
         q = poses.get(k) or {}
@@ -693,7 +783,7 @@ def explode(pid, spec="", items=None, poses=None, factor=1.0):
     """爆炸图：每个零件要挪多少（沿组装方向拉开），{key: [dx, dy, dz]}。没传姿势用保存的 / 默认的。"""
     p, r = _draft(pid, spec, items, poses)
     geo = _geo(pid, p, r["items"])
-    dflt = _default_poses(r["items"], geo)
+    dflt = _default_poses(r["items"], geo, _author_for(pid, p, r["items"]))
     parts, pz = [], {}
     for k, it, _n in instances(r["items"]):
         q = r["poses"].get(k) or {}

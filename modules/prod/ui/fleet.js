@@ -12,7 +12,7 @@
   const ROLE = () => ({ any: Z("都可以", "ทั้งหมด"), orders: Z("只打订单", "เฉพาะออเดอร์"), stock: Z("只打备货", "เฉพาะสต็อก") });
   const FIELD = () => ({ nozzle: Z("喷嘴 mm", "หัวฉีด มม."), plate: Z("热床板", "แผ่นฐาน"), g_per_h: Z("每小时克数", "กรัมต่อชั่วโมง"),
     ams: Z("AMS / 多色", "AMS / หลายสี"), orca_machine: Z("Orca 打印机配置", "โปรไฟล์เครื่อง Orca"), orca_process: Z("Orca 工艺配置", "โปรไฟล์กระบวนการ Orca"),
-    orca_filament: Z("Orca 耗材配置", "โปรไฟล์เส้นพลาสติก Orca") });
+    orca_filament: Z("Orca 耗材配置", "โปรไฟล์เส้นพลาสติก Orca"), slicer_app: Z("编辑用的切片软件", "โปรแกรมสไลซ์ที่ใช้แก้ไข") });
   const PLATES = () => [["", Z("不核对", "ไม่ตรวจ")], ["Textured PEI Plate", Z("纹理 PEI 板", "แผ่น PEI ผิวหยาบ")], ["Smooth PEI Plate", Z("光面 PEI 板", "แผ่น PEI ผิวเรียบ")],
     ["Cool Plate", Z("低温板", "แผ่นอุณหภูมิต่ำ")], ["Engineering Plate", Z("工程板", "แผ่นวิศวกรรม")], ["High Temp Plate", Z("高温板", "แผ่นอุณหภูมิสูง")], ["SuperTack Plate", Z("超粘板", "แผ่นยึดติดสูง")]];
   const STATES = () => ({ idle: Z("空闲", "ว่าง"), printing: Z("打印中", "กำลังพิมพ์"), paused: Z("已暂停", "หยุดชั่วคราว"), finished: Z("打印完成", "พิมพ์เสร็จ"),
@@ -200,12 +200,14 @@
     if (v == null || v === "") return Z("机型默认", "ค่าเริ่มต้นของรุ่น");
     if (k === "ams") return v ? Z("有", "มี") : Z("没有", "ไม่มี");
     if (k === "plate") return (PLATES().find((p) => p[0] === v) || [v, v])[1];
+    if (k === "slicer_app") return v === "bambu" ? "Bambu Studio" : v === "orca" ? "OrcaSlicer" : Z("自动", "อัตโนมัติ");
     return String(v);
   }
   function ovrInput(f) {
     const k = f.key, o = f.override;
     if (k === "plate") return `<select data-flo="plate"><option value="">${esc(Z("跟随模板", "ตามแม่แบบ"))}</option>${PLATES().slice(1).map(([v, l]) => `<option value="${esc(v)}" ${o === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
     if (k === "ams") return `<select data-flo="ams"><option value="">${esc(Z("跟随模板", "ตามแม่แบบ"))}</option><option value="true" ${o === true ? "selected" : ""}>${esc(Z("有", "มี"))}</option><option value="false" ${o === false ? "selected" : ""}>${esc(Z("没有", "ไม่มี"))}</option></select>`;
+    if (k === "slicer_app") return `<select data-flo="slicer_app"><option value="">${esc(Z("跟随模板", "ตามแม่แบบ"))}</option>${["bambu", "orca"].map((x) => `<option value="${x}" ${o === x ? "selected" : ""}>${x === "bambu" ? "Bambu Studio" : "OrcaSlicer"}</option>`).join("")}</select>`;
     return `<input data-flo="${k}" value="${esc(o == null ? "" : o)}" placeholder="${esc(Z("跟随模板", "ตามแม่แบบ"))}" data-notr>`;
   }
   function drawerHtml(D) {

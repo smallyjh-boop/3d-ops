@@ -127,7 +127,7 @@
       </div>
       <p class="small" id="dk-ts">外网（Tailscale）：…</p>
       <details class="small"><summary>运行记录</summary><pre class="sys-pre" data-notr>${esc((a.log || []).join("\n") || "（还没有）")}</pre></details>
-      <div class="row gap" style="margin-top:8px"><button data-dfolder>打开「在本机打开」的文件夹</button><button data-dswitch>重新连接 NAS</button><button data-dts>连接外网（Tailscale）</button><button data-mclose>关闭</button></div>`);
+      <div class="row gap" style="margin-top:8px"><button data-dselftest>🔧 ${ZD("切片软件自检", "ตรวจโปรแกรมสไลซ์")}</button><button data-dfolder>打开「在本机打开」的文件夹</button><button data-dswitch>重新连接 NAS</button><button data-dts>连接外网（Tailscale）</button><button data-mclose>关闭</button></div>`);
     m.onchange = async (e) => {
       const k = e.target.dataset && e.target.dataset.dopt; if (!k) return;
       INFO = await DESK.set_option(k, e.target.checked); renderChip();
@@ -144,10 +144,78 @@
     };
     tsShow();
     m.onclick = (e) => {
+      if (e.target.dataset.dselftest !== undefined) { selftest(); return; }
       if (e.target.dataset.dts !== undefined) { DESK.ts_join(); setTimeout(tsShow, 800); }
       if (e.target.dataset.dfolder !== undefined) DESK.show_folder();
       if (e.target.dataset.dswitch !== undefined) { DESK.switch_server(); toast("正在重新找 NAS…"); }
     };
+  }
+  // ---------------- v2.56（T36）🔧 切片软件自检 ----------------
+  const ZD = (zh, th) => (window.I18N && I18N.lang === "th" ? th : zh);
+  const APPN = { bambu: "Bambu Studio", orca: "OrcaSlicer" };
+  function checklistHtml(checks) {
+    return `<table class="grid small"><tbody>${(checks || []).map((c) => `<tr><td>${c.ok ? "✅" : "❌"}</td><td>${esc(ZD(c.zh, c.th))}</td><td class="muted" data-notr>${esc(c.detail || "")}</td></tr>`).join("")}</tbody></table>`;
+  }
+  async function selftest() {
+    if (!DESK || !DESK.selftest_checks) { toast(ZD("这个桌面客户端版本太旧，请更新", "โปรแกรมเดสก์ท็อปเก่าเกินไป กรุณาอัปเดต"), true); return; }
+    let skip = false;
+    const m = modal(`<h3>🔧 ${ZD("切片软件自检", "ตรวจโปรแกรมสไลซ์")}</h3><div id="dst-body" class="small"></div>
+      <div class="row gap" style="margin-top:8px"><button data-dst-skip>${ZD("跳过这一步", "ข้ามขั้นนี้")}</button><button data-mclose>${ZD("关闭", "ปิด")}</button></div>`);
+    const body = m.querySelector("#dst-body");
+    m.querySelector("[data-dst-skip]").onclick = () => { skip = true; };
+    const say = (h) => { if (body.isConnected) body.innerHTML = h; };
+    const errors = [];
+    say(ZD("正在找本机的 Bambu Studio / OrcaSlicer…", "กำลังค้นหา Bambu Studio / OrcaSlicer ในเครื่อง…"));
+    const det = (await DESK.slicers(true)).found || {};
+    const apps = Object.keys(APPN).filter((a) => det[a]);
+    const runs = {}, sids = [];
+    let split = null;
+    if (apps.length) {
+      let st = {};
+      try { st = (await api("/api/desktop/selftest/start", { json: { apps } })).runs; } catch (e) { errors.push(e.message); }
+      for (const app of apps) {
+        const r = st[app]; if (!r) continue;
+        sids.push(r.sid); skip = false;
+        const run = (runs[app] = { opened: false, uploaded: false, server: null, error: "" });
+        say(ZD(`正在用 ${APPN[app]} 打开测试盘（两个方块、两种颜色）…`, `กำลังเปิดถาดทดสอบด้วย ${APPN[app]}…`));
+        let o;
+        try { o = await DESK.edit_in_slicer(r); } catch (e) { o = { status: "error", error: e.message }; }
+        run.opened = o.status === "editing"; run.error = o.error || "";
+        if (!run.opened) { errors.push(`${app}: ${run.error}`); continue; }
+        if (split === null) { try { const sp = await DESK.split_screen(r.sid); split = [!!sp.ok, sp.msg || ""]; } catch (e) { split = [false, e.message]; } }
+        say(`<b>${ZD(`在 ${APPN[app]} 里随便挪一下任意一个零件，然后按 Ctrl+S 保存`, `ใน ${APPN[app]} ลองย้ายชิ้นงานชิ้นไหนก็ได้ แล้วกด Ctrl+S เพื่อบันทึก`)}</b><br>
+          <span class="muted">${ZD("保存后会自动回传、核对；等不到可以点「跳过这一步」（10 分钟后自动跳过）", "บันทึกแล้วจะส่งกลับและตรวจอัตโนมัติ ถ้ารอไม่ไหวกด «ข้ามขั้นนี้» (ข้ามเองหลัง 10 นาที)")}</span>`);
+        const end = Date.now() + 600000;
+        let s = {};
+        while (!skip && Date.now() < end && body.isConnected) {
+          await new Promise((res) => setTimeout(res, 1500));
+          try { s = await DESK.edit_status(r.sid); } catch { s = {}; }
+          if ((s.syncs || 0) >= 1 || s.status === "ended") break;
+        }
+        run.uploaded = (s.syncs || 0) >= 1;
+        run.server = (s.last_result || {}).check || null;
+        if (s.error) { run.error = s.error; errors.push(`${app}: ${s.error}`); }
+        try { await DESK.edit_stop(r.sid, "done"); } catch { /* 忽略 */ }
+      }
+    }
+    const checks = await DESK.selftest_checks(det, runs, split);
+    let rec = null;
+    try { rec = (await api("/api/desktop/selftest/report", { json: { pc: INFO && INFO.device_name, client: INFO && INFO.version, slicers: det, checks, sids, errors } })).record; }
+    catch (e) { errors.push(e.message); }
+    const pass = checks.length && checks.every((c) => c.ok);
+    say(`<p><b>${pass ? "✅ " + ZD("全部通过", "ผ่านทั้งหมด") : "❌ " + ZD("有没通过的项目（结果已经上报，老板在 设置 → 组件与插件 能看到）", "มีรายการไม่ผ่าน (ส่งผลไปที่ระบบแล้ว)")}</b></p>${checklistHtml(checks)}
+      ${errors.length ? `<pre class="sys-pre" data-notr>${esc(errors.join("\n"))}</pre>` : ""}${rec ? "" : `<p class="bad">${ZD("结果没能上报到服务器", "ส่งผลไปที่ระบบไม่สำเร็จ")}</p>`}`);
+  }
+  window.DESK_SELFTEST = { checklistHtml };
+  async function loadSelftest() {
+    const box = $("#cfg-desk-st"); if (!box) return;
+    let lg = [];
+    try { lg = (await api("/api/desktop/selftest/log")).log || []; } catch { lg = []; }
+    const r = lg[0];
+    box.innerHTML = r ? `<details><summary><b>🔧 ${ZD("最近一次切片软件自检", "การตรวจโปรแกรมสไลซ์ครั้งล่าสุด")}</b>：${r.passed ? "✅ " + ZD("通过", "ผ่าน") : "❌ " + ZD("不通过", "ไม่ผ่าน")} ·
+      <span data-notr>${esc(r.pc || "")} · ${esc(r.user || "")}</span> · ${fmtTime(r.at)} · <span data-notr>${Object.entries(r.slicers || {}).map(([k, v]) => `${APPN[k]} ${v ? esc(v.version || "?") : "—"}`).join(" / ")}</span></summary>
+      ${checklistHtml(r.checks)}${(r.errors || []).length ? `<pre class="sys-pre" data-notr>${esc(r.errors.join("\n"))}</pre>` : ""}</details>`
+      : `<span class="muted">${ZD("还没有电脑做过切片软件自检（桌面客户端右上角「本机加速」→「🔧 切片软件自检」）", "ยังไม่มีเครื่องไหนตรวจโปรแกรมสไลซ์ (ในโปรแกรมเดสก์ท็อป → «🔧 ตรวจโปรแกรมสไลซ์»)")}</span>`;
   }
   // 设置 → 组件与插件：桌面客户端（下载、每台电脑的状态，老板可以停用）
   async function loadDevices() {
@@ -174,8 +242,8 @@
     box.innerHTML = `<div class="card cfg-group" id="cfg-desk" data-lock-skip><div class="row between"><h3>💻 桌面客户端（Windows）</h3><a class="btn primary" href="/api/desktop/package">⬇ 下载桌面客户端</a></div>
       <p class="small">一个窗口就是整个系统（和网页版一样），自带电脑加速：切片、读大模型、3D 预览、抠图、去水印在自己电脑上做，只做自己账号的活。拖文件进窗口直接上传；模型、切片文件点「下载」直接用本机 Bambu Studio / Orca 打开；新消息弹 Windows 通知；关窗口收到右下角托盘，开机自动启动。局域网连不上会自动换外网地址（Tailscale）。</p>
       <ol class="small muted"><li>下载后解压，双击 <b>Install.bat</b>（第一次要联网装 3–10 分钟；电脑没有 Python 会自动装）。</li><li>桌面出现「3D Ops」图标，打开后用自己的账号登录，就自动连好加速。</li><li>以后 NAS 升级，客户端会自动跟着更新。员工也可以在顶部「💻 下载桌面版」自己下载。</li></ol>
-      <div id="cfg-desk-body" class="small"></div></div>`;
-    loadDevices();
+      <div id="cfg-desk-body" class="small"></div><div id="cfg-desk-st" class="small" style="margin-top:8px"></div></div>`;
+    loadDevices(); loadSelftest();
   }
   window.MODS = window.MODS || {};
   window.MODS.desk = { settings };

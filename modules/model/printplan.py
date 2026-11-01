@@ -707,6 +707,17 @@ def _item_extra(it):
             continue
     if ov:
         out["ov"] = ov
+    ps = it.get("part_slots")                 # v2.56（T36）：整个文件的零件，每个组件自己的槽（切片软件里给零件换了耗材）
+    if isinstance(ps, dict) and it.get("part") in (None, ""):
+        cl = {}
+        for k, v in ps.items():
+            try:
+                if str(int(k)) == str(k).strip():
+                    cl[str(int(k))] = int(max(1, min(SLOT_MAX, int(v))))
+            except (TypeError, ValueError):
+                continue
+        if cl:
+            out["part_slots"] = dict(sorted(cl.items(), key=lambda kv: int(kv[0])))
     return out
 
 
@@ -878,6 +889,7 @@ def save_plan(pid, spec, data, user=""):
         if pl["manual"] and not ck["ok"]:
             raise ValueError(f"第 {plan['plates'].index(pl) + 1} 盘：" + "，".join(ck["problems"]) + "（红色的零件挪一挪，或点「自动排列」）")
         old = next((x for x in (prev.get("plates") or []) if x.get("id") == pl["id"]), None)
+        _keep_master(pl, old)
         _check_mat_params(p, pl, old)
         if old and old.get("sliced") and (_sig(old) != _sig(pl) or (old.get("params") or {}) != (pl.get("params") or {})):
             pl.pop("sliced", None)                  # 改了摆盘 / 颜色 / 参数：以前的切片结果不能用了
@@ -893,6 +905,18 @@ def save_plan(pid, spec, data, user=""):
     _refresh_variants(p, spec, plan)
     store.save(p)
     return {"plan": plan, "checks": checks}
+
+
+MASTER_KEYS = ("master", "confirm", "confirmed", "master_of")
+
+
+def _keep_master(pl, old):
+    """v2.56（T36）：网页保存方案时，这一盘的摆盘 / 槽 / 参数没变 → 保留切片软件保存的主文件和「需要确认」；
+    在网页里改了 → 主文件不再用（历史版本还在），按网页的方案切片。"""
+    if not old or not old.get("master"):
+        return
+    if _sig({k: v for k, v in old.items() if k not in MASTER_KEYS}) == _sig(pl):
+        pl.update({k: old[k] for k in MASTER_KEYS if k in old})
 
 
 def _check_mat_params(p, pl, old):
@@ -1001,12 +1025,14 @@ def apply_recipe(pid, spec, r):
 def _sig(pl):
     """摆盘签名（改了就要重新切片）。v2.55 的新字段（按面贴平台 / 镜像 / 单独参数 / 每盘参数）只在用到时加进去，旧的签名不变。
     每盘参数（支撑、壁数、填充、温度、耗材配置…）：按主模型缩放的规格靠这个知道主模型改了参数、以前的切片不能用了。"""
-    ext = [(it.get("uid"), _item_extra(it)) for it in pl.get("items") or [] if any(k in _item_extra(it) for k in ("face", "mirror", "ov"))]
+    ext = [(it.get("uid"), _item_extra(it)) for it in pl.get("items") or [] if any(k in _item_extra(it) for k in ("face", "mirror", "ov", "part_slots"))]
     out = _sig0(pl) + (repr(ext) if ext else "")
     if isinstance(pl.get("params"), dict) and pl["params"]:
         import hashlib
         import json
         out += "|prm:" + hashlib.md5(json.dumps(pl["params"], sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()[:12]
+    if (pl.get("master") or {}).get("sha"):          # v2.56（T36）：切片软件保存的主文件变了 → 以前的切片作废
+        out += "|m:" + str(pl["master"]["sha"])[:16] + f"/{pl['master'].get('plate_no') or 1}"
     return out
 
 
@@ -1452,9 +1478,17 @@ def export_plate(pid, spec, plate_id, colour="", out_path=None):
     cmap = codes.color_hex(load_config())
     cols = colours_for(plan, plate, colour)
     slots = [dict(s, hex=(cmap.get(cols.get(s["slot"]) or "") or {}).get("hex") or s.get("hex") or "#FFFFFF") for s in plate["slots"]]
-    objs = plate_objects(pid, plate, p)
     out_path = out_path or tempfile.NamedTemporaryFile(suffix=".3mf", delete=False).name
-    write_plate_3mf(out_path, objs, slots)
+    if any(it.get("part_slots") for it in plate["items"]):      # v2.56：零件里每个组件自己的槽 → 按组件写 part（普通 3MF）
+        from . import slicerproj
+        objs2 = []
+        for it in plate["items"]:
+            label, parts, _pt = slicerproj.item_parts(pid, p, it, plate["slots"])
+            objs2.append({"name": label, "parts": parts, "x": float(it.get("x") or 0), "y": float(it.get("y") or 0),
+                          "rot": float(it.get("rot") or 0), "extruder": int(it.get("slot") or 1), "ov": ov_metadata(it.get("ov"))})
+        slicerproj.write_project(out_path, objs2, "orca", None)
+    else:
+        write_plate_3mf(out_path, plate_objects(pid, plate, p), slots)
     name = f"{pid}{'_' + spec if spec else ''}_{plate_id}{'_' + colour if colour else ''}.3mf".replace(" ", "_")
     return out_path, name
 
@@ -1470,47 +1504,74 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
     plate = next((x for x in plan["plates"] if x["id"] == plate_id), None)
     if not plate:
         raise ValueError("没有这一盘（刷新一下）")
-    # 整个文件放上盘、颜色来自文件（MakerWorld / 拓竹涂色 3MF）：导出时只能写「每个零件一个槽」，涂色会丢 → 不切，说清楚
-    from core import modellib
-    for it in plate.get("items") or []:
-        if it.get("part") in (None, ""):
-            ci = ((modellib._entry(p, it["id"]) or {}).get("info") or {}).get("colors") or {}
-            if ci.get("multicolor"):
-                raise ValueError("这一盘里有自带颜色的 3MF（涂色 / 多色项目文件），程序切会丢掉文件里的颜色。"
-                                 "请在电脑上用 Bambu Studio 打开原文件切片，再上传切片文件；或者把它拆成零件摆盘、每个零件选槽后再切。")
+    if plate.get("confirm"):                 # v2.56（T36）：切片软件回传后核对出的问题没确认，不切
+        raise ValueError("这一盘有需要确认的问题（切片软件里改过）：" + "；".join(c["zh"] for c in plate["confirm"]) + "。请先在这一盘上点「确认」")
     names = [x.get("name") for x in cfg.get("printers") or []]
     if printer_idx is None:
         printer_idx = names.index(plate["printer"]) if plate["printer"] in names else 0
-    path, fname = export_plate(pid, spec, plate_id, colour)
-    try:
-        cols = colours_for(plan, plate, colour)
-        from core import codes
-        cmap = codes.color_hex(cfg)
-        fils = [{"material": s.get("material") or "PLA", "hex": (cmap.get(cols.get(s["slot"]) or "") or {}).get("hex") or "#FFFFFF"}
-                for s in plate["slots"]]
-        multi = len({cols.get(s["slot"]) for s in plate["slots"]}) > 1
-        rc = recipe_of(p, plate)                # v2.55：这一盘自己的参数（支撑、壁数、填充、热床板、温度、耗材配置）
-        pre_warns = slice_warnings(p, plate, rc)
-        over = recipes.overrides(rc) or {}
-        # 安全：盘上设的喷嘴 / 热床温度是给槽 1 的材料的；别的材料（PLA + PETG / TPU）的槽用它自己配置里的温度
-        fo1 = recipes.filament_overrides(rc)
-        for f_ in fils:
-            f_["overrides"] = fo1 if _same_mat(f_["material"], fils[0]["material"]) else None
-        if multi:
-            over.update(slicer.MULTI_OVERRIDES)
+    from . import editsession
+    mpath = editsession.master_path(pid, spec, plate)
+    res, master_note = None, []
+    if mpath:                                # v2.56：有软件保存的主文件 → 直接切它（软件里的全部设置都用上）
         import tempfile
         keep = tempfile.NamedTemporaryFile(suffix=".gcode.3mf", delete=False).name
-        pname0 = names[printer_idx] if 0 <= printer_idx < len(names) else plate["printer"]
-        per_part = any(it.get("ov") for it in plate.get("items") or [])
-        res = slicer.orca_slice(cfg, path, printer_idx, fils[0]["material"], overrides=over, keep_to=keep, copies=1, orient=False,
-                                arrange=False, filaments=fils if len(fils) > 1 else None,
-                                filament_name=None if len(fils) > 1 else (recipes.filament_for(rc, pname0) or None),
-                                filament_overrides=fo1, keep_settings=per_part)
-    finally:
+        mat0 = (plate["slots"][0].get("material") if plate.get("slots") else "") or "PLA"
         try:
-            os.remove(path)
-        except OSError:
-            pass
+            res = editsession.slice_master(cfg, mpath, (plate.get("master") or {}).get("plate_no") or 1, mat0, keep_to=keep)
+            cols = colours_for(plan, plate, colour)
+            fils = [{"material": s.get("material") or "PLA"} for s in plate["slots"]]
+            multi = len({cols.get(s["slot"]) for s in plate["slots"]}) > 1
+            pre_warns = []
+            fname = f"{pid}{'_' + spec if spec else ''}_{plate_id}{'_' + colour if colour else ''}.3mf".replace(" ", "_")
+            res["warnings"] = []
+        except slicer.SliceError as e:
+            res = None
+            try:
+                os.remove(keep)
+            except OSError:
+                pass
+            master_note = [{"zh": f"主文件（{(plate.get('master') or {}).get('application') or '切片软件'} 保存的）切不了，改按方案切：{e}",
+                            "th": "สไลซ์ไฟล์หลักไม่ได้ จึงสไลซ์ตามแผนแทน (การตั้งค่าพิเศษในโปรแกรมไม่ได้ใช้)"}]
+    if res is None:
+        # 整个文件放上盘、颜色来自文件（MakerWorld / 拓竹涂色 3MF）：导出时只能写「每个零件一个槽」，涂色会丢 → 不切，说清楚
+        from core import modellib
+        for it in plate.get("items") or []:
+            if it.get("part") in (None, ""):
+                ci = ((modellib._entry(p, it["id"]) or {}).get("info") or {}).get("colors") or {}
+                if ci.get("multicolor"):
+                    raise ValueError("这一盘里有自带颜色的 3MF（涂色 / 多色项目文件），程序切会丢掉文件里的颜色。"
+                                     "请在电脑上用 Bambu Studio 打开原文件切片，再上传切片文件；或者把它拆成零件摆盘、每个零件选槽后再切。")
+        path, fname = export_plate(pid, spec, plate_id, colour)
+        try:
+            cols = colours_for(plan, plate, colour)
+            from core import codes
+            cmap = codes.color_hex(cfg)
+            fils = [{"material": s.get("material") or "PLA", "hex": (cmap.get(cols.get(s["slot"]) or "") or {}).get("hex") or "#FFFFFF"}
+                    for s in plate["slots"]]
+            multi = len({cols.get(s["slot"]) for s in plate["slots"]}) > 1
+            rc = recipe_of(p, plate)                # v2.55：这一盘自己的参数（支撑、壁数、填充、热床板、温度、耗材配置）
+            pre_warns = slice_warnings(p, plate, rc)
+            over = recipes.overrides(rc) or {}
+            # 安全：盘上设的喷嘴 / 热床温度是给槽 1 的材料的；别的材料（PLA + PETG / TPU）的槽用它自己配置里的温度
+            fo1 = recipes.filament_overrides(rc)
+            for f_ in fils:
+                f_["overrides"] = fo1 if _same_mat(f_["material"], fils[0]["material"]) else None
+            if multi:
+                over.update(slicer.MULTI_OVERRIDES)
+            import tempfile
+            keep = tempfile.NamedTemporaryFile(suffix=".gcode.3mf", delete=False).name
+            pname0 = names[printer_idx] if 0 <= printer_idx < len(names) else plate["printer"]
+            per_part = any(it.get("ov") for it in plate.get("items") or [])
+            res = slicer.orca_slice(cfg, path, printer_idx, fils[0]["material"], overrides=over, keep_to=keep, copies=1, orient=False,
+                                    arrange=False, filaments=fils if len(fils) > 1 else None,
+                                    filament_name=None if len(fils) > 1 else (recipes.filament_for(rc, pname0) or None),
+                                    filament_overrides=fo1, keep_settings=per_part)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    pre_warns = master_note + pre_warns
     fil = res.get("filaments") or []
     # 切片软件给的每个耗材克数里已经含冲刷 / 擦料塔的料；成本和扣库存会再加 purge_g，所以这里记「净」克数（v2.52 实测修正）
     purge = float(res.get("purge_g") or 0)

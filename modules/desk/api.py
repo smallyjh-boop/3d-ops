@@ -100,3 +100,51 @@ def desktop_package():
                                      "Install.bat": install_bat()})
     db.audit(u.get("username", ""), "下载桌面客户端", ver)
     return send_file(buf, mimetype="application/zip", as_attachment=True, download_name=f"3D-Ops-Desktop-{ver}.zip")
+
+
+# ---- v2.56（T36）🔧 切片软件自检：测试盘（不建产品）→ 软件里挪一下保存 → 自动回传核对 → 结果存日志 ----
+@bp.post("/api/desktop/selftest/start")
+def desktop_selftest_start():
+    from modules.desk import selftest
+    u = _login()
+    if not u:
+        return _err("请先登录", 401)
+    apps = [a for a in ((request.get_json(silent=True) or {}).get("apps") or ["bambu", "orca"]) if a in ("bambu", "orca")]
+    return jsonify({"runs": selftest.start(u.get("username", ""), apps)})
+
+
+@bp.get("/api/desktop/st/<sid>/file")
+def desktop_selftest_file(sid):
+    from modules.desk import selftest
+    try:
+        path, name = selftest.take_file(sid, request.args.get("t"))
+    except PermissionError as e:
+        return _err(str(e), 403)
+    return send_file(path, mimetype="model/3mf", as_attachment=True, download_name=name)
+
+
+@bp.post("/api/desktop/st/<sid>/upload")
+def desktop_selftest_upload(sid):
+    from modules.desk import selftest
+    f = request.files.get("file")
+    try:
+        return jsonify({"ok": True, "check": selftest.upload(sid, request.args.get("t"), f.read() if f else request.get_data())})
+    except PermissionError as e:
+        return _err(str(e), 403)
+    except ValueError as e:
+        return _err(str(e))
+
+
+@bp.post("/api/desktop/selftest/report")
+def desktop_selftest_report():
+    from modules.desk import selftest
+    u = _login()
+    if not u:
+        return _err("请先登录", 401)
+    return jsonify({"ok": True, "record": selftest.report(u.get("username", ""), request.get_json(silent=True) or {})})
+
+
+@bp.get("/api/desktop/selftest/log")
+def desktop_selftest_log():
+    from modules.desk import selftest
+    return jsonify({"log": selftest.log()})

@@ -19,12 +19,22 @@
   C 新建生产单选产品（core/po.py suggest / picker，建议数量 = 缺口，订单待打只排前面，t_po255）；D 打印机编码规则（core/fleetcodes.py，新标签二维码装稳定 id，t_codes255）；
   E 货位三种看法 + 服务端分页（modules/inv/views.py / locviews.py / qtytext.py，t_locviews255）
 
+- 开发中（分支 t36-slicer-edit，v2.56.0 未发版）：T36 第一步「在 Bambu Studio / OrcaSlicer 里编辑一盘」+ 桌面客户端切片软件自检 + T37 ① ③。
+  modules/model/slicerproj.py（生成 / 读回项目 3MF）、editsession.py（会话、锁、主文件、同步、安全核对、切主文件）、ui/slicedit.js；
+  core/fleet.slicer_app_of + 机型模板 slicer_app；desktop/slicer_edit.py + desktop_app Api；modules/desk/selftest.py；
+  assembly.py 作者装配 / 平铺图、core/mesh.assembly_3mf。详见 modules/model/README.md、modules/desk/README.md「系统 v2.56.0」。
+  测试 t_slicerapp36 / t_asm37 / desk t_slicerdesk256。Bambu Studio 在这里没法测：等老板在 Windows 上跑「🔧 切片软件自检」。
+  没做：T37 ②（装配视图编辑回传）、电脑上用 Bambu Studio 切片（T36 第二步）、NAS 网页版（第三步）。
+
 ## 已知问题 / 坑
 - 测试临时目录 /tmp/3dops-test-* 很大（每个约 0.8–1 GB），磁盘满时要清理
 - OrcaSlicer 不认我们写的 3MF 加拓竹标记（会崩溃 -11）；普通 3MF + Metadata/model_settings.config 才能按槽分色
 - 涂色 3MF（MakerWorld / 拓竹）不能按盘程序切（会丢涂色），要在 Bambu Studio 切好上传
 - 拍照识别准确率目前来自模拟照片，需要真实照片验证（系统 → 识别测试）
 
+- v2.56：OrcaSlicer 2.3.1 读拓竹格式项目 3MF：project_settings 必须是完整配置（只写几个键会崩溃 -11），我们让 Orca 自己导出一次取它的；
+  <plate> 的 plater_name 写中文会崩溃（留空）；自定义的对象 / part metadata（erp_uid）导出时会丢，靠名字末尾「#编号」对应；
+  创想三维单喷头机型带几个耗材要 single_extruder_multi_material=1，耗材配置里不能写 filament_colour（否则 -5）
 - 拓竹 X1 / P1 左前角 18×28 mm 是废料口（bed_exclude_area），零件压到那里 OrcaSlicer 报「盘上没有能切的零件」；自动排列已避开（printplan.exclude_of）
 
 ## 重要决定（以及原因）

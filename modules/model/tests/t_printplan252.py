@@ -278,8 +278,10 @@ ok(r["source"] == "rules" and "AI 没成功" in r["note_zh"] and r["check"]["ok"
 specmodel.map_spec(PID, "大号", "", "boss")
 p = store.load(PID); p["model"] = dict(p.get("model") or {}, lib_id=K3); store.save(p)
 d = C.get(f"/api/products/{PID}/display").get_json()
-ok(len(d["parts"]) == 3 and not d["has_pose"] and d["parts"][2]["pos"] == d["parts"][2]["center"], f"display parts default pose {d.get('error')}")
-ok(asm.assembled_tris(PID) is None, "no pose → original model used")
+# v2.56（T37 ③）：没保存姿势、没有作者装配、文件里零件是摆开的 → 零件平铺图（以前是文件里的位置 + 直接用原文件）
+ok(len(d["parts"]) == 3 and not d["has_pose"] and d["default_source"] in ("layout", "file")
+   and (d["default_source"] == "layout" or d["parts"][2]["pos"] == d["parts"][2]["center"]), f"display parts default pose {d.get('error')} {d.get('default_source')}")
+ok(asm.assembled_tris(PID) is not None, "multi-part file: preview built from the default (layout) poses")
 pose = [{"index": 0, "pos": [0, 0, 2.5], "rot": [0, 0, 0]}, {"index": 1, "pos": [0, 0, 20], "rot": [0, 0, 0]}, {"index": 2, "pos": [0, 0, 45], "rot": [0, 0, 45], "colour": "黑色"}]
 d = C.post(f"/api/products/{PID}/display", json={"parts": pose}).get_json()
 ok(d["has_pose"] and d["parts"][2]["rot"] == [0, 0, 45] and d["parts"][2]["colour"] == "黑色", "assembly pose saved")

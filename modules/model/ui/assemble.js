@@ -257,7 +257,10 @@ class Assembly {
     const st = this.box.querySelector("[data-asm-st]");
     if (!st) return;
     st.innerHTML = this.dirty ? `<b class="warn">${Z("有改动，还没保存", "มีการแก้ไข ยังไม่ได้บันทึก")}</b>`
-      : this.d.has_pose ? `<span class="ok">${Z("已保存组装", "บันทึกการประกอบแล้ว")}${this.d.ai ? Z("（AI 初稿 + 人工调整）", " (ร่าง AI + ปรับเอง)") : ""}</span>` : `<span class="muted">${Z("还没保存过：同一个文件的组件用文件里原来的位置，其他排成一排", "ยังไม่เคยบันทึก: ชิ้นจากไฟล์เดียวกันใช้ตำแหน่งเดิม ชิ้นอื่นเรียงเป็นแถว")}</span>`;
+      : this.d.has_pose ? `<span class="ok">${Z("已保存组装", "บันทึกการประกอบแล้ว")}${this.d.ai ? Z("（AI 初稿 + 人工调整）", " (ร่าง AI + ปรับเอง)") : ""}</span>` : `<span class="muted">${{ author: Z("还没保存过：按作者在 3MF 里的装配位置（作者装配）", "ยังไม่เคยบันทึก: ใช้ตำแหน่งประกอบของผู้ออกแบบในไฟล์ 3MF"),
+        file: Z("还没保存过：按文件里原来的组装位置", "ยังไม่เคยบันทึก: ใช้ตำแหน่งประกอบเดิมในไฟล์") }[this.d.default_source]
+        || Z("还没保存过：零件平铺图（零件整齐排开）。「自动组合」「AI 组装」只是参考建议，点「采用」才生效", "ยังไม่เคยบันทึก: ภาพวางชิ้นงานเรียงกัน «ประกอบอัตโนมัติ» «AI ประกอบ» เป็นแค่คำแนะนำ กด «ใช้» จึงมีผล")}</span>`;
+    if (this.suggest) st.innerHTML += ` <b class="warn">${Z("（正在看参考建议，还没采用）", "(กำลังดูคำแนะนำ ยังไม่ได้ใช้)")}</b>`;
     this.box.querySelectorAll("tr[data-k]").forEach((tr) => tr.classList.toggle("on", !!this.sel && tr.dataset.k === this.sel.userData.key));
   }
   _fit() {
@@ -363,6 +366,7 @@ class Assembly {
       if (a === "autosel") { await busy(b, () => this.autoSelect()); return; }
       if (a === "auto") { await busy(b, () => this.autoAssemble()); return; }
       if (a === "save") { await busy(b, () => this.save()); return; }
+      if (a === "adopt" || a === "reject") { this.decide(a === "adopt"); return; }
       if (a === "ai") { await busy(b, () => this.aiAssemble()); return; }
       if (a === "default") {
         if (!confirm(Z("这个规格的展示回到默认（自己选的零件和姿势会清掉）？", "กลับเป็นค่าเริ่มต้น (ชิ้นที่เลือกและท่าจะถูกล้าง)?"))) return;
@@ -398,7 +402,20 @@ class Assembly {
     });
   }
   body(extra) { return { spec: this.spec, items: this.items, parts: this.pose(), ...(extra || {}) }; }
+  // v2.56（T37 ③）：自动组合 / AI 组装只是「参考建议」：先显示出来，点「采用」才算，点「不用」回到原来的样子
+  suggestBar(kind) {
+    this.suggest = { kind };
+    return ` <button class="mini primary" data-asm="adopt">✓ ${Z("采用", "ใช้")}</button> <button class="mini" data-asm="reject">✕ ${Z("不用", "ไม่ใช้")}</button>`;
+  }
+  async decide(yes) {
+    if (!this.suggest) return;
+    const kind = this.suggest.kind; this.suggest = null;
+    if (!yes) { await this.undoRedo(true); if (kind === "ai") this.ai = false; else this.auto = null; this._banner("asm-info", Z("没有采用参考建议，回到原来的样子", "ไม่ใช้คำแนะนำ กลับเป็นแบบเดิม")); }
+    else this._banner("asm-ok", `✓ ${Z("已采用参考建议（保存后生效，可以再手动调整）", "ใช้คำแนะนำแล้ว (บันทึกแล้วจึงมีผล ปรับเองได้)")}`);
+    this._status();
+  }
   async save() {
+    if (this.suggest) { toast(Z("先对参考建议点「采用」或「不用」", "กด «ใช้» หรือ «ไม่ใช้» คำแนะนำก่อน"), true); return; }
     if (this.exploded) this.unexplode();
     this.d = await api(`/api/products/${enc(this.pid)}/display`, { json: this.body({ ai: this.ai, auto: this.auto }) });
     this.items = JSON.parse(JSON.stringify(this.d.items));
@@ -423,10 +440,11 @@ class Assembly {
     this.auto = { conf: r.confidence }; this.ai = false; this.dirty = true;
     const pct = Math.round(r.confidence * 100);
     this._banner(r.low ? "asm-ai" : "asm-ok", `${r.low ? "⚠" : "✓"} <b>${Z("自动组合", "ประกอบอัตโนมัติ")} · ${Z("置信度", "ความมั่นใจ")} ${pct}%</b> <span data-notr>${esc((TH() ? r.note_th : r.note_zh) || "")}</span>
-      ${r.low ? ` <button class="mini primary-lite" data-asm="ai">🤖 ${Z("用 AI 按图片组装", "ใช้ AI ประกอบตามรูป")}</button>` : ""}`);
+      ${r.low ? ` <button class="mini primary-lite" data-asm="ai">🤖 ${Z("用 AI 按图片组装", "ใช้ AI ประกอบตามรูป")}</button>` : ""}
+      <br>${Z("参考建议：", "คำแนะนำ: ")}${this.suggestBar("auto")}`);
     this._status(); this._fit();
     if (r.low && confirm(Z(`自动组合置信度低（${pct}%）。要再用「AI 按图片组装」吗？（AI 的结果会再按形状落下贴合）`, `ความมั่นใจต่ำ (${pct}%) ใช้ AI ประกอบตามรูปต่อไหม?`))) {
-      try { await this.aiAssemble(true); } catch (err) { toast(err.message || String(err), true); }
+      try { await this.decide(false); await this.aiAssemble(true); } catch (err) { toast(err.message || String(err), true); }
     }
   }
   async drop() {
@@ -485,7 +503,8 @@ class Assembly {
     this._apply(r.parts);
     this.ai = true; this.dirty = true;
     const note = esc((TH() ? r.note_th : r.note_zh) || r.note_zh || "") + (r.has_photo ? "" : Z("（这个产品还没有商品图，AI 按常识组装）", " (ยังไม่มีรูปสินค้า AI ประกอบตามความเข้าใจทั่วไป)"));
-    this._banner("asm-ai", `⚠ <b>${Z("AI 结果仅供参考，请手动调整", "ผลจาก AI ใช้อ้างอิงเท่านั้น กรุณาปรับเอง")}</b> <span data-notr>${note}</span>${r.snapped ? ` · ${Z("已按形状落下贴合", "ปรับให้แนบตามรูปทรงแล้ว")}` : ""}`);
+    this._banner("asm-ai", `⚠ <b>${Z("AI 结果仅供参考，请手动调整", "ผลจาก AI ใช้อ้างอิงเท่านั้น กรุณาปรับเอง")}</b> <span data-notr>${note}</span>${r.snapped ? ` · ${Z("已按形状落下贴合", "ปรับให้แนบตามรูปทรงแล้ว")}` : ""}
+      <br>${Z("参考建议：", "คำแนะนำ: ")}${this.suggestBar("ai")}`);
     this._status(); this._fit();
   }
   _hide(fn) {

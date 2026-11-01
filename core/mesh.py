@@ -231,6 +231,59 @@ def scene_3mf(data):
     return out or None
 
 
+def assembly_3mf(data):
+    """v2.56（T37）：拓竹 / Orca 项目文件里作者的「装配视图」位置（Metadata/model_settings.config 的
+    <assemble><assemble_item object_id instance_id transform offset/>）。按 scene_3mf 的零件顺序（每个 build item 一个）返回
+    [(R, t) 或 None]：从摆盘位置（build）到装配位置的变换，点 p_装配 = p_摆盘 @ R + t。文件里没有装配信息返回 None。"""
+    z = zipfile.ZipFile(io.BytesIO(data))
+    try:
+        ms = z.read("Metadata/model_settings.config")
+    except KeyError:
+        return None
+    asm = {}
+    for m in re.finditer(rb"<assemble_item\b([^>]*?)/?>", ms):
+        a = _attrs(m.group(1))
+        tf = _mat(a.get("transform"))
+        if not tf:
+            continue
+        try:
+            off = np.array([float(x) for x in (a.get("offset") or "0 0 0").split()][:3])
+        except ValueError:
+            off = np.zeros(3)
+        asm[(a.get("object_id", ""), a.get("instance_id", "0"))] = (tf[0], tf[1] + (off if len(off) == 3 else 0))
+    if not asm:
+        return None
+    root = next((n for n in z.namelist() if n.lower() == "3d/3dmodel.model"), None)
+    if not root:
+        return None
+    rbuf = z.read(root)
+    b = _between(rbuf, rb"build")
+    if not b:
+        return None
+    objs = _index_models(z)
+    rpath = "/" + root
+    seen, out = {}, []
+    for it in (_attrs(x.group(1)) for x in _ITEM_RE.finditer(rbuf, b[0], b[1])):
+        oid = it.get("objectid", "")
+        inst = seen.get(oid, 0)
+        seen[oid] = inst + 1
+        ent = objs.get((it.get("path") or rpath, oid))
+        if it.get("printable") == "0" or not ent or not (ent["mesh"] or ent["comps"]):
+            continue
+        bm = _mat(it.get("transform")) or (np.eye(3), np.zeros(3))
+        am = asm.get((oid, str(inst)))
+        if not am:
+            out.append(None)
+            continue
+        try:
+            R = np.linalg.inv(bm[0]) @ am[0]
+        except np.linalg.LinAlgError:
+            out.append(None)
+            continue
+        out.append((R, am[1] - bm[1] @ R))
+    return out
+
+
 def colors_3mf(data):
     """v2.23：拓竹 / Orca 项目文件里的耗材颜色和每个零件用哪一槽。
     返回 {"filaments": [{"slot", "hex", "type"}], "parts": [{"name", "slot"}], "used": [槽], "painted": bool, "multicolor": bool}；

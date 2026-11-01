@@ -70,6 +70,10 @@
   .pe-chk[data-chk-uids]{cursor:pointer}
   .pe-keys{font-size:12px}.pe-keys kbd{border:1px solid #ccd3dd;border-bottom-width:2px;border-radius:4px;padding:0 4px;background:#fff;font-size:11px}
   .pe-specs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:2px 0 6px}
+  .pp-plate.pp-fs{position:fixed;inset:0;z-index:900;overflow:auto;margin:0;border-radius:0;padding:10px 14px}
+  .pp-fs .pp-grid{grid-template-columns:minmax(0,1fr) minmax(300px,380px)}
+  .pp-fs .pp-cv{max-width:none}
+  .pp-ps{font-size:12px;margin:2px 0 0}.pp-ps summary{cursor:pointer;color:#0b5cad}
   `;
   if (!document.getElementById("pp-css")) { const st = document.createElement("style"); st.id = "pp-css"; st.textContent = css; document.head.appendChild(st); }
   else document.getElementById("pp-css").textContent = css;
@@ -195,6 +199,7 @@
     if (!S.sel || !plateOf(S.sel.pl)) S.sel = { pl: (S.plan.plates[0] || {}).id, uids: [] };
     else S.sel.uids = S.sel.uids.filter((u) => plateOf(S.sel.pl).items.some((it) => it.uid === u));
     render();
+    if (window.SLICEDIT) SLICEDIT.refresh(S).catch(() => {});
   }
   async function save(btn) {
     const run = async () => {
@@ -346,7 +351,7 @@
     const ck = check(pl);
     const nbad = Object.values(ck).filter((x) => x.out || x.overlap.length).length;
     const painted = pl.items.some((it) => { const e = libOf(it.id); return e && e.multicolor && it.part == null; });
-    return `<div class="pp-plate" data-pl="${pl.id}">
+    return `<div class="pp-plate ${S.fs === pl.id ? "pp-fs" : ""}" data-pl="${pl.id}">
       <div class="pp-ph"><b>${Z("第", "ถาดที่ ")}${k + 1}${Z(" 盘", "")}</b>
         <label>${Z("打印机", "เครื่องพิมพ์")} <select data-ppf="printer" data-notr>${S.d.printers.map((m) => `<option ${m.name === pl.printer ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>
         <span class="small muted" data-notr>${bed[0]}×${bed[1]}×${bed[2]} mm</span>
@@ -359,6 +364,8 @@
         <button class="mini primary-lite" data-pp="kit" title="${Z("按组装关系摆：一起拼的零件放在一起、按组装顺序、朝向一致（按原站说明 / 零件名；AI 开着时让 AI 分组）", "จัดตามความสัมพันธ์การประกอบ (ตามคำอธิบาย / ชื่อชิ้นงาน / AI)")}">🧩 ${Z("组合摆盘", "จัดเป็นชุด")}</button>
         <button class="mini" data-pe="sel-all" title="Ctrl+A">▣ ${Z("全选", "เลือกทั้งหมด")}</button>
         <button class="mini" data-pp="3d" title="${Z("3D 预览这一盘（按摆好的位置）", "ดูตัวอย่าง 3D ของถาดนี้")}">👁 3D</button>
+        <button class="mini" data-pp="fs" title="${Z("全屏编辑这一盘（Esc 退出）；滚轮缩放，按住中键或 Alt 拖动平移", "แก้ไขถาดนี้เต็มจอ (Esc ออก) หมุนล้อเพื่อซูม กดปุ่มกลางหรือ Alt ลากเพื่อเลื่อน")}">⛶ ${S.fs === pl.id ? Z("退出全屏", "ออกจากเต็มจอ") : Z("全屏", "เต็มจอ")}</button>
+        <button class="mini" data-pp="fit" title="${Z("缩放回整个热床", "ซูมกลับให้เห็นทั้งฐาน")}">⤢ ${Z("适合窗口", "พอดีหน้าต่าง")}</button>
         <details class="pe-keys"><summary>⌨ ${Z("快捷键", "คีย์ลัด")}</summary>${keysHtml()}</details>
       </div>
       <div class="pp-grid">
@@ -397,6 +404,7 @@
         <button class="mini" data-tr-trial="${esc(S.pid)}" data-tr-spec="${esc(S.spec)}" data-tr-plate="${esc(pl.id)}" data-tr-src="plan" title="${Z("选一台同机型的空闲打印机，用这一盘的文件试打（没有文件先切片）", "เลือกเครื่องรุ่นเดียวกันที่ว่าง ทดลองพิมพ์ด้วยไฟล์ของเพลทนี้ (ไม่มีไฟล์จะสไลซ์ก่อน)")}">🧪 ${Z("试打这一盘", "ทดลองพิมพ์เพลทนี้")}</button>` : ""}
         ${CAN("models.change") ? `<button class="mini" data-pp="merge" title="${Z("按摆好的位置合并成一个模型：主模型 → 设为 3D 模型；规格 → 指定给这个规格", "รวมเป็นโมเดลเดียวตามตำแหน่งที่จัดไว้")}">${Z("合并成一套（设为模型）", "รวมเป็นชุด (ตั้งเป็นโมเดล)")}</button>` : ""}
       </div>
+      ${window.SLICEDIT ? SLICEDIT.plateHtml(S, pl, k) : ""}
       ${pl.sliced ? `<div class="small ok">✂ ${Z("已切片", "สไลซ์แล้ว")}：${(pl.sliced.filaments || []).map((f) => `${Z("槽", "ช่อง")} ${f.slot} ${n1(f.grams)} g`).join(" · ")}${pl.sliced.purge_g ? ` · ${Z("冲刷", "ล้างสี")} ${n1(pl.sliced.purge_g)} g` : ""}${pl.sliced.hours ? ` · ${n1(pl.sliced.hours)} h` : ""}</div>` : ""}
       </div>`;
   }
@@ -528,10 +536,16 @@
     const tags = [it.face ? Z("按面", "ตามด้าน") : "", it.mirror ? "⇋" : "", it.scale && it.scale !== 1 ? `${Math.round(it.scale * 100)}%` : "", it.ov ? "⚙" : "", it.group ? "⛓" : ""].filter(Boolean).join(" ");
     return `<tr data-uid="${it.uid}" class="${isSel(pl, it.uid) ? "on" : ""} ${bad ? "bad" : ""}">
       <td class="nowrap"><b>${i + 1}</b></td>
-      <td><span data-notr title="${esc(labelOf(it))}">${esc(labelOf(it).slice(-28))}</span> <span class="small muted">${tags}</span>${bad ? `<div class="small bad">${c.out ? Z("超出热床", "เกินฐาน") : ""} ${(c.overlap || []).length ? Z("重叠", "ซ้อนกัน") : ""}</div>` : ""}</td>
+      <td><span data-notr title="${esc(labelOf(it))}">${esc(labelOf(it).slice(-28))}</span> <span class="small muted">${tags}</span>${partSlotsHtml(pl, it, e)}${bad ? `<div class="small bad">${c.out ? Z("超出热床", "เกินฐาน") : ""} ${(c.overlap || []).length ? Z("重叠", "ซ้อนกัน") : ""}</div>` : ""}</td>
       <td class="small">${it.face ? Z("按面贴平台", "วางตามด้าน") : esc(oriTxt(it.orient))}</td>
       <td>${painted ? `<span class="small muted">🎨 ${Z("文件自带颜色", "สีตามไฟล์")}</span>` : `<select data-ppi="slot" title="${Z("这个零件用哪个槽（颜色）", "ชิ้นนี้ใช้ช่องไหน (สี)")}">${pl.slots.map((s) => `<option value="${s.slot}" ${s.slot === it.slot ? "selected" : ""}>${Z("槽", "ช่อง")} ${s.slot} · ${esc(cl(slotColour(pl, s.slot)) || "")}</option>`).join("")}</select>`}</td>
       <td class="nowrap small muted" data-notr>${S.fps[it.uid] ? `${n1(S.fps[it.uid].w)}×${n1(S.fps[it.uid].d)}×${n1(S.fps[it.uid].h)}` : ""}</td></tr>`;
+  }
+  // v2.56：整个文件的零件在切片软件里给组件单独换了槽 → 展开看每个组件和它的槽
+  function partSlotsHtml(pl, it, e) {
+    const ps = it.part_slots; if (!ps || it.part != null) return "";
+    const names = {}; (e.parts || []).forEach((p) => { names[p.index] = p.name; });
+    return `<details class="pp-ps"><summary>${Z("每个组件的槽", "ช่องของแต่ละชิ้นส่วน")}</summary>${Object.entries(ps).map(([i, s]) => `<div><i class="pp-sw" style="background:${hexOf(slotColour(pl, s))}"></i><span data-notr>${esc(names[i] || "#" + (+i + 1))}</span> → ${Z("槽", "ช่อง")} ${s}</div>`).join("")}</details>`;
   }
   function oriTxt(k) {
     const zh = { bottom: "底面朝下", top: "倒放", front: "前面朝下", back: "背面朝下", left: "左侧朝下", right: "右侧朝下", face: "按面贴平台" };
@@ -576,20 +590,28 @@
   }
 
   // ---------------- 俯视图（canvas） ----------------
-  function scaleOf(cv, bed) {
+  // v2.56：缩放 / 平移 / 适合窗口 / 全屏（S.view[盘] = {z, px, py}；滚轮缩放，按住中键或 Alt 拖动平移）
+  function viewOf(pl) { S.view = S.view || {}; return S.view[pl.id] || (S.view[pl.id] = { z: 1, px: 0, py: 0 }); }
+  function baseK(cv, bed, pl) {
     const w = cv.clientWidth || 400;
-    return { k: (w - 20) / bed[0], pad: 10 };
+    let k = (w - 20) / bed[0];
+    if (S.fs === pl.id) { const h = Math.max(300, window.innerHeight - cv.getBoundingClientRect().top - 70); k = Math.min(k, (h - 20) / bed[1]); }
+    return k;
+  }
+  function scaleOf(cv, bed, pl) {
+    const k0 = baseK(cv, bed, pl || { id: cv.dataset.cv }), v = viewOf(pl || { id: cv.dataset.cv });
+    return { k: k0 * v.z, k0, pad: 10, px: v.px, py: v.py };
   }
   function draw(pl) {
     const cv = BOX && BOX.querySelector(`[data-cv="${pl.id}"]`);
     if (!cv) return;
     const bed = bedOf(pl.printer);
-    const { k, pad } = scaleOf(cv, bed);
-    const W = cv.clientWidth || 400, H = Math.round(bed[1] * k + pad * 2);
+    const { k, k0, pad, px, py } = scaleOf(cv, bed, pl);
+    const W = cv.clientWidth || 400, H = Math.round(bed[1] * k0 + pad * 2);
     const dpr = window.devicePixelRatio || 1;
     cv.style.height = H + "px"; cv.width = W * dpr; cv.height = H * dpr;
     const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const X = (x) => pad + x * k, Y = (y) => pad + (bed[1] - y) * k;
+    const X = (x) => pad + px + x * k, Y = (y) => pad + py + (bed[1] - y) * k;
     g.clearRect(0, 0, W, H);
     g.fillStyle = "#eef1f5"; g.fillRect(X(0), Y(bed[1]), bed[0] * k, bed[1] * k);
     g.strokeStyle = "#dde2e9"; g.lineWidth = 1;
@@ -640,8 +662,8 @@
     return null;
   }
   function toBed(cv, pl, ev) {
-    const bed = bedOf(pl.printer), { k, pad } = scaleOf(cv, bed), r = cv.getBoundingClientRect();
-    return [(ev.clientX - r.left - pad) / k, bed[1] - (ev.clientY - r.top - pad) / k];
+    const bed = bedOf(pl.printer), { k, pad, px, py } = scaleOf(cv, bed, pl), r = cv.getBoundingClientRect();
+    return [(ev.clientX - r.left - pad - px) / k, bed[1] - (ev.clientY - r.top - pad - py) / k];
   }
   function refreshPlate(pl) {          // 拖动时只重画这一盘的图和状态，不重做整个面板
     draw(pl);
@@ -652,8 +674,14 @@
     });
   }
   let DRAG = null, BSEL = null;
+  let PAN = null;
   function onDown(ev) {
     const cv = ev.target.closest("[data-cv]"); if (!cv || !S) return;
+    if (ev.button === 1 || ev.altKey) {          // 平移：中键 / Alt + 拖动
+      const v = viewOf(plateOf(cv.dataset.cv));
+      PAN = { cv, pl: plateOf(cv.dataset.cv), x: ev.clientX, y: ev.clientY, px: v.px, py: v.py };
+      cv.setPointerCapture(ev.pointerId); ev.preventDefault(); return;
+    }
     const pl = plateOf(cv.dataset.cv), [mx, my] = toBed(cv, pl, ev), it = hit(pl, mx, my);
     const multi = ev.ctrlKey || ev.metaKey || ev.shiftKey;
     if (S.sel.pl !== pl.id) S.sel = { pl: pl.id, uids: [] };
@@ -679,6 +707,7 @@
     cv.focus({ preventScroll: true });
   }
   function onMove(ev) {
+    if (PAN) { const v = viewOf(PAN.pl); v.px = PAN.px + ev.clientX - PAN.x; v.py = PAN.py + ev.clientY - PAN.y; draw(PAN.pl); return; }
     if (DRAG) {
       const [mx, my] = toBed(DRAG.cv, DRAG.pl, ev);
       const dx = Math.round((mx - DRAG.x0) * 2) / 2, dy = Math.round((my - DRAG.y0) * 2) / 2;
@@ -695,6 +724,7 @@
     }
   }
   function onUp() {
+    if (PAN) { PAN = null; return; }
     if (DRAG) {
       const d = DRAG; DRAG = null;
       d.cv.style.cursor = "";
@@ -735,7 +765,15 @@
     BOX.addEventListener("pointerup", onUp);
     BOX.addEventListener("pointercancel", onUp);
     BOX.addEventListener("wheel", (ev) => {
-      if (!S || !ev.shiftKey || !ev.target.closest("[data-cv]")) return;
+      if (!S || !ev.target.closest("[data-cv]")) return;
+      if (!ev.shiftKey) {                         // 滚轮缩放（以鼠标所在点为中心）
+        const cv = ev.target.closest("[data-cv]"), pl = plateOf(cv.dataset.cv), v = viewOf(pl), bed = bedOf(pl.printer);
+        const [bx, by] = toBed(cv, pl, ev);
+        v.z = Math.max(0.5, Math.min(12, v.z * (ev.deltaY > 0 ? 1 / 1.15 : 1.15)));
+        const { k, pad } = scaleOf(cv, bed, pl), r = cv.getBoundingClientRect();
+        v.px = ev.clientX - r.left - pad - bx * k; v.py = ev.clientY - r.top - pad - (bed[1] - by) * k;
+        ev.preventDefault(); draw(pl); return;
+      }
       const pl = plateOf(ev.target.closest("[data-cv]").dataset.cv); if (!selOf(pl).length || selOf(pl).length > 1) return;
       ev.preventDefault(); rotSel(pl, ev.deltaY > 0 ? 5 : -5);
     }, { passive: false });
@@ -748,6 +786,9 @@
     });
     BOX.addEventListener("toggle", (ev) => { const d = ev.target.closest && ev.target.closest("details.pe-prm"); if (d && S) S.openPrm[d.dataset.prm] = d.open; const pb = ev.target.closest && ev.target.closest("details.pe-parts-box"); if (pb && S) S.openParts = pb.open; }, true);
     window.addEventListener("resize", () => { if (S && S.plan && BOX && BOX.isConnected) S.plan.plates.forEach(draw); });
+    document.addEventListener("keydown", (ev) => {           // Esc 退出全屏
+      if (ev.key === "Escape" && S && S.fs) { const pl = plateOf(S.fs); S.fs = null; if (pl) { renderPlate(pl); } }
+    });
   }
   function onKey(ev) {
     if (!S || !S.plan) return;
@@ -792,6 +833,13 @@
 
   async function onClick(ev) {
     if (!S) return;
+    const vb = ev.target.closest('[data-pp="fs"],[data-pp="fit"]');
+    if (vb) {
+      const pl = plateOf(vb.closest("[data-pl]").dataset.pl);
+      if (vb.dataset.pp === "fs") S.fs = S.fs === pl.id ? null : pl.id;
+      S.view = S.view || {}; S.view[pl.id] = { z: 1, px: 0, py: 0 };
+      renderPlate(pl); focusCv(pl); return;
+    }
     const sp = ev.target.closest("[data-pe-spec]");
     if (sp) {
       if (S.dirty && !confirm(Z("打印方案有改动还没保存，切换规格会丢掉。继续？", "แผนการพิมพ์ยังไม่ได้บันทึก เปลี่ยนแบบจะหาย ดำเนินการต่อ?"))) return;
@@ -1080,6 +1128,7 @@
     if (S) { S.dirty = false; S.plan = null; }
   }
   window.PLAN = { mount: async (el, pid, spec, opts) => { BOX = el; wire(); await mount(el, pid, spec, opts || {}); }, mountEditor, open, close,
+    reload: async () => { if (S && BOX) await mount(BOX, S.pid, S.spec); }, renderPlate: (id) => { const pl = S && S.plan && plateOf(id); if (pl) renderPlate(pl); },
     dirty: () => !!(S && S.dirty && S.plan), check, poly, overlap, get state() { return S; } };
   // 编辑页：打开产品 / 换了 3D 模型时刷新
   window.addEventListener("model-changed", (e) => { if (typeof P !== "undefined" && P && e.detail === P.id && window.M3 && M3.state.planOpen) open(M3.spec).catch(() => {}); });

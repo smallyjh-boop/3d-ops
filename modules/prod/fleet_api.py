@@ -294,7 +294,7 @@ def _apply_fields(p, b, cfg, errs):
             if f not in fleet.TPL_FIELDS:
                 continue
             cv = fleet.clean_value(f, v)
-            if v not in (None, "") and cv is None:
+            if v not in (None, "", "auto") and cv is None:
                 errs.append((f"「{f}」的值不对：{v}", f"ค่า «{f}» ไม่ถูกต้อง: {v}"))
             elif cv is None:
                 o.pop(f, None)
@@ -771,7 +771,7 @@ def fleet_templates_save():
                 if f not in fleet.TPL_FIELDS:
                     continue
                 cv = fleet.clean_value(f, v)
-                if v not in (None, "") and cv is None:
+                if v not in (None, "", "auto") and cv is None:
                     errs.append((f"{name}：「{f}」的值不对（{v}）", f"{name}: ค่า «{f}» ไม่ถูกต้อง ({v})"))
                 elif cv is None:
                     cur.pop(f, None)

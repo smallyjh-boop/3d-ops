@@ -232,7 +232,9 @@ import ipaddress
 import uuid
 
 # 机型模板里的字段：同机型的打印机默认都用模板的值，单台只在「单独设置」的地方覆盖（例如这台装了 0.6 喷嘴）
-TPL_FIELDS = ("nozzle", "plate", "g_per_h", "ams", "orca_machine", "orca_process", "orca_filament")
+TPL_FIELDS = ("nozzle", "plate", "g_per_h", "ams", "orca_machine", "orca_process", "orca_filament", "slicer_app")
+# v2.56（T36）：编辑摆盘用哪个切片软件。auto（不存）= 拓竹用 Bambu Studio，其它（K1 / Klipper）用 OrcaSlicer
+SLICER_APPS = ("bambu", "orca")
 # v2.54 复审：喷嘴和热床板是每台自己的（换过 0.6 喷嘴的那台不能让同机型的新打印机「继承」）——迁移不放进模板，
 # 添加打印机时要明确填喷嘴
 PER_PRINTER = ("nozzle", "plate")
@@ -260,6 +262,9 @@ def clean_value(f, v):
         return _num(v, 0.1, 2)
     if f == "g_per_h":
         return _num(v, 0.01, 10000)
+    if f == "slicer_app":
+        s = str(v).strip().lower()
+        return s if s in SLICER_APPS else None
     if f == "ams":
         if v in (True, False):
             return v
@@ -345,6 +350,31 @@ def effective(p, cfg=None):
     for k, d in NEW_DEFAULTS.items():
         out.setdefault(k, d)
     return out
+
+
+def slicer_app_of(x, cfg=None):
+    """打印机 / 打印方案的盘 / 机型名 → 编辑用的切片软件 "bambu" / "orca"。
+    机型模板（或这台的单独设置）选了就按选的；自动 = 拓竹品牌用 Bambu Studio，其它用 OrcaSlicer。"""
+    if isinstance(x, dict):
+        if "printer" in x and "conn" not in x and "code" not in x:       # 打印方案的盘：printer = 机型名
+            name, eff = x.get("printer"), None
+        else:
+            name = x.get("name")
+            try:
+                eff = effective(x, cfg)
+            except Exception:  # noqa: BLE001
+                eff = x
+    else:
+        name, eff = x, None
+    v = (eff or {}).get("slicer_app") if eff is not None else None
+    if v is None:
+        try:
+            v = template_of(name, cfg).get("slicer_app")
+        except Exception:  # noqa: BLE001  读不到设置：按品牌
+            v = None
+    if v in SLICER_APPS:
+        return v
+    return "bambu" if (model_info(name) or {}).get("brand") == "bambu" else "orca"
 
 
 def to_stored(p, cfg):

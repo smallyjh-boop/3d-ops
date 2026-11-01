@@ -1101,3 +1101,156 @@ def print_plan_thumb(pid):
     r = app.response_class(svg, mimetype="image/svg+xml")
     r.headers["Cache-Control"] = "no-cache"
     return r
+
+
+# ---------------- v2.56（T36）在切片软件（Bambu Studio / OrcaSlicer）里编辑一盘 ----------------
+def _es():
+    from modules.model import editsession
+    return editsession
+
+
+def _udisp():
+    u = auth.current_user() or {}
+    return u.get("username") or "", u.get("display_name") or u.get("username") or ""
+
+
+@bp.get("/api/products/<pid>/print-plan/edit/status")
+def print_plan_edit_status(pid):
+    """这个规格每一盘：用哪个软件编辑、谁在编辑（锁）、主文件、需要确认。"""
+    from core import fleet
+    spec = (request.args.get("spec") or "").strip()
+    try:
+        p = store.load(pid)
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    plan = _pp.get_plan(p, spec)
+    me, _d = _udisp()
+    sessions = _es().open_for(pid, spec)
+    plates = []
+    for pl in plan.get("plates") or []:
+        m = pl.get("master") or {}
+        plates.append({"id": pl["id"], "app": fleet.slicer_app_of(pl), "session": next((s for s in sessions if s["plate"] == pl["id"]), None),
+                       "master": {k: m.get(k) for k in ("app", "application", "app_ver", "saved_at", "by", "plate_no", "painted")} if m else None,
+                       "history": len(m.get("history") or []) + (1 if m else 0), "confirm": pl.get("confirm") or [], "confirmed": pl.get("confirmed")})
+    return jsonify({"plates": plates, "me": me, "apps": _es().sp.APPS, "follow": bool(plan.get("follow"))})
+
+
+@bp.post("/api/products/<pid>/print-plan/edit/start")
+def print_plan_edit_start(pid):
+    b = request.get_json(force=True) or {}
+    me, disp = _udisp()
+    es = _es()
+    try:
+        r = es.start(pid, (b.get("spec") or "").strip(), str(b.get("plate_id") or "p1"), (b.get("colour") or "").strip(),
+                     str(b.get("app") or ""), me, disp)
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    except es.LockedError as e:
+        return jsonify({"error": str(e), "locked": {k: e.session.get(k) for k in ("user", "display", "app", "started")}}), 409
+    except ValueError as e:
+        return err(str(e))
+    db.audit(me, f"开始在 {r['app_name']} 里编辑打印方案", pid, f"{b.get('spec') or '主模型'} {b.get('plate_id')}")
+    return jsonify(r)
+
+
+def _own_session(sid):
+    s = _es().get(sid)
+    if not s:
+        return None, err("没有这个编辑会话", 404)
+    me, _d = _udisp()
+    if s.get("user") != me and not auth.is_owner():
+        return None, err("这是别人的编辑会话", 403)
+    return s, None
+
+
+@bp.post("/api/products/<pid>/print-plan/edit/finish")
+def print_plan_edit_finish(pid):
+    b = request.get_json(force=True) or {}
+    me, _d = _udisp()
+    try:
+        return jsonify({"ok": True, "session": _es().finish(str(b.get("sid") or ""), me, auth.is_owner())})
+    except PermissionError as e:
+        return err(str(e), 403)
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/products/<pid>/print-plan/edit/abandon")
+def print_plan_edit_abandon(pid):
+    b = request.get_json(force=True) or {}
+    me, _d = _udisp()
+    try:
+        s = _es().abandon(str(b.get("sid") or ""), me, auth.is_owner())
+    except PermissionError as e:
+        return err(str(e), 403)
+    except ValueError as e:
+        return err(str(e))
+    db.audit(me, "放弃在切片软件里的编辑（恢复到编辑前）", pid, f"{s.get('spec') or '主模型'} {s.get('plate')}")
+    return jsonify({"ok": True, "session": s})
+
+
+@bp.post("/api/products/<pid>/print-plan/edit/upload")
+def print_plan_edit_upload(pid):
+    """网页上传框：软件里改好保存的 3MF 拖回来（登录的人自己的会话）。"""
+    sid = request.args.get("sid") or request.form.get("sid") or ""
+    s, bad = _own_session(sid)
+    if bad:
+        return bad
+    f = request.files.get("file")
+    data = f.read() if f else request.get_data()
+    try:
+        return jsonify(_es().upload(sid, s["token"], data))
+    except PermissionError as e:
+        return err(str(e), 403)
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/products/<pid>/print-plan/edit/confirm")
+def print_plan_edit_confirm(pid):
+    b = request.get_json(force=True) or {}
+    me, _d = _udisp()
+    try:
+        pl = _es().confirm_plate(pid, (b.get("spec") or "").strip(), str(b.get("plate_id") or ""), me)
+    except (ValueError, FileNotFoundError) as e:
+        return err(str(e))
+    return jsonify({"ok": True, "confirmed": pl.get("confirmed")})
+
+
+@bp.get("/api/products/<pid>/print-plan/edit/master")
+def print_plan_edit_master(pid):
+    """下载这一盘现在的主文件（切片软件保存的项目 3MF）。"""
+    spec = (request.args.get("spec") or "").strip()
+    try:
+        plan = _pp.get_plan(store.load(pid), spec)
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    pl = next((x for x in plan.get("plates") or [] if x["id"] == request.args.get("plate")), None)
+    path = _es().master_path(pid, spec, pl) if pl else None
+    if not path:
+        return err("这一盘还没有主文件", 404)
+    return send_file(path, mimetype="model/3mf", as_attachment=True, download_name=f"{pid}_{pl['id']}_master.3mf")
+
+
+# 不用登录（带会话密钥）：桌面客户端下载编辑文件、保存后自动回传
+@bp.get("/api/slicer-edit/<sid>/file")
+def slicer_edit_file(sid):
+    try:
+        path, name = _es().take_download(sid, request.args.get("t"))
+    except PermissionError as e:
+        return err(str(e), 403)
+    return send_file(path, mimetype="model/3mf", as_attachment=True, download_name=name)
+
+
+@bp.post("/api/slicer-edit/<sid>/upload")
+def slicer_edit_upload(sid):
+    f = request.files.get("file")
+    data = f.read() if f else request.get_data()
+    try:
+        r = _es().upload(sid, request.args.get("t") or request.headers.get("X-Edit-Token"), data)
+    except PermissionError as e:
+        return err(str(e), 403)
+    except ValueError as e:
+        return err(str(e))
+    return jsonify({"ok": True, "confirm": r["confirm"], "changes": r["changes"], "session": r["session"],
+                    "new_plates": r["new_plates"], "deleted": r["deleted"]})

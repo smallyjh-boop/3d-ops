@@ -23,12 +23,15 @@ MODULE = {
                          ("GET", r"^/api/products/[^/]+/model-status$"),
                          ("POST", r"^/api/products/[^/]+/print-plan(/(footprint|check|kit|slice|slice-all|fill|merge|copy|from-display|op|orients))?$"),
                          ("POST", r"^/api/products/[^/]+/display(/(ai|auto-select|auto-assemble|settle|explode|copy))?$"),
-                         ("POST", r"^/api/products/[^/]+/spec-scale$")],
+                         ("POST", r"^/api/products/[^/]+/spec-scale$"),
+                         # v2.56（T36）：在切片软件里编辑一盘（权限和保存打印方案一样）
+                         ("POST", r"^/api/products/[^/]+/print-plan/edit/(start|finish|abandon|upload|confirm)$")],
+    "public_paths": ["/api/slicer-edit/"],      # 带会话密钥：桌面客户端下载编辑文件 / 保存后自动回传
     "perm_rules": [("POST", r"^/api/products/[^/]+/print-plan/merge$", "models.change")],
     "settings_module": "cost",
     "settings": [("多色打印（AMS）估算：没有切片结果时用", [
         ("mc_purge_g", "每次换色冲刷掉的料（克，估算用；拓竹默认冲刷量大约 1–2 克）"),
         ("mc_change_s", "每次换色多花的时间（秒，AMS 退料 + 进料 + 冲刷）")])],
     "config_defaults": {"mc_purge_g": 1.5, "mc_change_s": 50},
-    "ui": {"eager_js": ["model.js", "plan.js", "m3.js"], "page_js": [], "boot_js": []},
+    "ui": {"eager_js": ["model.js", "plan.js", "m3.js", "slicedit.js"], "page_js": [], "boot_js": []},
 }

@@ -296,7 +296,8 @@ const PRINTERS_CARD = () => `<div class="card cfg-group"><h3>${ZZ("机型模板"
         <th title="${ZZ("有 AMS（自动换料系统），能打多色。多色的生产任务只排给有 AMS 的打印机", "มี AMS (ระบบเปลี่ยนเส้นอัตโนมัติ) พิมพ์หลายสีได้ งานหลายสีจะจัดให้เฉพาะเครื่องที่มี AMS")}">AMS / ${ZZ("多色", "หลายสี")}</th>
         <th>${ZZ("每小时克数", "กรัมต่อชั่วโมง")}</th><th title="${ZZ("发送切片文件前核对：文件的喷嘴直径要和这里一样", "ตรวจก่อนส่งไฟล์สไลซ์: ขนาดหัวฉีดในไฟล์ต้องตรงกับค่านี้")}">${ZZ("喷嘴 mm", "หัวฉีด มม.")}</th>
         <th title="${ZZ("填了就核对切片文件用的热床板；不填不核对", "ถ้ากรอกจะตรวจแผ่นฐานในไฟล์สไลซ์ ถ้าไม่กรอกจะไม่ตรวจ")}">${ZZ("现在装的热床板", "แผ่นฐานที่ใส่อยู่")}</th>
-        <th>${ZZ("打印机配置", "โปรไฟล์เครื่อง")}</th><th>${ZZ("工艺配置", "โปรไฟล์กระบวนการ")}</th><th>${ZZ("耗材配置", "โปรไฟล์เส้นพลาสติก")}</th><th></th></tr></thead><tbody>
+        <th>${ZZ("打印机配置", "โปรไฟล์เครื่อง")}</th><th>${ZZ("工艺配置", "โปรไฟล์กระบวนการ")}</th><th>${ZZ("耗材配置", "โปรไฟล์เส้นพลาสติก")}</th>
+        <th title="${ZZ("在打印方案里点「编辑」时用哪个切片软件打开这台机型的盘。自动 = 拓竹用 Bambu Studio，其它（K1 / Klipper）用 OrcaSlicer", "เมื่อกด «แก้ไข» ในแผนการพิมพ์ จะเปิดถาดของรุ่นนี้ด้วยโปรแกรมไหน อัตโนมัติ = Bambu ใช้ Bambu Studio รุ่นอื่น (K1 / Klipper) ใช้ OrcaSlicer")}">${ZZ("编辑用的切片软件", "โปรแกรมสไลซ์ที่ใช้แก้ไข")}</th><th></th></tr></thead><tbody>
       ${(window.PR_TPLS || []).map((t, i) => tplRow(t, i)).join("")}
       </tbody></table></div>
       <datalist id="dl-machine"></datalist>
@@ -467,6 +468,7 @@ function tplRow(t, i) {
         <td><input data-p="orca_machine" list="dl-machine" value="${esc(v.orca_machine || "")}" title="${esc(v.orca_machine || "")}" placeholder="${ZZ("自动", "อัตโนมัติ")}" style="width:140px" ${resin ? "disabled" : ""}></td>
         <td><input data-p="orca_process" list="dl-process-${i}" value="${esc(v.orca_process || "")}" title="${esc(v.orca_process || "")}" placeholder="${ZZ("自动", "อัตโนมัติ")}" style="width:140px" ${resin ? "disabled" : ""}><datalist id="dl-process-${i}"></datalist></td>
         <td><input data-p="orca_filament" list="dl-filament-${i}" value="${esc(v.orca_filament || "")}" title="${esc(v.orca_filament || "")}" placeholder="${ZZ("自动", "อัตโนมัติ")}" style="width:120px" ${resin ? "disabled" : ""}><datalist id="dl-filament-${i}"></datalist></td>
+        <td>${resin ? '<span class="muted small">—</span>' : `<select data-p="slicer_app"><option value="" ${!v.slicer_app ? "selected" : ""}>${ZZ("自动", "อัตโนมัติ")}（${/bambu/i.test(t.name) ? "Bambu Studio" : "OrcaSlicer"}）</option><option value="bambu" ${v.slicer_app === "bambu" ? "selected" : ""}>Bambu Studio</option><option value="orca" ${v.slicer_app === "orca" ? "selected" : ""}>OrcaSlicer</option></select>`}</td>
         <td class="nowrap">${resin ? `<span class="small muted">${ZZ("光固化：电脑上切好上传", "เรซิน: สไลซ์บนคอมแล้วอัปโหลด")}</span>` : t.first != null ? `<button class="mini" data-test="${t.first}">${ZZ("测试切片", "ทดสอบสไลซ์")}</button>` : ""}</td></tr>`;
 }
 function prCountByModel() {
