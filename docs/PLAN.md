@@ -14,6 +14,9 @@
 - [ ] T8：AI 接口统一管理（v2.53.0）
 - [ ] T9：场景图改进（v2.53.0）
 - [x] T10：「返回」回到原来的地方（v2.53.0）｜static/nav.js + 各入口｜测试 tests/cases/t_nav253.py
+- [ ] T11：模型区改进（v2.53.0）：展示 / 打印分开、组装选零件 + 按接合位置自动组合、默认收起、按规格（不只尺寸）设置展示和打印方案、总览表、一键切片、组装生成打印方案、爆炸图、撤销｜modules/model、modules/goods、core/specmodel.py、core/modellib.py
+- [ ] T12：仓库全部物品进货位（v2.53.0）：料卷货位、生产区 / 待检区、采购 / 生产 / 发货 / 退货走货位、补货提醒、按库区算库存金额、手机操作、迁移｜modules/inv、core/materials.py、modules/pur、modules/mobile
+- [ ] T13：发 v2.53.0｜测试交给 test-runner、发版前 reviewer 审查、泰文缺口交给 translator
 
 ## 不做的事
 - 不迁移旧选品工具的数据
