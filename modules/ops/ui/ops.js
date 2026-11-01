@@ -101,7 +101,7 @@
   }
   function feeBars(f) {
     if (!f || !f.fees || !f.fees.length) return UX.empty(Z("还没有财务流水", "ยังไม่มีรายการการเงิน"));
-    return UX.bars(f.fees.filter((x) => x.amount).slice(0, 12).map((x) => ({ label: x.fee_name, raw: true, value: Math.abs(x.amount), tone: x.amount > 0 ? "ok" : "",
+    return UX.bars(f.fees.filter((x) => x.amount).slice(0, 12).map((x) => ({ label: (x.label ? Z(x.label.zh, x.label.th) : x.fee_name), raw: true, value: Math.abs(x.amount), tone: x.amount > 0 ? "ok" : "",
       text: `${m0(x.amount)}${x.rate != null ? ` · ${x.rate}%` : ""}` })));
   }
   const reviewRow = (r, multi) => `<div class="oa-li"><span class="${r.rating != null && r.rating <= 3 ? "bad" : "ok"}"><b>${r.rating ?? "—"}★</b></span>

@@ -172,6 +172,28 @@ def _day(s):
     return dt.datetime.fromtimestamp(t, TZ).strftime("%Y-%m-%d") if t else ""
 
 
+# v2.51：Lazada 费用名（英文原名）→ 中文 / 泰文，看板「平台扣了哪些钱」用；对不上的显示原名
+FEE_NAMES = [
+    ("item price credit", "商品金额", "ราคาสินค้า"), ("commission", "佣金", "ค่าคอมมิชชั่น"),
+    ("payment fee", "支付手续费", "ค่าธรรมเนียมการชำระเงิน"), ("free shipping max", "包邮计划费", "ค่าโปรแกรมส่งฟรี"),
+    ("shipping fee voucher", "运费券（店铺承担）", "คูปองค่าส่ง (ร้านออก)"), ("shipping fee paid by customer", "买家付的运费", "ค่าส่งที่ลูกค้าจ่าย"),
+    ("shipping fee", "运费", "ค่าจัดส่ง"), ("voucher", "优惠券（店铺承担）", "คูปองส่วนลด (ร้านออก)"),
+    ("promotional", "促销费", "ค่าโปรโมชั่น"), ("lazcoins", "Lazada 金币抵扣", "ส่วนลด LazCoins"),
+    ("handling fee", "处理费", "ค่าดำเนินการ"), ("service fee", "服务费", "ค่าบริการ"), ("penalty", "罚款", "ค่าปรับ"),
+    ("refund", "退款", "คืนเงิน"), ("reversal", "冲回", "รายการกลับรายการ"), ("adjustment", "调整", "ปรับปรุงยอด"),
+    ("sponsored", "广告费", "ค่าโฆษณา"), ("withholding tax", "代扣税", "ภาษีหัก ณ ที่จ่าย"), ("vat", "增值税", "ภาษีมูลค่าเพิ่ม"),
+]
+
+
+def fee_label(name):
+    """{zh, th}；对不上返回原名。"""
+    n = str(name or "").lower()
+    for key, zh, th in FEE_NAMES:
+        if key in n:
+            return {"zh": zh, "th": th}
+    return {"zh": str(name or ""), "th": str(name or "")}
+
+
 def _is_item(tx_type, fee_name):
     t = f"{tx_type} {fee_name}".lower()
     return "item price" in t or "ราคาสินค้า" in t
@@ -256,7 +278,7 @@ def fee_rates(days=30, shop_ids=None):
     rows = db.conn().execute(f"SELECT fee_name, is_item, SUM(amount) a, COUNT(*) n FROM oa_lz_tx WHERE day>=?{w} GROUP BY fee_name, is_item",
                              (since, *a)).fetchall()
     item = sum(r["a"] or 0 for r in rows if r["is_item"])
-    fees = [{"fee_name": r["fee_name"], "amount": round(r["a"] or 0, 2), "lines": r["n"],
+    fees = [{"fee_name": r["fee_name"], "label": fee_label(r["fee_name"]), "amount": round(r["a"] or 0, 2), "lines": r["n"],
              "rate": round(-(r["a"] or 0) / item * 100, 2) if item else None} for r in rows if not r["is_item"]]
     fees.sort(key=lambda x: x["amount"])
     deducted = -sum(f["amount"] for f in fees if f["amount"] < 0)
