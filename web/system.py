@@ -154,6 +154,11 @@ def post_config():
             chain.reschedule()     # 打印机增减、停用后重新分配任务
         except Exception:  # noqa: BLE001  排单失败不影响保存
             pass
+        try:                       # v2.53：打印机增 / 改名 / 删 → 仓库的生产区货位马上跟着变
+            from core import modules
+            modules.emit("printers.changed", printers=cfg["printers"])
+        except Exception:  # noqa: BLE001
+            pass
     return jsonify({"config": auth.strip_config(cfg, auth.current_user()), "summary": pricing.cost_summary(cfg)})
 
 

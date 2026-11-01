@@ -335,4 +335,23 @@ tr = C.get("/api/stocksync/matrix").get_json()["trend"]
 ok(len(tr) == 7 and tr[-1]["n"] > 0, "trend for the chart")
 html = C.get("/").get_data(as_text=True)
 ok("ss-root" in html, "page has the new stock sync root")
+# ---- 待检 / 退货 / 次品区的成品不算可售；质检合格马上可售并触发同步（放最后：开了货位后打印出来的先进待检区）----
+from modules.inv import flows as _fl
+for z_, zt in (("A", "pick"), ("Q", "qc"), ("D", "defect"), ("T", "returns")):
+    C.post("/api/inv/locations/bulk", json={"zone": z_, "layers": 1, "positions": 2, "ztype": zt, **({"categories": ["goods"]} if zt == "pick" else {})})
+FAIL["on"] = False
+S.set_rule("sku", K, 0, {"safety": 0}); S.set_rule("sku", K, sid, {"safety": 0})
+b0 = cell(K)["computed"]; st0 = production.stock_qty(K)
+production.stock_add(K, 3, "备货打印 批次#99", "t")
+ok(production.unavailable_qty(K) == 3 and production.stock_qty(K) == st0 + 3 and cell(K)["computed"] == b0, f"3 in QC not sellable ({cell(K)['computed']} vs {b0})")
+calls.clear()
+_it = next(i for _l, i, _q in _fl._held(db.conn(), "qc") if i["code"].upper() == K.upper())
+S.INLINE = True
+_fl.qc_pass(_it["id"], 2, user="t")
+S.INLINE = False
+ok(production.unavailable_qty(K) == 1 and cell(K)["computed"] == b0 + 2, f"QC pass 2 -> sellable +2 ({cell(K)['computed']})")
+ok(last_push(K) == b0 + 2, f"QC pass triggered a stock sync push ({last_push(K)})")
+_fl.qc_fail(_it["id"], 1, action="defect", user="t")
+ok(production.unavailable_qty(K) == 1 and cell(K)["computed"] == b0 + 2, "defect never sellable")
+
 print("ERRORS:", E_)

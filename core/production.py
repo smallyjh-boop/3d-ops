@@ -641,6 +641,23 @@ def stock_qty(sku):
     return max(0, r["qty"]) if r else 0
 
 
+def unavailable_qty(sku):
+    """v2.53：还不能卖的成品 = 待检区 / 退货区 / 次品区里的（仓库模块关着或没用货位 = 0）。"""
+    try:
+        from . import modules
+        pub = modules.public("inv")
+        if pub is not None:
+            return max(0, int(float(pub.unavailable_qty(sku) or 0) + 1e-9))
+    except Exception:  # noqa: BLE001
+        pass
+    return 0
+
+
+def sellable_qty(sku):
+    """成品库存 − 还没过质检 / 退货 / 次品的（没扣订单占住的）。"""
+    return max(0, stock_qty(sku) - unavailable_qty(sku))
+
+
 def reserved(sku, c=None):
     """v2.35：还没发货的订单「用库存发」占住的成品个数（发货出库时才真正扣库存）。"""
     c = c or db.conn()
@@ -654,7 +671,7 @@ def free_stock(sku, c=None):
     """可以用的成品 = 库存 − 订单占住的。"""
     c = c or db.conn()
     r = c.execute("SELECT qty FROM stock WHERE sku=?", ((sku or "").upper(),)).fetchone()
-    return max(0, (r["qty"] if r else 0) - reserved(sku, c))
+    return max(0, (r["qty"] if r else 0) - unavailable_qty(sku) - reserved(sku, c))
 
 
 def _reserve(c, job_id, n, qty, done0, now, user):
@@ -674,7 +691,7 @@ def use_stock(job_id, n, user=""):
     if j["status"] != "todo" or j["run_id"]:
         raise ValueError("只有还没开始打印的任务可以用库存")
     order_job = (j["kind"] or "order") == "order" and j["order_id"]
-    have = free_stock(j["sku"], c) if order_job else stock_qty(j["sku"])
+    have = free_stock(j["sku"], c) if order_job else sellable_qty(j["sku"])
     n = min(int(n or 0), have, max(0, j["qty"] - (j["qty_done"] or 0)))
     if n <= 0:
         raise ValueError("成品库存不够")

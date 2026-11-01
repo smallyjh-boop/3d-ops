@@ -13,6 +13,7 @@
   putaway_suggest(物品id, 数量)            上架推荐 [{code, qty, reason}]（v2.52，采购到货页显示）
   putaway_batch({物品id: 货位}, user)      with 用：这一批入库按填的货位上架，没填的按推荐（v2.52，采购到货）
   on_spool(料卷id, 操作, user)             料卷上机 / 下机 / 用完之后，货位跟着变（v2.53，core/materials 调）
+  unavailable_qty(SKU)                    还不能卖的成品个数 = 待检区 / 退货区 / 次品区里的（v2.53，用库存发 / 库存同步扣掉；没用货位 = 0）
   spool_locs()                            {料卷 id: 货位}（v2.53，料卷列表）
 """
 from . import locations
@@ -86,3 +87,8 @@ def on_spool(spool_id, action="", user=""):
 def spool_locs():
     from . import flows
     return flows.spool_locs()
+
+
+def unavailable_qty(sku):
+    from . import flows
+    return flows.unavailable_qty(sku)

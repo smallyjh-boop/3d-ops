@@ -165,6 +165,30 @@ ok(x["ok"] and lq(gi["id"], dz) == 0 and lq(gi["id"], qloc) == 2, "rework -> bac
 C.post("/api/inv/qc/pass", json={"item_id": gi["id"]})
 ok(lq(gi["id"], qloc) == 0 and sum(x["qty"] for x in wms.item_locations(gi["id"])["locations"]) == 6, "all passed and shelved")
 
+# ---------- 没过质检的不算可卖：待检 / 退货 / 次品区的成品不能「用库存发」、不进库存同步的可售 ----------
+from core import modules as _mods
+EV = []
+_emit0 = _mods.emit
+_mods.emit = lambda ev, **kw: (EV.append((ev, kw)), _emit0(ev, **kw))[1]
+base = production.stock_qty(sku)
+production.stock_add(sku, 3, "备货打印 批次#12", "t", pids[0], "测试", "")
+ok(flows.unavailable_qty(sku) == 3 and production.unavailable_qty(sku) == 3 and production.sellable_qty(sku) == base, f"QC goods unavailable {flows.unavailable_qty(sku)}")
+ok(production.free_stock(sku) == base - production.reserved(sku), "free_stock excludes QC goods")
+from modules.listing import stocksync as _ss
+ok(_ss.on_hand(sku) == base, "stock sync on-hand excludes QC goods")
+pub_ = _mods.public("inv")
+ok(pub_ is not None and pub_.unavailable_qty(sku) == 3 and pub_.unavailable_qty("NOPE-X") == 0, "public unavailable_qty")
+EV.clear()
+C.post("/api/inv/qc/pass", json={"item_id": gi["id"], "qty": 2})
+ok(flows.unavailable_qty(sku) == 1 and production.sellable_qty(sku) == base + 2, "QC pass -> available at once")
+ok(any(e == "stock.changed" and k.get("sku") == sku for e, k in EV), "QC pass broadcasts stock.changed")
+EV.clear()
+C.post("/api/inv/qc/fail", json={"item_id": gi["id"], "qty": 1, "action": "defect"})
+ok(flows.unavailable_qty(sku) == 1 and production.sellable_qty(sku) == base + 2 and any(e == "stock.changed" for e, k in EV), "defect stays unavailable (QC -> DF)")
+C.post("/api/inv/defect/act", json={"item_id": gi["id"], "act": "scrap"})
+ok(flows.unavailable_qty(sku) == 0 and production.stock_qty(sku) == base + 2, "scrapped -> gone, never available")
+_mods.emit = _emit0
+
 # ---------- 发货：成品从拣货区扣，包材从打包台扣 ----------
 card = new("感谢卡", "pack", "张")
 buy(card["id"], 20)
@@ -182,7 +206,7 @@ ok(sum(x["qty"] for x in wms.item_locations(gi["id"])["locations"] if x["ztype"]
 # ---------- 退货 → 退货区 → 重新上架 / 次品区 ----------
 x = C.post("/api/inv/returns/receive", json={"code": sku, "qty": 2, "note": "买家退回"}).get_json()
 rl = x.get("to")
-ok(x["ok"] and L.groups()[L.parse(rl)[0]]["ztype"] == "returns" and lq(gi["id"], rl) == 2 and production.stock_qty(sku) == 6, f"return -> 退货区 {rl}")
+ok(x["ok"] and L.groups()[L.parse(rl)[0]]["ztype"] == "returns" and lq(gi["id"], rl) == 2 and production.stock_qty(sku) == base + 2, f"return -> 退货区 {rl}")
 x = C.post("/api/inv/returns/act", json={"item_id": gi["id"], "act": "restock", "qty": 1}).get_json()
 ok(x["ok"] and x["to"].startswith("A1-") and lq(gi["id"], rl) == 1, "inspect: restock")
 x = C.post("/api/inv/returns/act", json={"item_id": gi["id"], "act": "defect"}).get_json()
@@ -254,6 +278,24 @@ ok(sp_loc(k1) == f"{p1}-02-05" and sp_loc(k2) is None, f"loaded -> printer slot 
 after_other = {(r[0], r[1]): r[2] for r in c.execute("SELECT item_id, loc_id, qty FROM inv_loc_qty WHERE item_id NOT IN (SELECT id FROM inv_items WHERE category='filament')")}
 ok(before_other == after_other, "other items' location quantities untouched")
 ok(production.stock_list() is not None and all("target" in r for r in production.stock_list()), "finished-goods targets kept")
+
+# ---------- 打印机设置一改，生产区货位马上跟着变（不用等打开货位页）----------
+def prs_now():
+    return [dict(p) for p in config.load_config()["printers"]]
+def shelves():
+    return {r["code"]: r["active"] for r in db.conn().execute("SELECT code, active FROM inv_printer_locs")}
+prs = prs_now()
+r = C.post("/api/config", json={"printers": prs + [{"code": "X1C-07", "name": "Bambu X1C", "g_per_h": 25, "enabled": True, "ams": True}]})
+ok(r.status_code == 200 and shelves().get("X1C-07") == 1, f"add printer -> shelf at once {shelves()}")
+ok(any(L.get_loc(l) for l in [f"{z}{r0['shelf']}-02-04" for r0 in db.conn().execute("SELECT shelf FROM inv_printer_locs WHERE code='X1C-07'")]), "new printer AMS slots exist")
+prs = prs_now()
+for p_ in prs:
+    if p_["code"] == "X1C-07":
+        p_["name"] = "X1C 改名"
+C.post("/api/config", json={"printers": prs})
+ok(db.conn().execute("SELECT name FROM inv_printer_locs WHERE code='X1C-07'").fetchone()[0] == "X1C 改名", "rename printer -> synced")
+C.post("/api/config", json={"printers": [p_ for p_ in prs_now() if p_["code"] != "X1C-07"]})
+ok(shelves().get("X1C-07") == 0, "remove printer -> shelf deactivated at once")
 
 # ---------- 手机页 ----------
 mj = C.get("/m/mobile/m.js").get_data(as_text=True)

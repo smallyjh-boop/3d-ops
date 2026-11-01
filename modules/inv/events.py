@@ -18,3 +18,9 @@ def on_order_status(oid, new, old=None, user=""):
         # v2.41：退货 / 拒收后重新发：东西已经由售后验货退回库存，原来的出库单不作废，只是允许再出一次库
         return shipout.allow_again(oid, user)
     return None
+
+
+def on_printers_changed(**kw):
+    """打印机设置改了（增 / 改名 / 删）→ 生产区的货架和槽马上同步（货位页 / 待办打开时的同步留作兜底）。"""
+    from . import flows
+    return flows.sync_printers()

@@ -31,7 +31,7 @@ MODULE = {
          "panel": "inv_stocktake", "parent": "inv_stocktake"},
         # v2.53：「耗材料卷」「成品备货」变成「库存」页里的页签（页面还在生产模块：materials / stock，旧链接照样打开）
     ],
-    "events": {"order.status": events.on_order_status},
+    "events": {"order.status": events.on_order_status, "printers.changed": events.on_printers_changed},
     "public": public,             # 别的模块用：where_is / sort_key / order_out / putaway_batch / pick_route；ledger.post → on_post
     "todo": _todo,                # v2.52：补货任务、待上架
     "production_allow": [("POST", r"^/api/inv/locations(/(assign|assign-all|bulk|add|group|props))?$"), ("GET", r"^/print/inv-locations$"),

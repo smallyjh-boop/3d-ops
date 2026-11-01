@@ -500,7 +500,22 @@ def move(frm, to, lines, user="", kind="move", task_id=None, force=False, commit
         c.commit()
         db.audit(user, {"putaway": "货位上架", "replenish": "库内补货"}.get(kind, "移库"),
                  f"{src['code'] if src else '待上架'} → {dst['code']}", "，".join(f"{it['code']}×{q:g}" for it, q in plan))
+        _avail_changed(src, dz, plan, kind)
     return {"from": src["code"] if src else "", "to": dst["code"], "moved": [{"item_id": it["id"], "code": it["code"], "qty": q} for it, q in plan]}
+
+
+def _avail_changed(src, dz, plan, kind):
+    """成品进出 待检 / 退货 / 次品区 = 可卖的数变了（数量没变，库存同步不知道）→ 广播 stock.changed 让各店铺重推。"""
+    try:
+        sz = zone_of(src["code"])["ztype"] if src else ""
+        if not ({sz, dz} & {"qc", "returns", "defect"}) or sz == dz:
+            return
+        from core import modules
+        for it, q in plan:
+            if it.get("category") == "goods":
+                modules.emit("stock.changed", sku=str(it["code"]).upper(), delta=0, reason="质检移库 " + kind)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def putaway(item_id, code, qty=None, user="", force=False, frm=""):

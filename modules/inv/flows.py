@@ -569,6 +569,22 @@ def _held(c, ztype):
     return sorted(out, key=lambda x: (sk(x[0]["code"]), x[1]["code"]))
 
 
+UNAVAILABLE = ("qc", "returns", "defect")
+
+
+def unavailable_qty(sku):
+    """这个成品（SKU）放在待检 / 退货 / 次品区里的数量（还不能卖）；没用货位 = 0。"""
+    c = db.conn()
+    it = c.execute("SELECT id FROM inv_items WHERE UPPER(code)=? AND category='goods'", (str(sku or "").strip().upper(),)).fetchone()
+    if not it:
+        return 0
+    locs = wms._locs(c)
+    if not any(l["ztype"] in UNAVAILABLE for l in locs.values()):
+        return 0
+    return sum(r["qty"] for r in wms._qty_rows(c, item_id=it["id"])
+               if locs.get(r["loc_id"]) and locs[r["loc_id"]]["ztype"] in UNAVAILABLE and r["qty"] > EPS)
+
+
 def held_list(ztype):
     c = db.conn()
     out = []

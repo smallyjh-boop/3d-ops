@@ -212,7 +212,7 @@ def on_hand(sku, source="total"):
                     return int(n)
                 except Exception:  # noqa: BLE001
                     pass
-    return production.stock_qty(sku)
+    return production.sellable_qty(sku)
 
 
 def _demand():
