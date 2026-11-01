@@ -266,7 +266,7 @@ function renderVariants() {
       <td>${i + 1}</td>
       <td class="nowrap">${swatch(v.opt1_zh, "var-sw")}<input data-v="opt1_zh" list="color-list" value="${esc(uiOpt1(v.opt1_zh))}" placeholder="${isTH() ? "สีขาว" : "白色"}" style="width:100px" data-notr title="${esc(v.opt1_zh || "")}"></td>
       <td class="nowrap">${specCell(v)}${specBadge(v)}</td>
-      <td class="mono small c-sku">${esc(v.sku || "")}</td>
+      <td class="mono small c-sku">${esc(v.sku || "")}${v.sku && window.TRIAL && TRIAL.can() && P.id ? ` <button type="button" class="mini" data-tr-stock="${esc(P.id)}" data-tr-skus="${esc(v.sku)}" data-tr-src="editor" title="${isTH() ? "ผลิตสินค้านี้เก็บสต็อก (ไม่ต้องมีออเดอร์)" : "不用订单，直接生产这个 SKU 放库存"}">➕ ${isTH() ? "ผลิต" : "生产"}</button>` : ""}</td>
       <td class="nowrap"><input data-v="grams" type="number" step="0.1" value="${v.grams ?? ""}" style="width:70px">${v.grams_src === "est" ? '<span class="src src-est" title="估算值">估</span>' : v.grams_src === "sliced" ? '<span class="src src-sliced" title="来自切片结果">切</span>' : ""}</td>
       <td><input data-v="hours" type="number" step="0.05" value="${v.hours ?? ""}" style="width:65px"></td>
       <td><input data-v="manual_price" type="number" step="1" value="${v.manual_price ?? ""}" style="width:80px"></td>

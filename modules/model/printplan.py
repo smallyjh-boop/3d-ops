@@ -969,6 +969,67 @@ def fill_variants(pid, spec, user=""):
     return n
 
 
+def apply_actual(pid, spec, plate_id, grams, hours, sku=""):
+    """v2.53 试打成功后：实际克数（含冲刷）/ 时长写回这一盘的切片结果，再按方案重算款式的克数 / 时长（成本跟着变）。
+    还没保存过方案的（默认一盘）直接写这个规格的款式。返回更新了哪些 SKU。"""
+    spec = (spec or "").strip()
+    p = store.load(pid)
+    plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
+    key = spec if spec in plans else ("" if "" in plans else None)
+    saved = plans.get(key) if key is not None else None
+    grams = float(grams) if grams not in (None, "") else None
+    hours = float(hours) if hours not in (None, "") else None
+    if not saved or saved.get("default") or not (saved.get("plates") or saved.get("follow")):
+        out = []
+        plan = get_plan(p, spec)
+        sets = max(1, int(next((x.get("sets") or 1 for x in plan.get("plates") or [] if x["id"] == plate_id), 1)))
+        for v in p.get("variants") or []:
+            if (v.get("opt2_zh") or "").strip() != spec:
+                continue
+            if grams:
+                v["grams"] = round(grams / sets, 1)
+            if hours:
+                v["hours"] = round(hours / sets, 2)
+            v["grams_src"] = "trial"
+            out.append(v.get("sku") or "")
+        store.save(p)
+        return out
+    plan = get_plan(p, spec if key == spec else "")
+    plate = next((x for x in plan.get("plates") or [] if x["id"] == plate_id), None)
+    if not plate:
+        return []
+    sl = dict(plate.get("sliced") or ((saved.get("sliced_by") or {}).get(plate_id)) or {})
+    purge = float(sl.get("purge_g") or 0)
+    net = max(0.0, (grams if grams else float(sum(f.get("grams") or 0 for f in sl.get("filaments") or []) + purge)) - purge)
+    fil = sl.get("filaments") or []
+    if not fil:
+        slots = sorted({int(it.get("slot") or 1) for it in plate.get("items") or []}) or [1]
+        fil = [{"slot": k, "grams": 1.0} for k in slots]
+    tot = sum(float(f.get("grams") or 0) for f in fil) or 1.0
+    sl["filaments"] = [{"slot": f["slot"], "grams": round(net * float(f.get("grams") or 0) / tot, 2)} for f in fil]
+    if hours:
+        sl["hours"] = hours
+    sl["trial"] = True
+    sl["at"] = time.time()
+    if saved.get("follow"):
+        saved.setdefault("sliced_by", {})[plate_id] = dict(sl, sig=_sig(plate))
+    else:
+        for x in saved["plates"]:
+            if x["id"] == plate_id:
+                x["sliced"] = sl
+    p["print_plans"] = plans
+    store.save(p)
+    n = fill_variants(pid, spec, "试打")
+    p = store.load(pid)
+    out = []
+    for v in p.get("variants") or []:
+        if (v.get("opt2_zh") or "").strip() == spec:
+            v["grams_src"] = "trial"
+            out.append(v.get("sku") or "")
+    store.save(p)
+    return out
+
+
 def _refresh_variants(p, spec, plan):
     """保存方案后：多色的款式记下各颜色用量（成本按颜色拆分、扣库存用），克数不动（要填克数点「填入变体」）。"""
     for v in p.get("variants") or []:
