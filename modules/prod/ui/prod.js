@@ -179,8 +179,9 @@
         ${o.merge.map((m) => `<label class="row small"><input type="checkbox" data-merge="${m.id}" checked> 任务 #${m.id} ${m.order_no ? `订单 <span class="mono" data-notr>${esc(m.order_no)}</span>` : esc(m.kind === "stock" ? "备货" : "")} × ${m.remaining}
           ${m.custom_note ? `<span class="note-inline" data-notr>✎ ${esc(m.custom_note)}</span>` : ""}</label>`).join("")}</div>` : ""}
       ${(o.parts || []).length ? `<div class="sd-box"><b>🧩 ${Z("有可用的零件（以前订单取消时留下的，不算成品库存）", "มีชิ้นส่วนที่ใช้ได้ (เหลือจากออเดอร์ที่ยกเลิก ไม่นับเป็นสต็อกสินค้า)")}</b>
-        ${o.parts.map((q) => `<div class="small" data-notr>· ${esc(q.label)} × ${q.qty}${q.name ? " · " + esc(q.name) : ""}${q.same_plate ? " ✓" : ""}</div>`).join("")}
-        <div class="small muted">${Z("打这个任务时可以直接用这些零件，对应的盘不用重新打（✓ = 正好是这一盘）", "ใช้ชิ้นส่วนเหล่านี้กับงานนี้ได้ เพลทที่ตรงกันไม่ต้องพิมพ์ใหม่ (✓ = เพลทนี้)")}</div></div>` : ""}
+        ${o.parts.map((q) => `<div class="small row" data-notr>· ${esc(q.label)} × ${q.qty}${q.name ? " · " + esc(q.name) : ""}${q.same_plate ? " ✓" : ""}
+          ${q.can_use ? `<button class="mini" data-usepart="${q.id}">${Z("使用零件", "ใช้ชิ้นส่วน")}</button>` : ""}</div>`).join("")}
+        <div class="small muted">${Z("可以用这些零件代替这一盘（点「使用零件」后，对应的盘不用重新打；✓ = 正好是这一盘）", "ใช้ชิ้นส่วนเหล่านี้แทนเพลทนี้ได้ (กด “ใช้ชิ้นส่วน” แล้วเพลทที่ตรงกันไม่ต้องพิมพ์ใหม่; ✓ = เพลทนี้)")}</div></div>` : ""}
       ${o.recipe_zh ? `<div class="small recipe-line">🧩 打印方案：${esc(o.recipe_zh)}${o.recipe && o.recipe.notes ? `<div class="warn" data-notr>⚠ ${esc(o.recipe.notes)}</div>` : ""}</div>` : ""}
       <div id="sd-mat" class="sd-box sd-mat"></div>
       <div id="sd-file" class="sd-box"></div>
@@ -242,7 +243,15 @@
       updFile();
     };
     $("#sd-n", el).addEventListener("input", () => { $('input[name="sd-mode"][value="custom"]', el).checked = true; updFile(); });
-    el.onclick = (e) => { const b = e.target.closest("[data-gvf]"); if (b && window.GVIEW) GVIEW.openFile(+b.dataset.gvf, { material: o.material_check.need }); };
+    el.onclick = async (e) => {
+      const b = e.target.closest("[data-gvf]"); if (b && window.GVIEW) GVIEW.openFile(+b.dataset.gvf, { material: o.material_check.need });
+      const u = e.target.closest("[data-usepart]");
+      if (u) {      // v2.54.1：用零件代替这一盘
+        u.disabled = true;
+        try { const r = await api(`/api/jobs/${jid}/use-part`, { json: { part_id: +u.dataset.usepart } }); toast(Z(`已使用零件 ×${r.used}`, `ใช้ชิ้นส่วนแล้ว ×${r.used}`)); closeModal(); loadBoard(); }
+        catch (er) { toast(er.message, true); u.disabled = false; }
+      }
+    };
     updFile();
     const go = async (send, btn) => {
       const review = {};

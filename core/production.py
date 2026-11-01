@@ -342,7 +342,7 @@ def generate(user=""):
     for j in c.execute("""SELECT * FROM jobs WHERE status='todo' AND COALESCE(qty_done,0)=0 AND run_id IS NULL
         AND kind='order' AND order_id IN (SELECT id FROM orders WHERE status IN
         ('cancelled','returned','delivery_failed','shipped','completed','unpaid') OR COALESCE(hold,0)=1)""").fetchall():
-        _park_parts(c, j, user)      # v2.54.1：几盘的任务取消时，已经打好、凑不成套的零件记下来，不丢
+        _park_parts(c, j, user, _why(c, j["order_id"]))      # v2.54.1：几盘的任务取消时，已经打好、凑不成套的零件记下来，不丢
     cancelled = c.execute("""DELETE FROM jobs WHERE status='todo' AND COALESCE(qty_done,0)=0 AND run_id IS NULL
         AND kind='order' AND order_id IN (SELECT id FROM orders WHERE status IN
         ('cancelled','returned','delivery_failed','shipped','completed','unpaid') OR COALESCE(hold,0)=1)""").rowcount
@@ -358,9 +358,12 @@ def generate(user=""):
     c.execute("""UPDATE jobs SET status='todo', done_at=NULL, alert='' WHERE alert='shipped_partial' AND status='done'
         AND order_id IN (SELECT id FROM orders WHERE status IN ('to_ship','quote'))""")
     # v2.35：还没发货就取消的订单，「用库存发」占住的数量放回去（只用库存、没打印过的任务直接删）
-    cancelled += c.execute("""DELETE FROM jobs WHERE kind='order' AND run_id IS NULL AND COALESCE(stock_n,0)>0
+    _sw = """kind='order' AND run_id IS NULL AND COALESCE(stock_n,0)>0
         AND COALESCE(qty_done,0)<=COALESCE(stock_n,0) AND status IN ('todo','post')
-        AND order_id IN (SELECT id FROM orders WHERE status='cancelled')""").rowcount
+        AND order_id IN (SELECT id FROM orders WHERE status='cancelled')"""
+    for j in c.execute("SELECT * FROM jobs WHERE " + _sw).fetchall():
+        _park_parts(c, j, user, _why(c, j["order_id"]))      # v2.54.1：用库存的任务里已经打好的几盘零件，也记进零件库
+    cancelled += c.execute("DELETE FROM jobs WHERE " + _sw).rowcount
     cancelled += _drop_cancelled_partial(c, user)
     c.commit()
     if n or cancelled:
@@ -941,7 +944,14 @@ def send_options(job_id, printer_idx=None, plate=None):
     j = o.get("job") or {}
     pv = o.get("plate") or {}
     ps = parts_available(j.get("sku"))
-    o["parts"] = [dict(p, label=part_label(p), same_plate=bool(pv.get("plate_id")) and p["plate_id"] == pv.get("plate_id")) for p in ps]
+    need = {}
+    if ps and j.get("id"):      # 「使用零件」只给几盘的任务：这一盘还需要多少件（够了就不能用）
+        c = db.conn()
+        jr = c.execute("SELECT * FROM jobs WHERE id=?", (j["id"],)).fetchone()
+        if jr and int(_col(jr, "multi_plate", 0)):
+            need = {v["plate_id"]: int(v["units"]) for v in _plates_view(c, jr)}
+    o["parts"] = [dict(p, label=part_label(p), same_plate=bool(pv.get("plate_id")) and p["plate_id"] == pv.get("plate_id"),
+                       can_use=need.get(p["plate_id"], 0) > 0, need=need.get(p["plate_id"], 0)) for p in ps]
     return o
 
 
@@ -1402,7 +1412,21 @@ def _consume(r, frac, reason, user, failed=False):
                                  reason, user, r["printer"], f"run:{r['id']}", failed=failed)
 
 
-def _park_parts(c, j, user=""):
+_WHY = {"cancelled": "订单取消", "returned": "订单退货", "delivery_failed": "订单拒收", "shipped": "订单已发货",
+        "completed": "订单已完成", "unpaid": "订单改回未付款"}
+
+
+def _why(c, order_id):
+    """订单为什么不做了（真实状态，用于零件备注 / 订单日志；挂起优先）。"""
+    o = c.execute("SELECT status, hold FROM orders WHERE id=?", (order_id,)).fetchone() if order_id else None
+    if not o:
+        return "订单取消"
+    if (o["hold"] or 0) and o["status"] not in ("cancelled", "returned", "delivery_failed"):
+        return "订单挂起"
+    return _WHY.get(o["status"], "订单取消")
+
+
+def _park_parts(c, j, user="", why="订单取消"):
     """v2.54.1：几盘的任务不做了（订单取消等）：每一盘多出来、凑不成整套的件（made − 已凑齐的套数）记进零件库（job_parts）。
     零件不是成品：不进 stock / 可售库存 / 库存同步；以后同 SKU 的任务开始打印时在对话框里列出来。"""
     rows = c.execute("SELECT * FROM job_plates WHERE job_id=? ORDER BY plate_no, id", (j["id"],)).fetchall()
@@ -1416,11 +1440,11 @@ def _park_parts(c, j, user=""):
         c.execute("""INSERT INTO job_parts(sku, product_id, plate_id, plate_no, plate_total, name, color, qty, src_job, order_id, note,
                      status, created_at, created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,'avail',?,?)""",
                   ((j["sku"] or "").upper(), j["product_id"], r["plate_id"], r["plate_no"], r["plate_total"], r["name"] or "",
-                   j["color"] or "", left, j["id"], j["order_id"], f"订单取消，第 {r['plate_no']} 盘已打好 {left} 套但凑不成成品（任务#{j['id']}）",
+                   j["color"] or "", left, j["id"], j["order_id"], f"{why}，第 {r['plate_no']} 盘已打好 {left} 套但凑不成成品（任务#{j['id']}）",
                    now, user or "系统"))
         parts.append(f"{plate_text({'no': r['plate_no'], 'total': r['plate_total'], 'name': r['name']})}×{left}")
     if parts:
-        _olog(j["order_id"], user or "系统", "订单取消，零件入零件库", f"{j['sku']}：" + "、".join(parts))
+        _olog(j["order_id"], user or "系统", f"{why}，零件入零件库", f"{j['sku']}：" + "、".join(parts))
     return parts
 
 
@@ -1438,6 +1462,45 @@ def part_label(p):
     return f"{p['sku']} 盘 {p['plate_no']} 零件"
 
 
+def use_part(job_id, part_id, sets=None, user=""):
+    """v2.54.1：「使用零件」——用零件库里的一条零件代替任务的一盘：零件记为已用，这一盘的 made 加上用掉的套数
+    （不超过这一盘还需要的件数），各盘凑齐的套数照 finish_run 的逻辑算进 qty_done（备货进库存 / 订单够数转待后处理）。"""
+    c = db.conn()
+    j = _job(c, job_id)
+    if j["status"] not in ("todo", "printing") or (_col(j, "kind") or "order") in PRINT_ONLY:
+        raise ValueError("这个任务现在不能用零件")
+    p = c.execute("SELECT * FROM job_parts WHERE id=?", (int(part_id),)).fetchone()
+    if not p or p["status"] != "avail" or int(p["qty"] or 0) <= 0:
+        raise ValueError("这个零件已经被用掉了")
+    if (p["sku"] or "").upper() != (j["sku"] or "").upper():
+        raise ValueError("零件和任务不是同一个 SKU")
+    views = _sync_plates(c, j)[0]
+    v = next((x for x in views if x["plate_id"] == p["plate_id"]), None)
+    if not v:
+        raise ValueError("这个任务没有对应的盘，用不了这个零件")
+    use = min(int(p["qty"]), int(v["units"]))
+    if sets not in (None, ""):
+        use = min(use, max(0, int(sets)))
+    if use <= 0:
+        raise ValueError("这一盘已经够了，不需要这个零件")
+    now = _now()
+    if use < int(p["qty"]):       # 只用一部分：剩下的留在零件库，用掉的拆成一条已用记录
+        c.execute("UPDATE job_parts SET qty=qty-? WHERE id=?", (use, p["id"]))
+        c.execute("""INSERT INTO job_parts(sku, product_id, plate_id, plate_no, plate_total, name, color, qty, src_job, order_id, note,
+                     status, created_at, created_by, used_job, used_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,'used',?,?,?,?)""",
+                  (p["sku"], p["product_id"], p["plate_id"], p["plate_no"], p["plate_total"], p["name"], p["color"], use,
+                   p["src_job"], p["order_id"], p["note"], p["created_at"], p["created_by"], j["id"], now))
+    else:
+        c.execute("UPDATE job_parts SET status='used', used_job=?, used_at=?, note=COALESCE(note,'')||? WHERE id=?",
+                  (j["id"], now, f"（{user or '系统'} 用于任务#{j['id']}）", p["id"]))
+    c.execute("UPDATE job_plates SET made=COALESCE(made,0)+?, updated_at=? WHERE id=?", (use, now, v["id"]))
+    lab = plate_text(v)
+    _plates_credited(c, j, now, user or "系统", lab, use, 0, f"零件#{p['id']}", f"使用零件 {lab} ×{use}（零件#{p['id']}）")
+    c.commit()
+    schedule()
+    return {"used": use, "left": int(p["qty"]) - use}
+
+
 def _drop_cancelled_partial(c, user=""):
     """v2.39：订单取消 / 退货 / 拒收时，已经打了一部分、还没在打的任务：不再排单，已经打好的件转成品库存。"""
     rows = c.execute("""SELECT * FROM jobs WHERE kind='order' AND run_id IS NULL AND status='todo'
@@ -1445,7 +1508,7 @@ def _drop_cancelled_partial(c, user=""):
         AND order_id IN (SELECT id FROM orders WHERE status IN ('cancelled','returned','delivery_failed'))""").fetchall()
     for j in rows:
         made = (j["qty_done"] or 0) - (j["stock_n"] or 0)
-        _park_parts(c, j, user)
+        _park_parts(c, j, user, _why(c, j["order_id"]))
         c.execute("DELETE FROM jobs WHERE id=?", (j["id"],))
         stock_add(j["sku"], made, f"订单取消，已打好的转成品库存（任务#{j['id']}）", user or "系统", j["product_id"], j["name"], j["color"])
         _olog(j["order_id"], user or "系统", "订单取消，停止生产", f"{j['sku']} 已打好 {made} 个转成品库存")
@@ -1518,27 +1581,34 @@ def _finish_plate_run(c, r, alloc, now, user):
             continue
         c.execute("UPDATE job_plates SET made=COALESCE(made,0)+?, prints=COALESCE(prints,0)+1, run_id=NULL, updated_at=? "
                   "WHERE job_id=? AND plate_id=?", (int(n), now, j["id"], r["plate_id"]))
-        new = _credit_plates(c, j["id"])
-        rem = max(0, int(j["qty"] or 1) - int(j["qty_done"] or 0))
-        to_job = min(new, rem)
-        done = (j["qty_done"] or 0) + to_job
-        if j["kind"] == "stock" and new:
-            stock_add(j["sku"], new, f"备货打印 凑齐 {new} 套（{lab} 批次#{rid}）", user, j["product_id"], j["name"], j["color"])
-        elif new > to_job:        # 一盘出几套、凑齐的比订单要的多 → 多的进成品库存
-            stock_add(j["sku"], new - to_job, f"多打进库存（{lab} 批次#{rid}）", user, j["product_id"], j["name"], j["color"])
-        g = (r["grams"] or 0) * n / max(1, r["count"])
-        c.execute("UPDATE jobs SET qty_done=?, plates_done=COALESCE(plates_done,0)+1, consumed_g=COALESCE(consumed_g,0)+?, "
-                  "updated_at=?, updated_by=? WHERE id=?", (done, g, now, user, j["id"]))
-        gone = (j["kind"] or "order") == "order" and j["order_id"] and c.execute(
-            "SELECT 1 FROM orders WHERE id=? AND status IN ('cancelled','returned','delivery_failed')", (j["order_id"],)).fetchone()
-        if done >= j["qty"] and not gone:
-            status = "done" if j["kind"] == "stock" else "post"
-            c.execute("UPDATE jobs SET status=?, printed_at=?, done_at=CASE WHEN ?='done' THEN ? ELSE done_at END, run_id=NULL "
-                      "WHERE id=?", (status, now, status, now, j["id"]))
-        else:
-            _plate_job_state(c, j["id"], now, user)
-        _olog(j["order_id"], user, f"打完 {lab}（{n} 套零件，批次 #{rid}）",
-              (f"凑齐 {new} 套，" if new else "还没凑齐，") + f"已完成 {done}/{j['qty']}")
+        _plates_credited(c, j, now, user, lab, n, (r["grams"] or 0) * n / max(1, r["count"]), f"批次#{rid}",
+                         f"打完 {lab}（{n} 套零件，批次 #{rid}）")
+
+
+def _plates_credited(c, j, now, user, lab, n, g, tag, logtxt):
+    """各盘的 made 变了之后：凑齐的套数算进 qty_done（备货 → 成品库存，多的进库存；够数 → 待后处理 / 完成）。finish_run 和「使用零件」共用。"""
+    rid = tag
+    new = _credit_plates(c, j["id"])
+    j = c.execute("SELECT * FROM jobs WHERE id=?", (j["id"],)).fetchone()
+    rem = max(0, int(j["qty"] or 1) - int(j["qty_done"] or 0))
+    to_job = min(new, rem)
+    done = (j["qty_done"] or 0) + to_job
+    if j["kind"] == "stock" and new:
+        stock_add(j["sku"], new, f"备货打印 凑齐 {new} 套（{lab} {rid}）", user, j["product_id"], j["name"], j["color"])
+    elif new > to_job:        # 一盘出几套、凑齐的比订单要的多 → 多的进成品库存
+        stock_add(j["sku"], new - to_job, f"多打进库存（{lab} {rid}）", user, j["product_id"], j["name"], j["color"])
+    c.execute("UPDATE jobs SET qty_done=?, plates_done=COALESCE(plates_done,0)+1, consumed_g=COALESCE(consumed_g,0)+?, "
+              "updated_at=?, updated_by=? WHERE id=?", (done, g, now, user, j["id"]))
+    gone = (j["kind"] or "order") == "order" and j["order_id"] and c.execute(
+        "SELECT 1 FROM orders WHERE id=? AND status IN ('cancelled','returned','delivery_failed')", (j["order_id"],)).fetchone()
+    if done >= j["qty"] and not gone:
+        status = "done" if j["kind"] == "stock" else "post"
+        c.execute("UPDATE jobs SET status=?, printed_at=?, done_at=CASE WHEN ?='done' THEN ? ELSE done_at END, run_id=NULL "
+                  "WHERE id=?", (status, now, status, now, j["id"]))
+    else:
+        _plate_job_state(c, j["id"], now, user)
+    _olog(j["order_id"], user, logtxt,
+          (f"凑齐 {new} 套，" if new else "还没凑齐，") + f"已完成 {done}/{j['qty']}")
 
 
 def fail_run(rid, reason="", note="", user=""):

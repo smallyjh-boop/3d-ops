@@ -189,7 +189,9 @@ def cur_pool_purge():
     def go():
         if not _owner():
             raise PermissionError
-        return {"purged": pool.purge_trash(b["skeys"] if isinstance(b.get("skeys"), list) else None)}
+        if "skeys" in b and not isinstance(b.get("skeys"), list):
+            raise ValueError("skeys 必须是列表（不传 = 清空全部）")
+        return {"purged": pool.purge_trash(b["skeys"] if "skeys" in b else None)}
     try:
         return _go(go)
     except PermissionError:

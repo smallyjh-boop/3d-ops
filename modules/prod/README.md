@@ -82,3 +82,4 @@
   ⑧ POST /api/config 不再把 200 台以后的打印机截掉：超过 5000 台报错。
   ⑨ load_config 按设置文件版本（inode + 修改时间 + 大小）缓存，返回拷贝（2000 台反复读约 5 毫秒，原来每次 0.2 秒以上）；连接管理在单独线程里读设置。
 - 1.14（系统 v2.54.1）：① 打印机抽屉的「🧪 打印测试」也带稳定 id（printer_id，data-tr-pid → TRIAL.printerTest）；服务器沿用 _same_printer：打开抽屉后列表变了（删了 / 调了顺序）→ 409「请刷新」，不切片、不发送；旧客户端不带 id 照旧按序号（测试 t_fleet254 第 12.4 节）。② 订单取消时，几盘任务已打好、凑不成整套的件进零件库（表 job_parts，core/production._park_parts；名称「<SKU> 盘 N 零件」）：不是成品，不进 stock / 可售库存 / 库存同步；同 SKU 新任务的「开始打印」对话框（send-options 的 parts）列出可用零件，同一盘打 ✓。暂不自动抵扣、也不在库存模块里显示（需要时再接）。测试 tests/t_parts2541.py。
+- 1.15（系统 v2.54.1 复审修复）：① 订单取消时「用库存占位」的任务（stock_n>0）也先 _park_parts 再删，已打好的几盘零件不丢。② 零件备注 / 订单日志用真实状态（订单挂起 / 已发货 / 已完成 / 取消 …，core/production._why）。③ 「使用零件」：开始对话框里几盘任务的每条可用零件有按钮 → POST /api/jobs/<id>/use-part（production.use_part）：零件记为已用（status used、used_job、used_at；只用一部分就拆成已用一条），对应盘的 made 加上用掉的套数（不超过这盘还需要的），凑齐的套数同 finish_run 入库 / 转订单（_plates_credited），写订单日志；用过的不再列出；没用前提示「可以用这些零件代替这一盘」。测试 tests/t_parts2541b.py。

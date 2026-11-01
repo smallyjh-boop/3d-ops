@@ -241,6 +241,24 @@ def _norm(t):
     return re.sub(r"[^0-9a-z฀-๿一-鿿]+", "", (t or "").lower())
 
 
+def edited(r):
+    """v2.54.1：用户手动改过的（备注 / 标签 / 改标题 / 手动分数 / 手动类目）。自动清理、池子上限、手动「清掉」都不动这些行。"""
+    def has(k):
+        try:
+            return str(r[k] or "").strip() not in ("", "[]", "null")
+        except (KeyError, IndexError):
+            return False
+    try:
+        so = r["score_ovr"]
+    except (KeyError, IndexError):
+        so = None
+    try:
+        co = r["cat_ovr"]
+    except (KeyError, IndexError):
+        co = 0
+    return has("note") or has("tags") or has("title_ovr") or (so is not None and so >= 0) or bool(co)
+
+
 def _select(opts):
     """每一类选中的候选：{类: {id: 字节}}（dup 的另给合并信息）。"""
     c = ensure()
@@ -252,20 +270,27 @@ def _select(opts):
     rows = c.execute("SELECT * FROM cur_candidates").fetchall()
     wids = {r[0] for r in c.execute("SELECT id FROM cur_watches")}
     out = {k: {} for k in CLASSES}
+    skip = {k: 0 for k in CLASSES}       # 手动改过、所以没清的个数
     merge = {}          # dup：{要删的 id: 留下的 id}
     for r in rows:
+        ed = edited(r)
         free = not r["product_id"] and r["status"] != "adopted"
         seen_ago = (now - (r["last_seen"] or 0)) / 86400
+        def put(k):
+            if ed:
+                skip[k] += 1
+            else:
+                out[k][r["id"]] = _bytes(r)
         if free and r["excluded"] and r["status"] != "ignored" and seen_ago > s["excl_days"]:
-            out["excl"][r["id"]] = _bytes(r)
+            put("excl")
         if free and not r["excluded"] and r["status"] == "" and (r["score"] or 0) < s["low_score"] and seen_ago > s["low_days"]:
-            out["low"][r["id"]] = _bytes(r)
+            put("low")
         if r["status"] == "ignored" and not r["product_id"] and seen_ago > s["ignored_days"]:
-            out["ignored"][r["id"]] = _bytes(r)
+            put("ignored")
         if r["product_id"] or r["status"] == "adopted":
             out["adopted"][r["id"]] = _bytes(r)
         if free and r["watch_id"] and r["watch_id"] not in wids:
-            out["watchdel"][r["id"]] = _bytes(r)
+            put("watchdel")
     groups = {}
     for r in rows:
         k = (_norm(r["author"]), _norm(r["title"]))
@@ -274,12 +299,17 @@ def _select(opts):
     for g in groups.values():
         if len(g) < 2:
             continue
-        g.sort(key=lambda r: (bool(r["product_id"]), r["status"] == "adopted", r["status"] == "ignored", r["score"] or 0, r["last_seen"] or 0), reverse=True)
+        # 手动改过的优先留下（其次已采用 / 忽略 / 分数高 / 最近见过）
+        g.sort(key=lambda r: (bool(r["product_id"]), r["status"] == "adopted", edited(r), r["status"] == "ignored", r["score"] or 0, r["last_seen"] or 0), reverse=True)
         for r in g[1:]:
             if r["product_id"] or r["status"] == "adopted":
                 continue
+            if edited(r):
+                skip["dup"] += 1          # 两条都改过：都留着，不合并（合并会丢掉其中一条的备注 / 标签）
+                continue
             out["dup"][r["id"]] = _bytes(r)
             merge[r["id"]] = g[0]["id"]
+    out["_skipped"] = skip
     return out, merge
 
 
@@ -290,7 +320,7 @@ def preview(opts=None):
     cls = []
     for k in CLASSES:
         allids |= set(sel[k])
-        cls.append({"id": k, "n": len(sel[k]), "mb": round(sum(sel[k].values()) / 1048576, 4)})
+        cls.append({"id": k, "n": len(sel[k]), "edited_skipped": sel["_skipped"][k], "mb": round(sum(sel[k].values()) / 1048576, 4)})
     uniq = {i: max(sel[k].get(i, 0) for k in CLASSES) for i in allids}
     return {"classes": cls, "total": len(allids), "mb": round(sum(uniq.values()) / 1048576, 4), "settings": settings(), "storage": storage()}
 
@@ -309,13 +339,21 @@ def _trash(c, rows, reason, gone=True):
 
 
 def _merge_metrics(c, winner, loser_ids):
-    w = c.execute("SELECT metrics, status FROM cur_candidates WHERE id=?", (winner,)).fetchone()
+    w = c.execute("SELECT metrics, status, note, tags FROM cur_candidates WHERE id=?", (winner,)).fetchone()
     m = db.jl(w["metrics"])
     status = w["status"]
+    notes = [str(w["note"] or "").strip()] if str(w["note"] or "").strip() else []
+    tags = db.jl(w["tags"]) if str(w["tags"] or "").strip() else []
+    tags = list(tags) if isinstance(tags, list) else []
     for i in loser_ids:
-        r = c.execute("SELECT metrics, status FROM cur_candidates WHERE id=?", (i,)).fetchone()
+        r = c.execute("SELECT metrics, status, note, tags FROM cur_candidates WHERE id=?", (i,)).fetchone()
         if not r:
             continue
+        n_ = str(r["note"] or "").strip()
+        if n_ and n_ not in notes:
+            notes.append(n_)
+        lt = db.jl(r["tags"]) if str(r["tags"] or "").strip() else []
+        tags += [t for t in (lt if isinstance(lt, list) else []) if t not in tags]
         for k, v in db.jl(r["metrics"]).items():
             try:
                 if float(str(v).replace(",", "").rstrip("kK")) > float(str(m.get(k, "0")).replace(",", "").rstrip("kK")):
@@ -324,7 +362,8 @@ def _merge_metrics(c, winner, loser_ids):
                 m.setdefault(k, v)
         if r["status"] == "ignored":
             status = "ignored"                  # 其中一个忽略过 → 合并后也是忽略（忽略的不会回来）
-    c.execute("UPDATE cur_candidates SET metrics=?, status=? WHERE id=?", (json.dumps(m, ensure_ascii=False), status, winner))
+    c.execute("UPDATE cur_candidates SET metrics=?, status=?, note=?, tags=? WHERE id=?",
+              (json.dumps(m, ensure_ascii=False), status, "\n".join(notes)[:500], json.dumps(tags, ensure_ascii=False) if tags else "", winner))
 
 
 def run(opts=None, classes=None):
@@ -369,7 +408,7 @@ def enforce_cap(cap=None):
         return 0
     low = settings()["low_score"]
     pool = [r for r in c.execute("SELECT * FROM cur_candidates WHERE product_id='' AND status IN ('', 'ignored')").fetchall()
-            if r["status"] == "ignored" or r["excluded"] or (r["seen_at"] or 0) > 0 or (r["score"] or 0) < low]
+            if (r["status"] == "ignored" or r["excluded"] or (r["seen_at"] or 0) > 0 or (r["score"] or 0) < low) and not edited(r)]
     pool.sort(key=lambda r: (r["status"] != "ignored", not r["excluded"], r["score"] or 0, r["last_seen"] or 0))
     rows = pool[:total - cap]
     _trash(c, rows, "cap", gone=False)
@@ -456,7 +495,7 @@ def suggestions(limit=50):
         ids = sorted(sel[k], key=lambda i: (rows[i]["last_seen"] or 0) if i in rows else 0)
         if not ids:
             continue
-        d = {"id": k, "n": len(ids), "mb": round(sum(sel[k].values()) / 1048576, 4)}
+        d = {"id": k, "n": len(ids), "mb": round(sum(sel[k].values()) / 1048576, 4), "edited_skipped": sel["_skipped"][k]}
         if k == "dup":
             d["groups"] = len({merge[i] for i in ids})
             d["items"] = [item(i, {"keep": (rows[merge[i]]["title_ovr"] or rows[merge[i]]["title"] or "")[:60] if merge[i] in rows else ""}) for i in ids[:limit]]

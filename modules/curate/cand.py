@@ -146,6 +146,11 @@ def upsert(items, who="", watch_id=0):
         if not row and pool.is_gone(k):          # v2.53：清理掉 / 忽略后清掉的，只留指纹，不再存
             out[str(it.get("url"))] = GONE_BADGE
             continue
+        old_del = None            # v2.54.1：手动删除过的又采到了：回收站里那条的备注 / 标签 / 手动分数等带到新行
+        if not row:
+            tr = c.execute("SELECT data FROM cur_trash WHERE skey=? AND reason='deleted'", (k,)).fetchone()
+            old_del = db.jl(tr["data"]) if tr else None
+            old_del = old_del if isinstance(old_del, dict) else None
         metrics = {str(a)[:20]: str(b)[:20] for a, b in (it.get("metrics") or {}).items()} if isinstance(it.get("metrics"), dict) else {}
         if row:
             old = db.jl(row["metrics"])
@@ -163,7 +168,7 @@ def upsert(items, who="", watch_id=0):
             reset_ai = True                                                       # 原来读错了，现在对了：重新让 AI 判断
         ai = {} if reset_ai else (db.jl(row["ai"]) if row else {})
         pp, ex, cat, sc = compute(cfg, {"title": title, "author": author, "metrics": metrics}, ai, db.jl(row["real"]) if row else None)
-        sc, ex, cat, sc_auto = ovr(row, sc, ex, cat)
+        sc, ex, cat, sc_auto = ovr(row if row else old_del, sc, ex, cat)
         if not row and (ex or sc < pool.settings()["junk_score"]):
             thumb, author, metrics, pp = "", "", {}, {}              # v2.53：新插入的（已有的不动，免得稍后看的候选被清掉作者 / 数据）规则排除 / 分数很低的只留指纹 + 标题，不存图片和细节
         if row:
@@ -177,6 +182,11 @@ def upsert(items, who="", watch_id=0):
                       "first_seen, last_seen, watch_id, capture_bad, score_auto) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (k, sites.platform(url), url, title, thumb, author, json.dumps(metrics, ensure_ascii=False), sc, json.dumps(pp), ex, cat,
                        who[:60], now, now, watch_id, bad, sc_auto))
+            if old_del:
+                so = old_del.get("score_ovr")
+                c.execute("UPDATE cur_candidates SET note=?, tags=?, title_ovr=?, score_ovr=?, cat_ovr=?, ex_ok=? WHERE skey=?",
+                          (str(old_del.get("note") or ""), str(old_del.get("tags") or ""), str(old_del.get("title_ovr") or ""),
+                           so if so is not None else None, int(old_del.get("cat_ovr") or 0), int(old_del.get("ex_ok") or 0), k))
             c.execute("DELETE FROM cur_trash WHERE skey=? AND reason='deleted'", (k,))       # v2.54.1：删除过的又采到了 = 重新出现，回收站里旧的不要了
         r2 = c.execute("SELECT * FROM cur_candidates WHERE skey=?", (k,)).fetchone()
         out[str(it.get("url"))] = badge(r2, cfg)

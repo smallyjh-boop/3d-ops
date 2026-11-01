@@ -62,8 +62,29 @@ def _label(lang):
     return [(k, TEXT[k])]
 
 
+_dots_cache = {}
+DOTS_TTL = 300        # v2.54.1：最常用颜色要读最多 400 个产品，每张图都读太慢 → 缓存几分钟（颜色表变了就换 key）
+
+
 def dots_for(cfg, n=5):
-    """角标上的小圆点颜色：颜色表里用得最多的几种真实颜色。"""
+    """角标上的小圆点颜色：颜色表里用得最多的几种真实颜色（缓存几分钟，按颜色表内容区分）。"""
+    import json
+    import time
+    try:
+        key = (n, json.dumps(codes.color_hex(cfg), sort_keys=True, default=str))
+    except Exception:  # noqa: BLE001
+        return _dots_for(cfg, n)
+    hit = _dots_cache.get(key)
+    if hit and time.time() - hit[0] < DOTS_TTL:
+        return list(hit[1])
+    out = _dots_for(cfg, n)
+    if len(_dots_cache) > 8:
+        _dots_cache.clear()
+    _dots_cache[key] = (time.time(), list(out))
+    return out
+
+
+def _dots_for(cfg, n=5):
     prods = []
     try:
         from . import store

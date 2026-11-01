@@ -780,6 +780,16 @@ def job_use_stock(jid):
         return err(str(e))
 
 
+@bp.post("/api/jobs/<int:jid>/use-part")
+def job_use_part(jid):
+    """v2.54.1：用零件库里的一条零件代替这个任务的一盘。"""
+    b = request.get_json(force=True) or {}
+    try:
+        return jsonify(production.use_part(jid, int(b.get("part_id") or 0), b.get("sets"), _uname()))
+    except (ValueError, TypeError) as e:
+        return err(str(e))
+
+
 @bp.post("/api/jobs/bulk")
 def jobs_bulk():
     """v2.43：订单页批量处理这些订单的生产任务。action：
