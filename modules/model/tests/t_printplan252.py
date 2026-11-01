@@ -197,9 +197,10 @@ try:
     r = pp.slice_plate(PID, "", "p1", "白色", None, "boss")
 finally:
     slicer.orca_slice = _orig
-ok(r["sliced"]["filaments"][0]["grams"] == 9.3 and r["sliced"]["purge_g"] == 1.42 and r["file"]["id"], f"slice plate stored {r['sliced']}")
+# 切片软件给的克数含冲刷：记净克数（9.3 / 5.6 按比例扣掉 1.42 g 冲刷）
+ok(abs(r["sliced"]["filaments"][0]["grams"] - 8.41) < 0.02 and abs(r["sliced"]["filaments"][1]["grams"] - 5.07) < 0.02 and r["sliced"]["purge_g"] == 1.42 and r["file"]["id"], f"slice plate stored (net of purge) {r['sliced']}")
 u2 = pp.usage(store.load(PID), "", "白色")
-ok(not u2["est"] and abs(u2["purge_g"] - 1.42) < 0.05 and {c["colour"]: c["grams"] for c in u2["colours"]} == {"白色": 9.3, "黑色": 5.6}, f"sliced usage replaces estimate {u2['colours']}")
+ok(not u2["est"] and abs(u2["purge_g"] - 1.42) < 0.05 and {c["colour"]: c["grams"] for c in u2["colours"]} == {"白色": 8.4, "黑色": 5.1}, f"sliced usage replaces estimate {u2['colours']}")
 
 # ---------- 生产：颜色要求、只排给有 AMS 的打印机、按颜色扣耗材 ----------
 cols = production.job_colours(PID, "3DP0002-WH", "白色")
