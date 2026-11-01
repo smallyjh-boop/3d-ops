@@ -248,4 +248,189 @@ p = store.load(PID)
 ok(pp.cleanup_cuts(PID, p, now=__import__("time").time() + pp.CUT_TTL * 10) == [], "used halves never cleaned up")
 pj = open(os.path.join(APP, "modules/model/ui/plan.js"), encoding="utf-8").read()
 ok("r.warnings" in pj, "editor shows the slice warnings")
+ok("temp_material" in pj, "editor records which material the temperatures were set for")
+
+# ================= 第二轮复审 =================
+# R1 槽 1 不是产品材料的盘：喷嘴 / 热床温度和耗材配置一起清掉（迁移、原来面板保存、换材料），切片时再按 temp_material 核对
+# Y1 自动选到的耗材配置还是别的材料（丝绸料 / 不认识的 → 打印机默认 PLA）→ 不切，说清楚（每槽都查）
+# Y2 切片前的配置信息按「选的」配置算是否一致，带提示
+# Y3 按主模型缩放的规格：签名和读的先后无关（_migrate 不改 p），试打写回后切片结果还有效
+# Y4 展示用到的切开的零件不清掉；顶面图案（monotonic）不当填充；按方案切片（slice_product）的提示记日志、返回前台
+import copy as _copy
+import time as _time
+# ---------- R1. 温度和材料 ----------
+p = store.load(PID)
+p["material"] = "PLA"
+p["recipe"] = dict(recipes.clean({"nozzle_temp": 210, "bed_temp": 55, "walls": 3, "filament": {"Bambu Lab P1S": PLA_PROF}}), updated_at=1)
+p["print_plans"] = {"": {"plates": [plate("p1", ["PLA"], [item("a1", 60, 60)]), plate("p2", ["PETG"], [item("b1", 60, 60)])], "schemes": {}}}
+p.pop("spec_recipes", None)
+store.save(p)
+raw0 = json.dumps(store.load(PID)["print_plans"], sort_keys=True)
+p = store.load(PID)
+mp = pp.get_plan(p, "")
+ok(json.dumps(p["print_plans"], sort_keys=True) == raw0, "Y3: reading (migration) does not change the stored plan in p")
+a_, b_ = mp["plates"]
+ok(a_["params"]["nozzle_temp"] == 210 and a_["params"]["bed_temp"] == 55 and a_["params"].get("temp_material") == "PLA" and a_["params"]["filament"],
+   f"migration: PLA plate keeps the PLA recipe temps {a_['params']}")
+ok(b_["params"]["nozzle_temp"] == 0 and b_["params"]["bed_temp"] == 0 and b_["params"]["filament"] == {} and "temp_material" not in b_["params"],
+   f"migration: PETG plate gets no PLA temps / profile {b_['params']}")
+ok(a_.get(pp.AUTO_PRM) and b_.get(pp.AUTO_PRM), "migrated params are marked")
+pp.save_plan(PID, "", mp, "boss")
+sv = store.load(PID)["print_plans"][""]["plates"]
+ok(not any(pp.AUTO_PRM in x for x in sv), "marker not stored")
+ok(sv[0]["params"]["nozzle_temp"] == 210 and sv[0]["params"]["temp_material"] == "PLA" and sv[1]["params"]["nozzle_temp"] == 0,
+   "saved: PLA plate 210 (for PLA), PETG plate no temps")
+# 原来的面板保存（apply_recipe）：PETG 盘不带 PLA 的温度
+pp.apply_recipe(PID, "", recipes.clean({"nozzle_temp": 215, "bed_temp": 60, "filament": {"Bambu Lab P1S": PLA_PROF}}))
+sv = store.load(PID)["print_plans"][""]["plates"]
+ok(sv[0]["params"]["nozzle_temp"] == 215 and sv[0]["params"]["temp_material"] == "PLA", f"apply_recipe: PLA plate 215 {sv[0]['params']}")
+ok(sv[1]["params"]["nozzle_temp"] == 0 and sv[1]["params"]["bed_temp"] == 0 and sv[1]["params"]["filament"] == {},
+   f"apply_recipe: PETG plate gets no PLA temps {sv[1]['params']}")
+# 换材料：PLA 盘（215 °C）→ TPU，温度和配置一起清掉
+mp = pp.get_plan(store.load(PID), "")
+mp["plates"][0]["slots"][0]["material"] = "TPU"
+mp["plates"][1]["params"].update(nozzle_temp=240, bed_temp=75, temp_material="PETG")     # PETG 盘自己设 PETG 的温度：留着
+pp.save_plan(PID, "", mp, "boss")
+sv = store.load(PID)["print_plans"][""]["plates"]
+ok(sv[0]["params"]["nozzle_temp"] == 0 and sv[0]["params"]["bed_temp"] == 0 and sv[0]["params"]["filament"] == {},
+   f"slot 1 PLA -> TPU clears temps + profile {sv[0]['params']}")
+ok(sv[1]["params"]["nozzle_temp"] == 240 and sv[1]["params"]["temp_material"] == "PETG", "temps set for the plate's own material are kept")
+# 新加的盘复制了 PLA 盘的参数（temp_material = PLA）但槽 1 是 PETG → 温度作废
+mp = pp.get_plan(store.load(PID), "")
+mp["plates"].append(plate("p9", ["PETG"], [item("z1", 60, 60)], params=dict(mp["plates"][1]["params"], nozzle_temp=210, temp_material="PLA")))
+pp.save_plan(PID, "", mp, "boss")
+ok(store.load(PID)["print_plans"][""]["plates"][2]["params"]["nozzle_temp"] == 0, "copied plate with PLA temps on a PETG slot: temps cleared")
+# v2.55.0 存下的坏数据：PETG 盘带着 PLA 的 210 °C、没记 temp_material
+p = store.load(PID)
+p["material"] = "PLA"
+p["print_plans"][""]["plates"][0]["slots"][0]["material"] = "PLA"
+bad = p["print_plans"][""]["plates"][1]
+bad["params"].update(nozzle_temp=210, bed_temp=55, filament={})
+bad["params"].pop("temp_material", None)
+store.save(p)
+ok(not pp.temps_ok(store.load(PID), pp.get_plan(store.load(PID), "")["plates"][1]), "old data: PETG plate with unlabelled temps -> not used")
+ok(pp.temps_ok(store.load(PID), pp.get_plan(store.load(PID), "")["plates"][0]), "plate without temps fine")
+ck = pp.plate_checks(store.load(PID), pp.get_plan(store.load(PID), "")["plates"][1], {})
+ok(any("温度不是给槽 1" in x["zh"] for x in ck), "editor check warns about stale temperatures")
+# 顶面图案
+ok("monotonic" not in pp.PATTERNS and "monotonicline" not in pp.PATTERNS, "monotonic not offered as infill")
+ok(pp.clean_params({"infill_pattern": "monotonic"})["infill_pattern"] == "rectilinear", "monotonic infill -> rectilinear on save")
+pl_m = dict(pp.get_plan(store.load(PID), "")["plates"][0])
+pl_m["params"] = dict(pl_m["params"], infill_pattern="monotonicline")
+ok(any("顶面图案" in x["zh"] for x in pp.plate_checks(store.load(PID), pl_m, {})), "stored monotonic infill: editor warns")
+rc_ = pp.recipe_of(store.load(PID), pl_m)
+w_ = pp.slice_warnings(store.load(PID), pl_m, rc_)
+ok(rc_["infill_pattern"] == "rectilinear" and w_ and w_[0]["th"], "slice uses rectilinear instead + warning")
+
+CAP.clear()
+slicer.run_cli = spy
+cfg = load_config()
+if slicer.find_orca(cfg):
+    idx = op.build_index(slicer.find_orca(cfg))
+    # R1 切片时：没记材料的旧温度不用，按 PETG 配置的温度
+    r = pp.slice_plate(PID, "", "p2", "白色", None, "boss")
+    f1 = CAP[-1][0]
+    ok(t0(f1) >= 230, f"stale PLA temps ignored at slice time: {t0(f1)}°C")
+    ok(any("温度" in w["zh"] for w in r.get("warnings") or []), f"slice result explains it {r.get('warnings')}")
+    # 记了是给 PETG 的温度：照用
+    p = store.load(PID)
+    p["print_plans"][""]["plates"][1]["params"].update(nozzle_temp=245, temp_material="PETG")
+    store.save(p)
+    CAP.clear()
+    r = pp.slice_plate(PID, "", "p2", "白色", None, "boss")
+    ok(t0(CAP[-1][0]) == 245 and not any("温度" in w["zh"] for w in r.get("warnings") or []), f"labelled PETG temp used {t0(CAP[-1][0])}")
+    # ---------- Y1. 自动选到别的材料的配置 → 不切 ----------
+    c2 = load_config()
+    c2["printers"][0]["orca_filament"] = PLA_PROF          # 打印机设置里的默认耗材：PLA
+    save_config(c2)
+    c2 = load_config()
+    for mat in ("SILK", "XYZ"):
+        try:
+            slicer.resolve_profiles(c2, 0, mat)
+            ok(False, f"{mat}: auto-picked PLA profile should be refused")
+        except slicer.SliceError as e:
+            ok(f"找不到 {mat} 的耗材配置" in str(e) and "ไม่พบ" in str(e), f"{mat}: refused with a clear message: {str(e)[:80]}")
+    ok(slicer.resolve_profiles(c2, 0, "PLA")[4] == PLA_PROF, "PLA still uses the printer's PLA profile")
+    ok("PC" in (op.filament_type(idx, slicer.resolve_profiles(c2, 0, "PC")[4]) or ""), "PC: a PC profile is found")
+    nts = []
+    slicer.resolve_profiles(c2, 0, "SILK", None, nts, strict=False)
+    ok(nts and nts[-1]["level"] == "error" and "SILK" in nts[-1]["zh"], "strict=False: reason in notes instead")
+    # 两槽：槽 2 是没有配置的材料 → 整盘不切
+    mp = pp.get_plan(store.load(PID), "")
+    two = plate("p5", ["PLA", "SILK"], [item("d1", 60, 60, 1), item("d2", 160, 60, 2)], params=dict(mp["plates"][0]["params"]))
+    mp["plates"].append(two)
+    mp["schemes"] = {"白色": {"1": "白色", "2": "黑色"}}
+    pp.save_plan(PID, "", mp, "boss")
+    n0_ = len(CAP)
+    try:
+        pp.slice_plate(PID, "", "p5", "白色", None, "boss")
+        ok(False, "slot 2 with no matching profile should not slice")
+    except slicer.SliceError as e:
+        ok("SILK" in str(e) and len(CAP) == n0_, f"per slot: refused before running OrcaSlicer {str(e)[:60]}")
+    # ---------- Y2. 切片前信息：按选的配置算 ----------
+    pr = dict(store.load(PID), material="PETG")
+    st = recipes.setup_info(pr, {"filament": {"Bambu Lab P1S": PLA_PROF}}, 0)
+    ok(st.get("material_match") == "diff" and st.get("chosen_type") == "PLA", f"setup info: chosen PLA profile vs PETG = diff {st.get('material_match')}")
+    ok(any("选的耗材配置和材料不一致，切片时会自动换" in w["zh"] and w["th"] for w in st.get("warnings") or []), "setup info warns it will be swapped")
+    ok(st.get("final_match") == "same" and "PETG" in st.get("filament_type", ""), f"…and says what will be used {st.get('filament')}")
+    st = recipes.setup_info(dict(pr, material="PLA"), {"filament": {"Bambu Lab P1S": PLA_PROF}}, 0)
+    ok(st.get("material_match") == "same" and not st.get("warnings"), "matching choice: no warning")
+    rjs = open(os.path.join(APP, "modules/prod/ui/recipe.js"), encoding="utf-8").read()
+    ok("st.warnings" in rjs and "nf.warnings" in rjs, "recipe panel shows setup / slice warnings")
+    c2["printers"][0].pop("orca_filament", None)
+    save_config(c2)
+    # ---------- 按方案切片（slice_product）：提示记日志、返回 ----------
+    p = store.load(PID)
+    os.makedirs(os.path.join(store.product_dir(PID), "model"), exist_ok=True)
+    shutil.copyfile(modellib.path_of(PID, next(e for e in p["model_lib"] if e["id"] == CUBE)), os.path.join(store.product_dir(PID), "model", p["model"]["file"]))
+    rcp = dict(recipes.get(p), infill_pattern="monotonic", filament={})
+    tmp, rep, _r = recipes.slice_product(p, 0, 1, rcp, user="boss")
+    os.remove(tmp)
+    ok(any("顶面图案" in w["zh"] for w in rep.get("warnings") or []), f"slice_product returns warnings {rep.get('warnings')}")
+    ok(any("按方案切片" in (a.get("action") or "") and a.get("username") == "boss" for a in db.audit_list(20)), "slice_product warnings in the audit log")
+    ok(_r["infill_pattern"] == "monotonic", "returned recipe unchanged (only the slice used rectilinear)")
+else:
+    print("SKIP 没有 OrcaSlicer（温度 / 配置的真切片）")
+slicer.run_cli = _run
+
+# ---------- Y3. 按主模型缩放的规格：签名稳定 ----------
+p = store.load(PID)
+p["print_plans"] = {"": {"plates": [plate("p1", ["PLA"], [item("a1", 60, 60)])], "schemes": {}}}   # 旧数据：没有每盘参数
+store.save(p)
+pp.set_scale(PID, "大号", 150, "boss")
+p = store.load(PID)
+sig_ = pp.plate_sig(pp.get_plan(p, "大号")["plates"][0])
+ok(sig_ == pp._sig0(pp.get_plan(p, "大号")["plates"][0]), "old main plan: same signature as before v2.55")
+p["print_plans"]["大号"]["sliced_by"] = {"p1": {"filaments": [{"slot": 1, "grams": 9}], "grams": 9, "hours": 1, "sig": sig_}}
+store.save(p)
+p = store.load(PID)
+r1 = [pp.plan_summary(p, s)["sliced"] for s in ("大号", "", "大号")]
+p = store.load(PID)
+r2 = [pp.plan_summary(p, s)["sliced"] for s in ("", "大号", "")]
+ok(r1 == [1, 0, 1] and r2[1] == 1, f"overview order does not flip the scaled spec's slice result {r1} {r2}")
+pp.apply_actual(PID, "大号", "p1", 12, 1.2)
+sc = pp.get_plan(store.load(PID), "大号")
+ok((sc["plates"][0].get("sliced") or {}).get("trial"), "trial write-back on a scaled spec stays valid (old main plan)")
+main = pp.get_plan(store.load(PID), "")
+pp.save_plan(PID, "", main, "boss")                       # 主模型保存了（参数存进去）
+p = store.load(PID)
+p["print_plans"]["大号"]["sliced_by"] = {"p1": {"grams": 9, "hours": 1, "sig": pp.plate_sig(pp.get_plan(p, "大号")["plates"][0])}}
+store.save(p)
+pp.apply_actual(PID, "大号", "p1", 13, 1.3)
+p = store.load(PID)
+ok([pp.plan_summary(p, s)["sliced"] for s in ("", "大号", "大号")][1:] == [1, 1], "trial write-back valid with stored params, stable over repeated overview")
+ok((pp.get_plan(store.load(PID), "大号")["plates"][0].get("sliced") or {}).get("trial"), "trial result still there")
+
+# ---------- Y4. 展示用到的切开的零件 ----------
+plan = C.get(f"/api/products/{PID}/print-plan").get_json()["plan"]
+u0 = plan["plates"][0]["items"][0]["uid"]
+r = C.post(f"/api/products/{PID}/print-plan/op", json={"spec": "", "plan": plan, "op": {"op": "cut", "plate": "p1", "uids": [u0], "z": 8}})
+ids = [c["id"] for c in r.get_json()["cut"]]
+p = store.load(PID)
+p["display"] = {"v": 2, "specs": {"": {"items": [{"uid": "d1", "id": ids[0], "part": None, "qty": 1}], "parts": []}}}
+gone = pp.cleanup_cuts(PID, p, now=_time.time() + pp.CUT_TTL + 1)
+ok(ids[0] not in gone and ids[1] in gone, f"half used only in display kept, unused half cleaned {gone}")
+p2 = _copy.deepcopy(store.load(PID))
+p2["display"] = {"source": ids[0], "parts": []}
+ok(ids[0] in pp._lib_refs(p2), "legacy display source counts as a reference")
 sys.exit(1 if E_ else 0)

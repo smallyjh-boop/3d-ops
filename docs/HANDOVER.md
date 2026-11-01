@@ -39,5 +39,6 @@
 
 - v2.55 打印参数的唯一来源是打印方案每盘的 params；product["recipe"] / spec_recipes 只是第 1 盘的镜像（老代码读）；recipes.get 只认 v2.55 后保存过（盘里有 params）的方案
 - v2.55 零件单独参数写在 3MF Metadata/model_settings.config 的 <object> metadata（layer_height / sparse_infill_density / wall_loops），切片时 keep_settings 保留该文件
+- v2.55 复审：盘参数的温度带 temp_material（给哪个材料设的），换材料 / 不一致就作废；printplan._migrate 不改 p（返回拷贝 + params_auto 标记），缩放规格签名一律用 plate_sig；resolve_profiles 默认 strict（自动选到别的材料的配置就抛错），只看配置的地方传 strict=False
 ## 本次改动的文件
 - 见 git log（v2.52.0 相关提交）

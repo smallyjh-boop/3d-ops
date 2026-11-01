@@ -53,7 +53,8 @@
         <td><select data-fil="${esc(name)}" data-pi="${(R.printer_idx || [])[i] ?? i}" class="fil-sel" data-notr>
           <option value="">${esc("自动：" + (st.auto ? st.filament : "按材料自动选"))}</option>
           ${chosen ? `<option value="${esc(chosen)}" selected>${esc(chosen)}</option>` : ""}</select></td>
-        <td class="small">${st.filament_type ? matBadge(st.filament_type, mm === "diff") : ""} ${mm === "diff" ? '<span class="bad">和产品材料不一致</span>' : ""}</td>
+        <td class="small">${(chosen && st.chosen_type) ? matBadge(st.chosen_type, mm === "diff") : st.filament_type ? matBadge(st.filament_type, mm === "diff") : ""} ${mm === "diff" ? '<span class="bad">和产品材料不一致</span>' : ""}
+          ${(st.warnings || []).map((w) => `<div class="${w.level === "error" ? "bad" : "warn"}" data-notr>${esc(TH() ? w.th : w.zh)}</div>`).join("")}</td>
         <td class="small nowrap">🔥 ${st.nozzle_temp ?? "-"}°C · ▭ ${st.bed_temp ?? "-"}°C${st.temp_custom ? ' <span class="pill tag-pill">自定</span>' : ""}</td></tr>`;
     }).join("");
   }
@@ -421,6 +422,7 @@
         const nf = await busy($('[data-rc="slice"]', BOX) || b, () => apiJob(`/api/products/${encodeURIComponent(PID)}/recipe/slice`, { json: { printer, count, spec: SPEC } }),
           TR("busy.slicing"));
         toast(nf && nf.report && nf.report.note ? nf.report.note + "。请在 3D 切片预览里检查，然后复核" : "切片完成，请在 3D 切片预览里检查支撑和摆放，然后复核", !!(nf && nf.report && nf.report.note), 8000);
+        ((nf && nf.warnings) || []).forEach((w) => toast(TH() ? w.th : w.zh, true, 10000));   // 耗材配置和材料不一致已自动换 / 填充图案改了
         await mount(BOX, PID);
         if (nf && nf.id) gv((G) => G.openFile(nf.id, { material: R.material }));
       }

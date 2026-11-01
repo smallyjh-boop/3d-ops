@@ -638,10 +638,20 @@ def filament_mismatch(idx, filament_name, material):
     return ""
 
 
-def resolve_profiles(cfg, printer_index=0, material="PLA", filament_name=None, notes=None):
+def no_profile_msg(material, got="", got_type=""):
+    """找不到这个材料的耗材配置（自动选到的是别的材料，例如 PC / 丝绸料选到了打印机默认的 PLA）。中文 + 泰文。"""
+    extra = f"（自动选到的「{got}」是 {got_type}，不能用）" if got else ""
+    extra_th = f" (โปรไฟล์ที่เลือกอัตโนมัติ「{got}」เป็น {got_type} ใช้ไม่ได้)" if got else ""
+    return (f"找不到 {material} 的耗材配置，请在打印机设置里选{extra}"
+            f" / ไม่พบโปรไฟล์ฟิลาเมนต์สำหรับ {material} กรุณาเลือกในการตั้งค่าเครื่องพิมพ์{extra_th}")
+
+
+def resolve_profiles(cfg, printer_index=0, material="PLA", filament_name=None, notes=None, strict=True):
     """这台打印机切片用哪套配置：返回 (orca 程序, 配置索引, 打印机配置, 工艺配置, 耗材配置)。
     filament_name：打印方案里指定的耗材配置（留空 = 按材料自动选）。
-    v2.55：指定的配置材料和 material 不一样时不用它（按材料自动选），原因写进 notes（[{zh, th}]）。"""
+    v2.55：指定的配置材料和 material 不一样时不用它（按材料自动选），原因写进 notes（[{zh, th}]）。
+    v2.55：自动选出来的配置还是别的材料（PC / 丝绸料 / 不认识的材料 → 打印机默认的 PLA）→ 抛 SliceError，不切；
+    strict=False（只看配置、列可选配置时）不抛，原因写进 notes。"""
     exe = find_orca(cfg)
     if not exe:
         raise SliceError("没有找到 OrcaSlicer。请在设置页点「手动选择程序」选 orca-slicer.exe（或它的桌面快捷方式）")
@@ -675,10 +685,20 @@ def resolve_profiles(cfg, printer_index=0, material="PLA", filament_name=None, n
         if material and material.upper() != "PLA" and machine:
             filament = op.match_filament(idx, machine, material) or filament
         filament = filament or (op.match_filament(idx, machine, material) if machine else "")
+        if machine and not filament and material and material.upper() != "PLA":
+            raise SliceError(no_profile_msg(material))
     for label, f in (("打印机", machine), ("工艺", process), ("耗材", filament)):
         if not f:
             raise SliceError(f"「{p.get('name')}」的{label}配置没有设置，也没能自动匹配。"
                              f"请到设置页点「自动匹配配置」，或从下拉里选择（OrcaSlicer 找到 {op.summary(idx)['machine']} 个打印机配置）")
+    bad = filament_mismatch(idx, filament, material)     # 最后用的配置（自动选的）再核对一次材料
+    if bad:
+        msg = no_profile_msg(material, filament, bad)
+        if strict:
+            raise SliceError(msg)
+        if notes is not None:
+            zh, th = msg.split(" / ", 1)
+            notes.append({"zh": zh, "th": th, "level": "error"})
     return exe, idx, machine, process, filament
 
 

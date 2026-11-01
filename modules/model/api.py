@@ -666,7 +666,7 @@ def print_plan_check(pid):
         if b.get("arrange") or any(it.get("x") is None for it in pl["items"]):
             miss = _pp.auto_arrange(pl, bed, f)
         if not pl.get("params"):
-            _pp._migrate(p, (b.get("spec") or "").strip(), plan)
+            pl = _pp._migrate(p, (b.get("spec") or "").strip(), plan)["plates"][0]     # 不改传进去的，返回补好的拷贝
         return jsonify({"plate": pl, "check": _pp.check_plate(pl, bed, f), "footprints": f, "missed": miss, "bed": bed,
                         "plate_checks": _pp.plate_checks(p, pl, f)})
     except (ValueError, OSError) as e:

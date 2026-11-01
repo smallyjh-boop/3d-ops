@@ -54,7 +54,7 @@ def _recipe_slice(pid, b):
         names = [x.get("name") for x in load_config().get("printers") or []]
         r = recipes.get(p)
         count = int(b.get("count") or r.get("per_plate") or 1)
-        tmp, rep, r = recipes.slice_product(p, idx, count, r)
+        tmp, rep, r = recipes.slice_product(p, idx, count, r, user=_uname())
         geo = recipes.geometry(p, r, idx)
         checks = recipes.check(r, geo, rep, p.get("material") or "PLA")
         f = print_files.add(tmp, f"{pid}{'_' + sp if sp else ''}_{names[idx]}_x{count}.gcode.3mf".replace(" ", "_"), pid, names[idx],
@@ -64,7 +64,7 @@ def _recipe_slice(pid, b):
     except (slicer.SliceError, ValueError, OSError, IndexError) as e:
         return err(f"切片失败：{e}")
     production.schedule()
-    return jsonify(f)
+    return jsonify(dict(f, warnings=rep.get("warnings") or []))     # v2.55：耗材配置换了 / 图案改了 → 前台提示
 
 
 @bp.post("/api/sliced/parse")

@@ -1168,7 +1168,7 @@ def _file_for_count(j, idx, count, file_id=None, user="", plate=None):
         raise ValueError(f"没有一盘 {count} 个的切片文件，这个产品也没有 3D 模型可以自动切片。"
                          f"现有文件的数量：{have or '无'}")
     recipe = recipes.get(p)
-    tmp, rep, recipe = recipes.slice_product(p, idx, count, recipe)
+    tmp, rep, recipe = recipes.slice_product(p, idx, count, recipe, user=user)
     geo = recipes.geometry(p, recipe, idx)
     checks = recipes.check(recipe, geo, rep, p.get("material") or "PLA")
     sp = p.get("_spec") or ""
