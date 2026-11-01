@@ -26,6 +26,14 @@
   测试 t_slicerapp36 / t_asm37 / desk t_slicerdesk256。Bambu Studio 在这里没法测：等老板在 Windows 上跑「🔧 切片软件自检」。
   没做：T37 ②（装配视图编辑回传）、电脑上用 Bambu Studio 切片（T36 第二步）、NAS 网页版（第三步）。
 
+- 已发布 v2.56.0（main，2026-11-01，分组全量 127 个通过）：T36 第一步——打印方案每一盘在 Bambu Studio（拓竹）/ OrcaSlicer（其它）里编辑，
+  modules/model/slicerproj.py（生成 / 读回项目 3MF，零件名带「#编号」对应）、editsession.py（会话、锁、主文件 10 个版本、同步、安全核对、
+  切主文件、旧切片作废 print_files.plate_sig）、desktop/slicer_edit.py（Windows 检测 / 监视 / 回传 / 分屏）、modules/desk/selftest.py（一键自检）；
+  T37 ①③ 展示组装读作者 assemble_item / 默认零件平铺；摆盘工具条移到右栏（画布不跳）
+- 待老板在 Windows 实测：桌面客户端「🔧 切片软件自检」（Bambu Studio 测试机装不了，完全没测过）
+- 暂停：T31 尺寸重量准确化，半成品在分支 t31-physical-wip（03c65f6，未测试；缺前端 phys.js、测试、净重扣支撑核对）
+- 未做：T36 第二步（电脑上用 Bambu Studio 切片）、第三步（NAS 网页版 Orca 应急）、T37 ②（软件装配视图组装回传）
+
 ## 已知问题 / 坑
 - 测试临时目录 /tmp/3dops-test-* 很大（每个约 0.8–1 GB），磁盘满时要清理
 - OrcaSlicer 不认我们写的 3MF 加拓竹标记（会崩溃 -11）；普通 3MF + Metadata/model_settings.config 才能按槽分色
