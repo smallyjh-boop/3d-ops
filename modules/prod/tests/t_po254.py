@@ -255,4 +255,45 @@ ok(PID and "<svg" in h and rel["no"] in h and SKA in h, "printable sheet has num
 ok("ใบสั่งผลิต" in C.get(f"/print/po/{PID}?lang=th").get_data(as_text=True), "Thai sheet")
 ok(C.get("/print/po/99999").status_code == 404, "unknown sheet 404")
 
+
+# ---------- 专用的单子结束 / 找不到 = 不再专用 + 提醒 ----------
+setp()
+for st_ in ("done", "cancelled"):
+    pe = C.post("/api/porders", json={"lines": [{"sku": SKA, "qty": 1}], "release": True}).get_json()
+    db.conn().execute("UPDATE production_orders SET status=? WHERE id=?", (st_, pe["id"])); db.conn().commit()
+    ok(po.dedication_status(str(pe["id"]))["state"] == "ended" and po.dedication_status(pe["no"])["state"] == "ended", f"dedication to a {st_} order = ended")
+    setp({0: {"dedicated_po": str(pe["id"])}, 1: {"dedicated_po": str(pe["id"])}, 2: {"dedicated_po": str(pe["id"])}})
+    pn = C.post("/api/porders", json={"lines": [{"sku": SKB, "qty": 1}], "release": True}).get_json()
+    production.schedule()
+    ok(printer_of(pn["id"])[SKB] in (0, 1, 2), f"printers dedicated to a {st_} order still take other jobs")
+    bd = production.board()
+    ok(all(l.get("dedicated_warn") for l in bd["lanes"][:3]), "board lane shows the warning")
+    C.post(f"/api/porders/{pn['id']}/cancel")
+setp({0: {"dedicated_po": "PO000000-99"}})
+ok(po.dedication_status("PO000000-99")["state"] == "missing" and po.dedication_status("")["state"] == "none", "missing / empty dedication states")
+pm = C.post("/api/porders", json={"lines": [{"sku": SKA, "qty": 1}], "release": True}).get_json()
+production.schedule()
+ok(printer_of(pm["id"])[SKA] is not None, "dedication to a missing order doesn't block jobs")
+setp()
+
+# ---------- 打印机限制存稳定 id ----------
+prs_ = load_config()["printers"]
+ok(all(p.get("id") for p in prs_), "printers carry stable ids")
+pa_ = C.post("/api/porders", json={"lines": [{"sku": SKA, "qty": 1}], "printers": ["K1C-01"]}).get_json()
+ok(pa_["printers"] == [prs_[2]["id"]], f"stored by id {pa_['printers']}")
+cfg_ = load_config(); cfg_["printers"][2]["code"] = "K1C-RENAMED"; save_config(cfg_)
+ok(po.resolve_printers(pa_["printers"]) == [2] and C.get(f"/api/porders/{pa_['id']}").get_json()["printer_idx"] == [2], "renaming the code keeps the restriction")
+cfg_ = load_config(); cfg_["printers"] = [cfg_["printers"][2]] + cfg_["printers"][:2]; save_config(cfg_)
+ok(po.resolve_printers(pa_["printers"]) == [0], "reordering printers keeps the restriction (id -> current index)")
+setp()
+prs_ = load_config()["printers"]
+db.conn().execute("UPDATE production_orders SET printers=? WHERE id=?", (json.dumps(["P1S-02"]), pa_["id"])); db.conn().commit()
+po.rules(prs_)
+ok(json.loads(db.conn().execute("SELECT printers FROM production_orders WHERE id=?", (pa_["id"],)).fetchone()[0]) == [prs_[1]["id"]], "legacy code refs migrated to ids")
+ok(po.resolve_printers(["Bambu Lab P1S"], prs_) == [], "plain model name with several printers is not guessed (no first-match)")
+ok(po.resolve_printers(["Creality K1C"], prs_) == [2], "plain model name with one printer still resolves")
+pb_ = C.post("/api/porders", json={"lines": [{"sku": SKA, "qty": 1}], "printers": ["model:Bambu Lab P1S"]}).get_json()
+ok(po.resolve_printers(pb_["printers"], prs_) == [0, 1] and pb_["printer_idx"] == [0, 1], "explicit any-of-this-model expands to all printers of the model")
+ok(C.post("/api/porders", json={"lines": [{"sku": SKA, "qty": 1}], "printers": ["model:Nope"]}).status_code == 400, "unknown model refused")
+
 print("ERRORS", E_)

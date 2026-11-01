@@ -45,35 +45,116 @@ def _next_no(c):
     return f"PO{day}-{n:02d}"
 
 
-# ---------------- 打印机引用（序号或编号） ----------------
+# ---------------- 打印机引用（稳定 id；兼容旧的编号 / 序号） ----------------
+MODEL_PREFIX = "model:"
+
+
 def resolve_printers(refs, prs=None):
-    """['K1C-01', 2, '0'] → 打印机序号列表（认不出来的丢掉）。"""
+    """引用 → 打印机序号列表（认不出来的丢掉）。引用可以是：打印机 id（现在存的）、编号 / 序号（旧数据）、
+    "model:机型名"（明确选「这个机型的任一台」，展开成该机型所有打印机）。
+    只写机型名的旧写法：这个机型只有一台才认；有几台同名的认不准，丢掉（不再悄悄挑第一台）。"""
     prs = prs if prs is not None else (load_config().get("printers") or [])
     out = []
-    for x in refs or []:
-        i = None
-        if isinstance(x, int) and not isinstance(x, bool):
-            i = x
-        else:
-            s = str(x).strip()
-            for k, p in enumerate(prs):
-                if s and s.lower() in ((p.get("code") or "").lower(), (p.get("name") or "").lower()):
-                    i = k
-                    break
-            if i is None and s.isdigit():
-                i = int(s)
-        if i is not None and 0 <= i < len(prs) and i not in out:
+
+    def add(i):
+        if 0 <= i < len(prs) and i not in out:
             out.append(i)
+    for x in refs or []:
+        if isinstance(x, int) and not isinstance(x, bool):
+            add(x)
+            continue
+        s = str(x).strip()
+        if not s:
+            continue
+        if s.lower().startswith(MODEL_PREFIX):
+            m = s[len(MODEL_PREFIX):].strip().lower()
+            for k, p in enumerate(prs):
+                if m and (p.get("name") or "").strip().lower() == m:
+                    add(k)
+            continue
+        hit = next((k for k, p in enumerate(prs) if p.get("id") and str(p["id"]) == s), None)
+        if hit is None:
+            hit = next((k for k, p in enumerate(prs) if (p.get("code") or "").lower() == s.lower()), None)
+        if hit is None:
+            same = [k for k, p in enumerate(prs) if (p.get("name") or "").lower() == s.lower()]
+            if len(same) == 1:
+                hit = same[0]
+        if hit is None and s.isdigit():
+            hit = int(s)
+        if hit is not None:
+            add(hit)
     return out
 
 
 def _clean_printers(refs):
-    """存的时候：有编号的存编号（打印机顺序变了也不乱），没有就存序号。"""
+    """存的时候：存稳定 id（改编号、调顺序都不会丢）；没有 id 的老配置退回存编号 / 序号；
+    "model:机型" 原样存（明确选的「这个机型的任一台」）；只写了有几台同名的机型名 = 当作选了这个机型。"""
     prs = load_config().get("printers") or []
-    idx = resolve_printers(refs, prs)
-    if refs and not idx:
+    out = []
+    for x in refs or []:
+        s = str(x).strip()
+        if not isinstance(x, int) and s.lower().startswith(MODEL_PREFIX):
+            if not resolve_printers([s], prs):
+                raise ValueError("填的打印机找不到")
+            v = MODEL_PREFIX + s[len(MODEL_PREFIX):].strip()
+            if v not in out:
+                out.append(v)
+            continue
+        idx = resolve_printers([x], prs)
+        if not idx and s and not s.isdigit() and any((p.get("name") or "").lower() == s.lower() for p in prs):
+            out.append(MODEL_PREFIX + s)
+            continue
+        for i in idx:
+            v = prs[i].get("id") or prs[i].get("code") or i
+            if v not in out:
+                out.append(v)
+    if refs and not out:
         raise ValueError("填的打印机找不到")
-    return [(prs[i].get("code") or i) for i in idx]
+    return out
+
+
+def _migrate_refs(c, prs):
+    """旧数据：生产单里存的是编号 / 序号 → 换成稳定 id（认得出的才换；已经是 id / model: 的不动）。"""
+    if not any(p.get("id") for p in prs):
+        return
+    ids = {str(p.get("id")) for p in prs if p.get("id")}
+    for r in c.execute("SELECT id, printers FROM production_orders WHERE printers IS NOT NULL AND printers NOT IN ('', '[]')").fetchall():
+        try:
+            refs = json.loads(r["printers"] or "[]")
+        except ValueError:
+            continue
+        if not refs or all(isinstance(x, str) and (x.lower().startswith(MODEL_PREFIX) or x in ids) for x in refs):
+            continue
+        new = []
+        for x in refs:
+            if isinstance(x, str) and (x.lower().startswith(MODEL_PREFIX) or x in ids):
+                new.append(x)
+                continue
+            for i in resolve_printers([x], prs):
+                v = prs[i].get("id")
+                if v and v not in new:
+                    new.append(v)
+        if new and new != refs:
+            c.execute("UPDATE production_orders SET printers=? WHERE id=?", (json.dumps(new), r["id"]))
+    c.commit()
+
+
+ACTIVE_PO = ("draft", "released", "producing", "partial")
+
+
+def dedication_status(value, c=None):
+    """打印机的「专用生产单」填的值（单 id 或单号）→ {"state": "none"|"active"|"ended"|"missing", "po_id", "no", "status"}。
+    ended = 单子已完成 / 取消，missing = 找不到这张单；这两种都当作没有专用（打印机照常接活），界面提醒「专用的生产单已结束」。"""
+    d = str(value or "").strip()
+    if not d:
+        return {"state": "none", "po_id": None, "no": "", "status": ""}
+    c = c or db.conn()
+    r = c.execute("SELECT id, no, status FROM production_orders WHERE id=?", (int(d),)).fetchone() if d.isdigit() else None
+    if r is None:
+        r = c.execute("SELECT id, no, status FROM production_orders WHERE no=?", (d,)).fetchone()
+    if r is None:
+        return {"state": "missing", "po_id": None, "no": d, "status": ""}
+    return {"state": "active" if r["status"] in ACTIVE_PO else "ended", "po_id": r["id"], "no": r["no"], "status": r["status"]}
 
 
 # ---------------- 排单用的规则 ----------------
@@ -83,19 +164,20 @@ def rules(printers, c=None):
     p["dedicated_po"] 的打印机只接这张单的任务；单子自己指定了打印机的只能排给这几台；暂停的单子不排。字段缺了 = 不限制。"""
     c = c or db.conn()
     pos = {}
+    try:
+        _migrate_refs(c, printers)
+    except Exception:  # noqa: BLE001  迁移失败不能影响排单
+        pass
     for r in c.execute("SELECT id, no, paused, printers, status FROM production_orders"):
         try:
             refs = json.loads(r["printers"] or "[]")
         except ValueError:
             refs = []
         pos[r["id"]] = {"no": r["no"], "paused": bool(r["paused"]) or r["status"] == "cancelled", "idx": set(resolve_printers(refs, printers))}
-    by_no = {v["no"]: k for k, v in pos.items()}
 
     def dedicated(p):
-        d = str(p.get("dedicated_po") or "").strip()
-        if not d:
-            return None
-        return int(d) if d.isdigit() else by_no.get(d, -1)
+        st = dedication_status(p.get("dedicated_po"), c)
+        return st["po_id"] if st["state"] == "active" else None   # 专用的单子没了 / 结束了 = 不再专用
 
     def allowed(i, j):
         p = printers[i]

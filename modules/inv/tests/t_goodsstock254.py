@@ -155,9 +155,40 @@ ok(rel["status"] == "released" and rowof(SKA)["making"] == pa["qty"] and rowof(S
 # 用户在预览里改了数量
 r2 = C.post("/api/inv/gs/replenish", json={"lines": [{"sku": SKB, "qty": 6}], "release": True}).get_json()
 ok(r2["po"]["status"] == "released" and r2["po"]["lines"][0]["qty"] == 6 and r2["po"]["qty"] == 6, "edited quantity + release in one go")
-ok(C.post("/api/inv/gs/replenish", json={"skus": ["BUY-001"]}).get_json()["purchase"], "buy-only replenish needs no production order")
+n_pur = len(db.conn().execute("SELECT 1 FROM inv_po WHERE status='draft'").fetchall())
+ok(C.post("/api/inv/gs/replenish", json={"skus": ["BUY-001"]}).status_code == 400, "click twice on a bought SKU: no second purchase draft (gap covered by the draft)")
+ok(C.post("/api/inv/gs/replenish", json={"lines": [{"sku": "BUY-001", "qty": 5}]}).status_code == 400, "explicit quantity for a SKU already in a purchase draft refused")
+ok(len(db.conn().execute("SELECT 1 FROM inv_po WHERE status='draft'").fetchall()) == n_pur, "purchase drafts unchanged")
 ok(C.post("/api/inv/gs/replenish", json={"lines": [{"sku": SKA, "qty": 0}]}).status_code == 400, "nothing to replenish refused")
+# 自产：点两次不能建出两张满额的单
+C.post("/api/inv/gs/target", json={"skus": [SKC], "target": 40})
+gapC = rowof(SKC)["gap"]
+ok(gapC > 0, f"SKC has a gap {gapC}")
+n0 = len(C.get("/api/porders").get_json()["orders"])
+f1 = C.post("/api/inv/gs/replenish", json={"skus": [SKC]}).get_json()
+ok(f1["po"] and f1["po"]["status"] == "draft" and rowof(SKC)["making"] >= gapC and rowof(SKC)["gap"] == 0, "draft production order line counts as in production -> gap closes")
+f2 = C.post("/api/inv/gs/replenish", json={"skus": [SKC]})
+ok(f2.status_code == 400, "second click: nothing to replenish")
+f3 = C.post("/api/inv/gs/replenish", json={"lines": [{"sku": SKC, "qty": gapC}]})
+ok(f3.status_code == 400, "stale preview lines for a covered SKU are refused (edit the draft instead)")
+ok(len(C.get("/api/porders").get_json()["orders"]) == n0 + 1, "only one production order was created")
+tot = db.conn().execute("SELECT SUM(l.qty) FROM po_lines l JOIN production_orders p ON p.id=l.po_id WHERE p.status='draft' AND UPPER(l.sku)=?", (SKC,)).fetchone()[0]
+ok(tot == f1["po"]["lines"][0]["qty"], f"total drafted quantity not doubled ({tot})")
+C.post(f"/api/porders/{f1['po']['id']}/release")
+ok(rowof(SKC)["making"] == f1["po"]["lines"][0]["qty"], "released: counted once (jobs), not jobs + lines")
+# 同机型只算一次切片方案
+calls = []
+from core import print_files as _pf
+_op = _pf.plan
+_pf.plan = lambda j, nm: (calls.append(nm), _op(j, nm))[1]
+config.save_config({"printers": [dict(PRS[0], code=f"X-{i}") for i in range(30)] + [PRS[1]], "stock_auto_use": False})
 production.sku_per_plate = orig
+production._REQ_CACHE = {}
+production.sku_per_plate(SKA); production.sku_per_plate(SKA)
+production._REQ_CACHE = None
+ok(len(calls) <= 2, f"print_files.plan once per printer model, cached ({len(calls)} calls for 31 printers x 2)")
+_pf.plan = _op
+config.save_config({"printers": PRS, "stock_auto_use": False})
 # 采购模块关了：回落到内核直接开草稿
 ok(modules.public("pur") is not None and hasattr(modules.public("pur"), "draft_po"), "pur public draft_po")
 

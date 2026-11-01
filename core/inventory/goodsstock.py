@@ -99,6 +99,37 @@ def _wms(c):
         return {}, {}
 
 
+def draft_po_qty(c=None):
+    """{SKU: 生产单里还没变成任务的数量}：草稿单的行 + 已下达但还没建任务的行（已建任务的在 jobs 里算过，不重复）。"""
+    c = c or db.conn()
+    out = {}
+    try:
+        for r in c.execute("SELECT UPPER(l.sku) sku, SUM(MAX(l.qty-COALESCE(l.done,0),0)) q FROM po_lines l JOIN production_orders p ON p.id=l.po_id "
+                           "WHERE p.status IN ('draft','released','producing','partial') AND (p.status='draft' OR l.job_id IS NULL) "
+                           "GROUP BY UPPER(l.sku)"):
+            out[r["sku"]] = r["q"] or 0
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def _draft_buy_skus(c):
+    """采购单草稿里已有的外购 SKU 集合。"""
+    try:
+        return {r[0].upper() for r in c.execute("SELECT i.code FROM inv_po_lines l JOIN inv_po p ON p.id=l.po_id JOIN inv_items i ON i.id=l.item_id "
+                                                "WHERE p.status='draft' AND i.category='goods'")}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _draft_own_skus(c):
+    try:
+        return {r[0].upper() for r in c.execute("SELECT l.sku FROM po_lines l JOIN production_orders p ON p.id=l.po_id "
+                                                "WHERE p.status='draft' AND p.source='stock'")}
+    except Exception:  # noqa: BLE001
+        return set()
+
+
 def rows(c=None):
     """所有成品，一行一个 SKU。"""
     from .. import orders, production, store
@@ -126,10 +157,12 @@ def rows(c=None):
     making = {}
     for r in c.execute("SELECT UPPER(sku) sku, SUM(qty - COALESCE(qty_done,0)) q FROM jobs WHERE kind='stock' AND status IN ('todo','printing') GROUP BY UPPER(sku)"):
         making[r["sku"]] = r["q"] or 0
+    for k, q in draft_po_qty(c).items():       # 生产单草稿 / 还没建任务的行也算「在做」，不然点两次会建两张
+        making[k] = making.get(k, 0) + q
     transit = {}
     try:
         from . import purchase
-        transit = purchase.in_transit()
+        transit = purchase.in_transit(include_draft=True)
     except Exception:  # noqa: BLE001
         pass
     last_out = {r["item_id"]: r["t"] for r in c.execute("SELECT item_id, MAX(ts) t FROM inv_moves WHERE qty<0 GROUP BY item_id")}
@@ -331,8 +364,16 @@ def plan(skus=None, group=None):
     """补货预览：[{sku, name, type, gap, per_plate, qty}]（自产按盘数往上取整，外购按缺口）。"""
     from .. import production
     want = {str(s).strip().upper() for s in skus or [] if str(s).strip()}
+    production._REQ_CACHE = {}      # 同一次预览里，同 SKU 同机型的切片方案只算一次
+    try:
+        return _plan_rows(rows(), want, group, production)
+    finally:
+        production._REQ_CACHE = None
+
+
+def _plan_rows(all_rows, want, group, production):
     out = []
-    for r in rows():
+    for r in all_rows:
         if r["gap"] <= 0 or (want and r["sku"] not in want):
             continue
         if group and group not in r["gk"]:
@@ -359,11 +400,24 @@ def replenish(lines=None, skus=None, group=None, user="", release=False, priorit
                 sel.append(dict(base, qty=q))
     else:
         sel = list(pl.values())
+    skipped = []
+    if lines:                       # 用户自己填数量时：这个 SKU 已经有补货草稿（生产单 / 采购单）了 = 不再另建一份，提示去改那张草稿
+        c0 = db.conn()
+        d_own, d_buy = _draft_own_skus(c0), _draft_buy_skus(c0)
+        keep = []
+        for x in sel:
+            if x["sku"] in (d_own if x["type"] == "own" else d_buy):
+                skipped.append(x["sku"])
+            else:
+                keep.append(x)
+        sel = keep
     if not sel:
+        if skipped:
+            raise ValueError("这些 SKU 已经有补货草稿了（" + "、".join(skipped[:5]) + "），请直接改那张草稿，不要重复建")
         raise ValueError("现在没有需要补的（都达到目标数量了）")
     own = [x for x in sel if x["type"] == "own"]
     buy = [x for x in sel if x["type"] == "buy"]
-    out = {"po": None, "purchase": [], "own": len(own), "buy": len(buy), "skipped": []}
+    out = {"po": None, "purchase": [], "own": len(own), "buy": len(buy), "skipped": list(skipped)}
     if own:
         out["po"] = _po.create([{"sku": x["sku"], "qty": x["qty"]} for x in own], "stock", user, priority=priority, due=due,
                                note="成品备货补货", printers=printers, release=release)

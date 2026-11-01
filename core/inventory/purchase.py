@@ -604,11 +604,12 @@ def list_po(status="", days=None, supplier_id=None, q=""):
     return out
 
 
-def in_transit():
-    """{物品id: 在途数量}（已下单、还没到的）。"""
+def in_transit(include_draft=False):
+    """{物品id: 在途数量}（已下单、还没到的）。include_draft=True 连采购单草稿也算（成品补货防止重复建单用）。"""
     out = {}
+    sts = "('draft','ordered','partial')" if include_draft else "('ordered','partial')"
     for r in db.conn().execute("SELECT l.item_id, SUM(MAX(l.qty-COALESCE(l.received,0),0)) q FROM inv_po_lines l JOIN inv_po p ON p.id=l.po_id "
-                               "WHERE p.status IN ('ordered','partial') GROUP BY l.item_id"):
+                               f"WHERE p.status IN {sts} GROUP BY l.item_id"):
         out[r["item_id"]] = r["q"] or 0
     return out
 

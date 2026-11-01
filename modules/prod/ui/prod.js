@@ -107,6 +107,7 @@
     return (l.paused ? ` <span class="pill po-badge paused">⏸ ${Z("暂停", "หยุด")}</span>` : "")
       + (l.working_po ? ` <span class="pill po-badge" data-po-open="${l.working_po.id}" title="${Z("正在做的生产单", "ใบสั่งผลิตที่กำลังทำ")}">📑 ${esc(l.working_po.no)}</span>` : "")
       + (l.dedicated ? ` <span class="pill po-badge" data-po-open="${l.dedicated.id}" title="${Z("专用于这张生产单", "ใช้เฉพาะใบสั่งผลิตนี้")}">🔒 ${esc(l.dedicated.no)}</span>` : "")
+      + (l.dedicated_warn ? ` <span class="pill po-badge warn" title="${Z("这台打印机的专用生产单已完成 / 取消 / 找不到，现在按没有专用处理", "ใบสั่งผลิตเฉพาะของเครื่องนี้จบแล้ว / ถูกยกเลิก / ไม่พบ ตอนนี้ถือว่าไม่ได้ใช้เฉพาะ")}">⚠ ${Z("专用的生产单已结束", "ใบสั่งผลิตเฉพาะจบแล้ว")}</span>` : "")
       + (roles[l.role] ? ` <span class="pill">${roles[l.role]}</span>` : "");
   }
   document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".po-badge[data-po-open]"); if (b && window.PO) PO.open(+b.dataset.poOpen); });

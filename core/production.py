@@ -794,8 +794,12 @@ def stock_set(sku, qty=None, target=None, user=""):
         c.commit()
 
 
-def sku_per_plate(sku):
+_REQ_CACHE = None      # 一键补货预览期间由 goodsstock.plan 打开：同 SKU 同机型的切片方案只算一次
+
+
+def sku_per_plate(sku, cache=None):
     """这个 SKU 一盘能打几个（按打印方案 / 切片文件；几盘的方案取每盘的套数；不知道 = 1）。成品备货补货按盘数往上取整用。"""
+    cache = cache if cache is not None else _REQ_CACHE
     try:
         from . import orders, print_files
         hit = orders.match_sku(sku, orders.sku_index())
@@ -807,10 +811,20 @@ def sku_per_plate(sku):
         views = job_plates(hit[0], sku, j["color"])
         if views and len(views) > 1:
             return max(1, min(int(v.get("sets") or 1) for v in views))
-        names = _printer_names()
         best = 1
-        for i in range(len(names)):
-            pl = print_files.plan(j, names[i])
+        seen = set()
+        for nm in _printer_names():
+            key = str(nm or "").strip().lower()
+            if key in seen:                # 同机型的打印机算出来一样，只算一次
+                continue
+            seen.add(key)
+            ck = (hit[0], sku, j["color"], key)
+            if cache is not None and ck in cache:
+                pl = cache[ck]
+            else:
+                pl = print_files.plan(j, nm)
+                if cache is not None:
+                    cache[ck] = pl
             if pl.get("file"):             # 没有切片文件时 plan 的 per_plate 只是剩余数量，不算
                 best = max(best, int(pl["per_plate"] or 1))
         return max(1, min(best, 500))
@@ -1758,6 +1772,10 @@ def board():
         l["pos"] = [pinfo2[i] for i in l["po_ids"] if i in pinfo2]
         l["working_po"] = (l["pos"][0] if l["pos"] else None)
         l["dedicated"] = pinfo2.get(int(l["dedicated_po"])) if l["dedicated_po"].isdigit() else None
+        l["dedicated_state"] = _po.dedication_status(l["dedicated_po"])["state"]
+        if l["dedicated_state"] in ("ended", "missing"):
+            l["dedicated"] = None
+            l["dedicated_warn"] = "专用的生产单已结束"
     return {"lanes": lanes, "unassigned": unassigned,
             "post": [j for j in jobs if j["status"] == "post"],
             "packed": [j for j in jobs if j["status"] == "packed"],
