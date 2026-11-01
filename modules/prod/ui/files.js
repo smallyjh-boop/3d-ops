@@ -37,6 +37,7 @@
       <span class="small muted">${f.grams ? H().num(f.grams, 0) + "g · " : ""}${f.hours ? H().num(f.hours, 1) + "h · " : ""}${size(f.size)} · ${fmtTime(f.created_at).slice(0, 10)}${f.active ? "" : " · 已停用"}</span>
       <span class="fm-acts">
         <button class="mini" data-fa="gv" title="3D 切片预览">🔍</button>
+        ${window.TRIAL && TRIAL.can() && f.kind !== "resin" ? `<button class="mini" data-tr-trial="${esc(pid)}" data-tr-spec="${esc(f.spec || "")}" data-tr-plate="${esc(f.plate_id || "p1")}" data-tr-file="${f.id}" data-tr-src="file" title="${Z("用这个文件试打（可以是还没验证的）", "ทดลองพิมพ์ด้วยไฟล์นี้ (ยังไม่ผ่านการตรวจก็ได้)")}">🧪 ${Z("试打", "ทดลอง")}</button>` : ""}
         <a class="btn mini-btn" href="/api/print-files/${f.id}/download" title="下载">⬇</a>
         ${CAN("files.upload") ? '<label class="filebtn mini-file" title="上传新版本替换（旧版本停用）">替换<input type="file" data-fa="rep-slice" accept=".3mf,.gcode,.gco" hidden></label>' : ""}
         <button class="mini" data-fa="toggle">${f.active ? "停用" : "启用"}</button>

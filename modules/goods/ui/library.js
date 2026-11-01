@@ -183,6 +183,9 @@ async function grpAssign(add) {
 }
 $("#btn-grp-add").addEventListener("click", () => grpAssign(true).catch((e) => toast(e.message, true)));
 $("#btn-lib-clear").addEventListener("click", () => { LIB_SEL.clear(); renderLibrary(); });
+// v2.53：不用订单直接生产 / 试打（弹窗在生产模块的 trial.js）
+$("#btn-lib-make").addEventListener("click", () => { if (!LIB_SEL.size) { toast("请先勾选产品", true); return; } if (window.TRIAL) TRIAL.stockDialog({ pids: [...LIB_SEL], source: "library" }); });
+$("#btn-lib-trial").addEventListener("click", () => { if (window.TRIAL) TRIAL.bulkTrial([...LIB_SEL], "library"); });
 $("#btn-lib-zip").addEventListener("click", () => {
   if (!LIB_SEL.size) return;
   location.href = `/api/files/zip?ids=${[...LIB_SEL].map(encodeURIComponent).join(",")}`;

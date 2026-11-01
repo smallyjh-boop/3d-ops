@@ -122,6 +122,13 @@
     "u.scan": ["扫要上架的商品（或者点下面的）", "สแกนสินค้าที่จะจัดเก็บ (หรือแตะด้านล่าง)"], "u.scanat": ["放到 {l}：扫商品", "วางที่ {l}: สแกนสินค้า"],
     // v2.53：料卷、质检、退货
     "t.spool": ["料卷", "ม้วนฟิลาเมนต์"], "t.spool.s": ["扫料卷 → 扫货位 / 打印机槽：上架、上机、下机、称重", "สแกนม้วน → สแกนตำแหน่ง / ช่องเครื่องพิมพ์: จัดเก็บ ใส่ ถอด ชั่ง"],
+    "t.trial": ["试打结果", "ผลทดลองพิมพ์"], "t.trial.s": ["打完的试打：成功 / 失败、问题、拍照、克数时长、成品去向", "งานทดลองพิมพ์ที่เสร็จ: สำเร็จ/ล้มเหลว ปัญหา ถ่ายรูป น้ำหนัก เวลา ปลายทาง"],
+    "tr.none": ["没有等结果的试打 ✓", "ไม่มีงานทดลองพิมพ์ที่รอผล ✓"], "tr.ok": ["✅ 成功", "✅ สำเร็จ"], "tr.bad": ["❌ 失败", "❌ ล้มเหลว"], "tr.issues": ["有什么问题", "มีปัญหาอะไร"],
+    "tr.note": ["说明", "หมายเหตุ"], "tr.g": ["实际克数 g", "น้ำหนักจริง g"], "tr.h": ["实际时长 h", "เวลาจริง h"], "tr.dest": ["这批成品去哪", "ชิ้นงานนี้ไปไหน"],
+    "tr.d.stock": ["合格入库（→ 待检区）", "ผ่าน เข้าสต็อก (→ โซนรอตรวจ)"], "tr.d.sample": ["当样品", "เป็นตัวอย่าง"], "tr.d.scrap": ["报废", "ทิ้ง"],
+    "tr.photo": ["📷 拍照 / 选照片", "📷 ถ่ายรูป / เลือกรูป"], "tr.save": ["保存试打结果", "บันทึกผล"], "tr.saved": ["已保存", "บันทึกแล้ว"],
+    "tr.i.翘边": ["翘边", "ขอบงอ"], "tr.i.支撑难拆": ["支撑难拆", "ซัพพอร์ตแกะยาก"], "tr.i.拉丝": ["拉丝", "เป็นเส้นใย"], "tr.i.尺寸不对": ["尺寸不对", "ขนาดไม่ถูก"],
+    "tr.i.颜色不对": ["颜色不对", "สีไม่ถูก"], "tr.i.掉层": ["掉层", "ชั้นหลุด"], "tr.i.其他": ["其他", "อื่น ๆ"], "tr.plate": ["盘", "เพลท"],
     "t.qc": ["质检", "ตรวจคุณภาพ"], "t.qc.s": ["待检区的成品：合格扫货位上架，不合格放次品区", "สินค้าในโซนรอตรวจ: ผ่านสแกนตำแหน่งจัดเก็บ ไม่ผ่านไปโซนชำรุด"],
     "t.ret": ["退货", "สินค้าคืน"], "t.ret.s": ["退回的货：重新上架或放次品区；扫商品登记退货", "ของที่ถูกส่งคืน: จัดเก็บใหม่หรือโซนชำรุด สแกนสินค้าเพื่อบันทึก"],
     "s.scan": ["扫料卷标签（F0001）", "สแกนป้ายม้วน (F0001)"], "s.then": ["👉 扫货位放好；扫打印机 · 槽 = 上机", "👉 สแกนตำแหน่งเพื่อวาง; สแกนเครื่องพิมพ์ · ช่อง = ใส่เครื่อง"],
@@ -373,7 +380,7 @@
   // ---------------- 首页 ----------------
   SCREENS.home = {
     show() {
-      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["loc", "🗄"], ["put", "📍"], ["move", "🔀"], ["count", "🧮"], ["spool", "🧵"], ["qc", "🔍"], ["ret", "↩"]] : []), ...(PUR ? [["rcv", "📥"]] : [])];
+      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["loc", "🗄"], ["put", "📍"], ["move", "🔀"], ["count", "🧮"], ["spool", "🧵"], ["qc", "🔍"], ["ret", "↩"]] : []), ...(PUR ? [["rcv", "📥"]] : []), ...(["owner", "production"].includes(ME.role) ? [["trial", "🧪"]] : [])];
       view().innerHTML = `<div class="me"><span data-notr>👤 ${esc(ME.display_name || ME.username)}</span>
           <span class="row"><a href="/" class="small">${T("full")}</a><button class="sm" id="logout">${T("logout")}</button></span></div>
         <div class="tiles">${tiles.map(([k, ic]) => `<button class="tile" data-go="${k}"><span class="ti">${ic}</span>${T("t." + k)}<small>${T("t." + k + ".s")}</small></button>`).join("")}</div>
@@ -1179,6 +1186,50 @@
   }
   SCREENS.qc = heldScreen("qc", { list: "q.list", none: "q.none", go: "q.pass", bad: "q.fail", scrap: true, goodUrl: "/api/inv/qc/pass", badUrl: "/api/inv/qc/fail" });
   SCREENS.ret = heldScreen("returns", { list: "r.list", none: "r.none", go: "r.restock", bad: "r.todef", defect: true, receive: true, goodUrl: "/api/inv/returns/act", badUrl: "/api/inv/returns/act" });
+
+  // ---------------- 试打结果（v2.53）：打完的试打 → 成功 / 失败、问题、拍照、克数时长、成品去向 ----------------
+  SCREENS.trial = {
+    list: [], it: null,
+    async show(arg) {
+      try { this.list = (await api("/api/trial/pending")).rows; } catch (e) { view().innerHTML = lastMsg("bad", srv(e.message)); return; }
+      this.it = arg ? this.list.find((x) => String(x.job_id) === String(arg)) || null : null;
+      if (this.it) { try { this.it = await api(`/api/trial/job/${this.it.job_id}`); } catch { /* 用列表里的 */ } }
+      this.render();
+    },
+    render(msg) {
+      const x = this.it;
+      if (!x) {
+        view().innerHTML = (msg ? lastMsg(msg[0], msg[1]) : "") + `<div class="card"><b>${T("t.trial")}</b>${this.list.length ? `<ul class="list">${this.list.map((y) => `<li class="tap" data-j="${y.job_id}"><div class="grow"><div class="mono" data-notr><b>${esc(y.sku || y.product_id)}</b></div>
+          <div class="small" data-notr>${esc(y.name || "")}${y.plate_total > 1 ? " · " + T("tr.plate") + " " + y.plate_no + "/" + y.plate_total : ""}</div></div></li>`).join("")}</ul>` : `<p class="muted">${T("tr.none")}</p>`}</div>`;
+        view().querySelectorAll("[data-j]").forEach((el) => el.addEventListener("click", () => go("trial", el.dataset.j)));
+        return;
+      }
+      const dests = x.dests || [{ key: "sample" }, { key: "scrap" }];
+      view().innerHTML = `<div class="card"><div class="mono" data-notr><b>${esc(x.sku || x.product_id)}</b></div>${x.plate_total > 1 ? `<div class="small" data-notr>${T("tr.plate")} ${x.plate_no}/${x.plate_total} ${esc(x.plate_name || "")}</div>` : ""}</div>
+        <div class="card col"><div class="row"><label class="row big"><input type="radio" name="tr-ok" value="1" checked> ${T("tr.ok")}</label><label class="row big"><input type="radio" name="tr-ok" value="0"> ${T("tr.bad")}</label></div>
+          <b>${T("tr.issues")}</b>${["翘边", "支撑难拆", "拉丝", "尺寸不对", "颜色不对", "掉层", "其他"].map((k) => `<label class="row"><input type="checkbox" data-iss="${k}"> ${T("tr.i." + k)}</label>`).join("")}
+          <label>${T("tr.note")}<input id="tr-note" data-notr></label>
+          <label>${T("tr.g")}<input id="tr-g" type="number" inputmode="decimal" value="${x.prefill && x.prefill.grams != null ? x.prefill.grams : ""}"></label>
+          <label>${T("tr.h")}<input id="tr-h" type="number" inputmode="decimal" value="${x.prefill && x.prefill.hours != null ? x.prefill.hours : ""}"></label>
+          <div id="tr-dest"><b>${T("tr.dest")}</b>${dests.map((d, i) => `<label class="row"><input type="radio" name="tr-dest" value="${d.key}" ${i === 0 ? "checked" : ""}> ${T("tr.d." + d.key)}</label>`).join("")}</div>
+          <label class="filebtn">${T("tr.photo")}<input type="file" id="tr-ph" accept="image/*" capture="environment" multiple hidden></label>
+          <button class="big" id="tr-save">${T("tr.save")}</button><button class="big" id="tr-back">${T("u.back")}</button></div>`;
+      const sync = () => { $("#tr-dest").classList.toggle("hidden", $('input[name="tr-ok"]:checked').value !== "1"); };
+      view().querySelectorAll('input[name="tr-ok"]').forEach((i) => i.addEventListener("change", sync));
+      $("#tr-back").addEventListener("click", () => { go("trial"); });
+      $("#tr-save").addEventListener("click", async () => {
+        const ok = $('input[name="tr-ok"]:checked').value === "1";
+        const fd = new FormData();
+        fd.append("ok", ok ? "1" : "0");
+        view().querySelectorAll("[data-iss]").forEach((i) => { if (i.checked) fd.append("issues", i.dataset.iss); });
+        fd.append("note", $("#tr-note").value); fd.append("grams", $("#tr-g").value); fd.append("hours", $("#tr-h").value);
+        if (ok) fd.append("dest", ($('input[name="tr-dest"]:checked') || {}).value || "");
+        [...$("#tr-ph").files].forEach((f) => fd.append("photo", f));
+        try { await api(`/api/trial/job/${x.job_id}/result`, { method: "POST", body: fd }); SCAN.ok(); this.it = null; this.list = this.list.filter((y) => y.job_id !== x.job_id); history.replaceState(history.state, "", "#/trial"); this.render(["ok", T("tr.saved")]); }
+        catch (e) { SCAN.bad(); toast(srv(e.message), true); }
+      });
+    },
+  };
 
   // ---------------- 移库（v2.52）：扫原货位 → 扫商品（一下 +1）→ 扫目标货位；补货任务点一下照着做 ----------------
   SCREENS.move = {

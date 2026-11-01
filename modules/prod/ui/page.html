@@ -3,11 +3,13 @@
 <section id="tab-production" class="panel hidden">
   <div class="row between wrap gap">
     <h2>生产看板</h2>
-    <div class="row gap"><button id="btn-prod-ticket">打印工单贴纸</button><button id="btn-prod-sched">重新排单</button><button id="btn-prod-reload">刷新</button></div>
+    <div class="row gap"><button id="btn-prod-new" class="primary" title="不用订单：直接生产（备货）或试打">➕ 新建任务</button><button id="btn-prod-ticket">打印工单贴纸</button><button id="btn-prod-sched">重新排单</button><button id="btn-prod-reload">刷新</button></div>
   </div>
   <p class="muted small">每台打印机一列：上面是正在打的「这一盘」，下面是排队的任务。点「▶ 开始打印」选数量（按订单 / 满盘 / 指定），
     同产品同颜色的任务可以拼成一盘。每次开始前都要确认热床已清空。打完自动扣耗材，多打的进成品库存。</p>
   <div id="prod-warn"></div>
+  <div id="prod-trial-pending"></div>
+  <div id="prod-kindbar" class="tr-kinds"></div>
   <div id="prod-lanes" class="lanes"></div>
   <div class="lanes two">
     <div class="card"><h3>后处理 / 待打包 <span id="prod-post-n" class="muted"></span></h3><div id="prod-post"></div></div>

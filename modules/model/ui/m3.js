@@ -122,7 +122,10 @@
           <div class="small muted">${pl.multicolor ? Z("多色 · 需要 AMS · ", "หลายสี · ต้องมี AMS · ") : ""}${Z("生产任务、成本、扣耗材都按打印方案", "งานผลิต ต้นทุน และการตัดสต็อกเส้นใช้ตามแผนการพิมพ์")}</div>
           <div class="m3-prog" data-m3-prog>${sl && sl.running ? progTxt(sl) : ""}</div></div>
         <div class="row gap wrap"><button class="primary-lite" data-m3="plan" data-ed-free>${M.planOpen ? Z("收起打印方案", "ปิดแผนการพิมพ์") : "🖨 " + Z("查看 / 编辑打印方案", "ดู / แก้ไขแผนการพิมพ์")}</button>
-          <button class="mini" data-m3="slice-all" data-ed-free title="${Z("每个规格的每一盘按顺序切片（OrcaSlicer，后台），切完按方案填克数 / 时长", "สไลซ์ทุกถาดของทุกแบบตามลำดับ (เบื้องหลัง) แล้วใส่กรัม/เวลา")}">✂ ${Z("一键全部切片", "สไลซ์ทั้งหมด")}</button></div>`;
+          <button class="mini" data-m3="slice-all" data-ed-free title="${Z("每个规格的每一盘按顺序切片（OrcaSlicer，后台），切完按方案填克数 / 时长", "สไลซ์ทุกถาดของทุกแบบตามลำดับ (เบื้องหลัง) แล้วใส่กรัม/เวลา")}">✂ ${Z("一键全部切片", "สไลซ์ทั้งหมด")}</button>
+          ${window.TRIAL && TRIAL.can() ? `<button class="mini" data-ed-free data-tr-trial="${esc(M.pid)}" data-tr-spec="${esc(M.spec)}" data-tr-all="1" data-tr-src="editor">🧪 ${Z("试打", "ทดลองพิมพ์")}</button>` : ""}</div>
+        <div class="tr-hist-box" data-tr-hist style="flex-basis:100%"></div>`;
+      if (window.TRIAL) TRIAL.mount(ps.querySelector("[data-tr-hist]"), M.pid, true);
     }
   }
   function progTxt(sl) {

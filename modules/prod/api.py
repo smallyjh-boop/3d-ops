@@ -3,9 +3,10 @@ v2.31 从 web/production.py 搬过来。"""
 from flask import Blueprint
 
 from web.common import *  # noqa: F401,F403
+from core import trial
 
 bp = Blueprint("m_prod", __name__)
-PREFIXES = ['/api/print-files', '/api/slicer', '/api/printers', '/api/printer-models', '/api/jobs', '/api/spools', '/api/materials', '/api/files', '/print/spools', '/print/jobs', '/api/sliced', '/api/runs', '/api/quality', '/api/production', '/api/maintenance', '/api/calib']
+PREFIXES = ['/api/print-files', '/api/trial', '/api/slicer', '/api/printers', '/api/printer-models', '/api/jobs', '/api/spools', '/api/materials', '/api/files', '/print/spools', '/print/jobs', '/api/sliced', '/api/runs', '/api/quality', '/api/production', '/api/maintenance', '/api/calib']
 PATTERNS = [r"^/api/stock(/make)?$", '^/api/products/[^/]+/recipe(/slice)?$']
 
 
@@ -773,17 +774,183 @@ def job_delete(jid):
 
 @bp.post("/api/stock/make")
 def stock_make():
-    """人工确认后生成备货任务（排在订单任务后面）。"""
+    """人工确认后生成备货任务（排在订单任务后面）。v2.53：可以带 priority（1 加急）、printer（指定打印机）、source（从哪个入口来的）。"""
     b = request.get_json(force=True) or {}
-    from core import orders as om
-    hit = om.match_sku(b.get("sku"), om.sku_index())
-    if not hit:
-        return err("产品库里找不到这个 SKU")
+    deny = _need_producer()
+    if deny:
+        return deny
     try:
-        j = production.create_job(hit[0], b["sku"], int(b.get("qty") or 1), "stock", None, _uname(), "备货")
+        r = trial.create_stock([{"sku": b.get("sku"), "qty": b.get("qty") or 1}], b.get("priority") or 0, b.get("printer"), _uname(),
+                               b.get("source") or "")
     except (ValueError, FileNotFoundError) as e:
         return err(str(e))
-    return jsonify(j)
+    return jsonify(r["jobs"][0])
+
+
+def _need_producer():
+    """v2.53：备货 / 试打 / 测试任务只有老板和生产角色能建。"""
+    if not trial.can_produce(auth.current_user()):
+        return err("没有权限：只有老板和生产人员可以建生产 / 试打任务", 403)
+    return None
+
+
+@bp.post("/api/jobs/stock")
+def jobs_stock():
+    """「➕ 生产」：一次给好几个 SKU 建备货任务。{items: [{sku, qty}], priority, printer, source}。"""
+    deny = _need_producer()
+    if deny:
+        return deny
+    b = request.get_json(force=True) or {}
+    try:
+        return jsonify(trial.create_stock(b.get("items") or [], b.get("priority") or 0, b.get("printer"), _uname(), b.get("source") or ""))
+    except (ValueError, FileNotFoundError) as e:
+        return err(str(e))
+
+
+@bp.get("/api/trial/skus")
+def trial_skus():
+    """「➕ 生产」对话框：这几个产品的 SKU（规格 / 颜色 / 现有库存）。pids=A,B"""
+    from core import store
+    out = []
+    for pid in [x for x in (request.args.get("pids") or "").split(",") if x]:
+        try:
+            p = store.load(pid)
+        except (FileNotFoundError, ValueError):
+            continue
+        for v in p.get("variants") or []:
+            if v.get("sku"):
+                out.append({"pid": pid, "name": p.get("name_zh") or "", "sku": v["sku"], "spec": (v.get("opt2_zh") or "").strip(),
+                            "colour": (v.get("opt1_zh") or "").strip(), "stock": production.stock_qty(v["sku"])})
+    return jsonify({"skus": out, "printers": [{"index": i, "label": (p.get("code") or f"#{i + 1}") + " " + (p.get("name") or "")}
+                                              for i, p in enumerate(load_config().get("printers") or []) if p.get("enabled", True) is not False]})
+
+
+@bp.get("/api/trial/printers")
+def trial_printers():
+    try:
+        return jsonify(trial.printer_options(request.args.get("pid") or "", request.args.get("spec") or "", request.args.get("plate") or "",
+                                             request.args.get("sku") or ""))
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/trial")
+def trial_create():
+    """「🧪 试打」：{product_id, sku, spec, plate_id, printer, file_id, source, all_plates, only_unverified}。
+    没有切片文件就现在切（慢，浏览器带 ?async=1 放后台）。几盘的产品不指定盘 → 每一盘一个试打任务。"""
+    deny = _need_producer()
+    if deny:
+        return deny
+    b = request.get_json(force=True) or {}
+    user = _uname()
+
+    def go():
+        from core import slicer
+        try:
+            if b.get("all_plates") or (not b.get("plate_id") and b.get("only_unverified")):
+                return jsonify(trial.create_trials(b.get("product_id") or "", b.get("sku") or "", b.get("spec"), b.get("plate_id") or "",
+                                                   b.get("printer"), user, b.get("source") or "", bool(b.get("only_unverified"))))
+            return jsonify(trial.create_trial(b.get("product_id") or "", b.get("sku") or "", b.get("spec"), b.get("plate_id") or "",
+                                              b.get("printer"), b.get("file_id"), user, b.get("source") or ""))
+        except (ValueError, FileNotFoundError, OSError, slicer.SliceError) as e:
+            return err(str(e))
+    return maybe_async("试打任务 " + str(b.get("product_id") or ""), go, "slice", b.get("product_id") or "")
+
+
+@bp.post("/api/trial/check-file")
+def trial_check_file():
+    """「🔍 检查切片文件」（不打印）。{product_id, spec, plate_id, printer, file_id, slice}"""
+    deny = _need_producer()
+    if deny:
+        return deny
+    b = request.get_json(force=True) or {}
+    user = _uname()
+
+    def go():
+        from core import slicer
+        try:
+            return jsonify(trial.check_file(b.get("product_id") or "", b.get("spec"), b.get("plate_id") or "", b.get("printer"),
+                                            b.get("file_id"), b.get("sku") or "", user, b.get("slice", True) is not False))
+        except (ValueError, FileNotFoundError, OSError, slicer.SliceError) as e:
+            return err(str(e))
+    return maybe_async("检查切片文件 " + str(b.get("product_id") or ""), go, "slice", b.get("product_id") or "")
+
+
+@bp.get("/api/trial/pending")
+def trial_pending():
+    return jsonify({"rows": trial.pending()})
+
+
+@bp.get("/api/trial/history")
+def trial_history():
+    return jsonify(trial.history(request.args.get("pid") or ""))
+
+
+@bp.get("/api/trial/stats")
+def trial_stats():
+    return jsonify(trial.stats_for([x for x in (request.args.get("pids") or "").split(",") if x]))
+
+
+@bp.get("/api/trial/job/<int:jid>")
+def trial_job(jid):
+    try:
+        return jsonify(trial.job_info(jid))
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/trial/job/<int:jid>/result")
+def trial_result(jid):
+    """试打结果（电脑 / 手机 /m 共用）：multipart（可带 photo 照片，可多张）或 json。"""
+    deny = _need_producer()
+    if deny:
+        return deny
+    if request.files:
+        fm = request.form
+        issues = fm.getlist("issues") or [x for x in (fm.get("issues") or "").split(",") if x]
+        photos = [trial.save_photo(jid, f) for f in request.files.getlist("photo") if f and f.filename]
+    else:
+        fm = request.get_json(force=True, silent=True) or {}
+        issues, photos = fm.get("issues") or [], []
+    try:
+        return jsonify(trial.submit_result(jid, str(fm.get("ok")) in ("1", "true", "True"), issues, fm.get("note") or "", fm.get("grams"),
+                                           fm.get("hours"), fm.get("dest") or "", photos, _uname()))
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/trial/<int:tid>/retry")
+def trial_retry(tid):
+    deny = _need_producer()
+    if deny:
+        return deny
+    b = request.get_json(force=True, silent=True) or {}
+
+    def go():
+        from core import slicer
+        try:
+            return jsonify(trial.retry(tid, _uname(), b.get("printer")))
+        except (ValueError, FileNotFoundError, OSError, slicer.SliceError) as e:
+            return err(str(e))
+    return maybe_async("再试一次", go, "slice", "")
+
+
+@bp.post("/api/printers/<int:idx>/print-test")
+def printer_print_test(idx):
+    """设置 → 生产 → 打印机连接 →「🧪 打印测试」：给这台机型切 20 mm 立方体，走正常开始打印（kind=test）。"""
+    deny = _need_producer()
+    if deny:
+        return deny
+    b = request.get_json(force=True, silent=True) or {}
+    user = _uname()
+
+    def go():
+        from core import slicer
+        try:
+            return jsonify(trial.printer_test(idx, user, b.get("confirm") or {}))
+        except (ValueError, ConnectionError, OSError, slicer.SliceError) as e:
+            return err(str(e))
+    return maybe_async("打印测试", go, "slice", "")
 
 
 @bp.get("/api/quality")

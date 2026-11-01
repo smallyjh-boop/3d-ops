@@ -54,12 +54,20 @@ CREATE TABLE IF NOT EXISTS job_plates (
   pin INTEGER DEFAULT 0, planned_start REAL, planned_end REAL, fails INTEGER DEFAULT 0, updated_at REAL
 );
 CREATE INDEX IF NOT EXISTS job_plates_job ON job_plates(job_id);
+CREATE TABLE IF NOT EXISTS trials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, job_id INTEGER, run_id INTEGER, product_id TEXT, sku TEXT, spec TEXT, plate_id TEXT,
+  plate_no INTEGER, plate_total INTEGER, plate_name TEXT, file_id INTEGER, printer INTEGER, status TEXT, qty INTEGER DEFAULT 1,
+  issues TEXT, note TEXT, grams REAL, hours REAL, photos TEXT, dest TEXT, applied TEXT, created_at REAL, created_by TEXT,
+  done_at REAL, done_by TEXT
+);
+CREATE INDEX IF NOT EXISTS trials_product ON trials(product_id);
 CREATE TABLE IF NOT EXISTS maintenance (
   id INTEGER PRIMARY KEY AUTOINCREMENT, printer INTEGER, item TEXT, ts REAL, hours_at REAL, username TEXT, note TEXT
 );
 """
 STATUS_ZH = {"todo": "待打印", "printing": "打印中", "post": "后处理", "packed": "已打包", "done": "已发货", "failed": "打印失败"}
-KIND_ZH = {"order": "订单", "stock": "备货", "reship": "补发"}
+KIND_ZH = {"order": "订单", "stock": "备货", "reship": "补发", "trial": "试打", "test": "测试"}
+PRINT_ONLY = ("trial", "test")      # v2.53：试打 / 打印测试任务（不进库存、不拼盘、不按几盘的方案拆）
 FAIL_REASONS = ["翘边 / 首层不粘", "打飞 / 脱离热床（空打）", "拉丝 / 表面差", "断料 / 缺料", "堵头", "支撑问题（塌 / 难拆）", "层错位",
                 "尺寸 / 形状不对", "颜色 / 材料用错", "人为碰到 / 取件损坏", "其他"]
 MAINT_ITEMS = [("clean", "清洁热床、擦喷嘴外部", 50), ("lube", "导轨 / 丝杆清洁润滑、检查皮带", 200),
@@ -178,7 +186,7 @@ def _plates_view(c, j, cache=None):
 def _sync_plates(c, j, cache=None):
     """几盘的方案：给任务建好每一盘的进度行（方案改了跟着改，正在打的那一盘留着）。返回 (每盘进度, 有没有改动)。
     只管还在打的任务（待打印 / 打印中）；光固化没有打印方案。"""
-    if j["status"] not in ("todo", "printing") or fleet_is_resin(j["material"]):
+    if j["status"] not in ("todo", "printing") or fleet_is_resin(j["material"]) or (_col(j, "kind") or "order") in PRINT_ONLY:
         return _plates_view(c, j, cache), False
     cache = {} if cache is None else cache
     ck = (j["product_id"], j["sku"], j["color"])
@@ -341,10 +349,12 @@ def delete_stock_job(job_id, user=""):
     """v2.41：删除备货任务（只能删还没在打的；打好的件每盘打完时已经进了成品库存）。"""
     c = db.conn()
     j = _job(c, job_id)
-    if (j["kind"] or "order") != "stock":
-        raise ValueError("只有备货任务可以删除；订单的任务请修改或取消订单")
+    if (j["kind"] or "order") not in ("stock", "trial", "test"):
+        raise ValueError("只有备货 / 试打 / 测试任务可以删除；订单的任务请修改或取消订单")
     if j["run_id"]:
-        raise ValueError("这个备货任务正在打印，先在生产看板结束这一盘")
+        raise ValueError("这个任务正在打印，先在生产看板结束这一盘")
+    if (j["kind"] or "") == "trial":
+        c.execute("DELETE FROM trials WHERE job_id=? AND status IN ('queued','await')", (job_id,))
     c.execute("DELETE FROM jobs WHERE id=?", (job_id,))
     c.execute("DELETE FROM job_plates WHERE job_id=?", (job_id,))
     c.commit()
@@ -353,20 +363,30 @@ def delete_stock_job(job_id, user=""):
     schedule()
 
 
-def create_job(product_id, sku, qty, kind="stock", order_id=None, user="", note=""):
-    """备货任务 / 补发任务。"""
+def create_job(product_id, sku, qty, kind="stock", order_id=None, user="", note="", priority=0, printer=None, file_id=None):
+    """备货任务 / 补发任务 / 试打任务（v2.53：priority=1 加急；printer 指定打印机；file_id 试打用的文件）。"""
     from . import orders, store
     p = store.load(product_id)
+    prs = load_config().get("printers") or []
+    if printer not in (None, ""):
+        from . import fleet
+        if not (0 <= int(printer) < len(prs)):
+            raise ValueError("没有这台打印机")
+        if fleet.tech_of(prs[int(printer)]) != fleet.job_tech(p.get("material")):
+            raise ValueError(f"「{prs[int(printer)].get('name')}」和这个产品的材料（{p.get('material') or 'PLA'}）不是同一种打印机")
     hit = orders.match_sku(sku, orders.sku_index()) if sku else None
     info = orders._variant_info(*hit) if hit else {"name": p.get("name_zh"), "color": "", "material": p.get("material"),
                                                       "grams": None, "hours": None}
     c = db.conn()
     now = _now()
+    pin = printer not in (None, "")
     jid = c.execute("""INSERT INTO jobs(order_id, product_id, sku, name, color, material, qty, grams_each, hours_each, status,
-                       kind, note, created_at, updated_at, updated_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       kind, note, created_at, updated_at, updated_by, priority_job, printer, pin, file_id)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (order_id, product_id, sku, info.get("name") or p.get("name_zh"), info.get("color", ""),
                      info.get("material") or "PLA", int(qty), info.get("grams"), info.get("hours"), "todo", kind, note,
-                     now, now, user)).lastrowid
+                     now, now, user, 1 if (priority or kind == "trial") else 0, int(printer) if pin else None,
+                     1 if pin else 0, int(file_id) if file_id else None)).lastrowid
     c.commit()
     schedule()
     return dict(_job(c, jid))
@@ -388,6 +408,11 @@ def plan_for(j, idx, names=None):
                     "grams_per_plate": round(g / n, 1) if n else 0, "hours_per_plate": round(h / n, 2) if n else 0,
                     "remaining": max(0, int(j["qty"] or 1) - int(j["qty_done"] or 0)), "multi_plate": len(views)}
     pl = print_files.plan(dict(j), name)
+    if (_col(j, "kind") or "order") in PRINT_ONLY and _col(j, "file_id"):      # v2.53：试打 / 测试用指定的文件（不管有没有复核）
+        f = print_files.get(int(j["file_id"]))
+        if f:
+            per = max(1, int(f.get("per_plate") or 1))
+            pl = {"file": f, "per_plate": per, "plates": 1, "grams": round(f.get("grams") or 0, 1), "hours": round(f.get("hours") or 1, 2)}
     if not pl["file"] and fleet.is_resin(j["material"]):
         # 光固化没有文件：时间主要看高度，按「一盘」估（默认每盘几小时见设置）
         cfg = load_config()
@@ -470,7 +495,8 @@ def schedule():
     jobs = c.execute("""SELECT j.*, o.priority, o.ship_by, o.order_time FROM jobs j LEFT JOIN orders o ON o.id=j.order_id
                         WHERE (j.status='todo' AND j.run_id IS NULL)
                            OR (COALESCE(j.multi_plate,0)>1 AND j.status IN ('todo','printing'))
-                        ORDER BY COALESCE(o.priority,0) DESC, CASE j.kind WHEN 'stock' THEN 1 ELSE 0 END,
+                        ORDER BY CASE WHEN j.kind IN ('trial','test') THEN 2 ELSE COALESCE(j.priority_job,0) END DESC,
+                        COALESCE(o.priority,0) DESC, CASE j.kind WHEN 'stock' THEN 1 ELSE 0 END,
                         (COALESCE(j.qty_done,0)>0) DESC, COALESCE(o.ship_by, 9e12), COALESCE(o.order_time, j.created_at), j.id""").fetchall()
     overhead = float(cfg.get("est_overhead_h") or 0.15)
     no_file_penalty = float(cfg.get("no_file_penalty_h") or 6) * 3600
@@ -580,10 +606,27 @@ def list_jobs(statuses=None, order_id=None):
         d["status_zh"] = STATUS_ZH.get(d["status"], d["status"])
         d["kind_zh"] = KIND_ZH.get(d.get("kind") or "order", "")
         d["remaining"] = max(0, int(d["qty"] or 1) - int(d["qty_done"] or 0))
+        if d.get("kind") == "trial":          # v2.53：试打任务的盘 / 文件 / 结果状态
+            d["trial"] = _trial_brief(d["id"])
         if d.get("multi_plate"):              # v2.52：每一盘的进度（「盘 1/2 · 主体件 已打 1/2」）
             d["plates"] = [_plate_out(v, prs) for v in _plates_view(c, d, pc)]
         out.append(d)
     return out
+
+
+def _trial_brief(job_id):
+    from . import trial
+    t = trial.get_trial(job_id=job_id)
+    if not t:
+        return None
+    pv = {"no": t["plate_no"], "total": t["plate_total"], "name": t["plate_name"]}
+    f = None
+    if t.get("file_id"):
+        from . import print_files
+        f = print_files.get(t["file_id"])
+    return {"id": t["id"], "status": t["status"], "plate_label": plate_text(pv) if (t["plate_total"] or 0) > 1 else "",
+            "plate_label_th": plate_text(pv, "th") if (t["plate_total"] or 0) > 1 else "", "file": f["filename"] if f else "",
+            "file_status": f["status"] if f else ""}
 
 
 def _plate_out(v, prs=None):
@@ -785,10 +828,12 @@ def merge_candidates(job_id, plate=None):
     v2.52 几盘的方案（plate = 这一盘的进度）：同一份方案的同一盘、这一盘还没在打、还要打的任务（remaining = 还差几套）。"""
     c = db.conn()
     j = _job(c, job_id)
+    if (j["kind"] or "order") in PRINT_ONLY:
+        return []
     if plate:
         out, cache = [], {}
         rows = c.execute("""SELECT j.*, o.order_no, o.ship_by, o.priority FROM jobs j LEFT JOIN orders o ON o.id=j.order_id
-                            WHERE j.status IN ('todo','printing') AND COALESCE(j.multi_plate,0)>1 AND j.id!=? AND j.product_id=?
+                            WHERE j.status IN ('todo','printing') AND COALESCE(j.multi_plate,0)>1 AND j.id!=? AND j.product_id=? AND j.kind NOT IN ('trial','test')
                             AND COALESCE(j.color,'')=?
                             ORDER BY COALESCE(o.priority,0) DESC, CASE j.kind WHEN 'stock' THEN 1 ELSE 0 END, COALESCE(o.ship_by, 9e12), j.id""",
                          (job_id, j["product_id"], j["color"] or "")).fetchall()
@@ -798,7 +843,7 @@ def merge_candidates(job_id, plate=None):
                 out.append(dict(r, remaining=v["units"], plate=_plate_out(v)))
         return out
     rows = c.execute("""SELECT j.*, o.order_no, o.ship_by, o.priority FROM jobs j LEFT JOIN orders o ON o.id=j.order_id
-                        WHERE j.status='todo' AND j.run_id IS NULL AND j.id!=? AND j.product_id=? AND COALESCE(j.color,'')=?
+                        WHERE j.status='todo' AND j.run_id IS NULL AND j.id!=? AND j.product_id=? AND COALESCE(j.color,'')=? AND j.kind NOT IN ('trial','test')
                         ORDER BY COALESCE(o.priority,0) DESC, CASE j.kind WHEN 'stock' THEN 1 ELSE 0 END,
                         COALESCE(o.ship_by, 9e12), j.id""",
                      (job_id, j["product_id"], j["color"] or "")).fetchall()
@@ -828,6 +873,9 @@ def send_options(job_id, printer_idx=None, plate=None):
     merge = merge_candidates(job_id)
     files = [print_files.ensure_params(f) for f in
              print_files.candidates(j["product_id"], j["sku"], pname, j["color"] or "", usable_only=False)]
+    if (j.get("kind") or "order") in PRINT_ONLY and j.get("file_id"):       # v2.53：试打 / 测试只列任务指定的文件
+        tf = print_files.get(int(j["file_id"]))
+        files = [print_files.ensure_params(tf)] if tf else []
     capacity = None
     recipe = None
     try:
@@ -848,7 +896,7 @@ def send_options(job_id, printer_idx=None, plate=None):
             f["machine_ok"], f["machine_errors"] = sc["ok"], sc["errors"]
     except ImportError:
         pass
-    usable = [f for f in files if f["status"] in ("reviewed", "verified") and f.get("machine_ok", True)]
+    usable = [f for f in files if (f["status"] in ("reviewed", "verified") or j.get("kind") in PRINT_ONLY) and f.get("machine_ok", True)]
     if not capacity:
         capacity = max([f["per_plate"] for f in files] or [remaining or 1])
     merge_total = sum(m["remaining"] for m in merge)
@@ -1024,6 +1072,11 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
     if busy:      # v2.40：一台打印机同时只能有一盘在打
         raise ValueError(f"「{names[idx] if idx < len(names) else idx}」上还有一盘（批次 #{busy['id']}）在打，"
                          "先在生产看板把它「打完」「失败」或「撤销」")
+    trial = (j.get("kind") or "order") in PRINT_ONLY          # v2.53：试打 / 打印测试：不拼盘，用任务指定的文件，不要求先复核
+    if trial:
+        merge_ids = []
+        if not file_id and j.get("file_id"):
+            file_id = j["file_id"]
     jobs = [j] + [dict(_job(c, int(x))) for x in (merge_ids or []) if int(x) != job_id]
     units = {}       # v2.52：几盘的任务每个任务这一盘还差几套
     if pv:
@@ -1051,14 +1104,16 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
     f = None
     if send or file_id:
         f = _file_for_count(j, idx, count, file_id, user, pv)
-        if f["status"] == "draft":
+        if trial:
+            pass       # 试打就是为了验证这个文件：不要求先复核 / 试打验证（机型、喷嘴、热床板、AMS 的核对下面照旧）
+        elif f["status"] == "draft":
             # 草稿：员工在开始对话框里逐项确认 = 人工复核（自动检查有错误时不允许）
             items = confirm.get("review") or {}
             if all(items.get(k) for k, _ in print_files.REVIEW_ITEMS):
                 f = print_files.review(f["id"], items, user, "开始打印时人工复核")
             else:
                 raise ValueError("这个切片文件还没复核。请逐项确认支撑、方向、数量、参数、材料后再开始")
-        if f["status"] != "verified":
+        if not trial and f["status"] != "verified":
             items = confirm.get("review") or {}
             missing = [lab for k, lab in print_files.REVIEW_ITEMS if not items.get(k)]
             if missing:
@@ -1096,7 +1151,7 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
         if n > 0:
             alloc[str(x["id"])] = n
             left -= n
-    extra = max(0, left)
+    extra = 0 if trial else max(0, left)
     if pv and extra:      # 几盘的任务：这一盘多出来的几套零件记在这个任务上（凑齐了一整套才进成品库存）
         alloc[str(j["id"])] = alloc.get(str(j["id"]), 0) + extra
         extra = 0
@@ -1224,6 +1279,14 @@ def finish_run(rid, user="", actual_count=None):
         done = (j["qty_done"] or 0) + n
         if j["kind"] == "stock":
             stock_add(j["sku"], n, f"备货打印 批次#{rid}", user, j["product_id"], j["name"], j["color"])
+        if j["kind"] in PRINT_ONLY:       # v2.53：试打 → 等员工填试打结果（再决定入库 / 样品 / 报废）；打印测试 → 到此结束，都不进库存
+            fin = "post" if j["kind"] == "trial" else "done"
+            c.execute("UPDATE jobs SET qty_done=?, status=?, printed_at=?, done_at=CASE WHEN ?='done' THEN ? ELSE done_at END, run_id=NULL, "
+                      "consumed_g=COALESCE(consumed_g,0)+?, updated_at=?, updated_by=? WHERE id=?",
+                      (j["qty"], fin, now, fin, now, r["grams"] or 0, now, user, j["id"]))
+            if j["kind"] == "trial":
+                c.execute("UPDATE trials SET status='await', run_id=? WHERE job_id=? AND status='queued'", (rid, j["id"]))
+            continue
         gone = (j["kind"] or "order") == "order" and j["order_id"] and c.execute(       # v2.39：打的时候订单被取消了
             "SELECT 1 FROM orders WHERE id=? AND status IN ('cancelled','returned','delivery_failed')", (j["order_id"],)).fetchone()
         if done >= j["qty"] and not gone:
@@ -1296,6 +1359,10 @@ def fail_run(rid, reason="", note="", user=""):
     for jid in alloc:
         j = c.execute("SELECT * FROM jobs WHERE id=?", (int(jid),)).fetchone()
         if not j:      # v2.39：任务已经不在了
+            continue
+        if j["kind"] in PRINT_ONLY:       # v2.53：试打 / 测试失败 = 这次试打的结果，不回到队列（要重来点「再试一次」）
+            from . import trial
+            trial.mark_failed_run(dict(j), reason, note, user)
             continue
         if r.get("plate_id"):       # v2.52：几盘的方案只有这一盘回到队列，别的盘照旧
             c.execute("UPDATE job_plates SET run_id=NULL, pin=0, fails=COALESCE(fails,0)+1, updated_at=? WHERE job_id=? AND plate_id=?",

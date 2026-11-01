@@ -112,6 +112,7 @@
     if (my !== SEQ) return;
     try {
       ROOT.querySelector(".p360-body").innerHTML = render(d);
+      if (window.TRIAL) { const h = ROOT.querySelector("[data-tr-hist]"); if (h) TRIAL.mount(h, d.product.id, true); }
       ROOT.querySelector("#p360-title").textContent = d.focus != null ? (d.variants[d.focus] || {}).sku || d.product.id : d.product.id;
       ROOT.querySelector(".p360-body").scrollTop = 0;
     } catch (e) {
@@ -192,7 +193,7 @@
     if (d.reviews) kp.push({ label: Z("评分", "คะแนนรีวิว"), value: k.rating != null ? `★ ${k.rating}` : "—", sub: k.reviews ? Z(`${k.reviews} 条评价`, `${k.reviews} รีวิว`) : Z("还没有评价", "ยังไม่มีรีวิว"),
       tone: k.rating == null ? "" : k.rating < 4 ? "warn" : "ok" });
     const kpis = window.UX ? `<div class="p360-k p360-k${kp.length}">${UX.kpis(kp)}</div>` : "";
-    return head + kpis + [secStock(d), secOnline(d), secStockSync(d), secSales(d), secComp(d), secReviews(d), secPlans(d), secChanges(d), secJobs(d), secOrders(d)].join("");
+    return head + kpis + [secStock(d), secOnline(d), secStockSync(d), secSales(d), secComp(d), secReviews(d), secPlans(d), secChanges(d), secJobs(d), secTrial(d), secOrders(d)].join("");
   }
 
   function secStock(d) {
@@ -318,14 +319,24 @@
       right: pend.length ? `<button type="button" class="mini" data-p360-go="opschg">${E(Z("去确认", "ไปยืนยัน"))} ›</button>` : "" });
   }
 
+  // v2.53：不用订单直接生产（备货）+ 试打记录（次数、成功率、问题、照片）
+  function mkBtn(d) {
+    if (!(window.TRIAL && TRIAL.can()) || !hasTab("production")) return "";
+    const sk = d.focus != null ? (d.variants[d.focus] || {}).sku || "" : "";
+    return `<button type="button" class="mini" data-tr-stock="${E(d.product.id)}" data-tr-skus="${E(sk)}" data-tr-src="p360">➕ ${E(Z("生产", "ผลิต"))}</button> `;
+  }
+  function secTrial(d) {
+    if (!(window.TRIAL && hasTab("production"))) return "";
+    return card(Z("试打记录", "บันทึกการทดลองพิมพ์"), `<div data-tr-hist></div>`, { right: window.TRIAL.can() ? `<button type="button" class="mini" data-tr-trial="${E(d.product.id)}" data-tr-all="1" data-tr-src="p360">🧪 ${E(Z("试打", "ทดลองพิมพ์"))}</button>` : "" });
+  }
   function secJobs(d) {
     const j = d.jobs || [];
-    if (!j.length) return card(Z("生产中", "กำลังผลิต"), empty("没有在做的生产任务", "ไม่มีงานผลิตที่กำลังทำ"));
+    if (!j.length) return card(Z("生产中", "กำลังผลิต"), empty("没有在做的生产任务", "ไม่มีงานผลิตที่กำลังทำ"), { right: mkBtn(d) });
     const tone = { failed: "bad", printing: "info", post: "info", todo: "" };
     const rows = j.map((x) => `<div class="p360-li"><div class="p360-li-m"><span class="mono">${E(x.sku || "")}</span> ×${x.remaining}
-        ${chip(Z(x.status_zh, JOB[x.status] || x.status_zh), tone[x.status])} <span class="small muted">${E(x.kind === "stock" ? Z("备货", "สต็อก") : x.kind === "reship" ? Z("补发", "ส่งใหม่") : x.order_no || "")}</span></div>
+        ${chip(Z(x.status_zh, JOB[x.status] || x.status_zh), tone[x.status])} <span class="small muted">${E(x.kind === "stock" ? Z("备货", "สต็อก") : x.kind === "reship" ? Z("补发", "ส่งใหม่") : x.kind === "trial" ? Z("试打", "ทดลองพิมพ์") : x.kind === "test" ? Z("测试", "ทดสอบ") : x.order_no || "")}</span></div>
       <div class="p360-li-r small muted">${x.printer_code ? "🖨 " + E(x.printer_code) : ""} #${x.id}</div></div>`).join("");
-    return card(Z("生产中", "กำลังผลิต"), rows, { n: j.length, right: hasTab("production") ? `<button type="button" class="mini" data-p360-go="production">${E(Z("生产看板", "บอร์ดผลิต"))} ›</button>` : "" });
+    return card(Z("生产中", "กำลังผลิต"), rows, { n: j.length, right: mkBtn(d) + (hasTab("production") ? `<button type="button" class="mini" data-p360-go="production">${E(Z("生产看板", "บอร์ดผลิต"))} ›</button>` : "") });
   }
 
   function secOrders(d) {

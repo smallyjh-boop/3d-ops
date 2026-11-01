@@ -274,6 +274,8 @@
             <button data-rc="ai">让 AI 检查</button></div></div>` : ""}
         <div class="row gap wrap fact">
           <a class="btn mini-btn" href="/api/print-files/${f.id}/download">⬇ 下载</a>
+          ${window.TRIAL && TRIAL.can() && f.kind !== "resin" ? `<button class="mini" data-tr-check="${esc(PID)}" data-tr-spec="${esc(f.spec || "")}" data-tr-plate="${esc(f.plate_id || "p1")}" data-tr-file="${f.id}" title="不打印：核对机型 / 喷嘴 / 热床板、克数、零件位置">🔍 检查</button>
+            <button class="mini" data-tr-trial="${esc(PID)}" data-tr-spec="${esc(f.spec || "")}" data-tr-plate="${esc(f.plate_id || "p1")}" data-tr-file="${f.id}" data-tr-src="file">🧪 试打</button>` : ""}
           ${CAN("files.upload") ? '<label class="filebtn mini-file" title="上传新版本，旧版本自动停用">替换<input type="file" data-rc="replace" accept=".3mf,.gcode,.gco,.pm5s,.pm5,.pm7,.pwmx,.pwma,.pwmb,.pm3,.pm4n,.ctb,.goo,.prz" hidden></label>' : ""}
           <button class="mini" data-rc="toggle">${f.active ? "停用" : "启用"}</button>
           ${CAN("files.delete") ? '<button class="mini danger" data-rc="del">删除</button>' : ""}

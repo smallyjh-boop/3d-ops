@@ -4,6 +4,7 @@
   const H = () => window.OPSH;
   const Z = (zh, th) => (window.I18N && I18N.lang === "th" ? th : zh);
   const CONN_ZH = { auto: "自动识别", bambu: "拓竹局域网", moonraker: "Klipper / Moonraker（root 过的 K1）", creality: "Creality 原厂固件", none: "不连接" };
+  const TH_ = () => window.I18N && I18N.lang === "th";
   const FST = { draft: "草稿（未复核）", reviewed: "已复核（未试打）", verified: "已试打验证" };
   let BOARD = null, PR_TIMER = null, BOARD_TIMER = null;
 
@@ -59,14 +60,16 @@
     const h = H();
     const late = j.ship_by && j.planned_end && j.planned_end > j.ship_by;
     const pl = j.plan || {};
-    const kind = (j.kind && j.kind !== "order" ? `<span class="pill kind-${j.kind}">${esc(j.kind_zh)}</span>` : "") +
+    const kind = (j.kind && j.kind !== "order" ? `<span class="pill kind-${j.kind}">${esc(window.TRIAL ? TRIAL.kindName(j.kind) : j.kind_zh)}</span>` : "") +
+      (j.trial && j.trial.plate_label ? `<span class="pill tag-pill" data-notr>${esc(TH_() ? j.trial.plate_label_th : j.trial.plate_label)}</span>` : "") +
       (j.tech === "resin" ? `<span class="pill resin-pill" title="光固化：打完先用酒精清洗，晾干后二次固化，再去支撑">🧪 树脂${j.status === "post" ? " · 清洗→固化→去支撑" : ""}</span>` : "") +
       (j.stock_n ? `<span class="pill tag-pill" title="先占住，发货出库时扣库存">📦 ${Z("用库存", "ใช้สต็อก")} ×${j.stock_n}</span>` : "");
     const btns = {
       todo: `<button class="big primary" data-start="${j.id}"${j.plate ? ` data-plate="${esc(j.plate.plate_id)}"` : ""}>▶ 开始打印…</button>` +
         (j.stock > 0 && j.kind !== "stock" ? `<button class="big" data-usestock="${j.id}" title="先占住，发货出库时才扣库存">📦 ${Z(`用库存（可用 ${j.stock} 个）`, `ใช้สต็อก (มี ${j.stock} ชิ้น)`)}</button>` : "") +
-        (j.kind === "stock" && !j.run_id ? `<button class="mini btn-edit-only" data-jdel="${j.id}">删除备货任务</button>` : ""),      // v2.41
-      post: `<button class="big primary" data-js="packed">📦 已打包</button><button class="mini" data-js="todo">退回重打</button>`,
+        (["stock", "trial", "test"].includes(j.kind) && !j.run_id ? `<button class="mini btn-edit-only" data-jdel="${j.id}">${Z("删除任务", "ลบงาน")}</button>` : ""),      // v2.41 / v2.53
+      post: j.kind === "trial" ? `<button class="big primary" data-tr-res="${j.id}">🧪 ${Z("填试打结果", "กรอกผลทดลองพิมพ์")}</button>`
+        : `<button class="big primary" data-js="packed">📦 已打包</button><button class="mini" data-js="todo">退回重打</button>`,
       packed: `<button class="big primary" data-js="done">🚚 已发货</button><button class="mini" data-js="post">退回</button>`,
     }[j.status] || "";
     const mv = j.status === "todo" && !j.plate && (CFG && CFG.printers || []).length > 1
@@ -100,7 +103,7 @@
     const st = lane.status || {};
     const mine = r.sent && st.state === "printing";
     return `<div class="run" data-rid="${r.id}">
-      <div class="row between"><b>正在打的这一盘 · ${r.plate_id ? Z(`${r.count} 套零件`, `ชิ้นส่วน ${r.count} ชุด`) : `${r.count} 个`}</b>${mine ? h.stChip(st, lane.status_zh) : `<span class="pill pst-printing">${r.sent ? "已发送" : "手动开始"}</span>`}</div>
+      <div class="row between"><b>${(r.jobs[0] && r.jobs[0].kind && r.jobs[0].kind !== "order") ? `<span class="pill kind-${r.jobs[0].kind}">${esc(window.TRIAL ? TRIAL.kindName(r.jobs[0].kind) : r.jobs[0].kind_zh)}</span> ` : ""}正在打的这一盘 · ${r.plate_id ? Z(`${r.count} 套零件`, `ชิ้นส่วน ${r.count} ชุด`) : `${r.count} 个`}</b>${mine ? h.stChip(st, lane.status_zh) : `<span class="pill pst-printing">${r.sent ? "已发送" : "手动开始"}</span>`}</div>
       ${mine ? `<div class="bar"><div style="width:${Number(st.progress) || 0}%"></div></div>` : ""}
       ${prodHead({ sku: r.sku, name: r.name, product: r.product })}
       ${r.plate_id ? `<div class="small plate-line">🧩 <b>${plateName({ no: r.plate_no, total: r.plate_total, name: r.plate_name })}</b></div>` : ""}
@@ -115,6 +118,7 @@
   async function loadBoard() {
     const b = await api("/api/production");
     BOARD = b;
+    if (window.TRIAL) TRIAL.filterBoard(b);      // v2.53：类型标签 / 筛选、等试打结果的提示
     const warn = [];
     if (!b.lanes.length) warn.push("还没有设置打印机（系统 → 设置 → 生产），任务没法分配。");
     if (b.missing_data.length) warn.push(`${b.missing_data.length} 个任务的产品缺少克数/时长，也没有切片文件，排单时间不准。请到产品的「打印方案」里切片。`);
@@ -212,7 +216,7 @@
         ${bad ? `<div class="bad"><b>材料不对！</b>切片文件是 ${esc(p.material)}，产品要用 ${esc(mc.need)}。请到打印方案里重新切片，不能开始。</div>` : ""}
         ${mc.trays && mc.trays.length ? `<div class="small">打印机料盘：${mc.trays.map((t) => `<span class="tray-chip">${t.hex ? `<i style="background:${esc(t.hex)}"></i>` : ""}<span data-notr>${esc(t.type || "?")}</span></span>`).join(" ")}</div>` : ""}
         ${mc.tray_warn ? `<div class="warn small">${esc(mc.tray_warn)}</div>` : ""}`;
-      const needReview = !(f && f.status === "verified");
+      const needReview = !(f && f.status === "verified") && !["trial", "test"].includes(j.kind);      // v2.53：试打 / 测试不要求先复核
       $("#sd-review", el).classList.toggle("hidden", !needReview);
       el.dataset.fileId = f ? f.id : (draft ? draft.id : "");
     };
@@ -272,14 +276,18 @@
       if (d.ticket) { window.open(`/print/jobs?ids=${d.ticket}`, "_blank"); return; }
       if (d.rdone) {
         if (!confirm("这一盘已经打完、零件检查合格了？")) return;
-        await busy(t, () => api(`/api/runs/${d.rdone}/done`, { json: {} })); toast("已记录：打完，耗材已扣"); return loadBoard();
+        const rj = BOARD && BOARD.lanes.flatMap((l) => l.runs).find((x) => x.id === +d.rdone);
+        await busy(t, () => api(`/api/runs/${d.rdone}/done`, { json: {} })); toast("已记录：打完，耗材已扣"); await loadBoard();
+        const tj = rj && rj.jobs.find((x) => x.kind === "trial");
+        if (tj && window.TRIAL) TRIAL.resultForm(tj.id);        // v2.53：试打打完马上填试打结果
+        return;
       }
       if (d.rcancel) {
         if (!confirm("撤销这一盘？（还没真正开始打印时用，不扣料）")) return;
         await api(`/api/runs/${d.rcancel}/cancel`, { json: {} }); return loadBoard();
       }
       if (d.jdel) {
-        if (!confirm("删除这个备货任务？（已经打好的件已经在成品库存里，不受影响）")) return;
+        if (!confirm(Z("删除这个任务？（备货任务已经打好的件已经在成品库存里，不受影响）", "ลบงานนี้? (ชิ้นที่พิมพ์เสร็จของงานเตรียมสต็อกอยู่ในสต็อกแล้ว ไม่กระทบ)"))) return;
         await api(`/api/jobs/${d.jdel}`, { method: "DELETE" }); toast("已删除"); return loadBoard();
       }
       if (d.usestock) {
@@ -577,6 +585,9 @@
           LOCKS[id].editing = false; setTimeout(() => connSettings(box), 100);
         } });
     });
+    if (window.TRIAL && TRIAL.can()) {      // v2.53：🧪 打印测试（20 mm 立方体）放在「测试连接」旁边
+      $$(".pr-conn [data-ctest]", box).forEach((b) => b.insertAdjacentHTML("afterend", ` <button class="mini" data-tr-ptest="${b.closest("[data-pi]").dataset.pi}" title="${Z("给这台打印机的机型切一个 20 mm 立方体，走正常发送 / 开始 / 打完回报，用来验证整条链路", "สไลซ์ลูกบาศก์ 20 มม. ตามรุ่นเครื่องนี้ แล้วส่ง/เริ่ม/รายงานเมื่อเสร็จตามขั้นตอนปกติ เพื่อทดสอบทั้งระบบ")}">🧪 ${Z("打印测试", "ทดสอบพิมพ์")}</button>`));
+    }
     if (!box.dataset.bound) {
       box.dataset.bound = "1";
       box.addEventListener("click", async (e) => {
