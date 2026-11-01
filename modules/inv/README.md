@@ -67,3 +67,5 @@
   按货位盘点的差异显示金额。接口：/api/inv/value、/api/inv/spools（…/put|load|unload|weigh、/count）、/api/inv/held/<qc|returns|defect|staging>、
   /api/inv/qc/pass|fail、/api/inv/returns/receive|act、/api/inv/defect/act、/api/inv/printer-locs。迁移（只做一次）：在机上的料卷 → 打印机 · 槽，
   其它 → v2.52 时这个耗材放的货位（没放过 → 待上架）；其它物品的货位数量、成品备货目标不动。测试 modules/inv/tests/t_wms253.py。
+
+- （系统 v2.53.0）复审修复：质检区默认关改以 v2.53 迁移标记为准（inv_loc_v253 没设 + 已有物品 → 明确写 inv_qc_on=False，不再看 config.json 里有没有这个键）。测试 modules/inv/tests/t_wms253.py。

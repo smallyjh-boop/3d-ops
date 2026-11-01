@@ -224,6 +224,27 @@ except ValueError as e:
 C.post(f"/api/products/{PID}/spec-scale", json={"spec": "大号", "pct": None})
 cd = ids(print_files.candidates(PID, "3DP0002-WH-D", "Bambu Lab P1S", usable_only=False))
 ok(fl["id"] not in cd and fm["id"] in cd, f"scale cancelled: back to the main files {cd}")
+# 复审：已验证的主模型文件被改到缩放规格 → 缩放比例不重算、状态回到草稿，开始打印被拦
+C.post(f"/api/products/{PID}/spec-scale", json={"spec": "大号", "pct": 120})
+fv = gf("main_verified.gcode")
+print_files.verify(fv["id"], True, "boss")
+ok(print_files.get(fv["id"])["status"] == "verified", "main file verified")
+r = PC.post(f"/api/print-files/{fv['id']}", json={"spec": "大号"})
+fv2 = print_files.get(fv["id"])
+ok(r.status_code == 200 and fv2["scale"] == 100 and fv2["status"] == "draft" and not fv2.get("reviewed_by") and not fv2.get("verified_by"),
+   f"spec change keeps scale 100 and resets to draft {fv2['scale']} {fv2['status']}")
+ok("120%" in specmodel.file_error(fv2, store.load(PID), "3DP0002-WH-D"), "file_error flags the scale mismatch")
+jD2 = production.create_job(PID, "3DP0002-WH-D", 1, "stock", user="boss")
+try:
+    production.start_run(jD2["id"], 0, file_id=fv["id"], send=False, user="boss", confirm=CONFIRM); ok(False, "start refused")
+except ValueError as e:
+    ok("120%" in str(e) or "复核" in str(e), f"scaled job refuses the re-assigned file: {e}")
+# 上传没写缩放比例 → 复核提示
+fh = gf("hint.gcode", spec="大号")
+ok(any(x.get("hint") == "scale" and "120" in x["zh"] and x.get("th") for x in print_files.set_checks(fh["id"], [])["checks"]), "scale hint added for a scaled spec upload")
+production.delete_stock_job(jD2["id"], "boss")
+print_files.update(fv["id"], active=0); print_files.update(fh["id"], active=0)
+C.post(f"/api/products/{PID}/spec-scale", json={"spec": "大号", "pct": None})
 for j_ in (jD, jA):
     production.delete_stock_job(j_["id"], "boss")
 for f_ in (fm, fsku, fl):

@@ -160,6 +160,30 @@ S._dirty.clear()
 r = S.run_check("t")
 ok(last_push(K) == 17 and S.log_list(sku=K)[0]["reason"] == "timer", f"periodic check pushes missed change {r}")
 
+# ---- 复审：防抖期间关了自动推送 → 什么都不推；事件触发的批次不记成「手动」
+S.INLINE = False
+production.stock_add(K, -1, "盘点", "t")                     # 手动类原因 -> 事件批次
+ok(K in S._dirty and S._dirty_reason.get(K) == "event", f"event batch is not 'manual' {S._dirty_reason.get(K)}")
+config.save_config({"ss_auto_push": False})
+before = last_push(K); n_calls = len(calls)
+r = S.process_dirty()
+ok(last_push(K) == before and len(calls) == n_calls and r.get("auto_off"), "switch turned off during debounce -> nothing pushed")
+config.save_config({"ss_auto_push": True})
+production.stock_add(K, -1, "盘点", "t")
+S.process_dirty()
+ok(S.log_list(sku=K)[0]["reason"] == "event", f"event push is logged as event, not manual: {S.log_list(sku=K)[0]['reason']}")
+production.stock_add(K, 2, "盘点", "t"); S.process_dirty()          # 数量还原
+# 基线：第一次拉到平台数写了 pushed_at；自动推送关着时不报「超过 1 天没同步」
+_c_ = S._c()
+_c_.execute("DELETE FROM ss_state WHERE sku=? AND shop_id=?", (K, sid)); _c_.commit()
+S.pull_platform()
+ok(_c_.execute("SELECT pushed_at FROM ss_state WHERE sku=? AND shop_id=?", (K, sid)).fetchone()[0], "baseline from the first pull sets pushed_at too")
+_c_.execute("UPDATE ss_state SET first_seen=? WHERE sku=? AND shop_id=?", (time.time() - 3 * 86400, K, sid)); _c_.commit()
+config.save_config({"ss_auto_push": False})
+ok(not cell(K)["stale"], "auto push off -> never 'stale'")
+config.save_config({"ss_auto_push": True})
+S.sync_pending("timer", "t")
+
 # ---- 锁定：自动同步不覆盖 ----
 S.set_lock(K, sid, 3, "t")
 ok(last_push(K) == 3 and cell(K)["status"] == "locked" and cell(K)["target"] == 3, "lock pushes the number and shows 已锁定")

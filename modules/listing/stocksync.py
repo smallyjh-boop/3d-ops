@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS ss_log (
 );
 CREATE INDEX IF NOT EXISTS ss_log_sku ON ss_log(sku, ts);
 """
-REASONS = ("ship", "in", "produce", "manual", "timer", "rule")          # 出货 / 入库 / 生产完成 / 手动 / 定时 / 规则变更
+REASONS = ("ship", "in", "produce", "manual", "timer", "rule", "event")          # 出货 / 入库 / 生产完成 / 手动 / 定时 / 规则变更
 REASON_ZH = {"ship": "出货", "in": "入库", "produce": "生产完成", "manual": "手动", "timer": "定时", "rule": "规则变更", "event": "库存变化"}
 FIELDS = ("safety", "alloc", "alloc_val", "virtual", "cap")
 INLINE = False                  # 测试用：库存变化马上同步，不等后台线程
@@ -367,7 +367,7 @@ def compute(skus=None, shop_ids=None):
                 "last_at": ss.get("pushed_at"), "status": status, "locked": locked is not None, "lock_qty": locked,
                 "paused": bool(ss.get("paused")), "error": ss.get("error") or "", "error_kind": ss.get("error_kind") or "",
                 "fails": ss.get("fails") or 0, "mismatch": bool(mismatch), "api": s["api"], "since": since,
-                "stale": bool(status in ("pending", "failed") and since and now - since > st["unsynced_hours"] * 3600),
+                "stale": bool(st["auto"] and status in ("pending", "failed") and since and now - since > st["unsynced_hours"] * 3600),
                 "rule": cc["rule"], "raw": cc["raw"]}
             kpi["total"] += 1
             if status == "pending":
@@ -726,7 +726,8 @@ def pull_platform(shop_ids=None):
             q = int(d.get("qty") or 0)
             kw = {"platform_qty": q, "platform_at": now, "plat_status": d.get("status") or ""}
             if known.get(sku.upper()) is None:
-                kw["pushed"] = q                       # 第一次见到：平台现在显示的数就是「上次推的数」，数字没变化之前什么都不推
+                kw["pushed"] = q
+                kw["pushed_at"] = now                       # 第一次见到：平台现在显示的数就是「上次推的数」，数字没变化之前什么都不推
             _set_state(sku.upper(), s["id"], **kw)
         PULL_INFO[s["id"]] = {"at": now, "error": ""}
         out[s["id"]] = {"n": len(got), "error": ""}
@@ -760,6 +761,8 @@ def on_stock_changed(sku="", delta=0, reason="", **kw):
     if not sku or not st["event"] or not st["auto"]:
         return
     k = reason_kind(reason, delta)
+    if k == "manual":
+        k = "event"      # 事件触发的不是「手动」：手动会绕过自动推送总开关
     with _lock:
         _dirty.add(sku.upper())
         _dirty_reason[sku.upper()] = k
@@ -795,11 +798,13 @@ def process_dirty():
         _dirty_reason.clear()
     if not skus:
         return {"pushed": 0, "failed": 0}
+    if not auto_enabled():          # 防抖期间总开关被关了：什么都不推（标记丢弃，开关再打开时定时检查会补）
+        return {"pushed": 0, "failed": 0, "skipped": 0, "items": [], "auto_off": True}
     reset_cache()
     out = {"pushed": 0, "failed": 0, "skipped": 0, "items": []}
     by = {}
     for s in skus:
-        by.setdefault(kinds.get(s, "manual"), []).append(s)
+        by.setdefault(kinds.get(s) if kinds.get(s) not in (None, "manual") else "event", []).append(s)
     for kind, group in by.items():
         r = sync_pending(kind, "系统", skus=group, retry=False)
         for k in ("pushed", "failed", "skipped"):
