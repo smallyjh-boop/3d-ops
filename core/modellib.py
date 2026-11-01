@@ -640,6 +640,16 @@ def _posd(s):
     return {"x": p[0], "y": p[1], "rot": p[2]} if p else {}
 
 
+def _orient_sel(tris, s):
+    """摆放方向（六个方向 / v2.55 任意面 face）+ 镜像（mirror：x / y / xy）。"""
+    f = s.get("face")
+    t = mesh.orient_tris(tris, s.get("orient") or "bottom", f if isinstance(f, (list, tuple)) and len(f) == 3 else None)
+    m = str(s.get("mirror") or "")
+    if m:
+        t = mesh.mirror(t, "x" in m, "y" in m)
+    return t
+
+
 def _pieces(pid, p, sel):
     """按勾选的文件 / 组件、数量、方向读出要摆的零件。返回 (pieces, desc)。"""
     pieces, desc = [], []
@@ -659,10 +669,10 @@ def _pieces(pid, p, sel):
             i = int(s["part"])
             if not 0 <= i < len(parts):
                 raise ValueError(f"「{e['orig_name']}」没有第 {i + 1} 个组件")
-            pieces.append((mesh.rotate(np.asarray(parts[i][1]) * k, s["orient"]), qty, _pos(s)))
+            pieces.append((_orient_sel(np.asarray(parts[i][1]) * k, s), qty, _pos(s)))
             desc.append({"id": e["id"], "part": i, "qty": qty, "orient": s["orient"], "label": f"{e['orig_name']} / {parts[i][0]}", **_posd(s)})
         else:
-            pieces.append((mesh.rotate(np.concatenate([t for _n, t in parts]) * k, s["orient"]), qty, _pos(s)))
+            pieces.append((_orient_sel(np.concatenate([t for _n, t in parts]) * k, s), qty, _pos(s)))
             desc.append({"id": e["id"], "part": None, "qty": qty, "orient": s["orient"], "label": e["orig_name"], **_posd(s)})
     return pieces, desc
 

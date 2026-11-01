@@ -413,3 +413,307 @@ def capacity(footprint, bed, gap=6.0, margin=5.0):
     n1 = int(bw // w) * int(bd // d)
     n2 = int(bw // d) * int(bd // w)        # 转 90° 放
     return max(0, n1, n2)
+
+
+# ---------------- v2.55 打印方案编辑器：任意面贴平台、镜像、推荐的面、按高度切开 ----------------
+FACE_AXES = {"bottom": (0, 0, -1), "top": (0, 0, 1), "front": (0, -1, 0), "back": (0, 1, 0), "left": (-1, 0, 0), "right": (1, 0, 0)}
+
+
+def _unit(n):
+    n = np.asarray(n, dtype=np.float64).reshape(3)
+    ln = float(np.linalg.norm(n))
+    if ln < 1e-9:
+        raise ValueError("面的方向不对")
+    return n / ln
+
+
+def face_matrix(n):
+    """把（模型文件里的）朝外法线 n 转到朝下（-Z）的旋转矩阵（罗德里格斯公式）。"""
+    a = _unit(n)
+    b = np.array([0.0, 0.0, -1.0])
+    v = np.cross(a, b)
+    c = float(np.dot(a, b))
+    if np.linalg.norm(v) < 1e-9:
+        return np.eye(3) if c > 0 else np.diag([1.0, -1.0, -1.0])      # 已经朝下 / 正好朝上（绕 X 转 180°）
+    vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+    return np.eye(3) + vx + vx @ vx * (1 / (1 + c))
+
+
+def rotate_face(tris, n):
+    """选定的面（法线 n）贴平台：转到朝下，再把最低点放到 0。"""
+    t = np.asarray(tris, dtype=np.float64)
+    out = (t.reshape(-1, 3) @ face_matrix(n).T).reshape(t.shape)
+    return out - out.reshape(-1, 3).min(0)
+
+
+def orient_tris(tris, orient="bottom", face=None):
+    """摆放方向：六个主要方向之一，或者 face = 任意面的法线（v2.55「按面贴平台」）。"""
+    if face is not None:
+        return rotate_face(tris, face)
+    return rotate(np.asarray(tris, dtype=np.float64), orient if orient in ORIENT_ZH else "bottom")
+
+
+def mirror(tris, mx=False, my=False):
+    """镜像（沿 X / Y），三角面的顶点顺序跟着反过来（法线还是朝外）。"""
+    t = np.array(tris, dtype=np.float64)
+    if not (mx or my):
+        return t
+    if mx:
+        t[..., 0] = -t[..., 0]
+    if my:
+        t[..., 1] = -t[..., 1]
+    if bool(mx) != bool(my):
+        t = t[:, [0, 2, 1], :]
+    return t
+
+
+def face_candidates(tris, n=3, min_cm2=1.0):
+    """推荐的「贴平台面」：模型外侧的大平面（不是六个主要方向的），按面积从大到小，最多 n 个。
+    返回 [{"face": [nx, ny, nz], "area_cm2"}]。"""
+    t = np.asarray(tris, dtype=np.float64)
+    if len(t) > 400_000:
+        t = t[:: max(1, len(t) // 400_000)]
+    a, b, c = t[:, 0], t[:, 1], t[:, 2]
+    nrm = np.cross(b - a, c - a)
+    ln = np.linalg.norm(nrm, axis=1)
+    ok = ln > 1e-9
+    nrm, area, cen = nrm[ok] / ln[ok, None], ln[ok] / 2, t[ok].mean(1)
+    if not len(area):
+        return []
+    q = np.round(nrm * 40).astype(np.int64)            # 约 1.5° 一格
+    _keys, inv = np.unique(q, axis=0, return_inverse=True)
+    inv = inv.reshape(-1)
+    tot = np.bincount(inv, weights=area)
+    verts = t.reshape(-1, 3)
+    out = []
+    for k in np.argsort(-tot)[:60]:
+        if tot[k] / 100 < min_cm2 or len(out) >= n:
+            break
+        m = inv == k
+        nn = (nrm[m] * area[m, None]).sum(0)
+        nn = nn / (np.linalg.norm(nn) or 1)
+        if any(abs(float(np.dot(nn, ax))) > 0.999 for ax in FACE_AXES.values()):
+            continue                                   # 六个主要方向已经有了
+        d = cen[m] @ nn
+        ext = float((verts @ nn).max())
+        on = area[m][np.abs(d - ext) < 0.3].sum()       # 只算贴在最外面的那一层（凹进去的平面放不平）
+        if on / 100 < min_cm2:
+            continue
+        if any(float(np.dot(nn, np.array(o["face"]))) > 0.995 for o in out):
+            continue
+        out.append({"face": [round(float(x), 5) for x in nn], "area_cm2": round(float(on) / 100, 1)})
+    return out
+
+
+def best_face_analysis(tris):
+    """六个主要方向 + 推荐的面，每个算贴平台面积 / 悬空 / 尺寸 / 分数（越小越好）。"""
+    rows = analyze_all(tris)
+    for c in face_candidates(tris):
+        st = stats(rotate_face(tris, c["face"]))
+        st.update(key="face", face=c["face"], label="按面贴平台")
+        st["score"] = round(st["overhang_cm2"] * 3 + st["steep_cm2"]
+                            + (8 if st["contact_cm2"] < 1 else 3 if st["contact_cm2"] < 3 else 0)
+                            + st["height_mm"] / max(1.0, max(st["size_mm"])) * 2, 2)
+        rows.append(st)
+    return rows
+
+
+def is_closed(tris):
+    """每条边正好被两个方向相反的三角面共用（封闭、朝向一致）。"""
+    t = np.asarray(tris, dtype=np.float64)
+    if not len(t):
+        return False
+    _v, inv = np.unique(np.round(t.reshape(-1, 3), 4), axis=0, return_inverse=True)
+    f = inv.reshape(-1, 3)
+    e = np.concatenate([f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]]])
+    e = e[e[:, 0] != e[:, 1]]
+    fw = {}
+    for a_, b_ in map(tuple, e.tolist()):
+        fw[(a_, b_)] = fw.get((a_, b_), 0) + 1
+    return all(fw.get((b_, a_), 0) == c for (a_, b_), c in fw.items())
+
+
+def _area2(poly):
+    s = 0.0
+    for i in range(len(poly)):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % len(poly)]
+        s += x1 * y2 - x2 * y1
+    return s / 2
+
+
+def _in_poly(pt, poly):
+    x, y = pt
+    inside = False
+    for i in range(len(poly)):
+        x1, y1 = poly[i]
+        x2, y2 = poly[i - 1]
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+
+def _seg_cross(p1, p2, p3, p4):
+    """线段 p1p2 和 p3p4 是否真正相交（端点重合不算）。"""
+    def o(a, b, c):
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    d1, d2, d3, d4 = o(p3, p4, p1), o(p3, p4, p2), o(p1, p2, p3), o(p1, p2, p4)
+    return ((d1 > 1e-12 > d2) or (d1 < -1e-12 < d2)) and ((d3 > 1e-12 > d4) or (d3 < -1e-12 < d4))
+
+
+def _bridge(outer, hole, others):
+    """把一个洞（顺时针）用一条来回的「桥」接进外圈（逆时针），变成一个简单多边形。others：还没接进来的洞（桥不能穿过）。"""
+    pts_o, pts_h = outer["pts"], hole["pts"]
+    hi = max(range(len(pts_h)), key=lambda i: pts_h[i][0])
+    m = pts_h[hi]
+    edges = [(pts_o[i], pts_o[(i + 1) % len(pts_o)]) for i in range(len(pts_o))]
+    for h in [hole] + others:
+        edges += [(h["pts"][i], h["pts"][(i + 1) % len(h["pts"])]) for i in range(len(h["pts"]))]
+    order = sorted(range(len(pts_o)), key=lambda i: (pts_o[i][0] - m[0]) ** 2 + (pts_o[i][1] - m[1]) ** 2)
+    pick = order[0]
+    for i in order[:400]:
+        v = pts_o[i]
+        if not any(_seg_cross(m, v, a, b) for a, b in edges):
+            pick = i
+            break
+    n = len(pts_h)
+    hp = [pts_h[(hi + k) % n] for k in range(n)] + [m]
+    ids_h = [hole["ids"][(hi + k) % n] for k in range(n)] + [hole["ids"][hi]]
+    return {"pts": pts_o[:pick + 1] + hp + pts_o[pick:], "ids": outer["ids"][:pick + 1] + ids_h + outer["ids"][pick:]}
+
+
+def _earclip(pts, ids):
+    """逆时针简单多边形（可以有桥接重复的点）→ 三角形（ids）。"""
+    idx = list(range(len(pts)))
+    out = []
+    P = np.asarray(pts, dtype=np.float64)
+
+    def cross(a, b, c):
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    start = 0
+    while len(idx) > 3:
+        n = len(idx)
+        found = False
+        rem = np.asarray(idx)
+        for kk in range(n):
+            k = (start + kk) % n
+            i0, i1, i2 = idx[k - 1], idx[k], idx[(k + 1) % n]
+            a, b, c = P[i0], P[i1], P[i2]
+            if cross(a, b, c) <= 1e-12:
+                continue
+            Q = P[rem]
+            same = (np.all(Q == a, 1) | np.all(Q == b, 1) | np.all(Q == c, 1))
+            c1 = (b[0] - a[0]) * (Q[:, 1] - a[1]) - (b[1] - a[1]) * (Q[:, 0] - a[0])
+            c2 = (c[0] - b[0]) * (Q[:, 1] - b[1]) - (c[1] - b[1]) * (Q[:, 0] - b[0])
+            c3 = (a[0] - c[0]) * (Q[:, 1] - c[1]) - (a[1] - c[1]) * (Q[:, 0] - c[0])
+            if np.any(~same & (c1 >= -1e-12) & (c2 >= -1e-12) & (c3 >= -1e-12)):
+                continue
+            out.append((ids[i0], ids[i1], ids[i2]))
+            idx.pop(k)
+            start = max(0, k - 1)
+            found = True
+            break
+        if not found:                         # 退化（共线 / 自相交）：剩下的按扇形补上
+            for k in range(1, len(idx) - 1):
+                out.append((ids[idx[0]], ids[idx[k]], ids[idx[k + 1]]))
+            return out
+    if len(idx) == 3:
+        out.append((ids[idx[0]], ids[idx[1]], ids[idx[2]]))
+    return out
+
+
+def cut_z(tris, z):
+    """按水平面 Z = z 切成两半，切口补面（封闭）。tris 的 Z 朝上（已经按摆放方向转好）。
+    返回 (下半, 上半)。原来的网格不封闭时切口可能补不全（用 is_closed 检查）。"""
+    t = np.asarray(tris, dtype=np.float64)
+    zs = t[..., 2]
+    if z <= zs.min() + 0.05 or z >= zs.max() - 0.05:
+        raise ValueError("切的高度要在零件的最低点和最高点之间")
+    vv = t.reshape(-1, 3)
+    if np.any(np.abs(vv[:, 2] - z) < 1e-5):           # 正好穿过顶点：稍微挪一点，避免退化
+        z += 3e-4
+    uv, inv = np.unique(np.round(vv, 6), axis=0, return_inverse=True)
+    f = inv.reshape(-1, 3)
+    f = f[(f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])]
+    below = uv[:, 2] < z
+    pts, key_of = [], {}
+
+    def ip(i, j):
+        k = (i, j) if i < j else (j, i)
+        if k not in key_of:
+            a, b = uv[i], uv[j]
+            s = (z - a[2]) / (b[2] - a[2])
+            key_of[k] = len(pts)
+            pts.append((a + (b - a) * s).tolist())
+        return ("p", key_of[k])
+    fb = below[f]
+    nb = fb.sum(1)
+    lo = [[("v", int(x)) for x in tri] for tri in f[nb == 3].tolist()]
+    hi = [[("v", int(x)) for x in tri] for tri in f[nb == 0].tolist()]
+    seg = []                     # 下半部分切口上的边，方向 = 补面（朝上）绕的方向
+    mixed = (nb == 1) | (nb == 2)
+    for tri, bl in zip(f[mixed].tolist(), fb[mixed].tolist()):
+        if sum(bl) == 1:                  # 一个点在下面
+            k = bl.index(True)
+            a, b, c = tri[k], tri[(k + 1) % 3], tri[(k + 2) % 3]
+            pab, pac = ip(a, b), ip(a, c)
+            lo.append([("v", a), pab, pac])
+            hi.append([pab, ("v", b), ("v", c)])
+            hi.append([pab, ("v", c), pac])
+            seg.append((pac[1], pab[1]))
+        else:                             # 两个点在下面
+            k = bl.index(False)
+            a, b, c = tri[k], tri[(k + 1) % 3], tri[(k + 2) % 3]
+            pab, pac = ip(a, b), ip(a, c)
+            hi.append([("v", a), pab, pac])
+            lo.append([pab, ("v", b), ("v", c)])
+            lo.append([pab, ("v", c), pac])
+            seg.append((pab[1], pac[1]))
+    nxt = {}
+    for s0, s1 in seg:
+        nxt.setdefault(s0, []).append(s1)
+    loops, used = [], set()
+    for start in list(nxt):
+        for first in list(nxt[start]):
+            if (start, first) in used:
+                continue
+            loop, cur = [start], first
+            used.add((start, first))
+            closed = False
+            for _ in range(len(seg) + 2):
+                if cur == start:
+                    closed = True
+                    break
+                loop.append(cur)
+                cands = [x for x in nxt.get(cur, []) if (cur, x) not in used]
+                if not cands:
+                    break
+                used.add((cur, cands[0]))
+                cur = cands[0]
+            if closed and len(loop) >= 3:
+                loops.append(loop)
+    polys = [{"ids": lp, "pts": [tuple(pts[i][:2]) for i in lp]} for lp in loops]
+    for pg in polys:
+        pg["a"] = _area2(pg["pts"])
+    outers = [pg for pg in polys if pg["a"] > 1e-9]
+    holes = [pg for pg in polys if pg["a"] < -1e-9]
+    for o in outers:
+        o["holes"] = []
+    for h in holes:
+        box = [o for o in outers if _in_poly(h["pts"][0], o["pts"])]
+        if box:
+            min(box, key=lambda o: o["a"])["holes"].append(h)
+    caps = []
+    for o in outers:
+        cur = {"pts": list(o["pts"]), "ids": list(o["ids"])}
+        hs = sorted(o["holes"], key=lambda h: -max(p[0] for p in h["pts"]))
+        for i, h in enumerate(hs):
+            cur = _bridge(cur, h, hs[i + 1:])
+        caps += _earclip(cur["pts"], cur["ids"])
+
+    def build(fs, flip):
+        out = [[uv[i] if kind == "v" else pts[i] for kind, i in tri] for tri in fs]
+        for a, b, c in caps:
+            out.append([pts[a], pts[c], pts[b]] if flip else [pts[a], pts[b], pts[c]])
+        return np.asarray(out, dtype=np.float64) if out else None
+    return build(lo, False), build(hi, True)

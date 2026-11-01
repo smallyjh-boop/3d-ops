@@ -785,11 +785,12 @@ MULTI_OVERRIDES = {"enable_prime_tower": "1", "flush_into_infill": "1", "flush_i
 
 
 def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, overrides=None, keep_to=None,
-               copies=1, orient=True, filament_name=None, filament_overrides=None, arrange=True, filaments=None):
+               copies=1, orient=True, filament_name=None, filament_overrides=None, arrange=True, filaments=None, keep_settings=False):
     """调用 OrcaSlicer 命令行切片，返回 {grams, hours, source, log}。
     v2.20：配置（打印机 / 工艺 / 耗材）在 NAS 上算好写成文件；切片本身有电脑在线时交给电脑（core/accel），不然在 NAS 上做。
     v2.52：arrange=False 按文件里摆好的位置切（手动摆盘）；filaments=[{material, hex}]（多色，每个 AMS 槽一个）——
-    每槽写一份耗材配置（颜色按槽），结果里带每个耗材的克数（filaments）、冲刷废料（purge_g）。多色只在本机切（不交给电脑）。"""
+    每槽写一份耗材配置（颜色按槽），结果里带每个耗材的克数（filaments）、冲刷废料（purge_g）。多色只在本机切（不交给电脑）。
+    v2.55：keep_settings=True（零件有单独的层高 / 填充 / 壁数，写在 3MF 的 model_settings.config 里）→ 保留这个文件、只在本机切。"""
     from . import accel
     from . import orca_profiles as op
     exe, idx, machine, process, filament = resolve_profiles(cfg, printer_index, material, filament_name)
@@ -825,12 +826,12 @@ def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, ov
         timeout = max(timeout, min(3600, int(600 + size_mb * 30)))
         params = {"orient": bool(orient), "copies": int(copies or 1), "timeout": timeout, "material": material, "used": used,
                   "keep": bool(keep_to), "model_name": os.path.basename(model_path), "arrange": bool(arrange),
-                  "keep_slots": bool(filaments and len(filaments) > 1)}
+                  "keep_slots": bool(filaments and len(filaments) > 1) or bool(keep_settings)}
         name = params["model_name"]
-        if ";" in f_path:          # 多色：几份耗材配置，只在本机切
+        if ";" in f_path or keep_settings:          # 多色：几份耗材配置 / 零件单独参数：只在本机切
             result = run_cli(exe, m_path, p_path, f_path, model_path, os.path.join(out_dir, "work"), params, keep_to, model_name=name)
             result["printer"] = printer_index
-            result["profiles"] = {"machine": machine, "process": process, "filament": filament, "filaments": len(filaments)}
+            result["profiles"] = {"machine": machine, "process": process, "filament": filament, "filaments": len(filaments or [1])}
             return result
 
         def remote_done(res, files):

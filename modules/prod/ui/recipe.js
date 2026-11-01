@@ -6,17 +6,19 @@
   const PATTERNS = ["gyroid", "grid", "cubic", "crosshatch", "rectilinear", "honeycomb", "lightning"];
   const LVL = { error: "❌", warn: "⚠️", info: "💡", ok: "✅" };
   const TH = () => window.I18N && I18N.lang === "th";
-  let R = null, PID = null, BOX = null, LIVE = null, DIRTY = false, LIVE_T = null, SPEC = "";   // SPEC：看哪个规格（v2.22，规格有自己的模型时）
+  let R = null, PID = null, BOX = null, LIVE = null, DIRTY = false, LIVE_T = null, SPEC = "", FILES_ONLY = false;   // SPEC：看哪个规格（v2.22，规格有自己的模型时）
   const sq = () => (SPEC ? `?spec=${encodeURIComponent(SPEC)}` : "");
 
   const gv = (fn) => { if (window.GVIEW) fn(window.GVIEW); else window.addEventListener("gview-ready", () => fn(window.GVIEW), { once: true }); };
 
-  async function mount(el, pid, spec) {
+  // v2.55 filesOnly（或 el 上 data-files-only="1"）：只显示模型文件 + 切片文件（放在统一的打印方案编辑器下面）
+  async function mount(el, pid, spec, opts) {
     if (pid !== PID) SPEC = "";
     if (spec !== undefined) SPEC = spec || "";
     BOX = el; PID = pid;
+    FILES_ONLY = !!((opts && opts.filesOnly) || (el && el.dataset && el.dataset.filesOnly === "1"));
     if (!pid) { disposeLive(); el.innerHTML = ""; return; }
-    el.innerHTML = '<p class="muted small">读取打印方案…</p>';
+    el.innerHTML = `<p class="muted small">${TH() ? "กำลังโหลด…" : "读取中…"}</p>`;
     try { R = await api(`/api/products/${encodeURIComponent(pid)}/recipe${sq()}`); SPEC = R.spec || ""; } catch (e) { el.innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
     DIRTY = false;
     render();
@@ -56,6 +58,18 @@
     }).join("");
   }
 
+  function uploadHtml() {
+    return CAN("files.upload") ? `<div class="rc-upload">
+        <label class="filebtn primary-file">⬆ 上传电脑上切好的文件（可多选）<input type="file" data-rc="upload" accept=".3mf,.gcode,.gco,.pm5s,.pm5,.pm7,.pm7m,.pm4n,.pm4u,.pm3,.pm3m,.pm3r,.pwmx,.pwma,.pwmb,.pwmo,.pwms,.pws,.pw0,.pwx,.dlp,.dl2p,.pmx2,.pwc,.ctb,.cbddlp,.goo,.prz,.jxs" multiple hidden></label>
+        <label class="small">用于<select data-u="printer"><option value="auto">自动识别打印机</option>${R.printers.map((n) => `<option data-notr>${esc(n)}</option>`).join("")}<option value="*">任何打印机</option></select></label>
+        <label class="small">一盘<input data-u="per" type="number" min="1" placeholder="自动" style="width:70px">个</label>
+        ${/^RESIN/.test(R.material) ? `<label class="small">打印时长<input data-u="hours" type="number" min="0" step="0.1" placeholder="自动读" style="width:80px">小时</label>
+        <label class="small">树脂<input data-u="ml" type="number" min="0" step="0.1" placeholder="自动读" style="width:80px">ml</label>
+        <div class="small muted">光固化：在 Photon Workshop / Chitubox / Lychee 里切好后上传（M5s 是 .pm5s 文件）。Anycubic 的文件会自动读出打印时长和树脂用量，
+          其他格式读不出来时请在这里填（切片软件里能看到）。<b>一盘放几个请一定填</b>（光固化读不出个数）。</div>` :
+        `<div class="small muted">Bambu Studio / OrcaSlicer 用「导出切片文件（Export plate sliced file）」得到 .gcode.3mf；Creality Print 导出 .gcode。
+          打印机和一盘几个会从文件里自动认出来，认不出时再手动选。上传后是草稿，在 3D 切片预览里检查后复核。</div>`}</div>` : "";
+  }
   function render() {
     disposeLive();
     setTimeout(() => {
@@ -71,6 +85,16 @@
         <span class="muted">${TH() ? "แต่ละแบบที่มีโมเดลของตัวเองมีแผนการพิมพ์และไฟล์สไลซ์แยก" : "有自己模型的规格，打印方案和切片文件分开管理"}</span></div>` : "";
     const spmBox = (R.specs || []).length ? `<details class="rc-spm small" ${own.length ? "" : ""}><summary>${TH() ? "แต่ละแบบใช้โมเดลไหน" : "规格用哪个模型"}
         <span class="muted">${own.length ? "" : (TH() ? "(ตอนนี้ทุกแบบใช้โมเดลหลัก)" : "（现在所有规格都用主模型）")}</span></summary><div class="rc-spm-body"></div></details>` : "";
+    if (FILES_ONLY) {           // v2.55：参数在上面的打印方案编辑器里改，这里只放模型文件和切片文件
+      BOX.innerHTML = spmBox + `<div class="rc rc-files-only">
+        <h4>${TH() ? "ไฟล์โมเดล" : "模型文件"}</h4>
+        <div class="rc-model">${modelBox()}</div>
+        <h4>${TH() ? "ไฟล์สไลซ์" : "切片文件"}${R.spec ? ` <span class="muted small" data-notr>· ${esc(R.spec)}</span>` : ""}</h4>
+        <div class="small muted">${TH() ? "สไลซ์ตามแผนการพิมพ์: กด「✂ สไลซ์ถาดนี้」ในแต่ละถาดด้านบน หรืออัปโหลดไฟล์ที่สไลซ์ในคอมพิวเตอร์ ตรวจในตัวอย่าง 3D แล้วยืนยัน → ทดลองพิมพ์" : "按打印方案切片：在上面每一盘点「✂ 按这一盘切片」；或者上传电脑上切好的文件。在 3D 切片预览里检查后复核 → 试打验证。"}</div>
+        ${uploadHtml()}
+        <div class="rc-files">${R.files.length ? R.files.map(fileCard).join("") : `<p class="muted small">${TH() ? "ยังไม่มีไฟล์สไลซ์" : "还没有切片文件"}</p>`}</div></div>`;
+      return;
+    }
     BOX.innerHTML = specBar + spmBox + `
     <div class="rc">
       <div class="row between wrap"><h4>打印方案 <span class="muted small">${r.updated_at ? "更新于 " + fmtTime(r.updated_at) + (r.updated_by ? " · " + esc(r.updated_by) : "") : (r.from_ai ? "（根据 AI 打印建议生成的草稿，请确认后保存）" : "（还没保存过）")}</span></h4>
@@ -131,16 +155,7 @@
         <label>一盘几个<input data-s="count" type="number" min="1" value="${r.per_plate}" style="width:80px"></label>
         <button data-rc="slice" class="primary">按方案切片</button>` : '<span class="muted small">没有 3D 模型，可以直接上传电脑上切好的文件 ↓</span>'}
       </div>
-      ${CAN("files.upload") ? `<div class="rc-upload">
-        <label class="filebtn primary-file">⬆ 上传电脑上切好的文件（可多选）<input type="file" data-rc="upload" accept=".3mf,.gcode,.gco,.pm5s,.pm5,.pm7,.pm7m,.pm4n,.pm4u,.pm3,.pm3m,.pm3r,.pwmx,.pwma,.pwmb,.pwmo,.pwms,.pws,.pw0,.pwx,.dlp,.dl2p,.pmx2,.pwc,.ctb,.cbddlp,.goo,.prz,.jxs" multiple hidden></label>
-        <label class="small">用于<select data-u="printer"><option value="auto">自动识别打印机</option>${R.printers.map((n) => `<option data-notr>${esc(n)}</option>`).join("")}<option value="*">任何打印机</option></select></label>
-        <label class="small">一盘<input data-u="per" type="number" min="1" placeholder="自动" style="width:70px">个</label>
-        ${/^RESIN/.test(R.material) ? `<label class="small">打印时长<input data-u="hours" type="number" min="0" step="0.1" placeholder="自动读" style="width:80px">小时</label>
-        <label class="small">树脂<input data-u="ml" type="number" min="0" step="0.1" placeholder="自动读" style="width:80px">ml</label>
-        <div class="small muted">光固化：在 Photon Workshop / Chitubox / Lychee 里切好后上传（M5s 是 .pm5s 文件）。Anycubic 的文件会自动读出打印时长和树脂用量，
-          其他格式读不出来时请在这里填（切片软件里能看到）。<b>一盘放几个请一定填</b>（光固化读不出个数）。</div>` :
-        `<div class="small muted">Bambu Studio / OrcaSlicer 用「导出切片文件（Export plate sliced file）」得到 .gcode.3mf；Creality Print 导出 .gcode。
-          打印机和一盘几个会从文件里自动认出来，认不出时再手动选。上传后是草稿，在 3D 切片预览里检查后复核。</div>`}</div>` : ""}
+      ${uploadHtml()}
       <div class="rc-files">${R.files.length ? R.files.map(fileCard).join("") : '<p class="muted small">还没有切片文件</p>'}</div>
     </div>`;
     lockBox($(".rc-edit", BOX), { id: "recipe", bar: $(".rc-lockbar", BOX), label: "✏ 修改打印方案", keep: "[data-lp]",
@@ -497,5 +512,6 @@
   }
   // 在模型库里换了 3D 模型 / 合并摆盘后，打印方案马上刷新
   window.addEventListener("model-changed", (e) => { if (BOX && BOX.isConnected && PID && e.detail === PID) mount(BOX, PID).catch(() => {}); });
+  window.addEventListener("plan-sliced", (e) => { if (BOX && BOX.isConnected && PID && e.detail === PID) mount(BOX, PID).catch(() => {}); });   // v2.55 编辑器里按盘切片后刷新切片文件
   window.RECIPE = { mount };
 })();
