@@ -409,6 +409,13 @@ def spool_action(sid, action, user="", printer="", slot="", grams=None, brand=No
     _sync(c, k)
     c.commit()
     db.audit(user, "耗材", s["code"], msg)
+    try:                     # v2.53：料卷的货位跟着变（上机 → 打印机 · 槽，下机 → 待上架，用完 → 拿掉）
+        from . import modules
+        m = modules.public("inv")
+        if m is not None and hasattr(m, "on_spool"):
+            m.on_spool(s["id"], action, user)
+    except Exception as e:  # noqa: BLE001  货位记不上不影响料卷操作
+        logging.getLogger("3dops").warning("料卷货位没跟上（%s %s）：%s", s["code"], action, e)
     return spool_get(s["id"]) if action != "delete" else None
 
 

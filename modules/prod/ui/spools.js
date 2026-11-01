@@ -28,6 +28,7 @@
           <a class="btn mini-btn" target="_blank" href="/print/spools?ids=${encodeURIComponent(s.code)}">标签</a></td></tr>`;
     }).join("") || '<tr><td colspan="9" class="muted">没有料卷。在上面「入库（按卷）」录入。</td></tr>';
     $("#sp-all").checked = ITEMS.length && ITEMS.every((s) => SEL.has(s.code));
+    if (window.INVZ) INVZ.spoolExtras().catch(() => {});      // v2.53：每卷放在哪个货位（仓库模块）
   }
 
   function printerOptions(cur = "") {

@@ -102,6 +102,13 @@ def human(code, lang="zh"):
     p = parse(code)
     if not p:
         return str(code or "")
+    try:                                         # v2.53：生产区的货位 = 打印机 · 槽
+        from . import flows
+        ph = flows.prod_human(p, lang)
+        if ph:
+            return ph
+    except Exception:  # noqa: BLE001
+        pass
     z, s, l, n = p
     return f"โซน {z} แร็ค {s} ชั้น {l} ช่อง {n}" if lang == "th" else f"{z}区 {s}号货架 第{l}层 第{n}位"
 
@@ -134,6 +141,8 @@ def init():
     _migrate_codes(c)
     _migrate_one_place(c)
     _migrate_v252(c)
+    from . import flows                          # v2.53：料卷货位、生产区（打印机 · 槽）、待检区……
+    flows.init()
 
 
 def _migrate_codes(c):

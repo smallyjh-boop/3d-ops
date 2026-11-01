@@ -18,8 +18,9 @@ MODULE = {
         {"tab": "files", "mod": "prod", "zh": "文件管理", "th": "จัดการไฟล์", "roles": "owner,production,listing", "after": "printers"},
         {"tab": "recipes", "mod": "prod", "zh": "打印方案 / 切片文件", "th": "แผนการพิมพ์ / ไฟล์สไลซ์", "roles": "owner,production", "after": "files"},
         {"tab": "quality", "mod": "prod", "zh": "质量统计", "th": "สถิติคุณภาพ", "roles": "owner,production", "after": "recipes"},
-        {"tab": "materials", "mod": "inv", "zh": "耗材料卷", "th": "ม้วนฟิลาเมนต์", "roles": "owner,production"},
-        {"tab": "stock", "mod": "inv", "zh": "成品备货", "th": "เตรียมสต็อกสินค้า", "roles": "owner,production", "after": "materials"},
+        # v2.53：不再是单独的菜单，是「仓库 → 库存」页里的页签「料卷」「成品备货」（旧 id 照样能打开，高亮「库存」）
+        {"tab": "materials", "mod": "inv", "zh": "耗材料卷", "th": "ม้วนฟิลาเมนต์", "roles": "owner,production", "ghost": True, "parent": "inventory"},
+        {"tab": "stock", "mod": "inv", "zh": "成品备货", "th": "เตรียมสต็อกสินค้า", "roles": "owner,production", "ghost": True, "parent": "inventory"},
     ],
     "owner_only": [("POST", r"^/api/print-files/\d+/confirm-printer$")],
     "settings_module": "orders",

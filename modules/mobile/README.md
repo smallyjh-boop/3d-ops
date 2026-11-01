@@ -91,3 +91,5 @@ Kotlin + Gradle Kotlin DSL，minSdk 24 / targetSdk 34，AGP 8.7.3、Kotlin 2.0.2
   App 摄像头认出的文字 `onNativeScan(文字, "text")` 先经 `/api/recog/text` 容错认成系统里的码（`scan.js` 显示「文字」小标）；
   `GET /api/mobile/resolve?…&fuzzy=1` 认不出时按文字容错（O/0、I/1、少横杠）找最像的码；新接口 `GET /api/mobile/code-patterns`（App 挑「像码的文字」的正则）。
 - （系统 v2.53.0）：手机页「‹」返回 = 上一个画面（自己记层数 history.state.md，不再用 history.length，直接打开的画面返回到首页而不会退出 App），回到上一个画面时滚回原来的位置（sessionStorage）。
+- 1.2（系统 v2.53.0）：手机页加「料卷」（扫料卷 → 扫货位上架 / 扫打印机 · 槽上机、下机、称重盘点、用完）、「质检」（待检区的成品：合格扫货位或点推荐上架，不合格 → 次品区 / 报废）、
+  「退货」（退货区的东西重新上架 / 次品区，扫商品登记退货）；「上架」能把暂存区（采购到货）里的东西扫货位上架。

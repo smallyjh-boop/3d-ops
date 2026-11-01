@@ -25,7 +25,10 @@
     try { SUPS = (await api("/api/inv/suppliers")).suppliers; } catch { SUPS = []; }
     render();
   }
-  function show(name) { if (name === "inventory") load().catch((e) => toast(e.message, true)); }
+  function show(name) {
+    if (window.INVZ && ["inventory", "materials", "stock"].includes(name)) INVZ.strip(name);   // v2.53：库存 · 料卷 · 成品备货 页签
+    if (name === "inventory") load().catch((e) => toast(e.message, true));
+  }
 
   function render() {
     const box = $("#inv-body"); if (!box) return;
@@ -43,10 +46,12 @@
     if (VIEW === "docs") return renderDocs();
     if (VIEW === "moves") return renderMoves();
     if (VIEW === "expense") return renderExpense();
+    if (VIEW === "flows" && window.INVZ) return INVZ.flows(box).catch((e) => toast(e.message, true));   // v2.53：质检 · 退货 · 次品
   }
 
   // ---------------- 库存 / 物品资料（v2.32：按同行的做法分开，没入过库的不堆在库存里） ----------------
   let SUB = "all";      // 物品资料里：all 全部 / zero 没库存 / inactive 已停用
+  let ZONE = "", LOCQ = "";   // v2.53：按区 / 货位筛选
   const CAT_COLS = {    // 每个分类显示自己需要的列
     filament: ["brand", "qty", "transit", "reorder", "cost", "value", "loc"],
     goods: ["qty", "cost", "value", "loc"],
@@ -56,7 +61,8 @@
     const catalog = VIEW === "catalog";
     const view = catalog ? SUB : "stock";
     const q = ($("#inv-q") || {}).value || "";
-    const r = await api(`/api/inv/items?view=${view}&category=${encodeURIComponent(CAT)}&q=${encodeURIComponent(q)}`);
+    const r = await api(`/api/inv/items?view=${view}&category=${encodeURIComponent(CAT)}&q=${encodeURIComponent(q)}` +
+      (catalog ? "" : `&zone=${encodeURIComponent(ZONE)}&loc=${encodeURIComponent(LOCQ)}`));
     const cnt = r.counts || {};
     const key = catalog ? "all" : "stock";
     const sum = (k) => Object.values(cnt).reduce((s, x) => s + (x[k] || 0), 0);
@@ -70,7 +76,7 @@
     const zeroN = CAT ? ((cnt[CAT] || {}).zero || 0) : sum("zero");
     const head = `<tr><th>编码</th><th>名称</th>${CAT ? "" : "<th>分类</th>"}${has("brand") ? "<th>品牌 / 规格</th>" : ""}<th>库存</th>
       ${has("transit") ? "<th>在途</th>" : ""}${has("reorder") ? "<th>补货线</th>" : ""}${has("cost") ? "<th>平均单价</th>" : ""}${has("value") ? "<th>金额</th>" : ""}
-      ${has("loc") ? "<th>货位</th>" : ""}${catalog ? "<th>状态</th>" : ""}<th></th></tr>`;
+      ${has("loc") ? `<th>${catalog || !window.INVZ ? "货位" : "分布在"}</th>` : ""}${catalog ? "<th>状态</th>" : ""}<th></th></tr>`;
     const row = (it) => `<tr class="${it.low ? "inv-low" : ""} ${it.active ? "" : "muted"}"><td class="mono" data-notr${it.category === "goods" ? ` data-p360="${esc(it.code)}"` : ""}>${esc(it.code)}</td>
         <td data-notr>${it.category === "filament" ? `<span class="sw" style="background:${esc(colorHex(it.color))}"></span>` : ""}${esc(itName(it))}</td>
         ${CAT ? "" : `<td>${esc(catName(it.category))}</td>`}${has("brand") ? `<td class="muted" data-notr>${esc([it.brand, it.spec].filter(Boolean).join(" · "))}</td>` : ""}
@@ -78,19 +84,24 @@
         ${has("transit") ? `<td>${it.transit ? num(it.transit, 1) : ""}</td>` : ""}
         ${has("reorder") ? `<td>${it.reorder_point == null ? "" : num(it.reorder_point, 1)}</td>` : ""}
         ${has("cost") ? `<td>${it.avg_cost ? "฿" + num(it.avg_cost, it.unit === "g" ? 3 : 2) : ""}</td>` : ""}${has("value") ? `<td>${it.value ? "฿" + num(it.value, 0) : ""}</td>` : ""}
-        ${has("loc") ? `<td class="mono small" data-notr>${it.location ? `<a href="#" data-locgo-code="${esc(it.location)}">${esc(it.location)}</a>` : ""}${it.loc_n > 1 ? ` <span class="muted" title="${esc(Z(`放在 ${it.loc_n} 个货位`, `อยู่ ${it.loc_n} ช่อง`))}">+${it.loc_n - 1}</span>` : ""}${it.unplaced > 1e-9 ? ` <span class="warn" title="${esc(Z("待上架", "รอจัดเก็บ"))}">📥${num(it.unplaced, 2)}</span>` : ""}</td>` : ""}
+        ${has("loc") && !catalog && window.INVZ ? `<td class="small">${INVZ.split(it)}${it.unplaced > 1e-9 ? ` <span class="warn" title="${esc(Z("待上架", "รอจัดเก็บ"))}">📥${num(it.unplaced, 2)}</span>` : ""}</td>` : ""}
+        ${has("loc") && (catalog || !window.INVZ) ? `<td class="mono small" data-notr>${it.location ? `<a href="#" data-locgo-code="${esc(it.location)}">${esc(it.location)}</a>` : ""}${it.loc_n > 1 ? ` <span class="muted" title="${esc(Z(`放在 ${it.loc_n} 个货位`, `อยู่ ${it.loc_n} ช่อง`))}">+${it.loc_n - 1}</span>` : ""}${it.unplaced > 1e-9 ? ` <span class="warn" title="${esc(Z("待上架", "รอจัดเก็บ"))}">📥${num(it.unplaced, 2)}</span>` : ""}</td>` : ""}
         ${catalog ? `<td class="small">${!it.active ? "已停用" : it.stocked ? (Math.abs(it.qty) > 1e-9 ? "有库存" : '<span class="muted">用完了</span>') : '<span class="muted">还没入过库</span>'}</td>` : ""}
         <td class="nowrap"><button class="mini" data-item="${it.id}">查看</button></td></tr>`;
-    $("#inv-body").innerHTML = `<div class="row gap wrap" style="margin-bottom:8px"><div class="chips" id="inv-cats">${chips}</div>
+    $("#inv-body").innerHTML = (!catalog && window.INVZ ? '<div id="inv-ov"></div>' : "") + `<div class="row gap wrap" style="margin-bottom:8px"><div class="chips" id="inv-cats">${chips}</div>
         <input id="inv-q" placeholder="搜索编码 / 名称 / 品牌" value="${esc(q)}" style="width:200px">
+        ${!catalog && window.INVZ ? INVZ.zoneSelect(r.zones, ZONE) + `<input id="inv-locq" placeholder="${esc(Z("货位（A1、A1-02…）", "ตำแหน่ง (A1, A1-02…)"))}" value="${esc(LOCQ)}" style="width:130px" data-notr>` : ""}
         ${catalog ? `<select id="inv-sub"><option value="all" ${SUB === "all" ? "selected" : ""}>全部物品</option><option value="zero" ${SUB === "zero" ? "selected" : ""}>没有库存的</option>
           <option value="inactive" ${SUB === "inactive" ? "selected" : ""}>已停用的</option></select>` : money ? `<span class="muted small">库存金额 <b>฿${num(total, 0)}</b></span>` : ""}</div>
-      <table class="grid small"><thead>${head}</thead><tbody>` +
-      (r.items.map(row).join("") || `<tr><td colspan="12" class="muted">${catalog ? "没有物品（点「＋ 新物品」建档）" : "现在没有库存。买了东西用「＋ 采购入库」，物品资料在「物品资料」里"}</td></tr>`) + "</tbody></table>" +
+      <div class="inv-scroll"><table class="grid small"><thead>${head}</thead><tbody>` +
+      (r.items.map(row).join("") || `<tr><td colspan="12" class="muted">${catalog ? "没有物品（点「＋ 新物品」建档）" : "现在没有库存。买了东西用「＋ 采购入库」，物品资料在「物品资料」里"}</td></tr>`) + "</tbody></table></div>" +
       (!catalog && zeroN ? `<p class="small muted"><span>没有库存的物品（从没入过库或已经用完）不显示在这里，请看</span> <a href="#" data-goiv="catalog">物品资料</a>（<b data-notr>${zeroN}</b>）</p>` : "");
     const qi = $("#inv-q"); let t = null;
     qi.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => renderItems().then(() => { const n = $("#inv-q"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }), 300); });
     const sb = $("#inv-sub"); if (sb) sb.onchange = () => { SUB = sb.value; renderItems(); };
+    const zs = $("#inv-zone"); if (zs) zs.onchange = () => { ZONE = zs.value; renderItems(); };
+    const lq = $("#inv-locq"); if (lq) lq.onchange = () => { LOCQ = lq.value.trim().toUpperCase(); renderItems(); };
+    const ov = $("#inv-ov"); if (ov) INVZ.overview(ov).catch(() => {});
   }
   function colorHex(zh) { try { return (typeof COLORS !== "undefined" && COLORS[zh] && COLORS[zh].hex) || "#ccc"; } catch { return "#ccc"; } }
 

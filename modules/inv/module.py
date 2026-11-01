@@ -13,7 +13,7 @@ MODULE = {
     "id": "inv",
     "name_zh": "仓库",
     "name_th": "คลังสินค้า",
-    "version": "2.0",
+    "version": "2.1",
     "desc_zh": "库存管理（物品、单据、流水）、货位（仓库 → 库区 → 货架，上架推荐、拣货路线、补货、移库、货位图）、按货位盘点、发货自动扣包材、打印扣耗材和成品同步记流水。",
     "desc_th": "จัดการสต็อก (สิ่งของ เอกสาร ความเคลื่อนไหว) ตำแหน่งจัดเก็บ (คลัง → โซน → ชั้นวาง แนะนำการจัดเก็บ เส้นทางหยิบ เติมสินค้า ย้ายตำแหน่ง แผนผัง) "
                "ตรวจนับตามตำแหน่ง ตัดวัสดุแพ็กอัตโนมัติเมื่อส่งของ บันทึกการใช้ฟิลาเมนต์และสินค้าสำเร็จรูป",
@@ -29,21 +29,36 @@ MODULE = {
          "panel": "inv_locations", "parent": "inv_locations"},
         {"tab": "stocktake", "mod": "inv", "zh": "盘点", "th": "ตรวจนับ", "roles": "owner,production,listing", "ghost": True,
          "panel": "inv_stocktake", "parent": "inv_stocktake"},
+        # v2.53：「耗材料卷」「成品备货」变成「库存」页里的页签（页面还在生产模块：materials / stock，旧链接照样打开）
     ],
     "events": {"order.status": events.on_order_status},
     "public": public,             # 别的模块用：where_is / sort_key / order_out / putaway_batch / pick_route；ledger.post → on_post
     "todo": _todo,                # v2.52：补货任务、待上架
     "production_allow": [("POST", r"^/api/inv/locations(/(assign|assign-all|bulk|add|group|props))?$"), ("GET", r"^/print/inv-locations$"),
-                         ("POST", r"^/api/inv/wms/(putaway|move|tasks/\d+/(do|cancel))$"), ("POST", r"^/api/inv/warehouses$")],
+                         ("POST", r"^/api/inv/wms/(putaway|move|tasks/\d+/(do|cancel))$"), ("POST", r"^/api/inv/warehouses$"),
+                         # v2.53：料卷上架 / 上机 / 下机 / 称重、质检、退货、次品
+                         ("POST", r"^/api/inv/spools/[^/]+/(put|load|unload|weigh)$"), ("POST", r"^/api/inv/spools/count$"),
+                         ("POST", r"^/api/inv/(qc|returns|defect)/(pass|fail|act|receive)$")],
     "settings_module": "inventory",
     "settings": [("货位", [
         ("inv_loc_auto", "入库时自动上架到推荐的货位（同一物品已在的货位 → 附近空位 → 其它空位；关掉 = 先进「待上架」，扫货位确认）", "bool"),
         ("inv_loc_layer_bottom", "最下面一层是第 1 层（关掉 = 最上面一层是第 1 层）", "bool"),
         ("inv_loc_idle_days", "货位图提醒：有货的货位多少天没动过算「呆滞」"),
         ("inv_loc_max_spread", "货位图提醒：一个物品放在超过几个货位就提醒（太分散不好拣）")]),
+        ("区和流程（v2.53）", [
+            ("inv_qc_on", "打印出来的成品先进「待检区」，质检合格再上架（关掉 = 直接按推荐上架）", "bool"),
+            ("inv_returns_zone", "售后放回库存 / 登记的退货先进「退货区」，检查后再上架或放次品区", "bool"),
+            ("inv_pack_station", "打包台的货位（发货扣包材先从这里扣；空 = 包材区）"),
+            ("inv_slow_days", "多少天没进出算「很久没动」（库存金额页）"),
+            ("inv_spool_tare_g", "空料盘重量（克）：称重盘点时 毛重 − 这个 = 剩余"),
+            ("inv_spool_low_g", "料卷剩多少克以下提醒「快用完」（0 = 不提醒）"),
+            ("inv_spool_expire_days", "料卷入库超过多少天提醒（0 = 不提醒）"),
+            ("inv_spool_dry_days", "开封 / 烘干后多少天提醒烘干（0 = 按材料：PLA 30、PETG 7、TPU 3 …）")]),
         ("订单发货出库", [
             ("inv_ship_out", "订单变成「已发货」时自动出库：扣「用库存发」的成品、这单用的纸箱、下面规则里的包材（每单一张出库单）", "bool")])],
-    "config_defaults": {"inv_loc_auto": True, "inv_loc_layer_bottom": True, "inv_ship_out": True, "inv_loc_idle_days": 90, "inv_loc_max_spread": 3},
-    "ui": {"inline": True, "html": "page.html", "eager_js": ["inventory.js", "locations.js", "wms.js", "stocktake.js"], "css": ["page.css"],
+    "config_defaults": {"inv_loc_auto": True, "inv_loc_layer_bottom": True, "inv_ship_out": True, "inv_loc_idle_days": 90, "inv_loc_max_spread": 3,
+                        "inv_qc_on": True, "inv_returns_zone": True, "inv_pack_station": "", "inv_slow_days": 60, "inv_spool_tare_g": 250,
+                        "inv_spool_low_g": 150, "inv_spool_expire_days": 365, "inv_spool_dry_days": 0},
+    "ui": {"inline": True, "html": "page.html", "eager_js": ["inventory.js", "locations.js", "wms.js", "stocktake.js", "zones.js"], "css": ["page.css"],
            "page_js": [], "boot_js": []},
 }

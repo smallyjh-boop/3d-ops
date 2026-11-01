@@ -21,10 +21,14 @@ from core.config import load_config
 
 ZTYPES = {   # 区的类型
     "pick": ("拣货区", "โซนหยิบสินค้า"), "reserve": ("备货区", "โซนสต็อกสำรอง"), "staging": ("暂存区", "โซนพักสินค้า"),
-    "returns": ("退货区", "โซนสินค้าคืน"), "defect": ("次品区", "โซนสินค้าชำรุด"), "supply": ("耗材区", "โซนวัสดุสิ้นเปลือง")}
+    "returns": ("退货区", "โซนสินค้าคืน"), "defect": ("次品区", "โซนสินค้าชำรุด"), "supply": ("耗材区", "โซนวัสดุสิ้นเปลือง"),
+    # v2.53：包材区（放包材、打包台）、生产区（每台打印机、每个 AMS 槽是一个货位，按打印机设置自动建）、待检区（刚打好等质检的成品）
+    "pack": ("包材区", "โซนวัสดุแพ็ก"), "production": ("生产区", "โซนผลิต"), "qc": ("待检区", "โซนรอตรวจ")}
 SIZES = {"S": ("小", "เล็ก"), "M": ("中", "กลาง"), "L": ("大", "ใหญ่"), "XL": ("特大", "ใหญ่พิเศษ")}
 _SRANK = {"S": 1, "M": 2, "L": 3, "XL": 4}
-PUTAWAY_TYPES = ("pick", "reserve", "supply")
+PUTAWAY_TYPES = ("pick", "reserve", "supply", "pack")
+OUT_LAST = ("staging", "qc", "returns", "defect", "production")      # v2.53：出库最后才扣这些区（待检 / 退货 / 次品不能当好货发）
+REPL_TYPES = ("pick", "supply", "pack")       # v2.53：拣货区、耗材区、包材区的货位都可以设最低数量，低了从备货区补
 EPS = 1e-9
 _tl = threading.local()
 
@@ -190,7 +194,8 @@ def _cats_ok(loc, cat, gs):
 
 
 def _type_rank(ztype, cat):
-    order = ("pick", "reserve", "supply") if cat == "goods" else ("supply", "pick", "reserve")
+    # v2.53：按分类找区：成品 → 拣货区；包材 → 包材区；耗材 / 备件 / 工具… → 耗材区
+    order = {"goods": ("pick", "reserve", "supply", "pack"), "pack": ("pack", "supply", "pick", "reserve")}.get(cat, ("supply", "pick", "reserve", "pack"))
     return order.index(ztype) if ztype in order else 9
 
 
@@ -292,7 +297,12 @@ def _out_order(c, item):
     sk = _L().sort_key
     locs = _locs(c, active=False)
     rows = [r for r in _qty_rows(c, item_id=item["id"]) if r["loc_id"] in locs]
-    rows.sort(key=lambda r: (0 if locs[r["loc_id"]]["code"] == item.get("location") else 1,
+    pref = getattr(_tl, "prefer", None) or ()
+    def prank(l):
+        return pref.index(l["code"]) if l["code"] in pref else (pref.index(l["ztype"]) if l["ztype"] in pref else len(pref))
+    rows.sort(key=lambda r: (prank(locs[r["loc_id"]]),
+                             OUT_LAST.index(locs[r["loc_id"]]["ztype"]) + 1 if locs[r["loc_id"]]["ztype"] in OUT_LAST else 0,
+                             0 if locs[r["loc_id"]]["code"] == item.get("location") else 1,
                              0 if locs[r["loc_id"]]["ztype"] == "pick" else 1, sk(locs[r["loc_id"]]["code"])))
     return [(locs[r["loc_id"]], r["qty"]) for r in rows]
 
@@ -333,6 +343,28 @@ def quiet(item_ids):
 
 
 @contextlib.contextmanager
+def prefer(codes):
+    """v2.53：这段时间里出库先从这些货位（或区类型，例如 "pack"）扣：打包台扣包材、次品区报废、退货区……"""
+    old = getattr(_tl, "prefer", None)
+    _tl.prefer = tuple(x for x in (codes or []) if x) + (old or ())
+    try:
+        yield
+    finally:
+        _tl.prefer = old
+
+
+@contextlib.contextmanager
+def route(loc_code):
+    """v2.53：这段时间里入库的东西放到这个货位（退货登记 → 退货区）。"""
+    old = getattr(_tl, "route", None)
+    _tl.route = loc_code
+    try:
+        yield
+    finally:
+        _tl.route = old
+
+
+@contextlib.contextmanager
 def putaway_batch(targets=None, user=""):
     """采购到货等：这一批入库先进待上架，结束时按 targets {物品id: 货位} 放，没写的按推荐（设置「入库自动上架」关着就留在待上架）。
     用法：with putaway_batch({...}) as pb: 入库……；之后 pb["placed"]、pb["warnings"]。"""
@@ -364,6 +396,12 @@ def putaway_batch(targets=None, user=""):
         if auto and c.execute("SELECT 1 FROM inv_locations LIMIT 1").fetchone():
             for code_, q_ in auto_place(c, iid, q, "purchase", user):
                 pb["placed"].append({"item_id": iid, "code": code_, "qty": q_})
+        elif not auto and c.execute("SELECT 1 FROM inv_locations LIMIT 1").fetchone():
+            from . import flows          # v2.53：不自动上架 → 先放暂存区，扫货位确认上架（待上架列表里有推荐）
+            if not flows.spool_item(c, iid):
+                st = flows.zone_loc(c, "staging")
+                _add(c, iid, st, q, "receive", user, "purchase")
+                pb["placed"].append({"item_id": iid, "code": st["code"], "qty": q, "staging": True})
     c.commit()
 
 
@@ -374,12 +412,22 @@ def on_post(c, item_id, qty, kind, user=""):
     q_ = _quiet()
     if q_ and int(item_id) in q_:
         return
+    from . import flows
+    if flows.spool_item(c, item_id):          # v2.53：按料卷管的耗材：货位上的数 = 每个货位上料卷剩的克数
+        flows.spool_sync(c, item_id=item_id, user=user, kind=kind)
+        return
     if qty < 0:
         reconcile(c, item_id, user, kind)
         check_replenish(c, item_id)
         return
     it = _item(c, item_id)
     if not it or not it["active"]:
+        return
+    tgt = flows.route_in(c, it, kind, getattr(_tl, "route", None))   # v2.53：打印出来的成品 → 待检区；退货 → 退货区
+    if tgt:
+        q = min(float(qty), unplaced(c, item_id))
+        if q > EPS:
+            _add(c, item_id, tgt, q, "putaway", user, kind)
         return
     pb = getattr(_tl, "batch", None)
     if pb is not None:
@@ -414,6 +462,9 @@ def move(frm, to, lines, user="", kind="move", task_id=None, force=False, commit
         it = _item(c, ln.get("item_id"))
         if not it:
             raise ValueError("没有这个物品")
+        from . import flows
+        if flows.spool_item(c, it["id"]):
+            raise ValueError(f"{it['code']} 按料卷管理：扫料卷标签移动（料卷页 / 手机「料卷」）")
         have = loc_qty(c, it["id"], src["id"]) if src else unplaced(c, it["id"])
         try:
             q = have if ln.get("qty") in (None, "") else float(ln["qty"])
@@ -430,6 +481,7 @@ def move(frm, to, lines, user="", kind="move", task_id=None, force=False, commit
         plan.append((it, q))
     if not plan:
         raise ValueError("没有要搬的东西")
+    dz = zone_of(dst["code"], c)["ztype"]
     if not dst.get("mixed", 1):
         kinds = {it["id"] for it, _q in plan} | {r["item_id"] for r in _qty_rows(c, loc_id=dst["id"])}
         if len(kinds) > 1:
@@ -439,8 +491,8 @@ def move(frm, to, lines, user="", kind="move", task_id=None, force=False, commit
             _set(c, it["id"], src["id"], loc_qty(c, it["id"], src["id"]) - q)
         _set(c, it["id"], dst["id"], loc_qty(c, it["id"], dst["id"]) + q)
         _log(c, it["id"], src["code"] if src else "", dst["code"], q, kind, user, f"task:{task_id}" if task_id else "")
-        if not it.get("location") or (src and it["location"] == src["code"] and loc_qty(c, it["id"], src["id"]) <= EPS
-                                       and not (src.get("fixed_item") and int(src["fixed_item"]) == it["id"])):
+        if dz in PUTAWAY_TYPES and (not it.get("location") or (src and it["location"] == src["code"] and loc_qty(c, it["id"], src["id"]) <= EPS
+                                                           and not (src.get("fixed_item") and int(src["fixed_item"]) == it["id"]))):
             c.execute("UPDATE inv_items SET location=? WHERE id=?", (dst["code"], it["id"]))
     if task_id:
         c.execute("UPDATE inv_loc_tasks SET status='done', done_by=?, done_at=? WHERE id=?", (user, _now(), int(task_id)))
@@ -451,15 +503,20 @@ def move(frm, to, lines, user="", kind="move", task_id=None, force=False, commit
     return {"from": src["code"] if src else "", "to": dst["code"], "moved": [{"item_id": it["id"], "code": it["code"], "qty": q} for it, q in plan]}
 
 
-def putaway(item_id, code, qty=None, user="", force=False):
-    """上架：待上架的物品放到货位（扫货位确认）。"""
-    return move("", code, [{"item_id": item_id, "qty": qty}], user, kind="putaway", force=force)
+def putaway(item_id, code, qty=None, user="", force=False, frm=""):
+    """上架：待上架的物品放到货位（扫货位确认）。frm = 暂存区的货位（v2.53：采购到货先放暂存区）。"""
+    return move(frm or "", code, [{"item_id": item_id, "qty": qty}], user, kind="putaway", force=force)
 
 
 def pending_count(c=None):
     c = c or db.conn()
-    return sum(1 for r in c.execute("SELECT id, qty FROM inv_items WHERE active=1 AND qty>0").fetchall()
-               if float(r["qty"] or 0) - located(c, r["id"]) > 1e-6)
+    from . import flows
+    n = sum(1 for r in c.execute("SELECT id, qty FROM inv_items WHERE active=1 AND qty>0").fetchall()
+            if float(r["qty"] or 0) - located(c, r["id"]) > 1e-6 and not flows.spool_item(c, r["id"]))
+    stg = [l["id"] for l in _locs(c).values() if l["ztype"] == "staging"]
+    if stg:
+        n += c.execute(f"SELECT COUNT(*) FROM inv_loc_qty WHERE qty>0 AND loc_id IN ({','.join('?' * len(stg))})", stg).fetchone()[0]
+    return n
 
 
 def pending(c=None):
@@ -467,10 +524,24 @@ def pending(c=None):
     from core.inventory import ledger
     c = c or db.conn()
     out = []
+    from . import flows
     for r in c.execute("SELECT * FROM inv_items WHERE active=1 AND qty>0 ORDER BY category, code").fetchall():
+        if flows.spool_item(c, r["id"]):
+            continue                   # v2.53：按料卷管的耗材在「料卷」里上架（一卷一卷扫）
         u = float(r["qty"] or 0) - located(c, r["id"])
         if u > 1e-6:
-            out.append({"item": ledger.item_row(r), "qty": round(u, 6), "suggest": recommend(r["id"], u, "", c, limit=3)})
+            out.append({"item": ledger.item_row(r), "qty": round(u, 6), "suggest": recommend(r["id"], u, "", c, limit=3), "from": ""})
+    # v2.53：暂存区里的（采购到货先放暂存区）也算待上架，上架 = 从暂存区搬到推荐的货位
+    locs = _locs(c)
+    for r in _qty_rows(c):
+        l = locs.get(r["loc_id"])
+        if not l or l["ztype"] != "staging":
+            continue
+        it = _item(c, r["item_id"])
+        if not it or not it["active"]:
+            continue
+        out.append({"item": ledger.item_row(c.execute("SELECT * FROM inv_items WHERE id=?", (it["id"],)).fetchone()), "qty": round(r["qty"], 6),
+                    "suggest": recommend(it["id"], r["qty"], "", c, limit=3), "from": l["code"]})
     return out
 
 
@@ -482,7 +553,7 @@ def replenish_suggestions(c=None):
     locs = _locs(c)
     out = []
     for l in sorted(locs.values(), key=lambda x: sk(x["code"])):
-        if l["ztype"] != "pick" or l.get("min_qty") in (None, ""):
+        if l["ztype"] not in REPL_TYPES or l.get("min_qty") in (None, ""):
             continue
         ids = {r["item_id"] for r in _qty_rows(c, loc_id=l["id"])}
         if l.get("fixed_item"):
@@ -510,7 +581,8 @@ def replenish_suggestions(c=None):
                 srcs.append((lo["code"], round(t, 6)))
                 left -= t
             out.append({"item_id": iid, "code": it["code"], "name_zh": it["name_zh"], "name_th": it["name_th"], "unit": it["unit"],
-                        "to": l["code"], "now": now, "min": mn, "need": round(need, 6), "sources": srcs})
+                        "to": l["code"], "now": now, "min": mn, "need": round(need, 6), "sources": srcs, "ztype": l["ztype"],
+                        "category": it["category"]})
     return out
 
 
@@ -604,6 +676,8 @@ def map_data(idle_days=None, max_spread=None):
     now = _now()
     zones, idle, empties = {}, [], []
     for l in locs.values():
+        if l["ztype"] == "production":      # v2.53：打印机 / AMS 槽不是存货的地方，不算利用率和空货位
+            continue
         tot = sum(r["qty"] for r in per_loc.get(l["id"], []))
         st = state_of(tot, l.get("capacity"))
         z = zones.setdefault(l["zone"], {"zone": l["zone"], "ztype": l["ztype"], "name": (zs.get(l["zone"]) or {}).get("name", ""),
@@ -623,7 +697,7 @@ def map_data(idle_days=None, max_spread=None):
     names = {r["id"]: dict(r) for r in c.execute("SELECT id, code, name_zh, name_th FROM inv_items")}
     spread = [{"item_id": iid, "code": names[iid]["code"], "name_zh": names[iid]["name_zh"], "name_th": names[iid]["name_th"],
                "locations": sorted(codes, key=sk)} for iid, codes in per_item.items() if len(codes) > max_spread and iid in names]
-    total = len(locs)
+    total = sum(z["total"] for z in zones.values())
     used = sum(z["used"] for z in zones.values())
     return {"zones": sorted(zones.values(), key=lambda z: z["zone"]),
             "stats": {"total": total, "used": used, "empty": total - used, "util": round(100 * used / total, 1) if total else 0,

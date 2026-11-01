@@ -14,6 +14,7 @@ import app as A
 from core import db, config, inventory as inv, modules, store, production
 from modules.inv import locations as L, wms, qr
 C = A.app.test_client()
+config.save_config({"inv_qc_on": False})       # v2.53 起打印出来的成品先进待检区；这里测的是 v2.52 的上架规则
 item = lambda iid: inv.get_item(iid)
 lq = lambda iid, code: wms.loc_qty(db.conn(), iid, L.get_loc(code)["id"])
 def new(name, cat="part", unit="个", **kw):
@@ -47,7 +48,7 @@ C.post("/api/inv/locations/bulk", json={"zone": "S", "layers": 1, "positions": 2
 C.post("/api/inv/locations/bulk", json={"zone": "P", "layers": 1, "positions": 3, "ztype": "supply", "categories": ["pack"]})
 ok(C.post("/api/inv/locations/group", json={"code": "S", "ztype": "bogus"}).status_code == 400, "bad zone type rejected")
 lst = C.get("/api/inv/locations").get_json()
-ok(set(lst["ztypes"]) == {"pick", "reserve", "staging", "returns", "defect", "supply"} and len(lst["warehouses"]) == 2, "zone types / warehouses in list")
+ok(set(lst["ztypes"]) >= {"pick", "reserve", "staging", "returns", "defect", "supply"} and len(lst["warehouses"]) == 2, "zone types / warehouses in list")
 ok({l["code"]: l for l in lst["locations"]}["R1-01-02"]["ztype"] == "reserve", "location carries zone type")
 d = C.get(f"/api/inv/locations/{L.get_loc('R1-01-01')['id']}").get_json()["location"]
 ok(d["warehouse_name"] == "二号仓" and d["state"] == "empty", "detail: warehouse + state")
@@ -162,7 +163,7 @@ ok(logs >= 3, "moves logged")
 m = C.get("/api/inv/wms/map").get_json()
 zr = next(z for z in m["zones"] if z["zone"] == "R")
 ok(zr["ztype"] == "reserve" and zr["over"] == 1 and zr["total"] == 4, f"map zone stats {zr}")
-ok(m["stats"]["total"] == len(L.locations()) and "R1-01-04" in m["alerts"]["empty"] and m["stats"]["over"] == 1, "map stats + empty alert")
+ok(m["stats"]["total"] == len([l for l in L.locations() if l["ztype"] != "production"]) and "R1-01-04" in m["alerts"]["empty"] and m["stats"]["over"] == 1, "map stats + empty alert")
 c = db.conn(); c.execute("UPDATE inv_locations SET last_move=? WHERE code='P1-01-03'", (wms._now() - 200 * 86400,)); c.commit()
 ok(any(x["code"] == "P1-01-03" and x["days"] >= 199 for x in C.get("/api/inv/wms/map").get_json()["alerts"]["idle"]), "idle location alert")
 sp = C.get("/api/inv/wms/map?max_spread=2").get_json()["alerts"]["spread"]

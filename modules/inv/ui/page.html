@@ -1,4 +1,5 @@
-<!-- 模块 inv 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上）。v2.52：仓库 = 库存 · 货位 · 盘点 三个页面 -->
+<!-- 模块 inv 的页面（v2.31 从 index.html 搬过来；inline：首页直接带上）。v2.52：仓库 = 库存 · 货位 · 盘点 三个页面；
+     v2.53：库存页顶上页签 库存 · 料卷 · 成品备货（zones.js），「质检 · 退货」页签 -->
 <section id="tab-inventory" class="panel hidden">
   <div class="row between wrap gap"><h2>库存</h2>
     <div class="row gap wrap" id="inv-actions">
@@ -14,7 +15,7 @@
     备货打印的成品自动入库；订单发货时自动出库（用库存发的成品、纸箱、包材，每单一张出库单）。买东西走「采购」（下单 → 在途 → 到货入库）。</p>
   <div id="inv-alerts"></div>
   <div class="chips" id="inv-views" style="margin:8px 0">
-    <span class="chip on" data-iv="items">库存</span><span class="chip" data-iv="catalog">物品资料</span><span class="chip" data-iv="boxes">纸箱</span><span class="chip" data-iv="docs">单据</span><span class="chip" data-iv="moves">流水</span>
+    <span class="chip on" data-iv="items">库存</span><span class="chip" data-iv="catalog">物品资料</span><span class="chip" data-iv="boxes">纸箱</span><span class="chip" data-iv="flows">质检 · 退货</span><span class="chip" data-iv="docs">单据</span><span class="chip" data-iv="moves">流水</span>
     <span class="chip" data-iv="expense">支出统计</span></div>
   <div id="inv-body"></div>
 </section>

@@ -120,6 +120,18 @@
     "u.r.empty": ["空货位", "ช่องว่าง"], "u.nosug": ["没有合适的空位：扫一个货位也能放", "ไม่มีช่องที่เหมาะ: สแกนช่องไหนก็วางได้"], "u.qty": ["放多少", "จำนวนที่วาง"],
     "u.scanloc": ["👉 扫货位条码确认放好", "👉 สแกนป้ายตำแหน่งเพื่อยืนยัน"], "u.back": ["返回列表", "กลับไปรายการ"],
     "u.scan": ["扫要上架的商品（或者点下面的）", "สแกนสินค้าที่จะจัดเก็บ (หรือแตะด้านล่าง)"], "u.scanat": ["放到 {l}：扫商品", "วางที่ {l}: สแกนสินค้า"],
+    // v2.53：料卷、质检、退货
+    "t.spool": ["料卷", "ม้วนฟิลาเมนต์"], "t.spool.s": ["扫料卷 → 扫货位 / 打印机槽：上架、上机、下机、称重", "สแกนม้วน → สแกนตำแหน่ง / ช่องเครื่องพิมพ์: จัดเก็บ ใส่ ถอด ชั่ง"],
+    "t.qc": ["质检", "ตรวจคุณภาพ"], "t.qc.s": ["待检区的成品：合格扫货位上架，不合格放次品区", "สินค้าในโซนรอตรวจ: ผ่านสแกนตำแหน่งจัดเก็บ ไม่ผ่านไปโซนชำรุด"],
+    "t.ret": ["退货", "สินค้าคืน"], "t.ret.s": ["退回的货：重新上架或放次品区；扫商品登记退货", "ของที่ถูกส่งคืน: จัดเก็บใหม่หรือโซนชำรุด สแกนสินค้าเพื่อบันทึก"],
+    "s.scan": ["扫料卷标签（F0001）", "สแกนป้ายม้วน (F0001)"], "s.then": ["👉 扫货位放好；扫打印机 · 槽 = 上机", "👉 สแกนตำแหน่งเพื่อวาง; สแกนเครื่องพิมพ์ · ช่อง = ใส่เครื่อง"],
+    "s.where": ["现在在", "ตอนนี้อยู่ที่"], "s.none": ["待上架", "รอจัดเก็บ"], "s.left": ["剩余", "เหลือ"], "s.unload": ["下机（放回待上架）", "ถอดออก (รอจัดเก็บ)"],
+    "s.empty": ["用完了", "ใช้หมดแล้ว"], "s.gross": ["称重盘点：整卷多少克（含空料盘）", "ชั่งตรวจนับ: ทั้งม้วนกี่กรัม (รวมแกนเปล่า)"], "s.weigh": ["⚖ 记下重量", "⚖ บันทึกน้ำหนัก"],
+    "s.ok": ["✔ {c} → {l}", "✔ {c} → {l}"], "s.wok": ["✔ {c} 剩 {g} g（{d} g）", "✔ {c} เหลือ {g} g ({d} g)"], "s.emptyq": ["{c} 用完了？剩下的会从库存扣掉", "{c} ใช้หมดแล้ว? ที่เหลือจะตัดจากสต็อก"],
+    "q.list": ["待检区", "โซนรอตรวจ"], "q.none": ["没有等质检的成品 ✓", "ไม่มีสินค้ารอตรวจ ✓"], "q.pass": ["👉 合格：扫货位上架（或点推荐）", "👉 ผ่าน: สแกนตำแหน่งจัดเก็บ (หรือกดที่แนะนำ)"],
+    "q.fail": ["不合格 → 次品区", "ไม่ผ่าน → โซนชำรุด"], "q.scrap": ["直接报废", "ทิ้งเลย"], "q.sug": ["放到推荐的 {l}", "วางที่แนะนำ {l}"],
+    "r.list": ["退货区", "โซนสินค้าคืน"], "r.def": ["次品区", "โซนชำรุด"], "r.none": ["退货区是空的 ✓", "โซนสินค้าคืนว่าง ✓"], "r.restock": ["👉 没问题：扫货位重新上架（或点推荐）", "👉 ไม่มีปัญหา: สแกนตำแหน่งจัดเก็บใหม่ (หรือกดที่แนะนำ)"],
+    "r.todef": ["有问题 → 次品区", "มีปัญหา → โซนชำรุด"], "r.newq": ["登记退货 {c}：几个？", "บันทึกสินค้าคืน {c}: กี่ชิ้น?"], "r.added": ["✔ {c} ×{n} 放进退货区", "✔ {c} ×{n} เข้าโซนสินค้าคืน"],
     "u.list": ["待上架", "รอจัดเก็บ"], "u.none": ["没有待上架的东西 ✓", "ไม่มีของรอจัดเก็บ ✓"], "u.force": ["还是要放进去吗？", "ยังจะวางไหม?"],
     "u.notpending": ["{c} 没有待上架的数量（要换位置用「移库」）", "{c} ไม่มีจำนวนรอจัดเก็บ (ย้ายใช้「ย้ายตำแหน่ง」)"],
     "m.s1": ["扫原货位", "สแกนช่องเดิม"], "m.s2": ["扫要搬的商品（一下 +1）或者填数", "สแกนสินค้าที่จะย้าย (ครั้งละ +1) หรือกรอกจำนวน"], "m.s3": ["扫新货位", "สแกนช่องใหม่"],
@@ -361,7 +373,7 @@
   // ---------------- 首页 ----------------
   SCREENS.home = {
     show() {
-      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["loc", "🗄"], ["put", "📍"], ["move", "🔀"], ["count", "🧮"]] : []), ...(PUR ? [["rcv", "📥"]] : [])];
+      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["loc", "🗄"], ["put", "📍"], ["move", "🔀"], ["count", "🧮"], ["spool", "🧵"], ["qc", "🔍"], ["ret", "↩"]] : []), ...(PUR ? [["rcv", "📥"]] : [])];
       view().innerHTML = `<div class="me"><span data-notr>👤 ${esc(ME.display_name || ME.username)}</span>
           <span class="row"><a href="/" class="small">${T("full")}</a><button class="sm" id="logout">${T("logout")}</button></span></div>
         <div class="tiles">${tiles.map(([k, ic]) => `<button class="tile" data-go="${k}"><span class="ti">${ic}</span>${T("t." + k)}<small>${T("t." + k + ".s")}</small></button>`).join("")}</div>
@@ -1029,7 +1041,7 @@
     async put(code, force) {
       const x = this.it, qty = qn($("#p-qty") ? $("#p-qty").value : x.qty);
       try {
-        const r = await send("/api/inv/wms/putaway", { item_id: x.item.id, code, qty, force: !!force }, `${T("t.put")} ${x.item.code} → ${code}`);
+        const r = await send("/api/inv/wms/putaway", { item_id: x.item.id, code, qty, force: !!force, from: x.from || "" }, `${T("t.put")} ${x.item.code} → ${code}`);
         SCAN.ok();
         this.msg = r.queued ? ["warn", T("offline.q")] : ["ok", T("l.put_ok", { c: `${x.item.code} ×${qty}`, l: code })];
         this.it = null;
@@ -1058,6 +1070,115 @@
       } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; this.render(); }
     },
   };
+
+  // ---------------- 料卷（v2.53）：扫料卷 → 扫货位放好 / 扫打印机 · 槽上机；下机、称重盘点、用完 ----------------
+  SCREENS.spool = {
+    sp: null, msg: null,
+    async show(arg) { this.sp = null; this.msg = null; if (!INV) { view().innerHTML = lastMsg("bad", T("k.noinv")); return; } if (arg) await this.scan(arg); else this.render(); },
+    async open(code) { this.sp = (await api(`/api/inv/spools/${encodeURIComponent(code)}`)).spool; },
+    render() {
+      const s = this.sp, msg = this.msg ? lastMsg(this.msg[0], this.msg[1]) : "";
+      if (!s) { view().innerHTML = `${msg}<p class="hint"><span class="big-ic">🧵</span>${T("s.scan")}</p>`; return; }
+      const where = s.loc ? `<span class="loc" data-notr>${esc(s.loc.code)}</span><div class="small" data-notr>${esc(TH() ? s.loc.human_th : s.loc.human_zh)}</div>` : `<b class="warn">${T("s.none")}</b>`;
+      view().innerHTML = `${msg}<div class="card"><div class="row between"><div><div class="mono" data-notr><b>${esc(s.code)}</b></div><div class="nm" data-notr>${esc(s.material)} ${esc(s.color)} ${esc(s.brand || "")}</div></div>
+          <div style="text-align:right"><div class="small muted">${T("s.left")}</div><div class="q" style="font-size:26px">${esc(Math.round(s.remaining_g || 0))} g</div></div></div>
+          <div class="small muted" style="margin-top:6px">${T("s.where")}</div>${where}</div>
+        <div class="card col"><div class="mode">${T("s.then")}</div>
+          ${s.status === "loaded" ? `<button class="big" id="s-unload">${T("s.unload")}</button>` : ""}
+          <div class="small muted">${T("s.gross")}</div><div class="step"><input id="s-gross" type="number" inputmode="decimal" placeholder="g"><button id="s-weigh">${T("s.weigh")}</button></div>
+          <button class="big" id="s-empty">${T("s.empty")}</button></div>`;
+      const run = async (fn) => { try { await fn(); SCAN.ok(); } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; } this.render(); };
+      const u = $("#s-unload"); if (u) u.addEventListener("click", () => run(async () => { this.sp = (await api(`/api/inv/spools/${s.code}/unload`, { json: {} })).spool; this.msg = ["ok", T("s.ok", { c: s.code, l: T("s.none") })]; }));
+      $("#s-weigh").addEventListener("click", () => run(async () => {
+        const r = await api(`/api/inv/spools/${s.code}/weigh`, { json: { gross: +$("#s-gross").value } });
+        this.sp = r.spool; this.msg = ["ok", T("s.wok", { c: s.code, g: Math.round(r.result.after), d: (r.result.diff >= 0 ? "+" : "") + Math.round(r.result.diff) })];
+      }));
+      $("#s-empty").addEventListener("click", async () => { if (!(await confirmBox(T("s.emptyq", { c: s.code })))) return; run(async () => { await api(`/api/spools/${s.code}/empty`, { json: {} }); this.sp = null; this.msg = ["ok", "✔ " + s.code]; }); });
+    },
+    async scan(code) {
+      try {
+        const r = await api(`/api/mobile/resolve?prefer=location&code=${encodeURIComponent(code)}`);
+        if (r.type === "spool") { SCAN.ok(); this.msg = null; await this.open(r.spool.code); this.render(); return; }
+        if (r.type === "location" && this.sp) {
+          const x = await api(`/api/inv/spools/${this.sp.code}/put`, { json: { code: r.location.code } });
+          SCAN.ok(); this.msg = ["ok", T("s.ok", { c: this.sp.code, l: r.location.code })]; this.sp = x.spool; this.render(); return;
+        }
+        SCAN.bad(); this.msg = ["bad", this.sp ? T("unknown", { c: code }) : T("s.scan")]; this.render();
+      } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; this.render(); }
+    },
+  };
+
+  // ---------------- 质检 / 退货（v2.53）：列表 → 点一个 → 扫货位上架（或推荐）/ 次品区 / 报废 ----------------
+  function heldScreen(zt, cfg) {
+    return {
+      list: [], defect: [], it: null, msg: null,
+      async show(arg) { this.it = null; this.msg = null; if (!INV) { view().innerHTML = lastMsg("bad", T("k.noinv")); return; } await this.load(); if (arg) await this.scan(arg); },
+      async load() {
+        try { this.list = (await api("/api/inv/held/" + zt)).items; } catch (e) { this.list = []; toast(srv(e.message), true); }
+        if (cfg.defect) { try { this.defect = (await api("/api/inv/held/defect")).items; } catch { this.defect = []; } }
+        if (this.it) this.it = this.list.find((x) => x.item.id === this.it.item.id && x.from === this.it.from) || null;
+        this.render();
+      },
+      render() {
+        const msg = this.msg ? lastMsg(this.msg[0], this.msg[1]) : "", x = this.it;
+        if (x) {
+          const sug = (x.suggest || [])[0];
+          view().innerHTML = `${msg}<div class="card"><div class="row between"><div><div class="mono" data-notr><b>${esc(x.item.code)}</b></div><div class="nm" data-notr>${esc(nm(x.item.name_zh, x.item.name_th))}</div>
+              <div class="small muted" data-notr>${esc(x.from)}</div></div><div class="q" style="font-size:28px">${esc(qn(x.qty))}</div></div></div>
+            <div class="card col"><div class="step"><button id="h-minus">−</button><input id="h-qty" type="number" inputmode="decimal" value="${esc(qn(x.qty))}"><button id="h-plus">+</button></div>
+              <div class="mode">${T(cfg.go)}</div>${sug ? `<button class="big" id="h-sug">${T("q.sug", { l: sug.code })}</button>` : ""}
+              <button class="big" id="h-bad">${T(cfg.bad)}</button>${cfg.scrap ? `<button class="big" id="h-scrap">${T("q.scrap")}</button>` : ""}
+              <button class="big" id="h-back">${T("u.back")}</button></div>`;
+          const q = $("#h-qty");
+          $("#h-minus").addEventListener("click", () => { q.value = Math.max(0, qn(q.value) - 1); });
+          $("#h-plus").addEventListener("click", () => { q.value = Math.min(qn(x.qty), qn(q.value) + 1); });
+          $("#h-back").addEventListener("click", () => { this.it = null; this.msg = null; this.render(); });
+          if (sug) $("#h-sug").addEventListener("click", () => this.good(sug.code));
+          $("#h-bad").addEventListener("click", () => this.bad(false));
+          const sc = $("#h-scrap"); if (sc) sc.addEventListener("click", async () => { if (await confirmBox(T("q.scrap") + "?")) this.bad(true); });
+          return;
+        }
+        const li = (y, k) => `<li class="tap" data-h="${k}"><div class="grow"><div class="mono" data-notr><b>${esc(y.item.code)}</b></div><div class="small" data-notr>${esc(nm(y.item.name_zh, y.item.name_th))}</div>
+          <div class="small muted" data-notr>${esc(y.from)}${y.suggest && y.suggest[0] ? " → " + esc(y.suggest[0].code) : ""}</div></div><b>${esc(qn(y.qty))}</b></li>`;
+        view().innerHTML = `${msg}<div class="card"><b>${T(cfg.list)}</b>${this.list.length ? `<ul class="list">${this.list.map((y, i) => li(y, i)).join("")}</ul>` : `<p class="muted">${T(cfg.none)}</p>`}</div>
+          ${cfg.defect && this.defect.length ? `<div class="card"><b>${T("r.def")}</b><ul class="list">${this.defect.map((y) => `<li><div class="grow mono" data-notr>${esc(y.item.code)} · ${esc(y.from)}</div><b>${esc(qn(y.qty))}</b></li>`).join("")}</ul></div>` : ""}`;
+        view().querySelectorAll("[data-h]").forEach((el) => el.addEventListener("click", () => { this.it = this.list[+el.dataset.h]; this.msg = null; this.render(); }));
+      },
+      qty() { return qn($("#h-qty") ? $("#h-qty").value : this.it.qty); },
+      async good(to) {
+        const x = this.it, qty = this.qty();
+        try {
+          const r = await api(cfg.goodUrl, { json: { item_id: x.item.id, from: x.from, qty, to, act: "restock" } });
+          SCAN.ok(); this.msg = ["ok", T("l.put_ok", { c: `${x.item.code} ×${qty}`, l: r.to })]; this.it = null; await this.load();
+        } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; this.render(); }
+      },
+      async bad(scrap) {
+        const x = this.it, qty = this.qty();
+        try {
+          const r = await api(cfg.badUrl, { json: { item_id: x.item.id, from: x.from, qty, action: scrap ? "scrap" : "defect", act: scrap ? "scrap" : "defect", note: scrap ? T("q.scrap") : "" } });
+          SCAN.warn(); this.msg = ["warn", T("l.put_ok", { c: `${x.item.code} ×${qty}`, l: r.to || "" })]; this.it = null; await this.load();
+        } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; this.render(); }
+      },
+      async scan(code) {
+        try {
+          const r = await api(`/api/mobile/resolve?prefer=location&code=${encodeURIComponent(code)}`);
+          if (r.type === "location" && this.it) return this.good(r.location.code);
+          const id = r.item ? r.item.id : null;
+          const y = id ? this.list.find((z) => z.item.id === id) : null;
+          if (y) { SCAN.ok(); this.it = y; this.msg = null; this.render(); return; }
+          if (cfg.receive && (r.item || r.sku)) {
+            const c = r.item ? r.item.code : r.sku.sku;
+            const n = prompt(T("r.newq", { c }), "1"); if (!n) return;
+            await api("/api/inv/returns/receive", { json: r.item ? { item_id: r.item.id, qty: +n } : { code: c, qty: +n } });
+            SCAN.ok(); this.msg = ["ok", T("r.added", { c, n })]; await this.load(); return;
+          }
+          SCAN.bad(); this.msg = ["bad", T("unknown", { c: code })]; this.render();
+        } catch (e) { SCAN.bad(); this.msg = ["bad", srv(e.message)]; this.render(); }
+      },
+    };
+  }
+  SCREENS.qc = heldScreen("qc", { list: "q.list", none: "q.none", go: "q.pass", bad: "q.fail", scrap: true, goodUrl: "/api/inv/qc/pass", badUrl: "/api/inv/qc/fail" });
+  SCREENS.ret = heldScreen("returns", { list: "r.list", none: "r.none", go: "r.restock", bad: "r.todef", defect: true, receive: true, goodUrl: "/api/inv/returns/act", badUrl: "/api/inv/returns/act" });
 
   // ---------------- 移库（v2.52）：扫原货位 → 扫商品（一下 +1）→ 扫目标货位；补货任务点一下照着做 ----------------
   SCREENS.move = {
