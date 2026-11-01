@@ -142,7 +142,7 @@ ok(C.get("/api/v1/curate/ext/ping", headers=HR).status_code == 403, "read-only k
 ok(C.post("/api/v1/curate/ext/score", json={"items": []}, headers=HR).status_code == 403, "read-only key refused (POST)")
 ok(C.get("/api/v1/curate/ext/ping", headers={"Authorization": "Bearer " + OKEY}).status_code == 403, "ops write-back key refused")
 r = C.get("/api/v1/curate/ext/ping", headers=H)
-ok(r.status_code == 200 and r.get_json()["ext_latest"] == "3.1.1" and r.get_json()["user"] == "Nok", f"ext ping with staff key {r.get_json()}")
+ok(r.status_code == 200 and r.get_json()["ext_latest"] == "3.1.2" and r.get_json()["user"] == "Nok", f"ext ping with staff key {r.get_json()}")
 ok(any(k["name"] == "Nok" and k.get("ext_version") == "3.1.0" for k in integrations.ext_versions()) if hasattr(integrations, "ext_versions") else True, "ext version noted")
 sp = C.get("/api/v1/curate/ext/sites", headers=H).get_json()
 ok(sp["version"] and {"makerworld", "printables", "thingiverse"} <= {s["id"] for s in sp["sites"]} and "_rx" not in json.dumps(sp), "site packs served as data")
@@ -200,8 +200,22 @@ pipeline.run_all()
 p = store.load(PID)
 ok(len(p["images"]) == 3 and all(os.path.isfile(os.path.join(store.image_dir(PID, "raw"), i["file"])) for i in p["images"]), "source images pulled into ERP product images")
 # 扩展下载文件 → 直接进产品的模型库
+# v2.51.x（扩展 3.1.2）：文件一次领一个（每个网站同时下载 2 个、文件之间隔几秒）
 fn = C.get("/api/v1/curate/ext/files/next", headers=H).get_json()
-ok(fn["product"] == PID and len(fn["files"]) == 3 and fn["pacing"]["file_gap"][0] > 0, f"files next with pacing {fn}")
+ok(fn["product"] == PID and len(fn["files"]) == 1 and fn["conc"] == 2, f"files next: one file per claim {fn}")
+fn2 = C.get("/api/v1/curate/ext/files/next", headers=H).get_json()
+ok(fn2["product"] is None and 0 < fn2["wait"] <= 21 and "按节奏" in fn2["reason"], f"second claim waits a few seconds (pacing), not minutes {fn2}")
+cdb.put("pace", {})
+fn["files"] += C.get("/api/v1/curate/ext/files/next", headers=H).get_json()["files"]
+ok(C.get("/api/v1/curate/ext/files/next", headers=H).get_json()["product"] is None, "max 2 downloads at once per site")
+cdb.put("pace", {})
+for f in fn["files"]:
+    cdb.conn().execute("UPDATE cur_files SET state='ok' WHERE id=?", (f["id"],))
+fn["files"] += C.get("/api/v1/curate/ext/files/next", headers=H).get_json()["files"]
+for f in fn["files"]:
+    cdb.conn().execute("UPDATE cur_files SET state='downloading' WHERE id=?", (f["id"],))
+cdb.conn().commit()
+ok([f["name"] for f in fn["files"]] == ["clip_small.stl", "clip_large.stl", "clip_tray.3mf"], f"files in order {fn['files']}")
 cube_stl(TMP + "/s.stl", 20); cube_stl(TMP + "/l.stl", 40)
 with zipfile.ZipFile(TMP + "/tray.3mf", "w") as z:
     z.writestr("3D/3dmodel.model", MODEL_XML)

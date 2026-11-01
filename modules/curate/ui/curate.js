@@ -32,7 +32,7 @@
   async function show(tab) {
     if (tab === "curate") tab = LS("last", "cur_cand");
     if (!SUBS.some(([s]) => s === tab)) tab = "cur_cand";
-    if (tab !== CUR) { SEL.clear(); ISEL.clear(); }
+    if (tab !== CUR) { SEL.clear(); ISEL.clear(); QSEL.clear(); }
     CUR = tab; LSset("last", tab);
     try { OV = await api("/api/cur/overview"); } catch (e) { OV = OV || {}; }
     frame();
@@ -84,6 +84,14 @@
         <button data-c-bulk="ignore">${Z("忽略所选", "ข้ามที่เลือก")}</button>
         <button data-c-bulk="reread" title="${esc(Z("让扩展重新读这些模型的详情页，改正标题、作者、图片", "ให้ส่วนขยายอ่านหน้ารายละเอียดใหม่ แก้ชื่อ ผู้ออกแบบ รูป"))}">↻ ${Z("重新读取", "อ่านใหม่")}</button>
         <button class="mini" data-c-bulk="clear">✕ ${Z("清除", "ล้าง")}</button>`;
+    } else if (CUR === "cur_queue" && QSEL.size) {
+      const B = QBULK();
+      h = `<span class="fb-n">${Z("已选", "เลือก")} <b>${QSEL.size}</b></span>
+        <button data-q-bulk="retry">↻ ${B.retry}</button><button data-q-bulk="hold">⏸ ${B.hold}</button><button data-q-bulk="resume">▶ ${B.resume}</button>
+        <button data-q-bulk="top">⤒ ${B.top}</button><button data-q-bulk="up">↑ ${B.up}</button><button data-q-bulk="down">↓ ${B.down}</button><button data-q-bulk="bottom">⤓ ${B.bottom}</button>
+        <select data-q-prio><option value="">${Z("优先级…", "ความสำคัญ…")}</option><option value="1">${Z("高", "สูง")}</option><option value="0">${Z("普通", "ปกติ")}</option><option value="-1">${Z("低", "ต่ำ")}</option></select>
+        <button data-q-bulk="delete" class="fb-del">${B.delete}</button>
+        <button class="mini" data-q-bulk="clear">✕ ${Z("清除", "ล้าง")}</button>`;
     } else if (CUR === "cur_inbox" && ISEL.size) {
       h = `<span class="fb-n">${Z("已选", "เลือก")} <b>${ISEL.size}</b></span>
         <button class="primary-lite" data-i-bulk="to_library">→ ${Z("转入产品库", "ย้ายเข้าคลังสินค้า")}</button>
@@ -287,27 +295,117 @@
       : fs.none ? `<span class="muted">${Z(`${fs.none} 个没下载`, `${fs.none} ไฟล์ยังไม่ดาวน์โหลด`)}</span>` : `<span class="muted">${Z("还没有模型文件", "ยังไม่มีไฟล์โมเดล")}</span>`);
     return p.join(" · ");
   }
+  // v2.51.x（扩展 3.1.2）：上面「现在」——速度（个 / 分钟）、还要多久、扩展正在做什么（下载进度）、每个网站的节奏和暂停（「继续」）；
+  // 中间「任务」——详情页和文件下载的任务列表：勾选（全选 / 按网站 / 按状态）→ 浮动条批量删除、重试、暂停 / 继续、置顶 / 提前 / 推后 / 置底、优先级；等着的可以拖动排序。
+  const QSEL = new Set();
+  let QF = Object.assign({ lane: "", site: "", state: "" }, LS("qf", {})), QD = null, QDRAG = null, QTIMER = null;
+  const REASON = () => ({
+    risk: Z("原站要人机验证 / 说请求太频繁：这个网站自动暂停，到时间自动继续", "เว็บต้นทางขอยืนยันตัวตน / แจ้งว่าถี่เกินไป: หยุดเว็บนี้อัตโนมัติ ครบเวลาจะทำต่อเอง"),
+    login: Z("原站要求登录：在装了扩展的 Chrome 里登录原站，再点「重试」", "เว็บต้นทางให้ล็อกอิน: ล็อกอินใน Chrome ที่ติดตั้งส่วนขยาย แล้วกด「ลองใหม่」"),
+    missing: Z("原站上找不到了（可能被作者删掉或改成私密）", "ไม่พบในเว็บต้นทาง (ผู้ออกแบบอาจลบหรือซ่อน)"),
+    timeout: Z("扩展读了几次都没读完（Chrome 关了、电脑睡了，或页面太慢）：可以点「重试」", "ส่วนขยายอ่านหลายครั้งไม่สำเร็จ (ปิด Chrome / คอมพักเครื่อง / หน้าช้า): กด「ลองใหม่」ได้"),
+    stall: Z("下载了几次都中断了（Chrome 关了、电脑睡了或网络断了）：可以点「重试」", "ดาวน์โหลดหลายครั้งแต่ขาดกลางทาง: กด「ลองใหม่」ได้"),
+    detail: Z("页面上没读到模型资料（可能没加载完或网站改版了）：可以点「重试」", "อ่านข้อมูลโมเดลจากหน้าไม่ได้ (โหลดไม่เสร็จหรือเว็บเปลี่ยน): กด「ลองใหม่」ได้"),
+    file: Z("下载失败：可以点「重试」", "ดาวน์โหลดไม่สำเร็จ: กด「ลองใหม่」ได้"),
+    retry: Z("上次没做完，已放回队列，会自动再试", "ครั้งก่อนไม่เสร็จ ใส่กลับเข้าคิวแล้ว จะลองใหม่อัตโนมัติ"),
+    gone: Z("候选 / 产品草稿已删除，任务自动取消", "ผู้สมัคร / สินค้าฉบับร่างถูกลบแล้ว ยกเลิกงานอัตโนมัติ"),
+    removed: Z("已从队列删除", "ลบออกจากคิวแล้ว"),
+  });
+  const QSTATE = () => ({ waiting: Z("等待", "รอ"), queued: Z("等待", "รอ"), running: Z("正在读", "กำลังอ่าน"), downloading: Z("下载中", "กำลังดาวน์โหลด"),
+    failed: Z("失败", "ไม่สำเร็จ"), canceled: Z("已取消", "ยกเลิกแล้ว") });
+  const PRIO = () => ({ 1: Z("高", "สูง"), 0: Z("普通", "ปกติ"), "-1": Z("低", "ต่ำ") });
+  const mb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB");
+  const dur = (s) => (s < 90 ? Z(`${Math.max(1, Math.round(s))} 秒`, `${Math.max(1, Math.round(s))} วินาที`) : s < 5400 ? Z(`约 ${Math.round(s / 60)} 分钟`, `~${Math.round(s / 60)} นาที`)
+    : Z(`约 ${Math.floor(s / 3600)} 小时 ${Math.round((s % 3600) / 60)} 分`, `~${Math.floor(s / 3600)} ชม. ${Math.round((s % 3600) / 60)} นาที`));
+  const bar = (got, total) => (total ? `<div class="cur-prog"><i style="width:${Math.min(100, Math.round((got / total) * 100))}%"></i></div><span class="small muted">${Math.min(100, Math.round((got / total) * 100))}% · ${mb(got)} / ${mb(total)}</span>`
+    : got ? `<span class="small muted">${mb(got)}</span>` : "");
+  function reasonHtml(j) {
+    if (!j.message) return "";
+    const t = REASON()[j.code];
+    return `<div class="small ${j.state === "failed" ? "bad" : "muted"}">${t ? esc(t) : `<span data-notr>${esc(j.message.slice(0, 160))}</span>`}</div>`
+      + (t && j.detail ? `<div class="small muted" data-notr title="${esc(j.message)}">${esc(j.detail.slice(0, 120))}</div>` : "");
+  }
+  function siteLine(s, lane) {
+    const x = s[lane];
+    const p = [`${x.running}/${x.conc} ${lane === "detail" ? Z("在读", "กำลังอ่าน") : Z("在下载", "กำลังดาวน์โหลด")}`];
+    if (x.left) p.push(Z(`还有 ${x.left} 个`, `เหลือ ${x.left}`));
+    if (x.left && x.next_in && !s.held && !s.until) p.push(Z(`${x.next_in} 秒后下一个`, `อีก ${x.next_in} วินาทีถัดไป`));
+    p.push(Z(`这小时 ${x.hour}/${x.cap}`, `ชั่วโมงนี้ ${x.hour}/${x.cap}`));
+    return p.join(" · ");
+  }
+  function nowCard(st) {
+    const doing = st.doing || [];
+    const act = doing.length ? `<table class="grid small"><tbody>${doing.map((x) => `<tr><td class="nowrap">${x.lane === "detail" ? "📄 " + Z("读详情页", "อ่านหน้ารายละเอียด") : "⬇ " + Z("下载", "ดาวน์โหลด")}</td>
+        <td><span data-notr>${esc(String(x.title).slice(0, 70))}</span> <span class="muted" data-notr>${esc(x.site_name)}</span></td>
+        <td class="nowrap">${x.lane === "file" ? bar(x.got, x.total) : ""}</td><td class="nowrap muted">${dur(x.secs)}</td></tr>`).join("")}</tbody></table>`
+      : `<p class="small muted">${st.left.detail + st.left.file ? (st.paused ? Z("采集队列已暂停", "หยุดคิวไว้") : (st.blocked || []).length === (st.sites || []).filter((s) => s.detail.left + s.file.left).length && (st.blocked || []).length
+        ? Z("有活的网站都暂停了（看下面）", "เว็บที่มีงานหยุดอยู่ทั้งหมด (ดูด้านล่าง)") : Z("在按节奏等下一个（几秒）", "กำลังรอจังหวะถัดไป (ไม่กี่วินาที)")) : Z("没有要做的", "ไม่มีงาน")}</p>`;
+    const sites = (st.sites || []).filter((s) => s.detail.left || s.file.left || s.held || s.until || s.detail.running || s.file.running);
+    const srows = sites.length ? `<table class="grid small cur-sitetbl"><tbody>${sites.map((s) => `<tr><td data-notr><b>${esc(s.name)}</b></td>
+        <td>${s.held ? UX.dot("warn", Z("手动暂停", "หยุดเอง")) : s.until ? UX.dot("bad", Z("风控暂停到 ", "หยุดกันบล็อกถึง ") + fmtTime(s.until).slice(11, 16)) : UX.dot("ok", Z("正常", "ปกติ"))}
+          ${s.factor > 1 ? `<span class="muted">${Z("减速", "ลดความเร็ว")} ×${s.factor}</span>` : ""}${s.until && s.reason ? `<div class="muted small" data-notr>${esc(s.reason)}</div>` : ""}</td>
+        <td>📄 ${siteLine(s, "detail")}<br>⬇ ${siteLine(s, "file")}</td>
+        <td class="nowrap">${s.held || s.until || s.factor > 1 ? `<button class="mini primary-lite" data-q-site="${esc(s.key)}" data-on="0">▶ ${Z("继续", "ทำต่อ")}</button>` : `<button class="mini" data-q-site="${esc(s.key)}" data-on="1">⏸ ${Z("暂停", "หยุด")}</button>`}</td></tr>`).join("")}</tbody></table>` : "";
+    const pace = st.pacing || {};
+    return UX.card({ title: Z("现在", "ตอนนี้"), right: `<button class="mini" data-q-act="${st.paused ? "resume" : "pause"}">${st.paused ? "▶ " + Z("继续全部", "ทำต่อทั้งหมด") : "⏸ " + Z("暂停全部", "หยุดทั้งหมด")}</button>`,
+      help: Z(`扩展有活就一直做：详情页、文件下载两条线同时进行，每个网站同时最多读 ${(pace.detail || {}).conc || 2} 个详情页、下载 ${(pace.file || {}).conc || 2} 个文件；同一个网站两次之间随机停 ${((pace.detail || {}).gap || []).join("–")} 秒（详情页）/ ${((pace.file || {}).gap || []).join("–")} 秒（文件），像人在点。遇到人机验证 / 请求太频繁，这个网站自动暂停（30 分钟，6 小时内再出现 2 小时），确认原站能正常打开可以点「继续」。速度和上限在「设置 → 商品」里改。`,
+        `ส่วนขยายทำงานต่อเนื่องเมื่อมีงาน: อ่านรายละเอียดและดาวน์โหลดพร้อมกัน แต่ละเว็บอ่านพร้อมกันได้ ${(pace.detail || {}).conc || 2} หน้า ดาวน์โหลด ${(pace.file || {}).conc || 2} ไฟล์ เว้นช่วงสุ่ม ${((pace.detail || {}).gap || []).join("–")} / ${((pace.file || {}).gap || []).join("–")} วินาทีเหมือนคนกด เจอแคปช่า / ถี่เกินไปจะหยุดเว็บนั้นอัตโนมัติ เปิดเว็บต้นทางได้ปกติแล้วกด「ทำต่อ」ได้ ปรับความเร็วและเพดานได้ใน「ตั้งค่า → สินค้า」`),
+      body: act + srows });
+  }
+  function jobRow(j) {
+    const wait = j.state === "waiting" || j.state === "queued";
+    return `<tr data-qj="${j.id}" class="${QSEL.has(j.id) ? "cur-qsel" : ""}${j.held ? " muted" : ""}"${wait ? ` draggable="true"` : ""}>
+      <td><input type="checkbox" data-q-sel="${j.id}" ${QSEL.has(j.id) ? "checked" : ""}></td>
+      <td class="cur-drag">${wait ? `<span title="${esc(Z("拖动排序", "ลากเพื่อเรียง"))}">⋮⋮</span>` : ""}</td>
+      <td>${j.lane === "detail" ? "📄" : "⬇"} ${link(j.url, String(j.title || j.url).slice(0, 70))}${j.refresh ? " " + pill(Z("重新读取候选", "อ่านผู้สมัครใหม่"), "") : ""}
+        <div class="small muted"><span data-notr>${esc(j.site_name)}</span>${j.product_id ? ` · <span class="mono" data-p360="${esc(j.product_id)}" data-notr>${esc(j.product_id)}</span>` : ""}${j.product_title && j.lane === "file" ? ` <span data-notr>${esc(String(j.product_title).slice(0, 40))}</span>` : ""}${j.size ? ` · <span data-notr>${esc(j.size)}</span>` : ""}</div></td>
+      <td>${pill(QSTATE()[j.state] || j.state, j.state === "failed" ? "bad" : j.state === "running" || j.state === "downloading" ? "info" : "")}${j.held ? " " + pill("⏸ " + Z("已暂停", "หยุดไว้"), "warn") : ""}
+        ${j.state === "downloading" ? `<div>${bar(j.got, j.total)}</div>` : j.secs ? `<div class="small muted">${dur(j.secs)}</div>` : ""}${reasonHtml(j)}</td>
+      <td>${j.prio ? pill(PRIO()[j.prio], j.prio > 0 ? "info" : "") : ""}</td>
+      <td class="nowrap">${wait ? `<button class="mini ghost" data-q-one="up" data-q="${j.id}" title="${esc(Z("提前", "เลื่อนขึ้น"))}">↑</button><button class="mini ghost" data-q-one="down" data-q="${j.id}" title="${esc(Z("推后", "เลื่อนลง"))}">↓</button>` : ""}
+        ${j.state === "failed" || j.state === "canceled" ? `<button class="mini" data-q-one="retry" data-q="${j.id}">↻ ${Z("重试", "ลองใหม่")}</button>`
+          : wait ? `<button class="mini" data-q-one="${j.held ? "resume" : "hold"}" data-q="${j.id}">${j.held ? "▶ " + Z("继续", "ทำต่อ") : "⏸ " + Z("暂停", "หยุด")}</button>` : ""}</td></tr>`;
+  }
+  function jobsCard(d) {
+    const st = d.status || {};
+    const jobs = d.jobs || [];
+    const sitesSel = (st.sites || []).map((s) => `<option value="${esc(s.key)}" ${QF.site === s.key ? "selected" : ""} data-notr>${esc(s.name)}</option>`).join("");
+    const seg = [["", Z("全部", "ทั้งหมด")], ["waiting", Z("等待", "รอ")], ["running", Z("进行中", "กำลังทำ")], ["held", Z("已暂停", "หยุดไว้")], ["failed", Z("失败", "ไม่สำเร็จ")]];
+    const nFail = jobs.filter((j) => j.state === "failed" || j.state === "canceled").length;
+    return UX.card({ title: Z(`任务 · ${jobs.length}`, `งาน · ${jobs.length}`),
+      right: `<button class="mini" data-q-clean title="${esc(Z("候选 / 产品已删除的任务取消；失败的详情页任务拿掉；失败的下载变回「没下载」（产品上还能重新下载）", "ยกเลิกงานของผู้สมัคร / สินค้าที่ถูกลบ ลบงานที่ไม่สำเร็จออก ไฟล์ที่ดาวน์โหลดไม่สำเร็จกลับเป็น「ยังไม่ดาวน์โหลด」"))}">🧹 ${Z("清理失败 / 无效任务", "ล้างงานที่ไม่สำเร็จ / ใช้ไม่ได้")}${nFail ? ` (${nFail})` : ""}</button>`,
+      help: Z("扩展按这里的顺序领活：优先级高的先做，同一优先级按队列顺序。勾选后用下面的浮动条批量操作；等着的任务可以按住 ⋮⋮ 拖动排序。删除下载任务只是不下载这个文件，产品草稿不动。",
+        "ส่วนขยายรับงานตามลำดับนี้: ความสำคัญสูงก่อน ความสำคัญเท่ากันตามลำดับคิว เลือกแล้วใช้แถบลอยด้านล่าง งานที่รอลาก ⋮⋮ เพื่อเรียงได้ ลบงานดาวน์โหลดคือไม่ดาวน์โหลดไฟล์นั้น สินค้าฉบับร่างไม่เปลี่ยน"),
+      body: `<div class="cur-fbar"><select data-qf="lane"><option value="">${Z("详情页 + 文件", "รายละเอียด + ไฟล์")}</option><option value="detail" ${QF.lane === "detail" ? "selected" : ""}>📄 ${Z("详情页", "หน้ารายละเอียด")}</option><option value="file" ${QF.lane === "file" ? "selected" : ""}>⬇ ${Z("文件下载", "ดาวน์โหลดไฟล์")}</option></select>
+          <select data-qf="site"><option value="">${Z("全部网站", "ทุกเว็บ")}</option>${sitesSel}</select>
+          <span class="seg">${seg.map(([k, t]) => `<button data-qf-state="${k}" class="${QF.state === k ? "on" : ""}">${t}</button>`).join("")}</span>
+          <label class="chk"><input type="checkbox" data-q-all ${jobs.length && jobs.every((j) => QSEL.has(j.id)) ? "checked" : ""}> ${Z("全选（这个筛选下的）", "เลือกทั้งหมด (ตามตัวกรอง)")}</label></div>`
+        + (jobs.length ? `<div class="cur-wrap"><table class="grid cur-tbl cur-jobs"><thead><tr><th></th><th></th><th>${Z("任务", "งาน")}</th><th>${Z("状态", "สถานะ")}</th><th>${Z("优先级", "ความสำคัญ")}</th><th></th></tr></thead><tbody>${jobs.map(jobRow).join("")}</tbody></table></div>`
+          : UX.empty(Z("没有任务", "ไม่มีงาน"))) });
+  }
   async function queuePage(box) {
-    const d = await api("/api/cur/queue");
-    const k = d.kpi, q = d.collect, ext = d.ext || {};
-    const CS = () => ({ waiting: Z("等读详情页", "รออ่านหน้ารายละเอียด"), running: Z("正在读取", "กำลังอ่าน"), done: Z("详情已读", "อ่านแล้ว"), failed: Z("读取失败", "อ่านไม่สำเร็จ"), canceled: Z("已取消", "ยกเลิก") });
-    const FS = () => ({ queued: Z("等下载", "รอดาวน์โหลด"), downloading: Z("下载中", "กำลังดาวน์โหลด"), failed: Z("失败", "ไม่สำเร็จ") });
+    const qs = new URLSearchParams(Object.entries(QF).filter(([, v]) => v)).toString();
+    const d = await api("/api/cur/queue" + (qs ? "?" + qs : ""));
+    QD = d;
+    for (const id of [...QSEL]) if (!d.jobs.some((j) => j.id === id)) QSEL.delete(id);
+    const k = d.kpi, ext = d.ext || {}, st = d.status || {};
     const step = (ok, zh, th) => pill((ok ? "✓ " : "· ") + Z(zh, th), ok ? "ok" : "");
+    const CS = () => ({ waiting: Z("等读详情页", "รออ่านหน้ารายละเอียด"), running: Z("正在读取", "กำลังอ่าน"), done: Z("详情已读", "อ่านแล้ว"), failed: Z("读取失败", "อ่านไม่สำเร็จ"), canceled: Z("已取消", "ยกเลิก") });
     const extH = ext.online ? `<span class="small ok">● ${Z("扩展在线", "ส่วนขยายออนไลน์")}</span>` : `<span class="small warn-t">⚠ ${Z("没有在线的扩展", "ไม่มีส่วนขยายออนไลน์")}：${EXT_TIP()}</span>`;
+    const left = (st.left || {}).detail + (st.left || {}).file;
     box.innerHTML = UX.kpis([
-      { label: Z("等读详情页", "รออ่านหน้ารายละเอียด"), value: n0(k.waiting), sub: q.paused ? Z("已暂停", "หยุดชั่วคราว") : "", tone: q.paused ? "warn" : "",
-        help: Z("采用以后，装了 ERP 扩展的 Chrome 在后台标签页一个个打开原站详情页，读图片、描述、许可证、文件链接，补进产品草稿", "หลังจากกดใช้ Chrome ที่ติดตั้งส่วนขยายจะเปิดหน้ารายละเอียดเบื้องหลังทีละหน้า อ่านรูป คำอธิบาย สัญญาอนุญาต ลิงก์ไฟล์ แล้วเติมลงสินค้าฉบับร่าง") },
+      { label: Z("速度", "ความเร็ว"), value: st.rate && st.rate.total ? `${st.rate.total.toFixed(1)}` : "—", sub: Z(`个 / 分钟 · 10 分钟做完 ${(st.rate || {}).done_10m || 0} 个`, `รายการ/นาที · 10 นาทีเสร็จ ${(st.rate || {}).done_10m || 0}`),
+        tone: st.rate && st.rate.total ? "ok" : "", help: Z("最近 10 分钟扩展做完的详情页 + 文件", "หน้ารายละเอียด + ไฟล์ที่ส่วนขยายทำเสร็จใน 10 นาทีล่าสุด") },
+      { label: Z("还要多久", "อีกนานเท่าไร"), value: left ? (st.eta ? dur(st.eta) : "—") : Z("做完了", "เสร็จแล้ว"), tone: left ? "" : "ok",
+        help: Z("按现在的速度（没有实测时按节奏估）算的，包括风控暂停剩下的时间", "คำนวณจากความเร็วตอนนี้ (ยังไม่มีข้อมูลจริงคิดจากจังหวะ) รวมเวลาหยุดกันบล็อกที่เหลือ") },
+      { label: Z("等读详情页", "รออ่านหน้ารายละเอียด"), value: n0(k.waiting), sub: st.paused ? Z("已暂停", "หยุดชั่วคราว") : "", tone: st.paused ? "warn" : "",
+        help: Z("采用以后，装了 ERP 扩展的 Chrome 在后台标签页打开原站详情页，读图片、描述、许可证、文件链接，补进产品草稿", "หลังจากกดใช้ Chrome ที่ติดตั้งส่วนขยายจะเปิดหน้ารายละเอียดเบื้องหลัง อ่านรูป คำอธิบาย สัญญาอนุญาต ลิงก์ไฟล์ แล้วเติมลงสินค้าฉบับร่าง") },
       { label: Z("文件等下载", "ไฟล์รอดาวน์โหลด"), value: n0(k.files), help: Z("扩展用浏览器里原站的登录状态下载，上传后直接进产品的模型库", "ส่วนขยายดาวน์โหลดด้วยการล็อกอินเว็บต้นทางในเบราว์เซอร์ แล้วใส่ในคลังโมเดลของสินค้า") },
       { label: Z("下载失败", "ดาวน์โหลดไม่สำเร็จ"), value: n0(k.failed), tone: k.failed ? "bad" : "" },
       { label: Z("许可待核验", "รอตรวจสัญญาอนุญาต"), value: n0(k.lic_pending), tone: k.lic_pending ? "warn" : "ok", help: Z("核验前产品不能导出、不能推送到平台。在产品编辑页上面点「核验通过」", "ก่อนตรวจ สินค้าส่งออก / ส่งขึ้นแพลตฟอร์มไม่ได้ กด「ตรวจผ่าน」ที่หน้าแก้ไขสินค้า") },
       { label: Z("扩展", "ส่วนขยาย"), value: ext.online ? Z("在线", "ออนไลน์") : Z("不在线", "ออฟไลน์"), tone: ext.online ? "ok" : "warn", sub: !ext.online && ext.last ? Z("上次 ", "ล่าสุด ") + fmtTime(ext.last).slice(5, 16) : "", help: EXT_TIP() },
-    ]) + `<div class="cur-grid2">${UX.card({ title: Z("每天采用（14 天）", "ใช้ต่อวัน (14 วัน)"), body: UX.columns(d.days.map((x) => ({ label: x.day, value: x.n, tone: "ok" })), { h: 90, from: d.days[0].day, to: d.days[d.days.length - 1].day }) })}
-      ${UX.card({ title: Z("采集队列", "คิวเก็บข้อมูล"), right: `<button class="mini" data-q-act="${q.paused ? "resume" : "pause"}">${q.paused ? Z("▶ 继续", "▶ ทำต่อ") : Z("⏸ 暂停", "⏸ หยุด")}</button>`,
-        body: [...q.active, ...q.recent.filter((x) => x.state !== "done")].length ? `<table class="grid small"><tbody>${[...q.active, ...q.recent.filter((x) => x.state !== "done")].slice(0, 12).map((r) => `<tr><td>${link(r.url, (r.title || r.url).slice(0, 60))}${r.kind === "refresh" ? " " + pill(Z("重新读取候选", "อ่านผู้สมัครใหม่"), "") : ""}</td>
-          <td>${pill(CS()[r.state] || r.state, r.state === "failed" ? "bad" : "info")}${r.message ? `<div class="muted" data-notr>${esc(r.message.slice(0, 100))}</div>` : ""}</td>
-          <td class="nowrap">${r.state === "waiting" ? `<button class="mini ghost" data-q-act="cancel" data-q="${r.id}">${Z("取消", "ยกเลิก")}</button>` : ["failed", "canceled"].includes(r.state) ? `<button class="mini" data-q-act="retry" data-q="${r.id}">${Z("重试", "ลองใหม่")}</button>` : ""}</td></tr>`).join("")}</tbody></table>`
-          : UX.empty(Z("队列是空的", "คิวว่าง")) })}</div>
-      ${UX.card({ title: Z("采用的产品草稿", "สินค้าฉบับร่างที่ใช้"), right: extH, help: Z("采用就是产品草稿（先在采集箱）：用 ERP 的编辑页补颜色、主图、类目属性、售价；模型文件在产品的模型库；许可核验过、上架检查通过才能导出 / 推送。没有模型文件的点「⬇ 下载模型文件」（扩展用原站登录状态下载），或者自己「⬆ 手动上传」。",
+    ]) + nowCard(st) + jobsCard(d)
+      + `${UX.card({ title: Z("采用的产品草稿", "สินค้าฉบับร่างที่ใช้"), right: extH, help: Z("采用就是产品草稿（先在采集箱）：用 ERP 的编辑页补颜色、主图、类目属性、售价；模型文件在产品的模型库；许可核验过、上架检查通过才能导出 / 推送。没有模型文件的点「⬇ 下载模型文件」（扩展用原站登录状态下载），或者自己「⬆ 手动上传」。",
           "กดใช้แล้วเป็นสินค้าฉบับร่าง (อยู่ในกล่องเก็บก่อน) แก้ไขด้วยหน้าแก้ไขของ ERP ไฟล์อยู่ในคลังโมเดลของสินค้า ไม่มีไฟล์กด「⬇ ดาวน์โหลดไฟล์โมเดล」หรือ「⬆ อัปโหลดเอง」"),
         body: d.rows.length ? `<div class="cur-wrap"><table class="grid cur-tbl"><thead><tr><th>${Z("产品", "สินค้า")}</th><th>${Z("许可", "สัญญาอนุญาต")}</th><th>${Z("进度", "ความคืบหน้า")}</th><th>${Z("模型文件", "ไฟล์โมเดล")}</th><th></th></tr></thead><tbody>
           ${d.rows.map((r) => { const f = r.files || {}; const fs = r.fstat || {};
@@ -320,9 +418,17 @@
                 <button class="mini primary-lite" data-c-dl="${esc(r.product_id)}" title="${esc(Z("让扩展用原站的登录状态下载这个模型的文件（还没有文件链接就先重新读详情页）", "ให้ส่วนขยายดาวน์โหลดไฟล์ด้วยการล็อกอินเว็บต้นทาง"))}">${fs.failed ? `↻ ${Z("重新下载", "ดาวน์โหลดใหม่")}` : `⬇ ${Z("下载模型文件", "ดาวน์โหลดไฟล์โมเดล")}`}</button>
                 <label class="filebtn mini" title="${esc(Z("自己上传 STL / 3MF / ZIP，和下载的一样做 ERP 分析", "อัปโหลด STL / 3MF / ZIP เอง วิเคราะห์เหมือนไฟล์ที่ดาวน์โหลด"))}">⬆ ${Z("手动上传", "อัปโหลดเอง")}<input type="file" data-c-up="${esc(r.product_id)}" multiple accept=".stl,.3mf,.zip,.obj,.step,.stp" hidden></label></td></tr>`; }).join("")}</tbody></table></div>`
           : UX.empty(Z("还没有采用过模型：在「候选池」里点「采用」，或在模型网站上点扩展的「＋采集」。", "ยังไม่เคยใช้โมเดล: กด「ใช้」ในคลังผู้สมัคร หรือกด「＋เก็บ」ของส่วนขยายบนเว็บโมเดล")) })}
-      ${d.downloads.length ? UX.card({ title: Z("文件下载", "การดาวน์โหลดไฟล์"), body: `<table class="grid small"><tbody>${d.downloads.map((x) => `<tr><td class="mono" data-notr>${esc(x.product_id)}</td><td data-notr>${esc(x.name)}</td>
-          <td>${pill(FS()[x.state] || x.state, x.state === "failed" ? "bad" : "info")}${x.error ? `<div class="muted" data-notr>${esc(x.error.slice(0, 120))}</div>` : ""}</td></tr>`).join("")}</tbody></table>` }) : ""}`;
+      ${UX.card({ title: Z("每天采用（14 天）", "ใช้ต่อวัน (14 วัน)"), body: UX.columns(d.days.map((x) => ({ label: x.day, value: x.n, tone: "ok" })), { h: 90, from: d.days[0].day, to: d.days[d.days.length - 1].day }) })}`;
+    // 有活时每 6 秒自己刷新（速度、进度、扩展在做什么）；拖动、勾选不受影响（勾选记在 QSEL 里）
+    clearTimeout(QTIMER);
+    if (left || (st.doing || []).length) QTIMER = setTimeout(() => { if (CUR === "cur_queue" && !QDRAG && !document.hidden && sec() && sec().offsetParent) render(); }, 6000);
   }
+  async function qAction(ids, action, extra) {
+    const r = await api("/api/cur/jobs/action", { json: { ids, action, ...(extra || {}) } });
+    return r;
+  }
+  const QBULK = () => ({ delete: Z("删除", "ลบ"), retry: Z("重试", "ลองใหม่"), hold: Z("暂停", "หยุด"), resume: Z("继续", "ทำต่อ"), top: Z("置顶", "ขึ้นบนสุด"),
+    up: Z("提前", "เลื่อนขึ้น"), down: Z("推后", "เลื่อนลง"), bottom: Z("置底", "ลงล่างสุด") });
 
   // ======================= 关注巡逻 =======================
   async function watchPage(box) {
@@ -458,7 +564,69 @@
     if ((b = t("[data-w-cand]"))) { Object.assign(FC, { min: "0", ex: "1", status: "all", new: "", bad: "" }); FC.watch = b.dataset.wCand; LSset("fc", { ...FC, watch: "" }); return goTab("cur_cand"); }
     if ((b = t("[data-w-reset]"))) return busy(b, async () => { await api("/api/cur/pace/reset", { json: { platform: b.dataset.wReset } }); render(); });
     if ((b = t("[data-q-act]"))) return busy(b, async () => { await api("/api/cur/collect/action", { json: { id: +(b.dataset.q || 0), action: b.dataset.qAct } }); render(); });
+    // 采集队列：网站暂停 / 继续、清理、筛选、勾选、单个任务和批量操作
+    if ((b = t("[data-q-site]"))) return busy(b, async () => { await api(`/api/cur/sites/${encodeURIComponent(b.dataset.qSite)}/hold`, { json: { on: b.dataset.on === "1" } }); render(); });
+    if ((b = t("[data-q-clean]"))) return busy(b, async () => {
+      const r = await api("/api/cur/queue/cleanup", { json: {} });
+      toast(Z(`清理了 ${r.orphans + r.collect} 个详情页任务、${r.files} 个失败的下载（产品上还能重新下载）`, `ล้างงานอ่านรายละเอียด ${r.orphans + r.collect} รายการ ดาวน์โหลดไม่สำเร็จ ${r.files} ไฟล์ (ดาวน์โหลดใหม่จากสินค้าได้)`));
+      QSEL.clear(); render();
+    });
+    if ((b = t("[data-qf-state]"))) { QF.state = b.dataset.qfState; LSset("qf", QF); QSEL.clear(); return render(); }
+    if ((b = t("[data-q-all]"))) { ((QD && QD.jobs) || []).forEach((j) => (b.checked ? QSEL.add(j.id) : QSEL.delete(j.id))); s.querySelectorAll("[data-q-sel]").forEach((x) => { x.checked = b.checked; x.closest("tr").classList.toggle("cur-qsel", b.checked); }); return floatBar(); }
+    if ((b = t("[data-q-sel]"))) { (b.checked ? QSEL.add(b.dataset.qSel) : QSEL.delete(b.dataset.qSel)); b.closest("tr").classList.toggle("cur-qsel", b.checked); return floatBar(); }
+    if ((b = t("[data-q-one]"))) return busy(b, async () => { await qAction([b.dataset.q], b.dataset.qOne); render(); });
+    if ((b = t("[data-q-bulk]"))) {
+      const ids = [...QSEL], act = b.dataset.qBulk;
+      if (act === "clear") { QSEL.clear(); return render(); }
+      if (act === "delete" && !confirm(Z(`从采集队列删除 ${ids.length} 个任务？（下载任务只是不下载这个文件，产品草稿不动；以后在产品上点「⬇ 下载模型文件」还能再排队）`,
+        `ลบ ${ids.length} งานออกจากคิว? (งานดาวน์โหลดคือไม่ดาวน์โหลดไฟล์นั้น สินค้าฉบับร่างไม่เปลี่ยน กด「⬇ ดาวน์โหลดไฟล์โมเดล」ที่สินค้าเพื่อเข้าคิวใหม่ได้)`))) return;
+      return busy(b, async () => {
+        const r = await qAction(ids, act);
+        toast(Z(`${QBULK()[act]}：${r.n} 个`, `${QBULK()[act]}: ${r.n} รายการ`));
+        if (act === "delete") QSEL.clear();
+        render();
+      });
+    }
   });
+  document.addEventListener("change", async (e) => {
+    const s = sec();
+    if (!s || !s.contains(e.target) || CUR !== "cur_queue") return;
+    const f = e.target.closest("[data-qf]");
+    if (f) { QF[f.dataset.qf] = f.value; LSset("qf", QF); QSEL.clear(); return render(); }
+    const pr = e.target.closest("[data-q-prio]");
+    if (pr && pr.value !== "" && QSEL.size) {
+      const r = await qAction([...QSEL], "prio", { prio: +pr.value }).catch((err) => toast(err.message, true));
+      if (r) toast(Z(`优先级已改：${r.n} 个`, `เปลี่ยนความสำคัญแล้ว: ${r.n} รายการ`));
+      render();
+    }
+  });
+  // 拖动排序（只有等着的任务能拖；拖的是勾选里的一个就整批一起挪）
+  document.addEventListener("dragstart", (e) => {
+    const tr = e.target.closest && e.target.closest("#tab-curate tr[data-qj][draggable]");
+    if (!tr) return;
+    QDRAG = tr.dataset.qj;
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", QDRAG); } catch (err) { /* 忽略 */ }
+  });
+  document.addEventListener("dragover", (e) => {
+    const tr = QDRAG && e.target.closest && e.target.closest("#tab-curate tr[data-qj][draggable]");
+    if (!tr || tr.dataset.qj[0] !== QDRAG[0]) return;
+    e.preventDefault();
+    document.querySelectorAll("#tab-curate tr.cur-dropto").forEach((x) => x !== tr && x.classList.remove("cur-dropto"));
+    tr.classList.add("cur-dropto");
+  });
+  document.addEventListener("drop", async (e) => {
+    const tr = QDRAG && e.target.closest && e.target.closest("#tab-curate tr[data-qj][draggable]");
+    if (!tr) return;
+    e.preventDefault();
+    const from = QDRAG, before = tr.dataset.qj;
+    QDRAG = null;
+    if (from === before) return render();
+    const ids = QSEL.has(from) ? [...QSEL].filter((x) => x[0] === from[0] && x !== before) : [from];
+    try { await qAction(ids, "move", { before }); } catch (err) { toast(err.message, true); }
+    render();
+  });
+  document.addEventListener("dragend", () => { QDRAG = null; document.querySelectorAll("#tab-curate tr.cur-dropto").forEach((x) => x.classList.remove("cur-dropto")); });
   // 打开模型站的菜单：点别处收起
   document.addEventListener("click", (e) => { document.querySelectorAll("#tab-curate details.cur-sites[open]").forEach((d) => { if (!d.contains(e.target)) d.open = false; }); });
   function collectMsg(r) {

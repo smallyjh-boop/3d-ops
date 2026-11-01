@@ -1,9 +1,12 @@
 """浏览器扩展的三件后台活：采集队列（读详情页）、模型文件下载（用浏览器里的登录状态下载，再上传到 ERP）、关注巡逻（读列表页）。
-节奏和防风控（从「3D选品工具」pace.py 搬过来）：
-  · 页面之间、文件之间、产品之间都随机停一会儿；每个平台每小时下载有上限、每天巡逻页数有上限；
+节奏和防风控（从「3D选品工具」pace.py 搬过来，v2.51.x / 扩展 3.1.2 改成两条线并行）：
+  · 详情页、文件各一条线，每个网站各自：同时最多 conc 个（默认 2）、相邻两次开始之间随机隔几秒（标准档：详情页 4–12 秒、文件 8–20 秒）、
+    每小时有上限（设置里能改）；每天巡逻页数有上限；
   · 一出现风控迹象（HTTP 429 / 403、人机验证、太频繁）就把这个平台减速一半并暂停 30 分钟（6 小时内再出现暂停 2 小时），
-    采集、下载、巡逻一起停；之后一直顺利就慢慢提回原来的速度。
-扩展每分钟问一次「有没有活」（/api/v1/curate/ext/next、/files/next、/watch/next），服务器按上面的规矩决定给不给。
+    采集、下载、巡逻一起停；之后一直顺利就慢慢提回原来的速度；也可以手动暂停 / 继续一个网站；
+  · 领了活没交回（Chrome 关了、扩展后台被停）：详情页 4 分钟、文件 3 分钟没进度就放回队列，超时 3 次算失败；
+  · 候选 / 产品草稿已删除的任务自动取消（不算失败）。
+扩展 3.1.2 有活时一直领（没活或在等节奏时按服务器给的 wait 秒数睡，闹钟每分钟叫醒一次）；老扩展 3.1.1 每分钟问一次也照样能用（文件一次给一个）。
 """
 import random
 import re
@@ -16,11 +19,16 @@ from core.config import load_config
 from . import db, sites
 
 SPEEDS = {
-    #          名称（中, 泰）                          文件间隔(秒)  产品间隔(秒)  每平台每小时文件数  采集详情页间隔(秒)
-    "slow": (("慢（最稳）", "ช้า (ปลอดภัยสุด)"), (15, 35), (120, 240), 15, (20, 40)),
-    "normal": (("标准（推荐）", "มาตรฐาน (แนะนำ)"), (8, 20), (45, 90), 30, (10, 25)),
-    "fast": (("快（容易被风控）", "เร็ว (เสี่ยงถูกบล็อก)"), (4, 10), (20, 45), 60, (5, 12)),
+    # v2.51.x（扩展 3.1.2）：详情页和文件分两条线、每个网站各自并行 2 个、节奏按「秒」算（以前一次只做一件、文件按产品成批 + 产品之间停 45–90 秒、每小时 30 个文件）。
+    #          名称（中, 泰）                          文件间隔(秒)  详情页间隔(秒)  每网站每小时文件数  每网站每小时详情页数
+    "slow": (("慢（最稳）", "ช้า (ปลอดภัยสุด)"), (15, 35), (10, 25), 60, 150),
+    "normal": (("标准（推荐）", "มาตรฐาน (แนะนำ)"), (8, 20), (4, 12), 150, 400),
+    "fast": (("快（容易被风控）", "เร็ว (เสี่ยงถูกบล็อก)"), (4, 10), (2, 6), 300, 800),
 }
+COLLECT_STALL = 240          # 详情页「正在读」超过 4 分钟没交回 = 扩展卡住 / 关掉了：放回队列重试
+FILE_STALL = 180             # 文件下载 3 分钟没进度（扩展 3.1.2 每几秒报一次进度）= 卡住：放回队列重试
+FILE_STALL_OLD = 600         # 不报进度的老扩展（3.1.1）：10 分钟
+MAX_TRIES = 3                # 超时 / 中断 3 次就算失败（写清楚原因）
 RISK_WORDS = re.compile(r"captcha|recaptcha|hcaptcha|turnstile|cf-chl|challenge-platform|just a moment|verify (?:you are|that you are) (?:a )?human|"
                         r"are you a robot|access denied|too many requests|rate.?limit|unusual traffic|请求过于频繁|操作频繁|人机验证|安全验证|滑动验证|访问受限", re.I)
 LOGIN_WORDS = re.compile(r"\b(?:log ?in|sign ?in|login required|please log in)\b|登录|登入|เข้าสู่ระบบ", re.I)
@@ -49,6 +57,16 @@ def speed(cfg=None):
     return v if v in SPEEDS else "normal"
 
 
+def pacing(cfg=None):
+    """节奏（每个网站）：两条线（detail 详情页 / file 文件）各自的间隔（秒，随机）、同时几个、每小时上限。设置里可以改（0 / 空 = 按速度档位）。"""
+    cfg = cfg or load_config()
+    prof = SPEEDS[speed(cfg)]
+    return {"detail": {"gap": prof[2], "conc": min(4, max(1, _i(cfg.get("cur_detail_conc"), 2))),
+                       "cap": _i(cfg.get("cur_detail_hour_cap"), 0) or prof[4]},
+            "file": {"gap": prof[1], "conc": min(4, max(1, _i(cfg.get("cur_dl_conc"), 2))),
+                     "cap": _i(cfg.get("cur_dl_hour_cap"), 0) or prof[3]}}
+
+
 # ---------------- 每个平台的节奏 / 暂停 ----------------
 def _state():
     st = db.get("pace") or {}
@@ -58,16 +76,26 @@ def _state():
 def _plat(st, p):
     d = st.setdefault(p, {})
     for k, v in (("factor", 1.0), ("cooldown_until", 0), ("next_at", 0), ("hour_start", 0), ("hour_count", 0), ("risk_count", 0),
-                 ("last_risk", 0), ("reason", ""), ("collect_next", 0)):
+                 ("last_risk", 0), ("reason", ""), ("collect_next", 0), ("held", False), ("detail_hour", 0)):
         d.setdefault(k, v)
     if time.time() - d["hour_start"] >= 3600:
-        d["hour_start"], d["hour_count"] = time.time(), 0
+        d["hour_start"], d["hour_count"], d["detail_hour"] = time.time(), 0, 0
     return d
 
 
 def paused(p):
     d = _plat(_state(), p)
     return d["cooldown_until"] if d["cooldown_until"] > time.time() else 0
+
+
+def _blocked(d, p):
+    """这个网站现在能不能派活：(原因, 暂停到) 或 ("", 0)。"""
+    if d.get("held"):
+        return f"{sites.name_of(p)} 已手动暂停", 0
+    if d["cooldown_until"] > time.time():
+        return (f"{sites.name_of(p)} 疑似风控暂停中（{d['reason'] or '原站要求验证 / 太频繁'}），到 "
+                f"{time.strftime('%H:%M', time.localtime(d['cooldown_until']))} 自动继续"), d["cooldown_until"]
+    return "", 0
 
 
 def on_success(p):
@@ -96,6 +124,7 @@ def on_risk(p, reason):
 
 
 def reset(p=None):
+    """「继续 / 恢复」：清掉暂停（风控暂停和手动暂停）和减速。"""
     with _lock:
         st = _state()
         for k in ([p] if p else list(st)):
@@ -103,17 +132,34 @@ def reset(p=None):
         db.put("pace", st)
 
 
+def hold_site(p, on=True):
+    """手动暂停 / 继续一个网站（采集、下载、巡逻一起）。继续 = 同时清掉风控暂停和减速。"""
+    if p not in sites.load():
+        raise ValueError("没有这个网站")
+    if not on:
+        return reset(p)
+    with _lock:
+        st = _state()
+        _plat(st, p)["held"] = True
+        db.put("pace", st)
+
+
 def overview(cfg=None):
     st = _state()
-    prof = SPEEDS[speed(cfg)]
+    pc = pacing(cfg)
     out = []
     t0 = db.day_start()
     c = db.conn()
     cw = cfg_watch(cfg)
+    now = time.time()
     for sid, s in sites.load().items():
         d = _plat(st, sid)
-        out.append({"key": sid, "name": s["name"], "paused": d["cooldown_until"] > time.time(), "until": d["cooldown_until"],
-                    "factor": d["factor"], "hour_count": d["hour_count"], "cap": max(3, int(prof[3] / d["factor"])), "reason": d["reason"],
+        f = max(1.0, d["factor"])
+        cool = d["cooldown_until"] > now
+        out.append({"key": sid, "name": s["name"], "paused": cool or bool(d.get("held")), "held": bool(d.get("held")),
+                    "until": d["cooldown_until"] if cool else 0, "factor": d["factor"], "reason": d["reason"] if cool else "",
+                    "hour_count": d["hour_count"], "cap": max(3, int(pc["file"]["cap"] / f)),
+                    "detail_hour": d["detail_hour"], "detail_cap": max(3, int(pc["detail"]["cap"] / f)),
                     "pages_today": c.execute("SELECT COUNT(*) FROM cur_watch_log WHERE platform=? AND ts>=?", (sid, t0)).fetchone()[0],
                     "daily_cap": cw["daily_cap"]})
     return out
@@ -161,7 +207,7 @@ def collect_states(urls):
         k = sites.source_key(sites.canonical(str(u)))
         if not k:
             continue
-        q = c.execute("SELECT id, state, product_id FROM cur_collect WHERE skey=? ORDER BY id DESC LIMIT 1", (k,)).fetchone()
+        q = c.execute("SELECT id, state, product_id FROM cur_collect WHERE skey=? AND hidden=0 ORDER BY id DESC LIMIT 1", (k,)).fetchone()
         if q and q["state"] in ("waiting", "running", "failed"):
             out[u] = {"state": q["state"], "item": q["id"], "product_id": q["product_id"]}
             continue
@@ -173,159 +219,357 @@ def collect_states(urls):
 
 def collect_queue():
     c = db.conn()
-    act = [dict(r) for r in c.execute("SELECT * FROM cur_collect WHERE state IN ('waiting','running') ORDER BY state='running' DESC, pos LIMIT 50")]
-    recent = [dict(r) for r in c.execute("SELECT * FROM cur_collect WHERE state NOT IN ('waiting','running') ORDER BY updated_at DESC LIMIT 10")]
+    act = [dict(r) for r in c.execute("SELECT * FROM cur_collect WHERE state IN ('waiting','running') AND hidden=0 "
+                                      "ORDER BY state='running' DESC, prio DESC, pos, id LIMIT 50")]
+    recent = [dict(r) for r in c.execute("SELECT * FROM cur_collect WHERE state NOT IN ('waiting','running') AND hidden=0 ORDER BY updated_at DESC LIMIT 10")]
     return {"active": act, "recent": recent, "paused": bool(db.get("collect_paused")), "waiting": sum(1 for r in act if r["state"] == "waiting")}
 
 
 def collect_action(iid, action):
-    c = db.conn()
+    """一个详情页任务的操作（扩展的采集队列面板、老页面用）。批量的在 job_action。"""
     if action in ("pause", "resume"):
         db.put("collect_paused", action == "pause")
-    elif action == "cancel":
-        c.execute("UPDATE cur_collect SET state='canceled', updated_at=? WHERE id=? AND state IN ('waiting','running')", (time.time(), iid))
-    elif action == "retry":
-        c.execute("UPDATE cur_collect SET state='waiting', message='', updated_at=? WHERE id=? AND state IN ('failed','canceled')", (time.time(), iid))
-    elif action == "up":
-        r = c.execute("SELECT pos FROM cur_collect WHERE id=?", (iid,)).fetchone()
-        p = c.execute("SELECT id, pos FROM cur_collect WHERE state='waiting' AND pos<? ORDER BY pos DESC LIMIT 1", (r["pos"] if r else 0,)).fetchone()
-        if r and p:
-            c.execute("UPDATE cur_collect SET pos=? WHERE id=?", (p["pos"], iid))
-            c.execute("UPDATE cur_collect SET pos=? WHERE id=?", (r["pos"], p["id"]))
-    else:
+        return collect_queue()
+    if action not in ("cancel", "retry", "up"):
         raise ValueError("未知操作")
-    c.commit()
+    job_action([f"c{iid}"], {"cancel": "delete"}.get(action, action))
     return collect_queue()
 
 
+# ---------------- 任务是不是还有用（候选 / 产品删掉了就自动取消，不算失败） ----------------
+def _product_alive(pid, cache):
+    if pid not in cache:
+        from core import store
+        try:
+            store.load(pid)
+            cache[pid] = True
+        except (FileNotFoundError, ValueError):
+            cache[pid] = False
+    return cache[pid]
+
+
+def _dead_reason(c, r, cache):
+    """详情页任务：候选 / 产品草稿已经删掉了 → 原因；还有用 → ""。"""
+    if r["kind"] == "refresh":
+        return "" if c.execute("SELECT 1 FROM cur_candidates WHERE skey=?", (r["skey"],)).fetchone() else "候选已删除，任务自动取消"
+    if r["product_id"] and not _product_alive(r["product_id"], cache):
+        return "产品草稿已删除，任务自动取消"
+    return ""
+
+
+def _drop_collect(c, r, why):
+    """自动取消：只读候选的任务直接删掉；产品的任务标「已取消」并从队列里藏起来（产品的文案 / 整理标记还在这一行上）。"""
+    if r["kind"] == "refresh" or not r["product_id"]:
+        c.execute("DELETE FROM cur_collect WHERE id=?", (r["id"],))
+    else:
+        c.execute("UPDATE cur_collect SET state='canceled', hidden=1, held=0, message=?, updated_at=? WHERE id=?", (why, time.time(), r["id"]))
+
+
+def cancel_orphans():
+    """候选 / 产品草稿已删除的任务（详情页、文件下载）自动取消。「删除采集错误的」、清理、扩展来领活时都会做。返回取消了几个。"""
+    c = db.conn()
+    cache, n = {}, 0
+    for r in c.execute("SELECT * FROM cur_collect WHERE state IN ('waiting','running','failed') OR (state='canceled' AND hidden=0)").fetchall():
+        why = _dead_reason(c, r, cache)
+        if why:
+            _drop_collect(c, r, why)
+            n += 1
+    for (pid,) in c.execute("SELECT DISTINCT product_id FROM cur_files WHERE kind<>'image' AND state IN ('queued','downloading','failed')").fetchall():
+        if not _product_alive(pid, cache):
+            n += c.execute("DELETE FROM cur_files WHERE product_id=?", (pid,)).rowcount
+    c.commit()
+    return n
+
+
+def cleanup():
+    """「清理失败 / 无效任务」：已删除的候选 / 产品的任务取消；失败 / 已取消的详情页任务从队列里拿掉（候选的直接删）；
+    失败的文件下载变回「没下载」（产品上还能点「⬇ 下载模型文件」重新排队）。返回 {orphans, collect, files}。"""
+    n0 = cancel_orphans()
+    c = db.conn()
+    now = time.time()
+    n1 = c.execute("DELETE FROM cur_collect WHERE state IN ('failed','canceled') AND (kind='refresh' OR product_id='')").rowcount
+    n1 += c.execute("UPDATE cur_collect SET hidden=1, updated_at=? WHERE state IN ('failed','canceled') AND hidden=0", (now,)).rowcount
+    n2 = c.execute("UPDATE cur_files SET state='', held=0, got=0, total=0, updated_at=? WHERE kind<>'image' AND state='failed'", (now,)).rowcount
+    c.commit()
+    return {"orphans": n0, "collect": n1, "files": n2}
+
+
+# ---------------- 失败原因（说人话） ----------------
+PLAIN = {"risk": "原站要人机验证 / 说请求太频繁：这个网站自动暂停，到时间自动继续（不用管）",
+         "login": "原站要求登录：在装了扩展的 Chrome 里登录原站，再点「重试」",
+         "missing": "原站上找不到了（可能被作者删掉或改成私密）",
+         "timeout": "扩展读了 {n} 次都没读完（Chrome 关了、电脑睡了，或页面太慢）：可以点「重试」",
+         "detail": "页面上没读到模型资料（可能没加载完或网站改版了）：可以点「重试」",
+         "file": "下载失败：可以点「重试」"}
+
+
+CODES = (("原站要人机验证", "risk"), ("原站要求登录", "login"), ("原站上找不到", "missing"), ("次都没读完", "timeout"), ("次都中断", "stall"),
+         ("页面上没读到模型资料", "detail"), ("下载失败", "file"), ("上次读取超时", "retry"), ("上次下载中断", "retry"), ("等一下自动再试", "retry"),
+         ("候选已删除", "gone"), ("产品草稿已删除", "gone"), ("已从队列删除", "removed"))
+
+
+def reason_code(msg):
+    """失败 / 等待原因 → 代码（页面按代码显示中文 / 泰文的白话；原文放在后面给懂的人看）。"""
+    for k, v in CODES:
+        if k in (msg or ""):
+            return v
+    return "other" if msg else ""
+
+
+def reason_detail(msg):
+    """原因后面括号里的原文（原站返回的错误等），给懂的人看；白话模板自己的括号不算。"""
+    m = re.search(r"（([^（）]*)）$", msg or "")
+    if not m or any(m.group(0) in v for v in PLAIN.values()):
+        return ""
+    return m.group(1)
+
+
+def _plain(kind, raw, base="detail"):
+    s = PLAIN.get(kind) or PLAIN[base]
+    raw = str(raw or "").strip()
+    return (s + (f"（{raw[:120]}）" if raw and kind == "other" else ""))[:300]
+
+
+# ---------------- 领活（两条线：详情页 / 文件；每个网站各自的间隔、同时几个、每小时上限） ----------------
+LANE = {}          # 扩展最近一次来领活时的情况（采集队列页上「扩展在做什么 / 为什么在等」）
+
+
+def _note_lane(lane, reason, wait):
+    LANE[lane] = {"at": time.time(), "reason": reason, "wait": wait}
+
+
+def _release_stuck(c):
+    """扩展领了活没交回（关了 Chrome、Service Worker 被停、卡住）：超时放回队列；超时 3 次算失败。"""
+    now = time.time()
+    for r in c.execute("SELECT id, tries FROM cur_collect WHERE state='running' AND started_at<?", (now - COLLECT_STALL,)).fetchall():
+        if r["tries"] >= MAX_TRIES:
+            c.execute("UPDATE cur_collect SET state='failed', message=?, updated_at=? WHERE id=?", (PLAIN["timeout"].format(n=r["tries"]), now, r["id"]))
+        else:
+            c.execute("UPDATE cur_collect SET state='waiting', message='上次读取超时，已放回队列重试', updated_at=? WHERE id=?", (now, r["id"]))
+    for r in c.execute("SELECT id, tries FROM cur_files WHERE state='downloading' AND ((beat>0 AND beat<?) OR (beat=0 AND started_at<?))",
+                       (now - FILE_STALL, now - FILE_STALL_OLD)).fetchall():
+        if r["tries"] >= MAX_TRIES:
+            c.execute("UPDATE cur_files SET state='failed', error=?, updated_at=? WHERE id=?",
+                      (f"下载了 {r['tries']} 次都中断了（Chrome 关了、电脑睡了或网络断了）：可以点「重试」", now, r["id"]))
+        else:
+            c.execute("UPDATE cur_files SET state='queued', error='上次下载中断，已放回队列重试', got=0, total=0, updated_at=? WHERE id=?", (now, r["id"]))
+    c.commit()
+
+
+def _running_by_site(c, sql):
+    out = {}
+    for (u,) in c.execute(sql).fetchall():
+        p = sites.platform(u) if "://" in str(u) else (u or "other")
+        out[p] = out.get(p, 0) + 1
+    return out
+
+
 def collect_next(cfg=None):
-    """扩展来领下一个要读的详情页。返回 {item, wait, reason}。"""
+    """扩展来领下一个要读的详情页。返回 {item, wait（秒，多久后再来领）, reason（为什么没给）}。
+    顺序：优先级（高 / 普通 / 低）→ 队列位置 → 先来后到；每个网站最多同时读 conc 个、相邻两次开始之间随机隔 gap 秒（风控减速时乘系数）。"""
     cfg = cfg or load_config()
     if db.get("collect_paused"):
-        return {"item": None, "wait": 0, "reason": "已暂停"}
+        _note_lane("detail", "采集队列已暂停", 0)
+        return {"item": None, "wait": 0, "reason": "采集队列已暂停"}
     c = db.conn()
-    c.execute("UPDATE cur_collect SET state='waiting' WHERE state='running' AND started_at<?", (time.time() - 600,))
-    rows = c.execute("SELECT * FROM cur_collect WHERE state='waiting' ORDER BY pos LIMIT 20").fetchall()
-    if not rows:
-        c.commit()
-        return {"item": None, "wait": 0, "reason": ""}
+    _release_stuck(c)
+    pc = pacing(cfg)["detail"]
+    running = _running_by_site(c, "SELECT url FROM cur_collect WHERE state='running'")
+    rows = c.execute("SELECT * FROM cur_collect WHERE state='waiting' AND held=0 AND hidden=0 ORDER BY prio DESC, pos, id LIMIT 80").fetchall()
+    cache, pick, why, wait, skip = {}, None, "", 0, set()
+    now = time.time()
     with _lock:
         st = _state()
-        why, pick, wait = "", None, 0
         for r in rows:
-            p = sites.platform(r["url"])
-            d = _plat(st, p)
-            if d["cooldown_until"] > time.time():
-                why = f"{sites.name_of(p)} 疑似风控暂停中"
+            dead = _dead_reason(c, r, cache)
+            if dead:
+                _drop_collect(c, r, dead)
                 continue
-            if d["collect_next"] > time.time():
-                wait = int(d["collect_next"] - time.time()) + 1
-                why = "按页面间隔等待"
+            p = sites.platform(r["url"])
+            if p in skip:
+                continue
+            d = _plat(st, p)
+            f = max(1.0, d["factor"])
+            b, _until = _blocked(d, p)
+            if b:
+                why = b
+                skip.add(p)
+                continue
+            if running.get(p, 0) >= pc["conc"]:
+                why, wait = f"{sites.name_of(p)} 正在同时读 {running[p]} 个详情页", min(wait or 5, 5)
+                skip.add(p)
+                continue
+            cap = max(3, int(pc["cap"] / f))
+            if d["detail_hour"] >= cap:
+                w = int(d["hour_start"] + 3600 - now) + 1
+                why, wait = f"{sites.name_of(p)} 这个小时已读 {d['detail_hour']} 个详情页（上限 {cap}，设置里能改）", min(wait or w, w)
+                skip.add(p)
+                continue
+            if d["collect_next"] > now:
+                w = int(d["collect_next"] - now) + 1
+                why, wait = f"{sites.name_of(p)} 按节奏等 {w} 秒", min(wait or w, w)
+                skip.add(p)
                 continue
             pick = r
-            d["collect_next"] = time.time() + random.uniform(*SPEEDS[speed(cfg)][4]) * d["factor"]
+            d["collect_next"] = now + random.uniform(*pc["gap"]) * f
+            d["detail_hour"] += 1
             break
         db.put("pace", st)
     if not pick:
         c.commit()
+        _note_lane("detail", why, wait)
         return {"item": None, "wait": wait, "reason": why}
-    c.execute("UPDATE cur_collect SET state='running', started_at=?, tries=tries+1, updated_at=? WHERE id=?", (time.time(), time.time(), pick["id"]))
+    c.execute("UPDATE cur_collect SET state='running', started_at=?, tries=tries+1, updated_at=? WHERE id=?", (now, now, pick["id"]))
     c.commit()
-    return {"item": {"id": pick["id"], "url": pick["url"], "title": pick["title"]}, "wait": 0, "reason": ""}
+    _note_lane("detail", "", 0)
+    return {"item": {"id": pick["id"], "url": pick["url"], "title": pick["title"]}, "wait": 0, "reason": "", "conc": pc["conc"]}
 
 
 def collect_result(body, who=""):
-    """扩展交回一个详情页读到的东西 {id, data} 或 {id, error, snippet, status}：补进产品草稿。"""
+    """扩展交回一个详情页读到的东西 {id, data} 或 {id, error, snippet, status}：补进产品草稿。
+    任务已经被删掉 / 取消了：不报错，忽略；候选 / 产品草稿已删除：自动取消（不算失败）。"""
     from . import adopt
     iid = _i(body.get("id"), 0)
     c = db.conn()
     q = c.execute("SELECT * FROM cur_collect WHERE id=?", (iid,)).fetchone()
-    if not q:
-        raise ValueError("采集队列里没有这一项")
+    if not q or q["state"] == "canceled":
+        return {"ok": True, "state": "ignored"}
     p = sites.platform(q["url"])
+    now = time.time()
+    dead = _dead_reason(c, q, {})
+    if dead:
+        _drop_collect(c, q, dead)
+        c.commit()
+        return {"ok": True, "state": "canceled"}
     data = body.get("data") if isinstance(body.get("data"), dict) else None
     if not data:
         kind, why = classify_failure(body)
-        msg = (str(body.get("error") or "页面上没读到产品信息"))[:200] + (f"（{why}）" if why else "")
         if kind == "risk":
-            on_risk(p, why or msg)
-        c.execute("UPDATE cur_collect SET state=?, message=?, updated_at=? WHERE id=?", ("waiting" if kind == "risk" else "failed", msg, time.time(), iid))
+            until = on_risk(p, why or str(body.get("error") or ""))
+            msg = f"原站要人机验证 / 说请求太频繁：{sites.name_of(p)} 暂停到 {time.strftime('%H:%M', time.localtime(until))}，之后自动继续"
+            c.execute("UPDATE cur_collect SET state='waiting', tries=MAX(0, tries-1), message=?, updated_at=? WHERE id=?", (msg, now, iid))
+        else:
+            msg = _plain(kind, str(body.get("error") or "") + (f"；{why}" if why else ""))
+            c.execute("UPDATE cur_collect SET state='failed', message=?, updated_at=? WHERE id=?", (msg, now, iid))
         c.commit()
         return {"ok": True, "state": "failed", "kind": kind}
     if q["kind"] == "refresh" or not q["product_id"]:
         from . import cand
         ok = cand.refresh_from_detail(q["skey"], data)
-        c.execute("UPDATE cur_collect SET state=?, message=?, updated_at=? WHERE id=?",
-                  ("done" if ok else "failed", "" if ok else "候选已经删掉了", time.time(), iid))
+        if ok:
+            c.execute("UPDATE cur_collect SET state='done', message='', updated_at=? WHERE id=?", (now, iid))
+        else:
+            _drop_collect(c, q, "候选已删除，任务自动取消")
         c.commit()
         on_success(p)
-        return {"ok": True, "state": "done" if ok else "failed", "product_id": ""}
+        return {"ok": True, "state": "done" if ok else "canceled", "product_id": ""}
     ok = adopt.enrich(q["product_id"], data, who or q["who"])
-    c.execute("UPDATE cur_collect SET state=?, message=?, updated_at=? WHERE id=?",
-              ("done" if ok else "failed", "" if ok else "产品草稿已经删掉了", time.time(), iid))
+    if ok:
+        c.execute("UPDATE cur_collect SET state='done', message='', updated_at=? WHERE id=?", (now, iid))
+    else:
+        _drop_collect(c, q, "产品草稿已删除，任务自动取消")
     c.commit()
     on_success(p)
     from . import pipeline
     pipeline.kick()
-    return {"ok": True, "state": "done" if ok else "failed", "product_id": q["product_id"]}
+    return {"ok": True, "state": "done" if ok else "canceled", "product_id": q["product_id"]}
 
 
 # ---------------- 模型文件下载（扩展用浏览器登录状态下载，上传进产品的模型库） ----------------
+FILE_ORDER = "prio DESC, CASE WHEN pos=0 THEN id ELSE pos END, id"
+
+
 def files_next(cfg=None):
-    """扩展来领下一个产品的模型文件。返回 {product, files:[{id,url,name}], pacing} 或 {product: None, reason}。"""
+    """扩展来领下一个要下载的模型文件（一次一个；扩展 3.1.2 同时开几条下载）。
+    返回 {product, files:[{id,url,name}], pacing, wait, reason}；没有能下载的：product = None、wait = 多久后再来（秒）。"""
     cfg = cfg or load_config()
     c = db.conn()
-    c.execute("UPDATE cur_files SET state='queued' WHERE state='downloading' AND updated_at<?", (time.time() - 1800,))
-    c.commit()
-    rows = c.execute("SELECT product_id, platform FROM cur_files WHERE state='queued' GROUP BY product_id ORDER BY MIN(updated_at) LIMIT 20").fetchall()
-    prof = SPEEDS[speed(cfg)]
-    why = ""
-    for r in rows:
-        p = r["platform"] or "other"
-        with _lock:
-            st = _state()
+    _release_stuck(c)
+    pc = pacing(cfg)["file"]
+    running = _running_by_site(c, "SELECT platform FROM cur_files WHERE state='downloading'")
+    rows = c.execute(f"SELECT * FROM cur_files WHERE state='queued' AND kind<>'image' AND held=0 ORDER BY {FILE_ORDER} LIMIT 80").fetchall()
+    cache, pick, why, wait, skip = {}, None, "", 0, set()
+    now = time.time()
+    with _lock:
+        st = _state()
+        for r in rows:
+            if r["product_id"] in skip:
+                continue
+            if not _product_alive(r["product_id"], cache):
+                c.execute("DELETE FROM cur_files WHERE product_id=?", (r["product_id"],))
+                skip.add(r["product_id"])
+                continue
+            p = r["platform"] or "other"
+            if p in skip:
+                continue
             d = _plat(st, p)
-            if d["cooldown_until"] > time.time():
-                why = f"{sites.name_of(p)} 疑似风控暂停中"
+            f = max(1.0, d["factor"])
+            b, _until = _blocked(d, p)
+            if b:
+                why = b
+                skip.add(p)
                 continue
-            if d["next_at"] > time.time():
-                why = f"按节奏等待 {int(d['next_at'] - time.time())} 秒"
+            if running.get(p, 0) >= pc["conc"]:
+                why, wait = f"{sites.name_of(p)} 正在同时下载 {running[p]} 个文件", min(wait or 5, 5)
+                skip.add(p)
                 continue
-            fs = c.execute("SELECT id, url, name FROM cur_files WHERE product_id=? AND state='queued' ORDER BY id LIMIT 30", (r["product_id"],)).fetchall()
-            cap = max(3, int(prof[3] / d["factor"]))
-            if d["hour_count"] and d["hour_count"] + len(fs) > cap:
-                why = f"这个小时已下载 {d['hour_count']} 个文件（上限 {cap}）"
+            cap = max(3, int(pc["cap"] / f))
+            if d["hour_count"] >= cap:
+                w = int(d["hour_start"] + 3600 - now) + 1
+                why, wait = f"{sites.name_of(p)} 这个小时已下载 {d['hour_count']} 个文件（上限 {cap}，设置里能改）", min(wait or w, w)
+                skip.add(p)
                 continue
-            f = d["factor"]
-            d["hour_count"] += len(fs)
-            d["next_at"] = time.time() + len(fs) * sum(prof[1]) / 2 * f + random.uniform(*prof[2]) * f
-            db.put("pace", st)
-        c.executemany("UPDATE cur_files SET state='downloading', updated_at=?, tries=tries+1 WHERE id=?", [(time.time(), x["id"]) for x in fs])
+            if d["next_at"] > now:
+                w = int(d["next_at"] - now) + 1
+                why, wait = f"{sites.name_of(p)} 按节奏等 {w} 秒", min(wait or w, w)
+                skip.add(p)
+                continue
+            pick = r
+            d["hour_count"] += 1
+            d["next_at"] = now + random.uniform(*pc["gap"]) * f
+            break
+        db.put("pace", st)
+    if not pick:
         c.commit()
-        return {"product": r["product_id"], "files": [dict(x) for x in fs],
-                "pacing": {"file_gap": [round(prof[1][0] * f, 1), round(prof[1][1] * f, 1)], "platform": p}}
-    return {"product": None, "reason": why}
+        _note_lane("file", why, wait)
+        return {"product": None, "files": [], "wait": wait, "reason": why}
+    c.execute("UPDATE cur_files SET state='downloading', started_at=?, beat=0, got=0, total=0, updated_at=?, tries=tries+1 WHERE id=?", (now, now, pick["id"]))
+    c.commit()
+    _note_lane("file", "", 0)
+    return {"product": pick["product_id"], "files": [{"id": pick["id"], "url": pick["url"], "name": pick["name"]}],
+            "pacing": {"file_gap": [0, 0], "platform": pick["platform"]}, "wait": 0, "reason": "", "conc": pc["conc"]}
+
+
+def file_progress(fid, got, total=0):
+    """扩展 3.1.2 下载时每几秒报一次进度（也是心跳：3 分钟没进度就算卡住）。返回 {cancel: 任务被删掉 / 取消了就停}。"""
+    c = db.conn()
+    now = time.time()
+    n = c.execute("UPDATE cur_files SET got=?, total=?, beat=?, updated_at=? WHERE id=? AND state='downloading'",
+                  (max(0, _i(got, 0)), max(0, _i(total, 0)), now, now, fid)).rowcount
+    c.commit()
+    return {"cancel": not n}
 
 
 def file_fail(fid, body):
     c = db.conn()
     f = c.execute("SELECT * FROM cur_files WHERE id=?", (fid,)).fetchone()
-    if not f:
-        raise ValueError("没有这个文件")
+    if not f or f["state"] != "downloading":
+        return {"kind": "other", "stop": False, "message": "", "ignored": True}
     kind, why = classify_failure(body)
-    msg = (str(body.get("error") or "下载失败"))[:200] + (f"（{why}）" if why else "")
-    stop = kind in ("risk", "login")
+    now = time.time()
+    raw = str(body.get("error") or "")
     if kind == "risk":
-        until = on_risk(f["platform"], why or msg)
-        msg += "，这个平台的下载、采集、巡逻暂停到 " + time.strftime("%H:%M", time.localtime(until))
-        c.execute("UPDATE cur_files SET state='queued', error=? WHERE product_id=? AND state='downloading'", (msg[:300], f["product_id"]))
+        until = on_risk(f["platform"], why or raw)
+        msg = f"原站要人机验证 / 说请求太频繁：{sites.name_of(f['platform'])} 的下载、采集、巡逻暂停到 {time.strftime('%H:%M', time.localtime(until))}，之后自动继续"
+        c.execute("UPDATE cur_files SET state='queued', tries=MAX(0, tries-1), error=?, got=0, total=0, updated_at=? WHERE id=?", (msg, now, fid))
+    elif kind == "other" and f["tries"] < MAX_TRIES:
+        msg = _plain(kind, raw + (f"；{why}" if why else ""), "file") + f"（第 {f['tries']} 次，等一下自动再试）"
+        c.execute("UPDATE cur_files SET state='queued', error=?, got=0, total=0, updated_at=? WHERE id=?", (msg[:300], now, fid))
     else:
-        c.execute("UPDATE cur_files SET state='failed', error=?, updated_at=? WHERE id=?", (msg[:300], time.time(), fid))
-        if stop:
-            c.execute("UPDATE cur_files SET state='failed', error=?, updated_at=? WHERE product_id=? AND state='downloading'",
-                      ("原站要求登录：在这台电脑的浏览器里登录原站后点「重新下载」", time.time(), f["product_id"]))
+        msg = _plain(kind, raw + (f"；{why}" if why else ""), "file")
+        c.execute("UPDATE cur_files SET state='failed', error=?, updated_at=? WHERE id=?", (msg[:300], now, fid))
     c.commit()
-    return {"kind": kind, "stop": stop, "message": msg}
+    return {"kind": kind, "stop": kind in ("risk", "login"), "message": msg}
 
 
 def file_uploaded(fid, name, stream):
@@ -335,11 +579,11 @@ def file_uploaded(fid, name, stream):
     c = db.conn()
     f = c.execute("SELECT * FROM cur_files WHERE id=?", (fid,)).fetchone()
     if not f:
-        raise ValueError("没有这个文件")
+        raise ValueError("没有这个文件（任务已删除）")
     try:
         store.load(f["product_id"])
     except (FileNotFoundError, ValueError):
-        c.execute("UPDATE cur_files SET state='failed', error='产品已删除' WHERE id=?", (fid,))
+        c.execute("DELETE FROM cur_files WHERE product_id=?", (f["product_id"],))
         c.commit()
         raise ValueError("产品草稿已经删掉了")
     stored, n = files.save_to_product(f["product_id"], name or f["name"], stream)
@@ -347,12 +591,223 @@ def file_uploaded(fid, name, stream):
     p.setdefault("source_files", []).append({"name": stored, "bytes": n, "kind": files.kind_of(stored), "url": f["url"], "orig_name": f["name"],
                                              "added_at": time.time(), "added_by": "选品"})
     store.save(p)
-    c.execute("UPDATE cur_files SET state='ok', stored=?, bytes=?, error='', updated_at=? WHERE id=?", (stored, n, time.time(), fid))
+    c.execute("UPDATE cur_files SET state='ok', stored=?, bytes=?, got=?, total=?, error='', updated_at=? WHERE id=?", (stored, n, n, n, time.time(), fid))
     c.execute("UPDATE cur_collect SET post=1 WHERE product_id=?", (f["product_id"],))
     c.commit()
     on_success(f["platform"])
     pipeline.kick()
     return {"ok": True, "bytes": n, "name": stored}
+
+
+# ---------------- 采集队列管理（勾选、删除、优先级、排序、暂停 / 继续、重试） ----------------
+JOB_STATES = {"detail": ("waiting", "running", "failed", "canceled"), "file": ("queued", "downloading", "failed")}
+
+
+def jobs(args=None, limit=300):
+    """采集队列里的任务（详情页 + 文件下载），id = c<编号> / f<编号>。args: lane=detail|file、site=平台、state=waiting|running|failed|held。
+    排序 = 扩展领活的顺序（正在做的在最前，然后优先级 → 位置）。"""
+    args = args or {}
+    c = db.conn()
+    out = []
+    lane, site, state = args.get("lane") or "", args.get("site") or "", args.get("state") or ""
+    now = time.time()
+    if lane in ("", "detail"):
+        for r in c.execute("SELECT * FROM cur_collect WHERE hidden=0 AND (state IN ('waiting','running','failed') OR (state='canceled' AND updated_at>?)) "
+                           "ORDER BY state='running' DESC, state='failed', prio DESC, pos, id LIMIT ?", (now - 86400, limit)).fetchall():
+            out.append({"id": f"c{r['id']}", "lane": "detail", "site": sites.platform(r["url"]), "title": r["title"] or r["url"], "url": r["url"],
+                        "product_id": r["product_id"], "refresh": r["kind"] == "refresh", "state": r["state"], "held": bool(r["held"]), "prio": r["prio"],
+                        "message": r["message"], "code": reason_code(r["message"]), "detail": reason_detail(r["message"]), "tries": r["tries"], "created_at": r["created_at"],
+                        "secs": int(now - r["started_at"]) if r["state"] == "running" else 0})
+    if lane in ("", "file"):
+        for r in c.execute("SELECT f.*, COALESCE(k.title, '') ctitle FROM cur_files f LEFT JOIN cur_collect k ON k.id=(SELECT MAX(id) FROM cur_collect WHERE product_id=f.product_id) "
+                           "WHERE f.kind<>'image' AND f.state IN ('queued','downloading','failed') ORDER BY f.state='downloading' DESC, f.state='failed', "
+                           "f.prio DESC, CASE WHEN f.pos=0 THEN f.id ELSE f.pos END, f.id LIMIT ?", (limit,)).fetchall():
+            out.append({"id": f"f{r['id']}", "lane": "file", "site": r["platform"] or "other", "title": r["name"], "url": r["url"], "product_id": r["product_id"],
+                        "product_title": r["ctitle"], "state": r["state"], "held": bool(r["held"]), "prio": r["prio"], "message": r["error"], "code": reason_code(r["error"]), "detail": reason_detail(r["error"]), "tries": r["tries"],
+                        "created_at": r["created_at"], "got": r["got"], "total": r["total"], "size": r["size_text"],
+                        "secs": int(now - r["started_at"]) if r["state"] == "downloading" else 0})
+    if site:
+        out = [j for j in out if j["site"] == site]
+    if state == "held":
+        out = [j for j in out if j["held"]]
+    elif state == "waiting":
+        out = [j for j in out if j["state"] in ("waiting", "queued") and not j["held"]]
+    elif state == "running":
+        out = [j for j in out if j["state"] in ("running", "downloading")]
+    elif state:
+        out = [j for j in out if j["state"] == state]
+    for j in out:
+        j["site_name"] = sites.name_of(j["site"])
+    return out
+
+
+def _split(ids):
+    cs, fs = [], []
+    for x in ids or []:
+        s = str(x)
+        if s[:1] in ("c", "f") and s[1:].isdigit():
+            (cs if s[0] == "c" else fs).append(int(s[1:]))
+    return cs, fs
+
+
+def _reorder(c, lane, sel, op, before=None):
+    """调整扩展领活的顺序（等着的任务）：top 置顶 / bottom 置底 / up 提前 / down 推后 / move 拖到 before 前面。
+    跨优先级移动时跟着改优先级（不然顺序不会变）。最后把位置重新编号。"""
+    if lane == "detail":
+        rows = [list(r) for r in c.execute("SELECT id, prio FROM cur_collect WHERE state='waiting' AND hidden=0 ORDER BY prio DESC, pos, id")]
+    else:
+        rows = [list(r) for r in c.execute(f"SELECT id, prio FROM cur_files WHERE state='queued' AND kind<>'image' ORDER BY {FILE_ORDER}")]
+    sel = [r for r in rows if r[0] in set(sel)]
+    if not sel:
+        return 0
+    ids = {r[0] for r in sel}
+    rest = [r for r in rows if r[0] not in ids]
+    if op == "top":
+        top = max(r[1] for r in rows)
+        for r in sel:
+            r[1] = top
+        rows = sel + rest
+    elif op == "bottom":
+        low = min(r[1] for r in rows)
+        for r in sel:
+            r[1] = low
+        rows = rest + sel
+    elif op in ("up", "down"):
+        seq = rows if op == "up" else rows[::-1]
+        for i in range(1, len(seq)):
+            if seq[i][0] in ids and seq[i - 1][0] not in ids:
+                seq[i][1] = seq[i - 1][1]
+                seq[i - 1], seq[i] = seq[i], seq[i - 1]
+        rows = seq if op == "up" else seq[::-1]
+    elif op == "move":
+        tgt = next((k for k, r in enumerate(rest) if r[0] == before), None)
+        if tgt is None:
+            prio = rest[-1][1] if rest else sel[0][1]
+            rows = rest + sel
+        else:
+            prio = rest[tgt][1]
+            rows = rest[:tgt] + sel + rest[tgt:]
+        for r in sel:
+            r[1] = prio
+    tbl = "cur_collect" if lane == "detail" else "cur_files"
+    c.executemany(f"UPDATE {tbl} SET pos=?, prio=? WHERE id=?", [(k + 1, r[1], r[0]) for k, r in enumerate(rows)])
+    return len(sel)
+
+
+def job_action(ids, action, prio=None, before=None):
+    """采集队列的批量操作。ids = ["c12", "f34"…]。
+    delete 删除（产品的下载任务只是取消这次下载，产品不动；产品的详情页任务标「已取消」藏起来；候选的重新读取任务直接删）
+    retry 重试失败的 · hold 暂停这个任务 · resume 继续 · prio 设优先级（1 高 / 0 普通 / -1 低）· top / bottom / up / down / move（before = 拖到哪个任务前面）。
+    返回 {n: 改了几个}。"""
+    cs, fs = _split(ids)
+    if not cs and not fs:
+        raise ValueError("先勾选任务")
+    c = db.conn()
+    now = time.time()
+    mk = lambda xs: ",".join("?" for _ in xs)  # noqa: E731
+    n = 0
+    if action == "delete":
+        if cs:
+            n += c.execute(f"DELETE FROM cur_collect WHERE id IN ({mk(cs)}) AND (kind='refresh' OR product_id='')", cs).rowcount
+            n += c.execute(f"UPDATE cur_collect SET state=CASE WHEN state='done' THEN 'done' ELSE 'canceled' END, hidden=1, held=0, message='已从队列删除', updated_at=? "
+                           f"WHERE id IN ({mk(cs)})", [now, *cs]).rowcount
+        if fs:
+            n += c.execute(f"UPDATE cur_files SET state='', held=0, got=0, total=0, error='', updated_at=? WHERE id IN ({mk(fs)}) AND state<>'ok'", [now, *fs]).rowcount
+    elif action == "retry":
+        if cs:
+            n += c.execute(f"UPDATE cur_collect SET state='waiting', message='', tries=0, hidden=0, held=0, updated_at=? WHERE id IN ({mk(cs)}) "
+                           f"AND state IN ('failed','canceled')", [now, *cs]).rowcount
+        if fs:
+            n += c.execute(f"UPDATE cur_files SET state='queued', error='', tries=0, held=0, got=0, total=0, updated_at=? WHERE id IN ({mk(fs)}) AND state IN ('failed','')",
+                           [now, *fs]).rowcount
+    elif action in ("hold", "resume"):
+        v = 1 if action == "hold" else 0
+        if cs:
+            n += c.execute(f"UPDATE cur_collect SET held=? WHERE id IN ({mk(cs)})", [v, *cs]).rowcount
+        if fs:
+            n += c.execute(f"UPDATE cur_files SET held=? WHERE id IN ({mk(fs)})", [v, *fs]).rowcount
+    elif action == "prio":
+        v = max(-1, min(1, _i(prio, 0)))
+        if cs:
+            n += c.execute(f"UPDATE cur_collect SET prio=? WHERE id IN ({mk(cs)})", [v, *cs]).rowcount
+        if fs:
+            n += c.execute(f"UPDATE cur_files SET prio=? WHERE id IN ({mk(fs)})", [v, *fs]).rowcount
+    elif action in ("top", "bottom", "up", "down", "move"):
+        bc, bf = _split([before] if before else [])
+        if cs:
+            n += _reorder(c, "detail", cs, action, bc[0] if bc else None)
+        if fs:
+            n += _reorder(c, "file", fs, action, bf[0] if bf else None)
+    else:
+        raise ValueError("未知操作")
+    c.commit()
+    return {"n": n}
+
+
+def queue_status(cfg=None):
+    """采集队列页上面一行：现在的速度（个 / 分钟，最近 10 分钟）、还要多久（预计）、扩展在做什么、每条线为什么在等、每个网站的暂停。"""
+    cfg = cfg or load_config()
+    c = db.conn()
+    now = time.time()
+    win = 600
+
+    def rate(sql):
+        n, first = c.execute(sql, (now - win,)).fetchone()
+        if not n:
+            return 0.0, 0
+        span = min(win, max(60.0, now - (first or now)))
+        return round(n / (span / 60), 2), n
+
+    det_rate, det_n = rate("SELECT COUNT(*), MIN(updated_at) FROM cur_collect WHERE state='done' AND updated_at>=?")
+    file_rate, file_n = rate("SELECT COUNT(*), MIN(updated_at) FROM cur_files WHERE kind<>'image' AND state='ok' AND url<>'' AND updated_at>=?")
+    det_left = {}
+    for (u,) in c.execute("SELECT url FROM cur_collect WHERE state IN ('waiting','running') AND held=0 AND hidden=0"):
+        p = sites.platform(u)
+        det_left[p] = det_left.get(p, 0) + 1
+    file_left = {r[0] or "other": r[1] for r in c.execute("SELECT platform, COUNT(*) FROM cur_files WHERE kind<>'image' AND state IN ('queued','downloading') "
+                                                          "AND held=0 GROUP BY platform")}
+    pc = pacing(cfg)
+    st = _state()
+    eta, blocked = 0.0, []
+    for p in set(det_left) | set(file_left):
+        d = _plat(st, p)
+        f = max(1.0, d["factor"])
+        b, until = _blocked(d, p)
+        if b:
+            blocked.append(p)
+            if d.get("held"):
+                continue
+        # 预计：按节奏每分钟能做几个（每小时上限也算上）；扩展最近 10 分钟有实测速度就用实测的
+        exp_d = min(60 / (sum(pc["detail"]["gap"]) / 2 * f), pc["detail"]["cap"] / f / 60)
+        exp_f = min(60 / (sum(pc["file"]["gap"]) / 2 * f), pc["file"]["cap"] / f / 60)
+        t = max(det_left.get(p, 0) / exp_d, file_left.get(p, 0) / exp_f) * 60 + max(0, until - now)
+        eta = max(eta, t)
+    nd, nf = sum(det_left.values()), sum(file_left.values())
+    if det_rate or file_rate:
+        meas = max(nd / det_rate * 60 if det_rate else 0, nf / file_rate * 60 if file_rate else 0)
+        if meas:
+            eta = meas if not eta else (eta + meas) / 2
+    doing = [{"lane": "detail", "title": r["title"] or r["url"], "site_name": sites.name_of(sites.platform(r["url"])), "secs": int(now - r["started_at"])}
+             for r in c.execute("SELECT * FROM cur_collect WHERE state='running' ORDER BY started_at LIMIT 8")]
+    doing += [{"lane": "file", "title": r["name"], "site_name": sites.name_of(r["platform"]), "secs": int(now - r["started_at"]), "got": r["got"], "total": r["total"]}
+              for r in c.execute("SELECT * FROM cur_files WHERE state='downloading' ORDER BY started_at LIMIT 8")]
+    lanes = {k: {**v, "ago": int(now - v["at"])} for k, v in LANE.items() if now - v["at"] < 300}
+    run_d = _running_by_site(c, "SELECT url FROM cur_collect WHERE state='running'")
+    run_f = _running_by_site(c, "SELECT platform FROM cur_files WHERE state='downloading'")
+    site_rows = []
+    for p, s in sites.load().items():
+        d = _plat(st, p)
+        f = max(1.0, d["factor"])
+        cool = d["cooldown_until"] > now
+        site_rows.append({"key": p, "name": s["name"], "held": bool(d.get("held")), "until": d["cooldown_until"] if cool else 0, "reason": d["reason"] if cool else "",
+                          "factor": d["factor"],
+                          "detail": {"running": run_d.get(p, 0), "left": det_left.get(p, 0), "next_in": max(0, int(d["collect_next"] - now)),
+                                     "hour": d["detail_hour"], "cap": max(3, int(pc["detail"]["cap"] / f)), "conc": pc["detail"]["conc"]},
+                          "file": {"running": run_f.get(p, 0), "left": file_left.get(p, 0), "next_in": max(0, int(d["next_at"] - now)),
+                                   "hour": d["hour_count"], "cap": max(3, int(pc["file"]["cap"] / f)), "conc": pc["file"]["conc"]}})
+    return {"rate": {"detail": det_rate, "file": file_rate, "total": round(det_rate + file_rate, 2), "done_10m": det_n + file_n},
+            "left": {"detail": nd, "file": nf}, "eta": int(eta) if (nd or nf) else 0, "doing": doing, "lanes": lanes,
+            "pacing": pc, "speed": speed(cfg), "blocked": blocked, "paused": bool(db.get("collect_paused")), "sites": site_rows}
 
 
 def queue_download(pid, ids=None, who=""):
@@ -370,7 +825,7 @@ def queue_download(pid, ids=None, who=""):
     if src.get("source") != "curate" or not src.get("source_url"):
         raise ValueError("这个产品不是从模型网站采用的，没有原站可以下载；请直接上传模型文件")
     c = db.conn()
-    q = "UPDATE cur_files SET state='queued', error='', updated_at=? WHERE product_id=? AND kind<>'image' AND state IN ('', 'failed')"
+    q = "UPDATE cur_files SET state='queued', error='', tries=0, held=0, updated_at=? WHERE product_id=? AND kind<>'image' AND state IN ('', 'failed')"
     args = [time.time(), pid]
     if ids:
         q += f" AND id IN ({','.join('?' for _ in ids)})"
@@ -455,7 +910,7 @@ def file_status(pid):
     for r in c.execute("SELECT state, COUNT(*) n FROM cur_files WHERE product_id=? AND kind<>'image' GROUP BY state", (pid,)):
         out["none" if not r["state"] else r["state"]] = out.get(r["state"] or "none", 0) + r["n"]
     out["links"] = sum(out[k] for k in ("ok", "queued", "downloading", "failed", "none"))
-    q = c.execute("SELECT state, message FROM cur_collect WHERE product_id=? ORDER BY id DESC LIMIT 1", (pid,)).fetchone()
+    q = c.execute("SELECT state, message FROM cur_collect WHERE product_id=? AND hidden=0 ORDER BY id DESC LIMIT 1", (pid,)).fetchone()
     out["collect"] = q["state"] if q else ""
     out["collect_msg"] = q["message"] if q else ""
     out["errors"] = [r[0] for r in c.execute("SELECT DISTINCT error FROM cur_files WHERE product_id=? AND kind<>'image' AND state='failed' AND error<>'' LIMIT 3", (pid,))]
@@ -598,8 +1053,9 @@ def watch_next(cfg=None):
     t0 = db.day_start()
     for w in rows:
         d = _plat(st, w["platform"])
-        if d["cooldown_until"] > time.time():
-            why = f"{sites.name_of(w['platform'])} 疑似风控暂停中"
+        b, _until = _blocked(d, w["platform"])
+        if b:
+            why = b
             continue
         n = c.execute("SELECT COUNT(*) FROM cur_watch_log WHERE platform=? AND ts>=?", (w["platform"], t0)).fetchone()[0]
         if n >= cw["daily_cap"]:

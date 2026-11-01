@@ -57,12 +57,20 @@ def roots(orca_exe=None):
             if os.path.isdir(d):
                 out.append(("system", d))
     if orca_exe:
-        base = os.path.dirname(orca_exe)
-        for rp in (os.path.join(base, "resources", "profiles"), os.path.join(base, "..", "resources", "profiles"),
-                   os.path.join(base, "..", "Resources", "profiles")):
-            for d in sorted(glob.glob(os.path.join(rp, "*"))):
-                if os.path.isdir(d):
-                    out.append(("install", os.path.normpath(d)))
+        # v2.52：Linux / NAS 上常见做法是 PATH 里放一个链接指向解开的 AppImage（squashfs-root），所以也看链接指向的真实位置
+        bases = []
+        for b in (os.path.dirname(orca_exe), os.path.dirname(os.path.realpath(orca_exe))):
+            if b not in bases:
+                bases.append(b)
+        seen = set()
+        for base in bases:
+            for rp in (os.path.join(base, "resources", "profiles"), os.path.join(base, "..", "resources", "profiles"),
+                       os.path.join(base, "..", "Resources", "profiles")):
+                for d in sorted(glob.glob(os.path.join(rp, "*"))):
+                    d = os.path.normpath(d)
+                    if os.path.isdir(d) and d not in seen:
+                        seen.add(d)
+                        out.append(("install", d))
     extra = os.environ.get("ORCA_PROFILES_DIR")  # 测试用
     if extra:
         for d in sorted(glob.glob(os.path.join(extra, "*"))):
