@@ -146,6 +146,11 @@ def add(src_path, filename, product_id, printer, sku="", per_plate=1, color="", 
     c = db.conn()
     sku = (sku or "").strip().upper()
     spec = (spec or "").strip()
+    if scale is None and spec:
+        scale = _spec_scale(product_id, spec)
+        if scale is not None:      # 没明确说按几 % 切的：提示人工确认（复核时看得到）
+            report = dict(report or {}, scale_hint=scale)
+            checks = _with_scale_hint(checks, scale)
     ver = (c.execute("SELECT MAX(version) FROM print_files WHERE product_id=? AND printer=? AND COALESCE(sku,'')=? "
                      "AND per_plate=? AND COALESCE(spec,'')=?", (product_id, printer or "*", sku, max(1, int(per_plate or 1)), spec)).fetchone()[0] or 0) + 1
     fid = c.execute("""INSERT INTO print_files(product_id, sku, printer, color, filename, kind, per_plate, grams, hours, note,
@@ -160,12 +165,16 @@ def add(src_path, filename, product_id, printer, sku="", per_plate=1, color="", 
     stored = f"{fid}_{_safe(filename)}"
     dst = os.path.join(FILE_DIR, stored)
     (shutil.move if move else shutil.copyfile)(src_path, dst)
-    if scale is None and spec:
-        scale = _spec_scale(product_id, spec)
     c.execute("UPDATE print_files SET stored=?, size=?, spec=?, plate_id=?, scale=? WHERE id=?",
               (stored, os.path.getsize(dst), spec, (plate_id or "").strip(), scale, fid))
     c.commit()
     return get(fid)
+
+
+def _with_scale_hint(checks, scale):
+    zh = f"这个规格按主模型缩放 {scale:g}%，请确认切片时已缩放"
+    out = [x for x in (checks or []) if not (isinstance(x, dict) and x.get("hint") == "scale")]
+    return out + [{"level": "warn", "zh": zh, "th": f"สเปกนี้ย่อ/ขยาย {scale:g}% จากโมเดลหลัก โปรดยืนยันว่าสไลซ์ที่สเกลนี้แล้ว", "hint": "scale"}]
 
 
 def _spec_scale(product_id, spec):
@@ -244,7 +253,7 @@ def list_files(product_id=None, full=False):
 
 
 def update(fid, **kw):
-    allowed = ("sku", "printer", "per_plate", "grams", "hours", "note", "active", "color", "spec")
+    allowed = ("sku", "printer", "per_plate", "grams", "hours", "note", "active", "color", "spec", "plate_id")
     sets = {k: v for k, v in kw.items() if k in allowed and v is not None}
     if "sku" in sets:
         sets["sku"] = str(sets["sku"]).strip().upper()
@@ -252,11 +261,18 @@ def update(fid, **kw):
         sets["per_plate"] = max(1, int(sets["per_plate"]))
     if not sets:
         return get(fid)
-    if "spec" in sets:          # 人工改了规格：缩放比例按这个规格现在的记（v2.53.1）
+    old = get(fid)
+    if "spec" in sets:
         sets["spec"] = str(sets["spec"]).strip()
-        old = get(fid)
-        if old and sets["spec"] != (old.get("spec") or ""):
-            sets["scale"] = _spec_scale(old["product_id"], sets["spec"]) if sets["spec"] else None
+    if "plate_id" in sets:
+        sets["plate_id"] = str(sets["plate_id"]).strip()
+    # 缩放比例是切片时定下来的，改规格不重算（v2.53 复审）：没记录的当 100；改规格 / 改盘一律回到草稿，要重新复核
+    if old and (("spec" in sets and sets["spec"] != (old.get("spec") or "")) or
+                ("plate_id" in sets and sets["plate_id"] != (old.get("plate_id") or ""))):
+        if old.get("scale") in (None, ""):
+            sets["scale"] = 100.0
+        sets.update(status="draft", reviewed_by=None, reviewed_at=None, review_items=None,
+                    verified_by=None, verified_at=None)
     c = db.conn()
     c.execute(f"UPDATE print_files SET {', '.join(k + '=?' for k in sets)} WHERE id=?", (*sets.values(), fid))
     c.commit()
@@ -266,6 +282,9 @@ def update(fid, **kw):
 def set_checks(fid, checks=None, ai=None):
     c = db.conn()
     if checks is not None:
+        h = ((get(fid) or {}).get("report") or {}).get("scale_hint")
+        if h is not None:
+            checks = _with_scale_hint(checks, h)
         c.execute("UPDATE print_files SET checks=? WHERE id=?", (json.dumps(checks, ensure_ascii=False), fid))
     if ai is not None:
         c.execute("UPDATE print_files SET ai_review=? WHERE id=?", (json.dumps(ai, ensure_ascii=False), fid))

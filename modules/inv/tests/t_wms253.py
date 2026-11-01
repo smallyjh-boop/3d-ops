@@ -286,7 +286,7 @@ config.save_config({"inv_loc_v253": False}); flows.migrate()
 ok(c.execute("SELECT COUNT(*) FROM inv_loc_log WHERE kind='migrate'").fetchone()[0] == nl and c.execute("SELECT qty FROM inv_loc_qty_bak253 WHERE item_id=? AND loc_id=?", (pe, _oloc["id"])).fetchone()[0] == 777.0, "migration: log/backup idempotent")
 # ---- 老安装升级：没明确选过 inv_qc_on → 质检区默认关 + 一次性提示；明确选过的不动
 import json as _json
-_raw = _json.load(open(config.CONFIG_PATH, encoding="utf-8")); _had = _raw.pop("inv_qc_on", None); _raw["inv_loc_v253"] = False   # 老安装的配置文件里没有这个键
+_raw = _json.load(open(config.CONFIG_PATH, encoding="utf-8")); _had = _raw.get("inv_qc_on"); _raw["inv_qc_on"] = True; _raw["inv_loc_v253"] = False   # save_config 早就把默认值 inv_qc_on=True 写进了文件（复审）
 _json.dump(_raw, open(config.CONFIG_PATH, "w", encoding="utf-8"), ensure_ascii=False)
 flows.migrate()
 cf = config.load_config()
@@ -297,7 +297,9 @@ C.post("/api/inv/qc/hint", json={"enable": True})
 cf = config.load_config()
 ok(cf["inv_qc_on"] is True and not cf.get("inv_qc_hint253") and C.get("/api/inv/meta").get_json().get("qc_hint") is False, "hint: enable QC / dismissed for good")
 config.save_config({"inv_qc_on": False, "inv_loc_v253": False}); flows.migrate()
-ok(config.load_config()["inv_qc_on"] is False and not config.load_config().get("inv_qc_hint253"), "explicit setting is never touched by migration")
+ok(config.load_config()["inv_qc_on"] is False, "migration marker set -> a later migrate() never touches inv_qc_on again")
+config.save_config({"inv_qc_on": True}); flows.migrate()
+ok(config.load_config()["inv_qc_on"] is True, "after the marker is set, QC on stays on")
 config.save_config({"inv_qc_on": _had if _had is not None else True})
 ok(sp_loc(k1) == f"{p1}-02-05" and sp_loc(k2) is None, f"loaded -> printer slot (B1), others -> 待上架 {sp_loc(k1)} {sp_loc(k2)}")
 after_other = {(r[0], r[1]): r[2] for r in c.execute("SELECT item_id, loc_id, qty FROM inv_loc_qty WHERE item_id NOT IN (SELECT id FROM inv_items WHERE category='filament')")}

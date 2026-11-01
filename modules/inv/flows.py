@@ -797,15 +797,10 @@ def _backup_qty(c, iid):
 def _qc_default_for_existing(c):
     """升级的老安装：设置里没明确选过 inv_qc_on 的，质检区默认关（否则升级后每个打印出来的成品都进待检区、算不可售，库存推送变 0）。
     新安装（还没有任何物品）照默认开。关掉的同时记一个一次性提示（仓库页提醒可以开质检）。"""
-    import json as _json
-    import os as _os
-    from core import config as _cfg
+    # config.json 里有没有 inv_qc_on 不可靠（save_config 会把模块默认值都写进去），所以以迁移标记为准：
+    # 只在 v2.53 迁移还没做过时调用（migrate 保证），已有物品 = 老安装 → 明确写成关。
     try:
-        raw = {}
-        if _os.path.exists(_cfg.CONFIG_PATH):
-            with open(_cfg.CONFIG_PATH, "r", encoding="utf-8") as f:
-                raw = _json.load(f)
-        if "inv_qc_on" in raw:
+        if load_config().get("inv_loc_v253"):
             return
         if c.execute("SELECT 1 FROM inv_items LIMIT 1").fetchone():
             save_config({"inv_qc_on": False, "inv_qc_hint253": True})

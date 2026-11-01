@@ -795,9 +795,19 @@ def recalc_undo(batch, user=""):
     for r in rows:
         try:
             p = store.load(r["pid"])
-            v = p["variants"][r["idx"]]
-        except (FileNotFoundError, ValueError, IndexError, KeyError):
+        except (FileNotFoundError, ValueError, KeyError):
             skipped += 1
+            continue
+        vs = p.get("variants") or []
+        want = (r.get("sku") or "").strip()
+        v = None       # 变体可能被重排 / 删除过：以 SKU 为准，位置对不上就按 SKU 找，找不到就跳过（不改别的变体）
+        if 0 <= int(r["idx"] or 0) < len(vs) and (vs[r["idx"]].get("sku") or "").strip() == want:
+            v = vs[r["idx"]]
+        elif want:
+            v = next((x for x in vs if (x.get("sku") or "").strip() == want), None)
+        if v is None:
+            skipped += 1
+            c.execute("UPDATE fee_recalc_log SET undone=? WHERE id=?", (time.time(), r["id"]))
             continue
         if v.get("manual_price") in (None, "", 0):
             v["manual_price"] = v.get("manual_price_prev") if v.get("manual_price_prev") not in (None, "") else r["old_price"]

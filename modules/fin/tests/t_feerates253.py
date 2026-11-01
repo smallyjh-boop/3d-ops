@@ -210,6 +210,18 @@ ok(feerates.recalc_batches() and feerates.recalc_batches()[0]["batch"] == r["bat
 u = feerates.recalc_undo(r["batch"], "boss")
 ok(u["restored"] == 1 and store.load("PA")["variants"][0]["manual_price"] == 45 and not feerates.recalc_batches(), f"撤销：恢复手动价 {u}")
 ok(feerates.recalc_undo(r["batch"], "boss")["restored"] == 0, "撤销可重复调用（不再动）")
+# 复审：撤销按 SKU 找变体——变体重排 / 删除后不会把价格放到别的变体上
+pe = store.blank_product("PE"); pe["name_zh"] = "产品PE"; pe["category"] = {"id": "catA"}
+mkv = lambda sku, mp: {"opt1_zh": sku, "opt2_zh": "", "grams": 10, "hours": 1, "manual_price": mp, "image": "", "stock": None, "sku": sku}
+pe["variants"] = [mkv("PE-2", 70), mkv("PE-1", None)]          # 记录时 PE-1 在第 0 位，现在被重排到第 1 位；PE-3 已被删除
+store.save(pe)
+for i_, (sk_, op_) in enumerate((("PE-1", 55.0), ("PE-3", 66.0))):
+    cn.execute("INSERT INTO fee_recalc_log(batch, pid, idx, sku, old_price, platform, shop, who, at) VALUES('BX','PE',?,?,?,'shopee','SPS','boss',?)", (i_, sk_, op_, time.time()))
+cn.commit()
+u2 = feerates.recalc_undo("BX", "boss")
+pe2 = {v["sku"]: v for v in store.load("PE")["variants"]}
+ok(u2["restored"] == 1 and u2["skipped"] == 1 and pe2["PE-1"]["manual_price"] == 55.0 and pe2["PE-2"]["manual_price"] == 70,
+   f"撤销按 SKU 恢复：重排后放回 PE-1、已删除的 PE-3 跳过、PE-2 不被改 {u2}")
 pv = C.post("/api/fin/fees/recalc/preview", json={"platform": "shopee", "shop": "SPS"}).get_json()
 ok(pv["ok"] and pv["plan"] and pv["plan"][0]["variants"][0]["manual_price"] == 45, "预览接口")
 
