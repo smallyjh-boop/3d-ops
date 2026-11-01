@@ -12,9 +12,9 @@
 - 测试机已装 OrcaSlicer 2.3.1（/opt/orca，PATH 里 orca-slicer），v20_test 和真切片测试能跑
 - 老板 NAS：两个网口同网段（qvs0 192.168.31.2 没插线），需要在 QNAP 把网口 1 改 DHCP 才能永久生效
 - 打印机：P1S、K1 Max（192.168.31.139）、K1C（192.168.31.133）已填；K1 原厂固件发送打印待「打印测试」真机验证
-- 下一步：等老板反馈（真机打印测试、库存同步对照表核对后开自动推送、真实照片测识别、生产单 / 机群页试用）
+- 下一步：等老板反馈（K1 真机打印测试、真机打印测试、库存同步对照表核对后开自动推送、真实照片测识别、生产单 / 机群页试用）
 
-- 开发中（v2.55.0，已合并到开发分支，正在修发版前审查问题）：
+- 已发布 v2.55.0（main，2026-11-01，分组全量 124 个 + 多语言检查通过）：
   A 统一打印方案编辑器（modules/model，测试 t_editor255）；B 耗材卷 + 重量（core/inventory/units.py，t_units255 / t_units255b / pur t_pur255）；
   C 新建生产单选产品（core/po.py suggest / picker，建议数量 = 缺口，订单待打只排前面，t_po255）；D 打印机编码规则（core/fleetcodes.py，新标签二维码装稳定 id，t_codes255）；
   E 货位三种看法 + 服务端分页（modules/inv/views.py / locviews.py / qtytext.py，t_locviews255）
@@ -40,5 +40,6 @@
 - v2.55 打印参数的唯一来源是打印方案每盘的 params；product["recipe"] / spec_recipes 只是第 1 盘的镜像（老代码读）；recipes.get 只认 v2.55 后保存过（盘里有 params）的方案
 - v2.55 零件单独参数写在 3MF Metadata/model_settings.config 的 <object> metadata（layer_height / sparse_infill_density / wall_loops），切片时 keep_settings 保留该文件
 - v2.55 复审：盘参数的温度带 temp_material（给哪个材料设的），换材料 / 不一致就作废；printplan._migrate 不改 p（返回拷贝 + params_auto 标记），缩放规格签名一律用 plate_sig；resolve_profiles 默认 strict（自动选到别的材料的配置就抛错），只看配置的地方传 strict=False
+- v2.55 丝绸料：recipes.norm_material 把 SILK / 丝 → PLA-SILK（和 PLA 是 close，不拦）；match_filament 先找 Generic PLA Silk，没有用普通 PLA
 ## 本次改动的文件
 - 见 git log（v2.52.0 相关提交）
