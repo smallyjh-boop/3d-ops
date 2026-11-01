@@ -625,9 +625,23 @@ def _usable(idx, val):
     return ""
 
 
-def resolve_profiles(cfg, printer_index=0, material="PLA", filament_name=None):
+def filament_mismatch(idx, filament_name, material):
+    """v2.55：指定的耗材配置和要打的材料不一样（例如 PLA 的配置拿去打 PETG / TPU）→ 返回配置里的材料，一样 / 读不到返回空。
+    同一大类（PLA / PLA-CF）算一样。"""
+    from . import orca_profiles as op
+    from .recipes import same_material
+    if not filament_name or not material:
+        return ""
+    ft = op.filament_type(idx, filament_name)
+    if ft and same_material(ft, material) == "diff":
+        return ft
+    return ""
+
+
+def resolve_profiles(cfg, printer_index=0, material="PLA", filament_name=None, notes=None):
     """这台打印机切片用哪套配置：返回 (orca 程序, 配置索引, 打印机配置, 工艺配置, 耗材配置)。
-    filament_name：打印方案里指定的耗材配置（留空 = 按材料自动选）。"""
+    filament_name：打印方案里指定的耗材配置（留空 = 按材料自动选）。
+    v2.55：指定的配置材料和 material 不一样时不用它（按材料自动选），原因写进 notes（[{zh, th}]）。"""
     exe = find_orca(cfg)
     if not exe:
         raise SliceError("没有找到 OrcaSlicer。请在设置页点「手动选择程序」选 orca-slicer.exe（或它的桌面快捷方式）")
@@ -647,6 +661,14 @@ def resolve_profiles(cfg, printer_index=0, material="PLA", filament_name=None):
     filament = (filament_name or "").strip()
     if filament and not op._lookup(idx, filament):
         raise SliceError(f"打印方案里指定的耗材配置「{filament}」在 OrcaSlicer 里找不到，请重新选择")
+    bad = filament_mismatch(idx, filament, material)
+    if bad:                 # 安全：PLA 的配置（温度）不能拿去打 PETG / TPU
+        import logging
+        logging.getLogger("slicer").warning("filament profile %s is %s, plate material %s: ignored", filament, bad, material)
+        if notes is not None:
+            notes.append({"zh": f"指定的耗材配置「{filament}」是 {bad}，这一盘打 {material}：没有用它，改用 {material} 的通用配置。请在这一盘的参数里重新选耗材配置",
+                          "th": f"โปรไฟล์ฟิลาเมนต์「{filament}」เป็น {bad} แต่ถาดนี้พิมพ์ {material}: ไม่ได้ใช้ ใช้โปรไฟล์ทั่วไปของ {material} แทน กรุณาเลือกโปรไฟล์ใหม่"})
+        filament = ""
     if not filament:
         filament = _usable(idx, p.get("orca_filament"))
         # 产品材质不是 PLA 时，自动换成对应材质的通用耗材配置
@@ -793,7 +815,8 @@ def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, ov
     v2.55：keep_settings=True（零件有单独的层高 / 填充 / 壁数，写在 3MF 的 model_settings.config 里）→ 保留这个文件、只在本机切。"""
     from . import accel
     from . import orca_profiles as op
-    exe, idx, machine, process, filament = resolve_profiles(cfg, printer_index, material, filament_name)
+    notes = []
+    exe, idx, machine, process, filament = resolve_profiles(cfg, printer_index, material, filament_name, notes)
     from . import fleet
     p = fleet.effective((cfg.get("printers") or DEFAULT_PRINTERS)[printer_index], cfg)
     out_dir = tempfile.mkdtemp(prefix="slice_")
@@ -803,21 +826,27 @@ def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, ov
             mname = mcfg.get("name") or machine
             p_path, _ = op.write_flat(idx, process, "process", out_dir, mname, overrides)
             f_path, _ = op.write_flat(idx, filament, "filament", out_dir, mname, filament_overrides)
+            slot_used = []
             if filaments and len(filaments) > 1:          # v2.52 多色：每个槽一份耗材配置（按材料选，颜色按槽）
                 fps_ = []
                 for k, fl in enumerate(filaments):
                     _e, _i, _m, _p, fname_k = resolve_profiles(cfg, printer_index, fl.get("material") or material, None)
-                    fo = dict(filament_overrides or {})
+                    # v2.55：每槽自己的温度调整（fl["overrides"]，没有这个键时用 filament_overrides）——
+                    # 不同材料（PLA + PETG / TPU）不能共用一个喷嘴温度
+                    fo = dict((fl.get("overrides") if "overrides" in fl else filament_overrides) or {})
                     if fl.get("hex"):
                         fo["filament_colour"] = [fl["hex"]]
                     sub = os.path.join(out_dir, f"fil{k + 1}")
                     os.makedirs(sub, exist_ok=True)
                     fk, _ = op.write_flat(idx, fname_k, "filament", sub, mname, fo)
                     fps_.append(fk)
+                    slot_used.append(f"槽 {k + 1}：{fname_k}" + (f"（{fo.get('nozzle_temperature', [''])[0]}°C）" if fo.get("nozzle_temperature") else ""))
                 f_path = ";".join(fps_)
         except op.ProfileError as e:
             raise SliceError(f"「{p.get('name')}」的配置有问题：{e}") from e
         used = f"打印机配置：{machine}\n工艺配置：{process}\n耗材配置：{filament}\n"
+        if slot_used:
+            used += "每槽耗材：" + "；".join(slot_used) + "\n"
         if filament_overrides:
             used += "耗材调整：" + ", ".join(f"{k}={v}" for k, v in filament_overrides.items()) + "\n"
         if overrides:
@@ -832,6 +861,7 @@ def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, ov
             result = run_cli(exe, m_path, p_path, f_path, model_path, os.path.join(out_dir, "work"), params, keep_to, model_name=name)
             result["printer"] = printer_index
             result["profiles"] = {"machine": machine, "process": process, "filament": filament, "filaments": len(filaments or [1])}
+            result["warnings"] = notes
             return result
 
         def remote_done(res, files):
@@ -848,6 +878,7 @@ def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, ov
                            remote_done, timeout=timeout + 120, err_cls=SliceError)
         result["printer"] = printer_index
         result["profiles"] = {"machine": machine, "process": process, "filament": filament}
+        result["warnings"] = notes
         return result
     finally:
         shutil.rmtree(out_dir, ignore_errors=True)

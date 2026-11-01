@@ -505,7 +505,7 @@
         <label>${Z("壁数（外墙圈数）", "จำนวนผนัง")}<input type="number" min="1" max="8" value="${r.walls ?? 2}" data-prm="walls"></label>
         <label>${Z("顶 / 底层数", "ชั้นบน / ล่าง")}<input type="number" min="2" max="10" value="${r.top_bottom ?? 4}" data-prm="top_bottom"></label>
         <label>${Z("填充率 %", "เติมเนื้อใน %")}<input type="number" min="0" max="100" value="${r.infill_pct ?? 15}" data-prm="infill_pct"></label>
-        <label>${Z("填充图案", "ลายเติมเนื้อใน")}<select data-prm="infill_pattern" data-notr>${(m.patterns || ["gyroid"]).map((p) => `<option ${p === r.infill_pattern ? "selected" : ""}>${p}</option>`).join("")}</select></label>
+        <label>${Z("填充图案", "ลายเติมเนื้อใน")}<select data-prm="infill_pattern" data-notr>${[...(m.patterns || ["gyroid"]), ...(r.infill_pattern && !(m.patterns || ["gyroid"]).includes(r.infill_pattern) ? [r.infill_pattern] : [])].map((p) => `<option ${p === r.infill_pattern ? "selected" : ""}>${p}</option>`).join("")}</select></label>
         <label>${Z("热床板", "แผ่นฐาน")}<select data-prm="bed_type">${Object.keys(m.bed_types || { auto: 1 }).map((k) => `<option value="${k}" ${k === r.bed_type ? "selected" : ""}>${esc(TH() ? bedTh[k] || k : (m.bed_types || {})[k] || k)}</option>`).join("")}</select></label>
         <label class="row" style="align-self:end"><input type="checkbox" data-prm="brim" ${r.brim ? "checked" : ""}> ${Z("帽檐（防翘边、防倒）", "ปีกกันงอ (brim)")}</label>
         <label>${Z("自动排列间距 mm", "ระยะห่างจัดเรียง mm")}<input type="number" min="2" max="30" value="${r.gap_mm ?? 6}" data-prm="gap_mm"></label>
@@ -885,6 +885,7 @@
           const r = await apiJob(`/api/products/${enc(S.pid)}/print-plan/${a}`, { json: { spec: S.spec, plate_id: pl.id, colour: S.colour } });
           if (a === "merge") { toast(Z("已合并", "รวมแล้ว")); window.dispatchEvent(new CustomEvent("model-changed", { detail: S.pid })); }
           else toast(Z("切片完成，已存成切片文件（草稿，复核后生产用）", "สไลซ์เสร็จ บันทึกเป็นไฟล์สไลซ์แล้ว (ร่าง)") + (r.file_id ? ` #${r.file_id}` : ""));
+          (r.warnings || []).forEach((w) => toast(Z(w.zh, w.th), true));   // 耗材配置和材料不一致，已改用自动配置
           await mount(BOX, S.pid, S.spec);
           if (window.M3) M3.refresh();
           if (a === "slice") window.dispatchEvent(new CustomEvent("plan-sliced", { detail: S.pid }));

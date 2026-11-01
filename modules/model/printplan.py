@@ -519,6 +519,7 @@ def scaled_plan(p, spec, sp):
     """「按主模型缩放 N%」的规格：主模型的方案，每个零件放大 / 缩小（不用另外的文件）。主模型方案改了自动跟着改。
     切片结果存在 sp["sliced_by"][盘号]（带摆盘签名，主模型改了摆盘就作废）。"""
     import copy
+    stored = _stored_params(p, "")              # 先记下（get_plan 读的时候会把补上的参数写进 p 里的方案）
     base = copy.deepcopy(get_plan(p, ""))
     k = float(sp.get("scale") or 100) / 100.0
     for pl in base.get("plates") or []:
@@ -528,7 +529,7 @@ def scaled_plan(p, spec, sp):
         pl["manual"] = False
         pl.pop("sliced", None)
         got = (sp.get("sliced_by") or {}).get(pl["id"])
-        if got and got.get("sig") == _sig(pl):
+        if got and got.get("sig") == _sig(pl if pl["id"] in stored else _no_params(pl)):
             pl["sliced"] = {k2: v for k2, v in got.items() if k2 != "sig"}
     base.update(follow=True, scale=sp.get("scale"), base_default=bool(base.get("default")))
     base.pop("default", None)
@@ -536,6 +537,16 @@ def scaled_plan(p, spec, sp):
     if sp.get("updated_at"):
         base["updated_at"] = sp["updated_at"]
     return base
+
+
+def _stored_params(p, spec):
+    """方案里真的存了每盘参数的盘号（没存的是读的时候按 recipe 补的，_migrate）。"""
+    plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
+    return {pl.get("id") for pl in (plans.get(spec) or {}).get("plates") or [] if isinstance(pl, dict) and isinstance(pl.get("params"), dict)}
+
+
+def _no_params(pl):
+    return {k: v for k, v in pl.items() if k != "params"}
 
 
 def set_scale(pid, spec, pct, user=""):
@@ -648,7 +659,10 @@ def _num(v, lo, hi, d):
 # ---------------- v2.55 每盘的打印参数（原来「打印方案」面板的参数，搬进来按盘设） ----------------
 PARAM_KEYS = ("supports", "support_build_plate_only", "support_angle", "walls", "top_bottom", "infill_pct", "infill_pattern",
               "brim", "bed_type", "gap_mm", "nozzle_temp", "bed_temp", "filament", "notes")
-PATTERNS = ["gyroid", "grid", "cubic", "crosshatch", "rectilinear", "honeycomb", "lightning", "line", "concentric", "triangles", "adaptivecubic"]
+PATTERNS = ["gyroid", "grid", "cubic", "crosshatch", "rectilinear", "honeycomb", "lightning", "line", "concentric", "triangles", "adaptivecubic",
+            # v2.55：OrcaSlicer 其它的填充图案（AI 建议、导入的 3MF 里会有），不能被改成 gyroid
+            "zig-zag", "2dlattice", "tri-hexagon", "alignedrectilinear", "3dhoneycomb", "hilbertcurve", "archimedeanchords",
+            "octagramspiral", "supportcubic", "quartercubic", "crosszag", "lockedzag", "monotonic", "monotonicline"]
 OV_RANGE = {"layer_height": (0.04, 0.6, float), "infill_pct": (0, 100, int), "walls": (1, 20, int)}
 
 
@@ -658,8 +672,8 @@ def clean_params(d):
     d = dict(d or {})
     r = recipes.clean(dict(d, layer_height=0.2))
     out = {k: r[k] for k in PARAM_KEYS}
-    if out["infill_pattern"] not in PATTERNS:
-        out["infill_pattern"] = "gyroid"
+    if out["infill_pattern"] not in PATTERNS:      # 不认识的图案保留原值（只去掉不合法的字符），不偷偷改成 gyroid
+        out["infill_pattern"] = _re.sub(r"[^a-z0-9_-]+", "", str(out["infill_pattern"] or "").strip().lower())[:32] or "gyroid"
     return out
 
 
@@ -702,14 +716,28 @@ def base_params(p, spec=""):
     return clean_params({k: r.get(k) for k in PARAM_KEYS})
 
 
+def _slot1(pl):
+    try:
+        return (pl.get("slots") or [{}])[0].get("material") or ""
+    except (AttributeError, IndexError, TypeError):
+        return ""
+
+
+def _same_mat(a, b):
+    from core import recipes
+    return recipes.norm_material(a or "PLA") == recipes.norm_material(b or "PLA")
+
+
 def _migrate(p, spec, plan):
-    """方案里每盘没有参数的，按原来的打印方案补上（不保存；保存时一起存）。"""
+    """方案里每盘没有参数的，按原来的打印方案补上（不保存；保存时一起存）。
+    原来的耗材配置是按产品材料选的：槽 1 不是这个材料的盘不带过去（按材料自动选）。"""
     base = None
     for pl in (plan or {}).get("plates") or []:
         if not isinstance(pl.get("params"), dict):
             if base is None:
                 base = base_params(p, spec)
-            pl["params"] = dict(base, filament=dict(base.get("filament") or {}))
+            fil = dict(base.get("filament") or {}) if _same_mat(_slot1(pl), p.get("material")) else {}
+            pl["params"] = dict(base, filament=fil)
     return plan
 
 
@@ -802,12 +830,15 @@ def save_plan(pid, spec, data, user=""):
         if pl["manual"] and not ck["ok"]:
             raise ValueError(f"第 {plan['plates'].index(pl) + 1} 盘：" + "，".join(ck["problems"]) + "（红色的零件挪一挪，或点「自动排列」）")
         old = next((x for x in (prev.get("plates") or []) if x.get("id") == pl["id"]), None)
+        if old and not _same_mat(_slot1(old), _slot1(pl)) and (pl.get("params") or {}).get("filament"):
+            pl["params"]["filament"] = {}           # 安全：槽 1 换了材料，原来按旧材料选的耗材配置（温度）作废
         if old and old.get("sliced") and (_sig(old) != _sig(pl) or (old.get("params") or {}) != (pl.get("params") or {})):
             pl.pop("sliced", None)                  # 改了摆盘 / 颜色 / 参数：以前的切片结果不能用了
     plan["updated_at"], plan["updated_by"] = time.time(), user
     if not isinstance(p.get("print_plans"), dict):
         p["print_plans"] = {}
     p["print_plans"][spec] = plan
+    cleanup_cuts(pid, p)                         # 切开的两半：用上了留下，没用上的（过一阵）清掉
     _sync_material(p, spec, prev, plan)
     _mirror_recipe(p, spec, plan, user)
     _refresh_variants(p, spec, plan)
@@ -877,9 +908,11 @@ def apply_recipe(pid, spec, r):
     e = _spec_entry(p, key)
     prm = clean_params({k: r.get(k) for k in PARAM_KEYS})
     for pl in plan["plates"]:
-        if prm != pl.get("params") or abs(float(pl.get("layer_height") or 0) - float(r.get("layer_height") or 0.2)) > 1e-6:
+        fil = dict(prm.get("filament") or {}) if _same_mat(_slot1(pl), p.get("material")) else {}
+        want = dict(prm, filament=fil)
+        if want != pl.get("params") or abs(float(pl.get("layer_height") or 0) - float(r.get("layer_height") or 0.2)) > 1e-6:
             pl.pop("sliced", None)
-        pl["params"] = dict(prm, filament=dict(prm.get("filament") or {}))
+        pl["params"] = want
         pl["layer_height"] = float(r.get("layer_height") or 0.2)
         for it in pl.get("items") or []:
             if e and it["id"] == e["id"] and it.get("part") in (None, "") and r.get("orientation") in mesh.ORIENT_ZH \
@@ -896,9 +929,15 @@ def apply_recipe(pid, spec, r):
 
 
 def _sig(pl):
-    """摆盘签名（改了就要重新切片）。v2.55 的新字段（按面贴平台 / 镜像 / 单独参数）只在用到时加进去，旧的签名不变。"""
+    """摆盘签名（改了就要重新切片）。v2.55 的新字段（按面贴平台 / 镜像 / 单独参数 / 每盘参数）只在用到时加进去，旧的签名不变。
+    每盘参数（支撑、壁数、填充、温度、耗材配置…）：按主模型缩放的规格靠这个知道主模型改了参数、以前的切片不能用了。"""
     ext = [(it.get("uid"), _item_extra(it)) for it in pl.get("items") or [] if any(k in _item_extra(it) for k in ("face", "mirror", "ov"))]
-    return _sig0(pl) + (repr(ext) if ext else "")
+    out = _sig0(pl) + (repr(ext) if ext else "")
+    if isinstance(pl.get("params"), dict) and pl["params"]:
+        import hashlib
+        import json
+        out += "|prm:" + hashlib.md5(json.dumps(pl["params"], sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()[:12]
+    return out
 
 
 def _sig0(pl):
@@ -1382,6 +1421,10 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
         multi = len({cols.get(s["slot"]) for s in plate["slots"]}) > 1
         rc = recipe_of(p, plate)                # v2.55：这一盘自己的参数（支撑、壁数、填充、热床板、温度、耗材配置）
         over = recipes.overrides(rc) or {}
+        # 安全：盘上设的喷嘴 / 热床温度是给槽 1 的材料的；别的材料（PLA + PETG / TPU）的槽用它自己配置里的温度
+        fo1 = recipes.filament_overrides(rc)
+        for f_ in fils:
+            f_["overrides"] = fo1 if _same_mat(f_["material"], fils[0]["material"]) else None
         if multi:
             over.update(slicer.MULTI_OVERRIDES)
         import tempfile
@@ -1391,7 +1434,7 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
         res = slicer.orca_slice(cfg, path, printer_idx, fils[0]["material"], overrides=over, keep_to=keep, copies=1, orient=False,
                                 arrange=False, filaments=fils if len(fils) > 1 else None,
                                 filament_name=None if len(fils) > 1 else (recipes.filament_for(rc, pname0) or None),
-                                filament_overrides=recipes.filament_overrides(rc), keep_settings=per_part)
+                                filament_overrides=fo1, keep_settings=per_part)
     finally:
         try:
             os.remove(path)
@@ -1412,7 +1455,7 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
     p = store.load(pid)
     plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
     if (plans.get(spec) or {}).get("follow"):          # 按主模型缩放的规格：结果记在 sliced_by（带摆盘签名）
-        plans[spec].setdefault("sliced_by", {})[plate_id] = dict(sliced, sig=_sig(plate))
+        plans[spec].setdefault("sliced_by", {})[plate_id] = dict(sliced, sig=_sig(plate if plate_id in _stored_params(p, "") else _no_params(plate)))
     else:
         plan = plans.get(spec) or plan
         plan.pop("default", None)
@@ -1429,7 +1472,11 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
                         plate_id=plate_id,        # v2.52：记下是哪一盘（几盘的方案生产时每盘用自己的文件）
                         scale=round(float(plan["scale"]), 1) if plan.get("follow") and plan.get("scale") else None)  # v2.53.1：缩放比例
     f = print_files.ensure_params(f)          # v2.53.1：马上读切片参数（机型 / 喷嘴），排单 / 开始打印才认得出这个文件能用
-    return {"sliced": sliced, "file": f}
+    warns = res.get("warnings") or []
+    if warns:
+        from core import db
+        db.audit(user, "打印方案切片：耗材配置和材料不一致，已改用自动配置", pid, f"{spec or '主模型'} {plate_id}：" + "；".join(w["zh"] for w in warns))
+    return {"sliced": sliced, "file": f, "warnings": warns}
 
 
 # ---------------- v2.53 规格 × 状态 概览、一键全部切片 ----------------
@@ -1739,6 +1786,7 @@ def cut_item(pid, p, it, z, user=""):
     if lo is None or hi is None:
         raise ValueError("这个高度切不开（一边是空的）")
     stem = os.path.splitext(os.path.basename(label.split(" / ")[-1]))[0][:40] or "part"
+    cleanup_cuts(pid, p)
     new = []
     for half, tag in ((lo, "A"), (hi, "B")):
         name = modellib._free_name(pid, f"{stem}_cut{round(float(z), 1)}_{tag}.stl")
@@ -1746,7 +1794,8 @@ def cut_item(pid, p, it, z, user=""):
         mesh.write_stl(half - half.reshape(-1, 3).min(0), path)
         e = {"id": "m" + uuid.uuid4().hex[:8], "file": name, "dir": "models", "orig_name": name, "bytes": os.path.getsize(path),
              "ext": "stl", "origin": "cut", "variant": "", "added_at": time.time(), "added_by": user,
-             "cut_of": {"id": it["id"], "part": it.get("part"), "z": round(float(z), 2), "half": tag, "closed": bool(mesh.is_closed(half))}}
+             "cut_of": {"id": it["id"], "part": it.get("part"), "z": round(float(z), 2), "half": tag, "closed": bool(mesh.is_closed(half))},
+             "cut_pending": True}               # 方案还没保存：保存时用上了才算数，没用上的过一阵自动清掉（cleanup_cuts）
         p.setdefault("model_lib", []).append(e)
         e["info"] = modellib.analyze(pid, e)
         new.append(e)
@@ -1755,6 +1804,55 @@ def cut_item(pid, p, it, z, user=""):
          "rot": it.get("rot") or 0, **({"ov": dict(it["ov"])} if it.get("ov") else {})}
     b = dict(a, uid=_uid(), id=new[1]["id"], x=None, y=None)
     return [a, b], new
+
+
+CUT_TTL = 6 * 3600       # 切开了但方案没保存的两半，留这么久（别的窗口可能还在编辑）再清掉
+
+
+def _lib_refs(p):
+    """模型库里被用到的条目：所有方案的零件、当前 3D 模型、规格指定的模型、合并模型的来源。"""
+    refs = {(p.get("model") or {}).get("lib_id")}
+    for plan in (p.get("print_plans") or {}).values() if isinstance(p.get("print_plans"), dict) else []:
+        for pl in (plan or {}).get("plates") or [] if isinstance(plan, dict) else []:
+            refs.update(it.get("id") for it in pl.get("items") or [])
+    refs.update(v.get("model_lib_id") for v in p.get("variants") or [])
+    for e in p.get("model_lib") or []:
+        refs.update(d.get("id") for d in e.get("parts_of") or [])
+    refs.discard(None)
+    return refs
+
+
+def cleanup_cuts(pid, p, ttl=CUT_TTL, now=None):
+    """切割留下的文件：方案用上了 → 去掉「待保存」标记；没用上、超过 ttl 秒 → 从模型库删掉（文件挪进 model_history）。
+    只改 p（调用方保存）。返回删掉的条目 id。"""
+    pend = [e for e in p.get("model_lib") or [] if e.get("cut_pending")]
+    if not pend:
+        return []
+    refs = _lib_refs(p)
+    now = time.time() if now is None else now
+    gone = []
+    for e in pend:
+        if e["id"] in refs:
+            e.pop("cut_pending", None)
+        elif now - float(e.get("added_at") or 0) >= ttl:
+            gone.append(e["id"])
+            fp = modellib.path_of(pid, e)
+            if fp:
+                trash = os.path.join(store.product_dir(pid), "model_history")
+                os.makedirs(trash, exist_ok=True)
+                try:
+                    os.replace(fp, os.path.join(trash, f"{time.strftime('%Y%m%d_%H%M%S')}__{os.path.basename(fp)}"))
+                except OSError:
+                    pass
+            th = (e.get("info") or {}).get("thumb")
+            if th and os.path.exists(os.path.join(modellib._dir(pid), th)):
+                try:
+                    os.remove(os.path.join(modellib._dir(pid), th))
+                except OSError:
+                    pass
+    if gone:
+        p["model_lib"] = [e for e in p.get("model_lib") or [] if e["id"] not in gone]
+    return gone
 
 
 OPS = ("move", "rotate", "scale", "mirror", "duplicate", "delete", "slot", "orient", "auto_orient", "align", "distribute",
@@ -2037,7 +2135,14 @@ def apply_op(pid, spec, data, op, user=""):
         if len(sel) != 1:
             raise ValueError("切割一次选一个零件")
         it = sel[0]
-        two, ents = cut_item(pid, p, it, op.get("z"), user)
+        try:
+            z = float(op.get("z"))
+        except (TypeError, ValueError):
+            raise ValueError("切割高度要填数字（离热床多少毫米）") from None
+        h = float((fps.get(it["uid"]) or {}).get("h") or 0)
+        if not math.isfinite(z) or z <= 0 or (h and z >= h):
+            raise ValueError(f"切割高度要在 0 到 {h:.1f} 毫米之间（这个零件放平后高 {h:.1f} 毫米）")
+        two, ents = cut_item(pid, p, it, z, user)
         i = pl["items"].index(it)
         pl["items"][i:i + 1] = two
         refresh()
