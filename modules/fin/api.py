@@ -390,6 +390,22 @@ def fin_fees_recalc():
     return _wrap(lambda: dict(feerates.recalc_suggested(load_config(), plat, b.get("shop") or "", b.get("ids"), auth.current_user()["username"]), ok=True))
 
 
+@bp.post("/api/fin/fees/recalc/preview")
+def fin_fees_recalc_preview():
+    """确认框用：{platform, shop, ids?} → 会清手动价 / 只标要改价的产品和变体（和真正执行用同一份）。"""
+    from core import feerates
+    b = request.get_json(force=True) or {}
+    plat = str(b.get("platform") or "lazada").lower()
+    return _wrap(lambda: {"ok": True, "plan": feerates.recalc_plan(load_config(), plat, b.get("shop") or "", b.get("ids"))})
+
+
+@bp.post("/api/fin/fees/recalc/undo")
+def fin_fees_recalc_undo():
+    from core import feerates
+    b = request.get_json(force=True) or {}
+    return _wrap(lambda: dict(feerates.recalc_undo(str(b.get("batch") or ""), auth.current_user()["username"]), ok=True))
+
+
 @bp.post("/api/fin/fees/ack")
 def fin_fees_ack():
     from core import feerates

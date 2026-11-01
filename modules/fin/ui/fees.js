@@ -44,6 +44,15 @@
     }).join("")}</div>`;
   }
 
+  function undoBox() {
+    const bs = D.recalc_batches || [];
+    if (!bs.length) return "";
+    return UX.card({ tone: "", title: Z("最近一次「重算建议价」可撤销", "ล้างราคาที่ตั้งเอง ย้อนกลับได้"),
+      body: bs.map((b) => `<div class="row gap"><span>${E(PLAT[b.platform] || b.platform)} · <span data-notr>${E(b.shop || "—")}</span> · ${when(b.at)} · <span data-notr>${E(b.by || "")}</span> ·
+        ${Z(`${b.products} 个产品 ${b.n} 个变体的手动价被清掉`, `ล้างราคาที่ตั้งเอง ${b.products} สินค้า ${b.n} ตัวเลือก`)}</span>
+        <button class="mini" data-fe-undo="${E(b.batch)}">${Z("撤销（恢复手动价）", "ย้อนกลับ (คืนราคาที่ตั้งเอง)")}</button></div>`).join("") });
+  }
+
   function eventsBox() {
     if (!D.events.length) return "";
     const g = {};
@@ -107,7 +116,7 @@
       `<select data-fe-plat><option value="">${Z("全部平台", "ทุกแพลตฟอร์ม")}</option>${Object.keys(PLAT).map((p) => `<option value="${p}" ${PF === p ? "selected" : ""}>${PLAT[p]}</option>`).join("")}</select>
        <button class="mini" data-fe-refresh>${Z("立即重算", "คำนวณใหม่")}</button>`,
       Z("用平台结算流水算出来的真实费率，成本 / 定价 / 利润估算都用它。每天自动重算一次。", "อัตราจริงจากรายการชำระเงิน ใช้ในต้นทุน/ราคา/กำไร คำนวณใหม่อัตโนมัติทุกวัน"))
-      + kpis() + eventsBox()
+      + kpis() + eventsBox() + undoBox()
       + UX.card({ title: Z("费率走势（近 30 天口径）", "แนวโน้มอัตรา (30 วัน)"), body: trend() })
       + UX.card({ title: Z("店铺 × 类目", "ร้าน × หมวดหมู่"), body: table() })
       + UX.card({ title: Z("默认费率", "อัตราเริ่มต้น"), body: defaults(), help: Z("平台默认就是「设置」里的平台扣点，改这里也会同步过去。", "ค่าเริ่มต้นของแพลตฟอร์มคือค่าในหน้าตั้งค่า แก้ที่นี่จะซิงค์กัน") })
@@ -122,7 +131,7 @@
   }
 
   document.addEventListener("click", async (e) => {
-    const t = e.target.closest && e.target.closest("[data-fe-refresh],[data-fe-save],[data-fe-addcat],[data-fe-delcat],[data-fe-recalc],[data-fe-ack]");
+    const t = e.target.closest && e.target.closest("[data-fe-refresh],[data-fe-save],[data-fe-addcat],[data-fe-delcat],[data-fe-recalc],[data-fe-undo],[data-fe-ack]");
     if (!t || !BOX || !BOX.contains(t)) return;
     const reload = async () => { D = await api("/api/fin/fees"); paint(); };
     try {
@@ -141,9 +150,23 @@
       if (t.dataset.feDelcat) { const [p, c] = t.dataset.feDelcat.split("|"); await api("/api/fin/fees/defaults", { json: { platform: p, category: c, rate: "" } }); return reload(); }
       if (t.dataset.feRecalc) {
         const [p, shop] = t.dataset.feRecalc.split("|");
-        if (!confirm(Z("把受影响产品里手动定价过低的变体改回建议价，并标「要改价」？", "ตั้งตัวเลือกที่ราคาต่ำเกินไปกลับเป็นราคาแนะนำ และติดป้าย「ต้องแก้ราคา」?"))) return;
+        const pv = await api("/api/fin/fees/recalc/preview", { json: { platform: p, shop } });
+        const clr = pv.plan.filter((a) => a.action === "clear"), mk = pv.plan.filter((a) => a.action === "mark");
+        if (!pv.plan.length) { toast(Z("没有带手动价、又低于最低加价率的产品，不需要改", "ไม่มีสินค้าที่ตั้งราคาเองและต่ำกว่าเกณฑ์"), true); return; }
+        const line = (a) => `  ${a.id} ${a.name}：` + a.variants.map((v) => `${v.sku || "#" + v.idx} ฿${v.manual_price}→${v.suggested}`).join("，");
+        const msg = [
+          clr.length ? Z(`清掉手动价（回到建议价，可撤销）：${clr.length} 个产品`, `ล้างราคาที่ตั้งเอง (กลับเป็นราคาแนะนำ ย้อนกลับได้): ${clr.length} สินค้า`) : "",
+          ...clr.slice(0, 12).map(line), clr.length > 12 ? `  … ${Z("还有", "อีก")} ${clr.length - 12}` : "",
+          mk.length ? Z(`只标「要改价」、不动手动价（还挂在别的平台，手动价是共用的）：${mk.length} 个产品`, `ติดป้าย「ต้องแก้ราคา」เท่านั้น ไม่แตะราคาที่ตั้งเอง (ขายในแพลตฟอร์มอื่นด้วย): ${mk.length} สินค้า`) : "",
+          ...mk.slice(0, 12).map((a) => `  ${a.id} ${a.name}（${a.also_on.join("/")}）`), mk.length > 12 ? `  … ${Z("还有", "อีก")} ${mk.length - 12}` : "",
+        ].filter(Boolean).join("\n");
+        if (!confirm(msg)) return;
         const r = await api("/api/fin/fees/recalc", { json: { platform: p, shop } });
-        toast(Z(`已处理 ${r.products} 个产品、${r.variants} 个变体`, `จัดการแล้ว ${r.products} สินค้า ${r.variants} ตัวเลือก`)); return reload();
+        toast(Z(`已处理 ${r.products} 个产品（清手动价 ${r.variants} 个变体，只标要改价 ${r.marked.length} 个产品）`, `จัดการแล้ว ${r.products} สินค้า (ล้างราคา ${r.variants} ตัวเลือก ติดป้ายอย่างเดียว ${r.marked.length})`)); return reload();
+      }
+      if (t.dataset.feUndo) {
+        const r = await api("/api/fin/fees/recalc/undo", { json: { batch: t.dataset.feUndo } });
+        toast(Z(`已恢复 ${r.restored} 个变体的手动价${r.skipped ? `，${r.skipped} 个已被改过没动` : ""}`, `คืนราคาแล้ว ${r.restored} ตัวเลือก${r.skipped ? ` ข้าม ${r.skipped}` : ""}`)); return reload();
       }
       if (t.dataset.feAck) { const [p, shop] = t.dataset.feAck.split("|"); await api("/api/fin/fees/ack", { json: { platform: p, shop } }); return reload(); }
     } catch (err) { toast(err.message, true); }

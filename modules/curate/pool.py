@@ -230,14 +230,16 @@ def preview(opts=None):
     return {"classes": cls, "total": len(allids), "mb": round(sum(uniq.values()) / 1048576, 4), "settings": settings(), "storage": storage()}
 
 
-def _trash(c, rows, reason):
+def _trash(c, rows, reason, gone=True):
+    """进回收站。gone=False（池子上限清掉的）不写指纹：只是放不下，以后再采到还能回来；忽略过的永远要留指纹。"""
     now = time.time()
     for r in rows:
         d = dict(r)
         c.execute("INSERT OR REPLACE INTO cur_trash(skey, data, reason, trashed_at, bytes) VALUES(?,?,?,?,?)",
                   (r["skey"], json.dumps(d, ensure_ascii=False), reason, now, _bytes(r)))
-        c.execute("INSERT OR REPLACE INTO cur_gone(skey, reason, at, platform, watch_id) VALUES(?,?,?,?,?)",
-                  (r["skey"], "adopted" if (r["product_id"] or r["status"] == "adopted") else reason, now, r["platform"] or "", r["watch_id"] or 0))
+        if gone or r["status"] == "ignored" or r["product_id"] or r["status"] == "adopted":
+            c.execute("INSERT OR REPLACE INTO cur_gone(skey, reason, at, platform, watch_id) VALUES(?,?,?,?,?)",
+                      (r["skey"], "adopted" if (r["product_id"] or r["status"] == "adopted") else reason, now, r["platform"] or "", r["watch_id"] or 0))
         c.execute("DELETE FROM cur_candidates WHERE id=?", (r["id"],))
 
 
@@ -293,15 +295,19 @@ def run(opts=None, classes=None):
 
 
 def enforce_cap(cap=None):
-    """池子上限：超了先清低分、旧的（没处理的；稍后看 / 已采用的不动）。"""
+    """池子上限：超了先清已忽略 / 规则排除 / 已经看过没处理 / 低分的，旧的先清。
+    从没看过的新发现（分数不低）、稍后看、已采用的一律不动（宁可超一点上限）。因为放不下被清掉的不写指纹，以后再采到还能回来（忽略过的除外）。"""
     c = ensure()
     cap = int(cap or settings()["cap"])
     total = c.execute("SELECT COUNT(*) FROM cur_candidates").fetchone()[0]
     if cap <= 0 or total <= cap:
         return 0
-    rows = c.execute("SELECT * FROM cur_candidates WHERE product_id='' AND status IN ('', 'ignored') ORDER BY (status='ignored') DESC, score ASC, last_seen ASC LIMIT ?",
-                     (total - cap,)).fetchall()
-    _trash(c, rows, "cap")
+    low = settings()["low_score"]
+    pool = [r for r in c.execute("SELECT * FROM cur_candidates WHERE product_id='' AND status IN ('', 'ignored')").fetchall()
+            if r["status"] == "ignored" or r["excluded"] or (r["seen_at"] or 0) > 0 or (r["score"] or 0) < low]
+    pool.sort(key=lambda r: (r["status"] != "ignored", not r["excluded"], r["score"] or 0, r["last_seen"] or 0))
+    rows = pool[:total - cap]
+    _trash(c, rows, "cap", gone=False)
     c.commit()
     return len(rows)
 

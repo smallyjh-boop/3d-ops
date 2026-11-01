@@ -75,7 +75,10 @@ def fee_rate_for(cfg, platform=None, shop=None, category=None):
         return feerates.resolve(platform, shop, category, cfg)
     except Exception:  # noqa: BLE001
         from . import feerates
-        pct = float(cfg.get("platform_fee_rate") or 0)
+        try:
+            pct = min(max(float(cfg.get("platform_fee_rate") or 0), 0.0), feerates.MAX_PCT)
+        except (TypeError, ValueError):
+            pct = 0.0
         return feerates._pack((platform or "lazada"), shop or "", category or "", {"default": {"pct": pct, "fixed": 0.0}}, "default", "default", 0, 0, None)
 
 

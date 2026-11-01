@@ -182,10 +182,51 @@ ok(any(a["id"] == "PA" for a in aff), "手动价 45 在 Shopee 新费率下低�
 tl.clear(); feerates.todo(lambda key, group, level, title, detail="", tab="", roles="owner", alert=None, th=None: tl.append((key, level, detail)))
 chg = [t for t in tl if t[0].startswith("fee_change:shopee")]
 ok(chg and "产品PA" in chg[0][2], "待办里列出受影响产品")
+# v2.53 复审：手动价是各平台共用的——还挂在 Lazada 的产品不清手动价，只标要改价
+pa = store.load("PA"); pa["lazada_status"] = pa.get("lazada_status")
+from core import listing as _lst_mod
+_orig_status = _lst_mod.status_of
+_lst_mod.status_of = lambda p, pf: {"status": "uploaded"} if (p["id"] == "PA" and pf == "lazada") else _orig_status(p, pf)
+plan = feerates.recalc_plan(cfg, "shopee", "SPS")
+ok(plan and plan[0]["id"] == "PA" and plan[0]["action"] == "mark" and plan[0]["also_on"] == ["lazada"], f"预览：还挂在 Lazada → 只标要改价 {plan}")
+rm = feerates.recalc_suggested(cfg, "shopee", "SPS", None, "boss")
+ok(rm["variants"] == 0 and rm["marked"] == ["PA"] and store.load("PA")["variants"][0]["manual_price"] == 45 and not rm["batch"], f"共用手动价没被清 {rm}")
+ok("price" in (store.load("PA").get("marks") or {}), "只标要改价")
+_lst_mod.status_of = _orig_status
+# 只动受影响的：另一个产品有手动价但没低于最低加价率 → 不动
+mk("PC", "PC-1", "catA"); pc_ = store.load("PC"); pc_["variants"][0]["manual_price"] = 999; store.save(pc_)
+mk("PD", "PD-1", "catA")      # 没手动价
+plan = feerates.recalc_plan(cfg, "shopee", "SPS")
+ok([a["id"] for a in plan] == ["PA"], f"预览只含有手动价且受影响的变体 {[a['id'] for a in plan]}")
 r = feerates.recalc_suggested(cfg, "shopee", "SPS", None, "boss")
-ok(r["products"] >= 1 and r["variants"] >= 1 and store.load("PA")["variants"][0]["manual_price"] in (None, ""), f"按新费率重算建议价：清掉过低的手动价 {r}")
+v = store.load("PA")["variants"][0]
+ok(r["variants"] == 1 and r["batch"] and v["manual_price"] in (None, ""), f"按新费率重算建议价：清掉过低的手动价 {r}")
+ok(v["manual_price_prev"] == 45 and v["manual_price_prev_by"] == "boss" and v["manual_price_prev_at"], "清之前存了 manual_price_prev + 谁 / 何时")
+ok(store.load("PC")["variants"][0]["manual_price"] == 999 and "manual_price_prev" not in store.load("PC")["variants"][0], "没受影响的产品手动价没动")
 ok("price" in (store.load("PA").get("marks") or {}), "打上「要改价」标记")
+ok(db.conn().execute("SELECT COUNT(*) FROM audit WHERE action LIKE '财务·按新费率重算%'").fetchone()[0] >= 1, "写了审计记录")
 ok(not feerates.events("open"), "处理后事件关闭")
+ok(feerates.recalc_batches() and feerates.recalc_batches()[0]["batch"] == r["batch"], "页面能看到可撤销的批次")
+u = feerates.recalc_undo(r["batch"], "boss")
+ok(u["restored"] == 1 and store.load("PA")["variants"][0]["manual_price"] == 45 and not feerates.recalc_batches(), f"撤销：恢复手动价 {u}")
+ok(feerates.recalc_undo(r["batch"], "boss")["restored"] == 0, "撤销可重复调用（不再动）")
+pv = C.post("/api/fin/fees/recalc/preview", json={"platform": "shopee", "shop": "SPS"}).get_json()
+ok(pv["ok"] and pv["plan"] and pv["plan"][0]["variants"][0]["manual_price"] == 45, "预览接口")
+
+# ---------- 费率数据异常：不除零、不负价、待办警告 ----------
+for pct, fx in ((1.2, 0), (1.0, 0), (-0.1, 0), (0.3, 99999)):
+    cn.execute("UPDATE fee_rate_snap SET pct=?, fixed=? WHERE platform='lazada' AND shop='LZA' AND category='catA' AND win=30", (pct, fx)); cn.commit(); feerates.invalidate()
+    rr = feerates.resolve("lazada", "LZA", "catA", cfg)
+    pf = pricing.price_variant(cfg, {"grams": 10, "hours": 1}, platform="lazada", shop="LZA", category="catA")
+    ok(rr["level"] != "category" or rr["pct"] <= 0.8, f"异常费率 {pct}/{fx} 被忽略（落到 {rr['level']}）")
+    ok(pf["final_price"] > 0 and pf["suggested_price"] > 0, f"异常费率 {pct}/{fx} 下定价不崩 / 不为负 {pf['final_price']}")
+ok(feerates.price_for(100, 0.5, {"pct": 1.5, "fixed": 0}) > 0 and feerates.price_for(100, 0.5, {"pct": "x"}) == 0.0, "price_for 对坏数据不抛错、不除零")
+ok(feerates.price_for(100, 0.5, {"pct": -2, "fixed": -5}) == 150, "price_for 负数按 0 处理")
+cn.execute("UPDATE fee_rate_snap SET pct=1.2, fixed=0 WHERE platform='lazada' AND shop='LZA' AND category='catA' AND win=30"); cn.commit(); feerates.invalidate()
+tl.clear(); feerates.todo(lambda key, group, level, title, detail="", tab="", roles="owner", alert=None, th=None: tl.append((key, level, title, th)))
+bw = [t for t in tl if t[0].startswith("fee_bad:lazada:LZA")]
+ok(bw and bw[0][1] == "warn" and bw[0][3][0], f"待办警告：结算费率不正常 {bw}")
+feerates.refresh(["lazada"], now=now)
 
 # ---------- 页面接口 ----------
 rv = C.get("/api/fin/fees"); j = rv.get_json()

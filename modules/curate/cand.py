@@ -141,8 +141,8 @@ def upsert(items, who="", watch_id=0):
             reset_ai = True                                                       # 原来读错了，现在对了：重新让 AI 判断
         ai = {} if reset_ai else (db.jl(row["ai"]) if row else {})
         pp, ex, cat, sc = compute(cfg, {"title": title, "author": author, "metrics": metrics}, ai, db.jl(row["real"]) if row else None)
-        if (ex or sc < pool.settings()["junk_score"]) and not (row and (row["product_id"] or row["status"] == "adopted")):
-            thumb, author, metrics, pp = "", "", {}, {}              # v2.53：规则排除 / 分数很低的只留指纹 + 标题，不存图片和细节
+        if not row and (ex or sc < pool.settings()["junk_score"]):
+            thumb, author, metrics, pp = "", "", {}, {}              # v2.53：新插入的（已有的不动，免得稍后看的候选被清掉作者 / 数据）规则排除 / 分数很低的只留指纹 + 标题，不存图片和细节
         if row:
             c.execute("UPDATE cur_candidates SET url=?, title=?, thumb=CASE WHEN ?<>'' THEN ? ELSE thumb END, author=?, metrics=?, score=?, parts=?, "
                       "excluded=?, category=?, last_seen=?, watch_id=CASE WHEN watch_id=0 THEN ? ELSE watch_id END, capture_bad=? WHERE skey=?",
