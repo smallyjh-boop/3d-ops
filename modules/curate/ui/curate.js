@@ -111,7 +111,7 @@
       { label: Z("候选模型", "โมเดลผู้สมัคร"), value: n0(k.total), help: Z("扩展在模型网站列表页上看到、打过分的模型", "โมเดลที่ส่วนขยายเห็นในหน้ารายการและให้คะแนนแล้ว") },
       { label: Z(`高分（≥ ${d.alert_score}）`, `คะแนนสูง (≥ ${d.alert_score})`), value: n0(k.good), tone: k.good ? "ok" : "", go: "cand:hi" },
       { label: Z("今日新品", "ใหม่วันนี้"), value: n0(k.new_today), tone: k.new_today ? "info" : "", go: "cand:new", help: Z("关注巡逻今天新找到的", "ที่ตระเวนเจอใหม่วันนี้") },
-      { label: Z("被排除", "ถูกคัดออก"), value: n0(k.excluded), go: "cand:ex", help: Z("儿童玩具（TISI）、宗教、武器、接触食物、成人、品牌 / 动漫角色、多色、打印太久", "ของเล่นเด็ก (มอก.) ศาสนา อาวุธ สัมผัสอาหาร ผู้ใหญ่ แบรนด์ / ตัวการ์ตูน หลายสี พิมพ์นานเกิน") },
+      { label: Z("被排除", "ถูกคัดออก"), value: n0(k.excluded), go: "cand:ex", help: Z("儿童玩具（TISI）、宗教、武器、接触食物、成人、品牌 / 动漫角色、打印太久（多色不排除，只扣分）", "ของเล่นเด็ก (มอก.) ศาสนา อาวุธ สัมผัสอาหาร ผู้ใหญ่ แบรนด์ / ตัวการ์ตูน พิมพ์นานเกิน (หลายสีไม่คัดออก แค่หักคะแนน)") },
       k.bad ? { label: Z("采集可能出错", "อาจเก็บข้อมูลผิด"), value: n0(k.bad), tone: "bad", go: "cand:bad", help: Z("列表页读成了作者那一块（标题是作者名、图是头像），不交给 AI 打分", "อ่านส่วนผู้ออกแบบแทนโมเดล (ชื่อเป็นชื่อผู้ออกแบบ รูปเป็นรูปโปรไฟล์) จึงไม่ส่งให้ AI") } : null,
       d.ai ? { label: Z("等 AI 判断", "รอ AI ประเมิน"), value: n0(k.wait_ai), tone: k.wait_ai ? "warn" : "" } : null,
     ]) + (k.bad ? `<div class="warn-box small cur-note cur-badnote">⚠ ${Z(`有 ${k.bad} 个候选采集可能出错（标题是作者 / 店铺名，或缩略图是头像），多半是 Printables 列表页读错了（扩展 3.1.1 已修好）。`, `มี ${k.bad} รายการที่อาจเก็บข้อมูลผิด (ชื่อเป็นชื่อผู้ออกแบบ / ร้าน หรือรูปย่อเป็นรูปโปรไฟล์) ส่วนใหญ่มาจากหน้ารายการ Printables (ส่วนขยาย 3.1.1 แก้แล้ว)`)}
@@ -159,7 +159,7 @@
       <td><div class="cur-pic">${img(r.thumb)}<div>${link(r.url, (r.title || r.url).slice(0, 80))}${r.new ? " " + pill(Z("新品", "ใหม่"), "info") : ""}
         <div class="small muted"><span data-notr>${esc(r.platform_name)}${r.author ? " · " + esc(r.author) : ""}</span>${r.category ? ` · <span data-notr>${esc(catTxt(r))}</span>` : ""}</div>
         ${r.excluded ? `<div class="small bad" data-notr>✕ ${esc(reasonTxt(r))}</div>` : ""}${bad}</div></div></td>
-      <td class="small nowrap">${r.est ? `<span data-notr>${esc(r.est)}</span> ${r.measured ? pill(Z("实测", "วัดจริง"), "ok") : pill(Z("估", "ประมาณ"), "")}` : "—"}${r.single === false ? `<div>${pill(Z("多色", "หลายสี"), "warn")}</div>` : ""}${r.price ? `<div class="muted" data-notr>${esc(r.price)}</div>` : ""}</td>
+      <td class="small nowrap">${r.est ? `<span data-notr>${esc(r.est)}</span> ${r.measured ? pill(Z("实测", "วัดจริง"), "ok") : pill(Z("估", "ประมาณ"), "")}` : "—"}${r.single === false ? `<div title="${Z("多色：能打（P1S + AMS），生产效率和利润分扣一些", "หลายสี: พิมพ์ได้ (P1S + AMS) หักคะแนนประสิทธิภาพและกำไรเล็กน้อย")}">${pill(Z("多色（需要 AMS）", "หลายสี (ต้องมี AMS)"), "warn")}</div>` : ""}${r.price ? `<div class="muted" data-notr>${esc(r.price)}</div>` : ""}</td>
       <td class="small">${marketCell(r.market, radar)}</td>
       <td class="small cur-reason">${ai}</td>
       <td class="nowrap">${act}</td></tr>`;

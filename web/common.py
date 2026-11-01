@@ -276,6 +276,16 @@ def _save_from_client(pid, p):
                 v.pop("model_lib_id", None)
         p["print_advice"] = old.get("print_advice")
         p["recipe"] = old.get("recipe")            # 打印方案、分组有单独的接口保存
+        # v2.52：打印方案（盘 / 多色）、展示模型（组装姿势）有单独的接口保存；规格改名时方案跟着改名
+        if isinstance(old.get("print_plans"), dict):
+            p["print_plans"] = {renames.get(k, k): v for k, v in old["print_plans"].items()}
+        else:
+            p.pop("print_plans", None)
+        p["display"] = old.get("display")
+        _cu = {(x.get("sku") or "").upper(): (x.get("colour_usage"), x.get("purge_g")) for x in old.get("variants") or [] if x.get("sku")}
+        for v in p.get("variants") or []:
+            if (v.get("sku") or "").upper() in _cu:
+                v["colour_usage"], v["purge_g"] = _cu[(v.get("sku") or "").upper()]
         p["groups"] = old.get("groups") or []
         p["source"] = old.get("source")            # 选品工具来源信息、下载的原始文件
         p["source_files"] = old.get("source_files")

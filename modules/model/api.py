@@ -541,3 +541,283 @@ def spec_models_fill(pid):
     except ValueError as e:
         return err(str(e))
     return jsonify({"ok": True, "filled": n, "product": store.load(pid), **specmodel.overview(pid)})
+
+
+# ---------------- v2.52 打印方案（每个规格：几盘、手动摆盘、AMS 槽、配色）+ 展示模型（组装姿势） ----------------
+from . import assembly as _asm, printplan as _pp  # noqa: E402
+
+
+def _plan_payload(pid, spec, plan=None, checks=None):
+    from core import mesh, specmodel
+    p = store.load(pid)
+    plan = plan or _pp.get_plan(p, spec)
+    fps, chk, warn = {}, {}, []
+    for pl in plan.get("plates") or []:
+        try:
+            f = _pp.fps_for(pid, p, pl)
+        except (ValueError, OSError) as e:
+            warn.append(str(e))
+            continue
+        fps.update(f)
+        if any(it.get("x") is None for it in pl.get("items") or []):
+            _pp.auto_arrange(pl, _pp.bed_of(pl["printer"]), f)
+        chk[pl["id"]] = (checks or {}).get(pl["id"]) or _pp.check_plate(pl, _pp.bed_of(pl["printer"]), f)
+    colours = list(dict.fromkeys((v.get("opt1_zh") or "").strip() for v in p.get("variants") or []
+                                 if (v.get("opt2_zh") or "").strip() == spec and (v.get("opt1_zh") or "").strip()))
+    p2 = dict(p, print_plans=dict(p.get("print_plans") or {}, **{spec: plan}))
+    use = {}
+    for c in colours or [""]:
+        try:
+            use[c] = _pp.usage(p2, spec, c)
+        except (ValueError, OSError) as e:
+            warn.append(str(e))
+    cfg = load_config()
+    if auth.is_owner():
+        from core import pricing
+        for c, u in use.items():
+            if u["multicolor"]:
+                u["cost"] = pricing.colour_cost(cfg, u["colours"], u["hours"], p.get("material"))
+            else:
+                u["cost"] = pricing.variant_cost(cfg, u["grams"], u["hours"], p.get("material"))
+    lib = []
+    for e in p.get("model_lib") or []:
+        info = e.get("info") or {}
+        if not info.get("ok"):
+            continue
+        ci = info.get("colors") or {}
+        lib.append({"id": e["id"], "name": e.get("orig_name") or e["file"], "best": info.get("best"), "size": info.get("size"),
+                    "parts": [{"index": x.get("index"), "name": x.get("name"), "best": x.get("best"), "size": x.get("size")} for x in info.get("parts") or []],
+                    "multicolor": bool(ci.get("multicolor")), "painted": bool(ci.get("painted")),
+                    "colors": {"filaments": ci.get("filaments"), "used": ci.get("used"), "usage": ci.get("usage")} if ci.get("multicolor") else None,
+                    "main": (p.get("model") or {}).get("lib_id") == e["id"]})
+    specs = [{"spec": s, "own": specmodel.own(p, s), "has_plan": s in (p.get("print_plans") or {})} for s in specmodel.specs(p)]
+    return {"spec": spec, "plan": plan, "footprints": fps, "checks": chk, "usage": use, "colours": colours, "library": lib,
+            "printers": _pp.printer_models(cfg), "specs": specs, "orient_zh": mesh.ORIENT_ZH, "material": p.get("material") or "PLA",
+            "warnings": warn, "slot_max": _pp.SLOT_MAX,
+            "purge": {"g": cfg.get("mc_purge_g", 1.5), "s": cfg.get("mc_change_s", 50)}}
+
+
+@bp.get("/api/products/<pid>/print-plan")
+def print_plan_get(pid):
+    try:
+        return jsonify(_plan_payload(pid, (request.args.get("spec") or "").strip()))
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/products/<pid>/print-plan")
+def print_plan_save(pid):
+    b = request.get_json(force=True) or {}
+    spec = (b.get("spec") or "").strip()
+    try:
+        r = _pp.save_plan(pid, spec, b.get("plan") or {}, _uname())
+        db.audit(_uname(), "保存打印方案（盘 / 多色）", pid, spec or "主模型")
+        return jsonify(_plan_payload(pid, spec, r["plan"], r["checks"]))
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/products/<pid>/print-plan/footprint")
+def print_plan_footprint(pid):
+    """零件按方向放平后的俯视轮廓（编辑盘时加零件 / 换方向用，不保存）。"""
+    b = request.get_json(force=True) or {}
+    try:
+        p = store.load(pid)
+        return jsonify({"items": [_pp.footprint(pid, x.get("id"), x.get("part"), x.get("orient") or "bottom", p) for x in (b.get("items") or [])[:200]]})
+    except (ValueError, OSError) as e:
+        return err(str(e))
+
+
+@bp.post("/api/products/<pid>/print-plan/check")
+def print_plan_check(pid):
+    """检查 / 自动排列一盘（不保存）：{plate, arrange: bool} → {plate, check}"""
+    b = request.get_json(force=True) or {}
+    try:
+        p = store.load(pid)
+        plan = _pp.clean_plan(p, {"plates": [b.get("plate") or {}]})
+        pl = plan["plates"][0]
+        f = _pp.fps_for(pid, p, pl)
+        bed = _pp.bed_of(pl["printer"])
+        miss = 0
+        if b.get("arrange") or any(it.get("x") is None for it in pl["items"]):
+            miss = _pp.auto_arrange(pl, bed, f)
+        return jsonify({"plate": pl, "check": _pp.check_plate(pl, bed, f), "footprints": f, "missed": miss, "bed": bed})
+    except (ValueError, OSError) as e:
+        return err(str(e))
+
+
+@bp.post("/api/products/<pid>/print-plan/kit")
+def print_plan_kit(pid):
+    """组合摆盘（按说明 / AI）：一套零件按组装关系摆在一起（不保存，前台当初稿再手动调）。{plate, ai: bool}"""
+    b = request.get_json(force=True) or {}
+
+    def go():
+        try:
+            p = store.load(pid)
+            pl = _pp.clean_plan(p, {"plates": [b.get("plate") or {}]})["plates"][0]
+            r = _pp.kit_layout(pid, pl, use_ai=b.get("ai", True) is not False)
+            bed = _pp.bed_of(pl["printer"])
+            return jsonify({"plate": pl, "check": _pp.check_plate(pl, bed, r["footprints"]), "footprints": r["footprints"], "bed": bed,
+                            "source": r["source"], "groups": r["groups"], "note_zh": r["note_zh"], "note_th": r["note_th"], "missed": r["missed"]})
+        except (ValueError, OSError) as e:
+            return err(str(e))
+    return maybe_async(f"组合摆盘 {pid}", go, "ai_check", pid)
+
+
+@bp.post("/api/products/<pid>/print-plan/merge")
+def print_plan_merge(pid):
+    """把一盘按摆好的位置合并成一个模型：规格有自己的模型 → 指定给规格；主模型 → 设为 3D 模型。"""
+    b = request.get_json(force=True) or {}
+
+    def go():
+        from core import specmodel
+        spec = (b.get("spec") or "").strip()
+        p = store.load(pid)
+        plan = _pp.get_plan(p, spec)
+        pl = next((x for x in plan["plates"] if x["id"] == b.get("plate_id")), None)
+        if not pl:
+            return err("没有这一盘")
+        f = _pp.fps_for(pid, p, pl)
+        if not pl.get("manual") or any(it.get("x") is None for it in pl["items"]):
+            _pp.auto_arrange(pl, _pp.bed_of(pl["printer"]), f)
+        sel = _pp.plate_selection(pl)
+        try:
+            if spec:
+                e = modellib.make_entry(pid, sel, _uname(), name=f"{spec}_{pl['id']}", variant=spec)
+                specmodel.map_spec(pid, spec, e["id"], _uname())
+                return jsonify({"ok": True, "entry": e["id"], "spec": spec})
+            r = modellib.make_current(pid, sel, _uname(), name=f"plate_{pl['id']}")
+            return jsonify({"ok": True, "entry": (r.get("merged") or {}).get("id"), "files_reset": r["files_reset"]})
+        except ValueError as e:
+            return err(str(e))
+    return maybe_async(f"按摆好的盘合并 {pid}", go, "model_lib", pid)
+
+
+@bp.get("/api/products/<pid>/print-plan/export")
+def print_plan_export(pid):
+    """下载一盘的 3MF（按摆好的位置，每个零件带耗材槽；拓竹 Studio / OrcaSlicer 打开就是摆好、分好色的）。"""
+    try:
+        path, name = _pp.export_plate(pid, (request.args.get("spec") or "").strip(), request.args.get("plate") or "p1",
+                                      (request.args.get("colour") or "").strip())
+    except (ValueError, OSError) as e:
+        return err(str(e))
+    with open(path, "rb") as f:
+        data = f.read()
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    r = app.response_class(data, mimetype="model/3mf")
+    from urllib.parse import quote
+    r.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name)}"
+    return r
+
+
+@bp.post("/api/products/<pid>/print-plan/slice")
+def print_plan_slice(pid):
+    """按摆好的盘切片（多色时每个槽一份耗材配置、开擦料塔）。要 OrcaSlicer；没有时返回说明，界面上继续用估算。"""
+    b = request.get_json(force=True) or {}
+
+    def go():
+        from core import slicer
+        try:
+            r = _pp.slice_plate(pid, (b.get("spec") or "").strip(), b.get("plate_id") or "p1", (b.get("colour") or "").strip(),
+                                None if b.get("printer") in (None, "") else int(b["printer"]), _uname())
+            return jsonify({"ok": True, "sliced": r["sliced"], "file_id": (r.get("file") or {}).get("id")})
+        except slicer.SliceError as e:
+            return err(f"切片没有成功：{e}（没有 OrcaSlicer 时克数、冲刷废料按估算，标「估」）")
+        except (ValueError, OSError) as e:
+            return err(str(e))
+    return maybe_async(f"按打印方案切片（盘） {pid}", go, "slice", pid)
+
+
+@bp.post("/api/products/<pid>/print-plan/fill")
+def print_plan_fill(pid):
+    b = request.get_json(force=True) or {}
+    try:
+        n = _pp.fill_variants(pid, (b.get("spec") or "").strip(), _uname())
+    except (ValueError, OSError) as e:
+        return err(str(e))
+    db.audit(_uname(), "按打印方案填克数时长", pid, f"{n} 个变体")
+    return jsonify({"ok": True, "n": n, "product": store.load(pid)})
+
+
+@bp.get("/api/products/<pid>/display")
+def display_get(pid):
+    try:
+        return jsonify(_asm.get(pid))
+    except FileNotFoundError:
+        return err("产品不存在", 404)
+    except (ValueError, OSError) as e:
+        return err(str(e))
+
+
+@bp.post("/api/products/<pid>/display")
+def display_save(pid):
+    try:
+        r = _asm.save(pid, request.get_json(force=True) or {}, _uname())
+        db.audit(_uname(), "保存展示模型（组装姿势）", pid, "")
+        return jsonify(r)
+    except (ValueError, OSError) as e:
+        return err(str(e))
+
+
+@bp.delete("/api/products/<pid>/display")
+def display_reset(pid):
+    try:
+        return jsonify(_asm.reset(pid, _uname()))
+    except (ValueError, OSError) as e:
+        return err(str(e))
+
+
+@bp.get("/api/products/<pid>/display/part/<int:index>")
+def display_part(pid, index):
+    import gzip as _gz
+    try:
+        t = _asm.part_tris(pid, index, request.args.get("source") or None)
+    except (ValueError, OSError) as e:
+        return err(str(e))
+    resp = app.response_class(_gz.compress(t.astype("<f4").tobytes(), 4), mimetype="application/octet-stream")
+    resp.headers["Content-Encoding"] = "gzip"
+    return resp
+
+
+@bp.get("/api/products/<pid>/display/stl")
+def display_stl(pid):
+    """按组装姿势拼好的模型（STL），3D 预览和商品图用；没有保存过姿势时 404（前台用原来的模型）。"""
+    import tempfile as _tf
+    from core import mesh
+    try:
+        t = _asm.assembled_tris(pid)
+    except (ValueError, OSError) as e:
+        return err(str(e))
+    if t is None:
+        return err("还没有组装姿势", 404)
+    with _tf.NamedTemporaryFile(suffix=".stl", delete=False) as f:
+        tmp = f.name
+    try:
+        mesh.write_stl(t, tmp)
+        with open(tmp, "rb") as f:
+            data = f.read()
+    finally:
+        os.remove(tmp)
+    return app.response_class(data, mimetype="model/stl")
+
+
+@bp.post("/api/products/<pid>/display/ai")
+def display_ai(pid):
+    """AI 按图片组装（初稿，不保存）。"""
+    b = request.get_json(force=True) or {}
+
+    def go():
+        try:
+            return jsonify(_asm.ai_assemble(pid, b.get("renders") or {}, _uname(), b.get("product_image")))
+        except ValueError as e:
+            return err(str(e))
+        except Exception as e:  # noqa: BLE001  AI 没设置 / 网络错误 / 回答不是 JSON
+            return err(f"AI 组装失败：{e}")
+    return maybe_async(f"AI 按图片组装 {pid}", go, "ai_check", pid)

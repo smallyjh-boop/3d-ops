@@ -179,6 +179,32 @@ def orient_risks(st, material="PLA"):
     return out
 
 
+RISK_CODES = ("risk.contact_bad", "risk.contact_warn", "risk.overhang_bad", "risk.overhang_warn", "risk.tall", "risk.abs")
+
+
+def risk_label(code, vars_=None, lang="zh"):
+    """v2.52：空打风险编号 → 中文 / 泰文整句（和前台 static/i18n_keys.js 同一份）。没有这个编号时返回编号本身。"""
+    import json
+    global _RISK_KEYS
+    if _RISK_KEYS is None:
+        try:
+            src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "i18n_keys.js"), encoding="utf-8").read()
+            body = src[src.index("{", src.index("I18N_KEYS")):src.rindex("}") + 1]
+            _RISK_KEYS = {k: v for k, v in json.loads(body).items() if k.startswith("risk.")}
+        except (OSError, ValueError):
+            _RISK_KEYS = {}
+    e = _RISK_KEYS.get(code)
+    if not e:
+        return code
+    s = e.get("th" if lang == "th" else "zh") or e.get("zh") or code
+    for k, v in (vars_ or {}).items():
+        s = s.replace("{" + k + "}", str(v))
+    return s
+
+
+_RISK_KEYS = None
+
+
 def orient_table(tris, material="PLA"):
     rows = mesh.analyze_all(tris)
     for r in rows:
@@ -222,7 +248,7 @@ def _est(cfg, m, material):
     return {"grams": est.get("grams"), "hours": first.get("hours"), "printer": first.get("name")}
 
 
-INFO_VER = 3   # 分析内容有变化就加 1：旧的分析结果会自动重新分析（2 = 摆放方向 / 空打风险 / STL 缩略图；3 = 3MF 按 transform 摆放 + 多色）
+INFO_VER = 4   # 分析内容有变化就加 1：旧的分析结果会自动重新分析（2 = 摆放方向 / 空打风险 / STL 缩略图；3 = 3MF 按 transform 摆放 + 多色；4 = 多色 3MF 每种耗材用量）
 
 
 def _color_names(ci):
@@ -273,6 +299,14 @@ def analyze(pid, e):
             with open(fp, "rb") as f:
                 ci = mesh.colors_3mf(f.read())
             if ci:
+                try:                         # v2.52：带切片数据的多色 3MF：每种耗材用了多少克（slice_info）
+                    with zipfile.ZipFile(fp) as z0:
+                        if "Metadata/slice_info.config" in z0.namelist():
+                            fl = slicer.slice_info_filaments(z0.read("Metadata/slice_info.config").decode("utf-8", "ignore"))
+                            if fl:
+                                ci["usage"] = [{"slot": f["slot"], "grams": f["grams"]} for f in fl]
+                except (zipfile.BadZipFile, OSError, KeyError):
+                    pass
                 info["colors"] = _color_names(ci)
         except (zipfile.BadZipFile, OSError, ValueError):
             pass
@@ -542,10 +576,27 @@ def remove(pid, eid, user=""):
     return library(pid)
 
 
+def place(tris, x, y, rot=0.0):
+    """v2.52 手动摆盘：零件（已经按方向转好）绕竖直轴转 rot 度，外框中心放到热床 (x, y)，底面 z=0。"""
+    t = np.asarray(tris, dtype=np.float64)
+    v = t.reshape(-1, 3)
+    mn, mx = v.min(0), v.max(0)
+    t = t - np.array([(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, mn[2]])
+    a = np.radians(float(rot or 0))
+    if a:
+        rz = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
+        t = (t.reshape(-1, 3) @ rz.T).reshape(-1, 3, 3)
+    return t + np.array([float(x), float(y), 0.0])
+
+
 def _layout(pieces, width=LAYOUT_WIDTH, gap=LAYOUT_GAP):
-    """把组件按外框一排排摆开（不重叠），底面都放到 z=0。pieces: [(tris, qty)]"""
+    """把组件按外框一排排摆开（不重叠），底面都放到 z=0。pieces: [(tris, qty)] 或 [(tris, qty, (x, y, rot))]。
+    v2.52：每件都带位置（打印方案里手动摆好的盘）时，按位置放，不自动排。"""
+    if pieces and all(len(pc) > 2 and pc[2] for pc in pieces):
+        return np.concatenate([place(t, *pos) for t, qty, pos in pieces for _ in range(int(qty))])
     boxes = []
-    for tris, qty in pieces:
+    for pc in pieces:
+        tris, qty = pc[0], pc[1]
         t = tris - tris.reshape(-1, 3).min(0)
         s = t.reshape(-1, 3).max(0)
         for _ in range(int(qty)):
@@ -573,6 +624,21 @@ def _norm_sel(selection):
     return sel
 
 
+def _pos(s):
+    """选择里带了位置（打印方案手动摆的盘）→ (x, y, rot)；没有 → None。"""
+    try:
+        if s.get("x") is not None and s.get("y") is not None:
+            return (float(s["x"]), float(s["y"]), float(s.get("rot") or 0))
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _posd(s):
+    p = _pos(s)
+    return {"x": p[0], "y": p[1], "rot": p[2]} if p else {}
+
+
 def _pieces(pid, p, sel):
     """按勾选的文件 / 组件、数量、方向读出要摆的零件。返回 (pieces, desc)。"""
     pieces, desc = [], []
@@ -587,11 +653,11 @@ def _pieces(pid, p, sel):
             i = int(s["part"])
             if not 0 <= i < len(parts):
                 raise ValueError(f"「{e['orig_name']}」没有第 {i + 1} 个组件")
-            pieces.append((mesh.rotate(parts[i][1], s["orient"]), qty))
-            desc.append({"id": e["id"], "part": i, "qty": qty, "orient": s["orient"], "label": f"{e['orig_name']} / {parts[i][0]}"})
+            pieces.append((mesh.rotate(parts[i][1], s["orient"]), qty, _pos(s)))
+            desc.append({"id": e["id"], "part": i, "qty": qty, "orient": s["orient"], "label": f"{e['orig_name']} / {parts[i][0]}", **_posd(s)})
         else:
-            pieces.append((mesh.rotate(np.concatenate([t for _n, t in parts]), s["orient"]), qty))
-            desc.append({"id": e["id"], "part": None, "qty": qty, "orient": s["orient"], "label": e["orig_name"]})
+            pieces.append((mesh.rotate(np.concatenate([t for _n, t in parts]), s["orient"]), qty, _pos(s)))
+            desc.append({"id": e["id"], "part": None, "qty": qty, "orient": s["orient"], "label": e["orig_name"], **_posd(s)})
     return pieces, desc
 
 

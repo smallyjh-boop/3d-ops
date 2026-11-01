@@ -50,11 +50,41 @@ def variant_cost(cfg, grams, hours, material_type=None):
     }
 
 
+def colour_cost(cfg, colours, hours, material_type=None):
+    """v2.52 多色：按每种颜色的克数（含摊到这个颜色的冲刷废料 purge_g）分别算材料钱，机时按总时长（含换色时间）。
+    colours = [{colour, material, grams, purge_g?}]。返回 variant_cost 一样的字段 + per_colour（每种颜色的克数、钱）。"""
+    per, mat = [], 0.0
+    for c in colours or []:
+        g = float(c.get("grams") or 0) + float(c.get("purge_g") or 0)
+        m = g * (1 + cfg["material_loss_rate"]) * thb_per_gram(cfg, c.get("material") or material_type)
+        mat += m
+        per.append({"colour": c.get("colour") or "", "material": c.get("material") or material_type or "",
+                    "grams": round(float(c.get("grams") or 0), 1), "purge_g": round(float(c.get("purge_g") or 0), 1), "cost": round(m, 2)})
+    machine = float(hours or 0) * machine_hour_cost(cfg)
+    packaging = cfg["packaging_per_item"]
+    failure = (mat + machine) * cfg["failure_rate"]
+    return {"material": round(mat, 2), "machine": round(machine, 2), "packaging": round(packaging, 2), "failure": round(failure, 2),
+            "total": round(mat + machine + packaging + failure, 2), "per_colour": per,
+            "purge_g": round(sum(x["purge_g"] for x in per), 1)}
+
+
 def price_variant(cfg, variant, markup=None, material=None):
-    """返回该变体的成本拆分、建议价、最终价、实际加价率和警告。"""
+    """返回该变体的成本拆分、建议价、最终价、实际加价率和警告。
+    v2.52：变体有 colour_usage（多色，打印方案算的每种颜色用量）时，材料按颜色分开算（cost.per_colour）。"""
     fee = cfg["platform_fee_rate"]
     mk = cfg["default_markup"] if markup in (None, "") else float(markup)
-    cost = variant_cost(cfg, variant.get("grams"), variant.get("hours"), material)
+    cu = variant.get("colour_usage")
+    if isinstance(cu, list) and len(cu) > 1:
+        cost = colour_cost(cfg, cu, variant.get("hours"), material)
+        # 克数以变体上填的为准（多色用量是打印方案算的比例）：总克数不一样时按比例缩放各颜色
+        tot = sum(float(c.get("grams") or 0) + float(c.get("purge_g") or 0) for c in cu)
+        g = float(variant.get("grams") or 0)
+        if g and tot and abs(g - tot) > 0.05:
+            k = g / tot
+            cost = colour_cost(cfg, [dict(c, grams=float(c.get("grams") or 0) * k, purge_g=float(c.get("purge_g") or 0) * k) for c in cu],
+                               variant.get("hours"), material)
+    else:
+        cost = variant_cost(cfg, variant.get("grams"), variant.get("hours"), material)
     suggested = nice_price(cost["total"] * (1 + mk) / (1 - fee), cfg["price_ending"])
     floor = nice_price(cost["total"] * (1 + cfg["min_markup"]) / (1 - fee), cfg["price_ending"])
     manual_price = variant.get("manual_price")
