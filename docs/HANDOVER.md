@@ -11,6 +11,8 @@
 - 打印机：P1S（拓竹局域网）已连上；K1 Max 原厂固件能读状态，发送打印待「打印测试」验证；K1C 待填 IP
 - 下一步：等老板反馈；用户需要：核对库存同步对照表后再开自动推送、真机打印测试、真实照片测识别
 
+- 开发中（v2.54，未发版、版本号没改）：删除旧的「3D选品工具」对接（link/curator.py、/api/curator*、/api/v1/catalog/*、catalog 密钥权限、规格同步和规格锁）；旧产品数据全留着；测试 tests/cases/t_v254.py
+
 ## 已知问题 / 坑
 - 测试临时目录 /tmp/3dops-test-* 很大（每个约 0.8–1 GB），磁盘满时要清理
 - OrcaSlicer 不认我们写的 3MF 加拓竹标记（会崩溃 -11）；普通 3MF + Metadata/model_settings.config 才能按槽分色

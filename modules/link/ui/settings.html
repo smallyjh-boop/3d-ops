@@ -1,4 +1,4 @@
-<!-- 设置 → AI 与对接：店铺对接 + 3D选品工具对接（v2.30 从 index.html 搬过来；由 settings.js 放进设置页） -->
+<!-- 设置 → AI 与对接：店铺对接（v2.30 从 index.html 搬过来；由 settings.js 放进设置页） -->
 <style>
 /* v2.49 店铺设置表单：基本信息一行 + 一个应用一张卡片 */
 #shop-form .sf-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
@@ -35,21 +35,3 @@
       <table class="grid small" id="intg-hooks"><thead><tr><th>时间</th><th>平台</th><th>处理结果</th><th>内容</th></tr></thead><tbody></tbody></table>
     </details>
 </div>
-  <!-- v2.50：选品已经在 ERP 里做（商品 → 选品），这张旧的对接卡片默认收起（legacy，代码和 /api/v1/catalog 接口都保留） -->
-  <details class="card cur-legacy" id="cur-card">
-    <summary class="muted small">旧的「3D选品工具」对接（已不再需要：选品现在在「商品 → 选品」里做；只有还在用旧的选品工具时才展开）</summary>
-    <div class="row between wrap gap"><h3>3D选品工具对接 <span id="cur-badge"></span></h3><a id="cur-open" class="btn hidden" target="_blank" rel="noopener">打开选品工具 ↗</a></div>
-    <p class="muted small">新产品从选品工具推送过来，ERP 自动建草稿、生成编号、下载图片和模型文件。两边各要一把密钥：①「ERP 访问选品工具」：填在下面，ERP 下载图片用；②「选品工具访问 ERP」：下面一键新建「建产品」密钥，复制填到选品工具「设置 → ERP 对接 → 建产品密钥」。</p>
-    <div class="form3">
-      <label>选品工具地址<input id="cur-url" placeholder="http://192.168.31.200:18765" data-notr></label>
-      <label>选品工具的密钥（选品工具「设置 → ERP 对接 → ERP 访问本系统的密钥」）<input id="cur-key" type="password" autocomplete="off" data-notr></label>
-      <div class="row gap" style="align-self:end"><button id="cur-save" class="primary">保存</button><button id="cur-test">测试连接</button></div>
-    </div>
-    <div id="cur-result" class="small"></div>
-    <h4>选品工具访问 ERP 的密钥（建产品）</h4>
-    <div id="cur-keys" class="small"></div>
-    <div class="row gap"><button id="cur-newkey" class="mini">＋ 一键新建「建产品」密钥</button><button id="cur-newread" class="mini">＋ 新建只读密钥（选品工具同步编号、售价用）</button></div>
-    <div id="cur-keyout"></div>
-    <h4>最近推送过来的产品 <span id="cur-count" class="muted small"></span></h4>
-    <table class="grid small" id="cur-recent"><thead><tr><th>时间</th><th>编号</th><th>品名</th><th>SKU</th><th>状态</th><th>选品记录</th></tr></thead><tbody></tbody></table>
-  </details>

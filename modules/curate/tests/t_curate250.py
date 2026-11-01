@@ -382,8 +382,8 @@ ok(th.get("采集队列") and th.get("候选池"), "th.json has the page words")
 sch = C.get("/api/settings/schema").get_json()["modules"]
 ok(any(f["key"] == "cur_w_demand" for m in sch if m["id"] == "goods" for g in m["groups"] for f in g["fields"]), "settings under 商品")
 # 旧的对接卡片收起来了（接口照样在）
-ok(C.get("/api/curator").status_code == 200 and "legacy" in C.get("/m/link/settings.html").get_data(as_text=True), "old curator link card kept as legacy")
-ok(C.get("/api/v1/categories", headers={"Authorization": "Bearer " + integrations.create_key("cat", "catalog")}).status_code == 200, "/api/v1/catalog APIs still work")
+ok(C.get("/api/curator").status_code == 404 and "cur-card" not in C.get("/m/link/settings.html").get_data(as_text=True), "old curator link card removed (v2.54)")
+ok(C.get("/api/v1/categories", headers={"Authorization": "Bearer " + integrations.create_key("cat", "read")}).status_code == 200, "/api/v1/categories still works for read keys")
 # 模块关掉
 ok(C.post("/api/modules/curate", json={"on": False}).status_code == 200 and C.get("/api/cur/overview").status_code == 404
    and C.get("/api/v1/curate/ext/ping", headers=H).status_code == 404, "module off → 404")

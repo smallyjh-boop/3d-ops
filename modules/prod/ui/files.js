@@ -88,7 +88,7 @@
     if (window.GVIEW) go(window.GVIEW); else window.addEventListener("gview-ready", () => go(window.GVIEW), { once: true });
   }
   // ---------------- 模型库（v2.13） ----------------
-  const ORIGIN = { curator: ["选品工具", "tag-pill"], upload: ["上传", ""], merged: ["合并", "warn-pill"] };
+  const ORIGIN = { curator: ["选品", "tag-pill"], upload: ["上传", ""], merged: ["合并", "warn-pill"] };
   const mm = (s) => (s ? s.map((v) => Math.round(+v)).join(" × ") + " mm" : "");
   const estTxt = (i) => {
     if (!i) return "";
@@ -209,7 +209,7 @@
           ${CAN("models.delete") && !i.current ? '<button class="mini danger" data-ml="del">删除</button>' : ""}</td></tr>${parts}`;
     };
     $("#ml-body").innerHTML = `
-      <p class="small muted">这个产品的全部模型文件（选品工具推过来的、自己上传的、合并出来的）都在这里，放在这个产品自己的文件夹里。<b>「3D 模型」</b>是切片、估算克数和时长、3D 预览用的那一个： 单个文件点「设为 3D 模型」；套件 / 多个组件：勾选要一起打的文件或组件、填好每个几件，点下面「合并成一套」，会自动摆在一盘上（不重叠），一起切片。 想自己摆盘：勾选后「下载勾选的文件」，在切片软件里摆好切好，再到文件管理「⬆ 上传切片文件」上传整盘（一盘几个按「套」算）。</p>
+      <p class="small muted">这个产品的全部模型文件（选品来的、自己上传的、合并出来的）都在这里，放在这个产品自己的文件夹里。<b>「3D 模型」</b>是切片、估算克数和时长、3D 预览用的那一个： 单个文件点「设为 3D 模型」；套件 / 多个组件：勾选要一起打的文件或组件、填好每个几件，点下面「合并成一套」，会自动摆在一盘上（不重叠），一起切片。 想自己摆盘：勾选后「下载勾选的文件」，在切片软件里摆好切好，再到文件管理「⬆ 上传切片文件」上传整盘（一盘几个按「套」算）。</p>
       <div class="row gap wrap">${up ? `<label class="filebtn primary-file">⬆ 上传模型文件<input type="file" id="ml-up" multiple accept=".stl,.3mf,.obj,.step,.stp,.zip" hidden></label>` : ""}
         <button class="mini" data-ml="reanalyze">重新分析尺寸</button>
         <span class="small">当前 3D 模型：${cur ? `<b data-notr>${esc(cur.orig_name || cur.file)}</b> ${mm((cur.metrics || {}).size)}` : '<span class="warn">还没选</span>'}</span>

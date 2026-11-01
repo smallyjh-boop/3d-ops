@@ -234,13 +234,13 @@ def _save_from_client(pid, p):
         p["lazada_api"] = old.get("lazada_api")       # v2.44.1：平台编号由推送 / 在线商品同步维护（编辑页开着时推送过，别被旧的盖掉）
         p["listing"] = old.get("listing") or {}      # 上架进度由导出 / 标记接口维护（没导出过的是 {}，不能存成 null）
         if "specs" in old:
-            p["specs"] = old.get("specs")              # 规格由选品工具同步 / 「确认规格」接口维护（v2.16）
+            p["specs"] = old.get("specs")              # 规格记录由「确认规格」接口和 check_variants 维护（v2.16）
         for k in ("seo_review", "seo_undo", "seo_log", "title_changed_at", "copy_dirty_after_export"):   # v2.24：搜索优化由后台维护
             if k in old:
                 p[k] = old[k]
             else:
                 p.pop(k, None)
-        for k in ("ip_risk", "curator_listing"):     # 侵权确认走单独的接口；选品工具原始文案只读
+        for k in ("ip_risk", "curator_listing"):     # 侵权确认走单独的接口；选品整理的原始文案只读
             if k in old:
                 p[k] = old.get(k)
         if "active" not in p and "active" in old:
@@ -248,7 +248,7 @@ def _save_from_client(pid, p):
         p["model"] = old.get("model")              # 模型和打印建议由后台维护
         p["model_lib"] = old.get("model_lib") or []  # 模型库由后台维护（v2.13）；没有时存空列表，不存 null
         from core import specs as _specs
-        bad = _specs.check_variants(p, old)          # v2.22：不能加出重复的变体 / 选品工具没有的规格
+        bad = _specs.check_variants(p, old)          # v2.22：不能加出重复的变体，规格记录跟着规格名走
         if bad:
             abort(400, bad)
         # v2.22.1：规格改名（按 SKU 认出来）→ 模型对应、打印方案、切片文件、模型库标注一起跟着改名
@@ -293,12 +293,12 @@ def _save_from_client(pid, p):
             p["marks"] = old["marks"]                  # v2.53：「要上传 / 要修改」标记有单独的接口，页面上可能过时
         else:
             p.pop("marks", None)
-        p["source"] = old.get("source")            # 选品工具来源信息、下载的原始文件
+        p["source"] = old.get("source")            # 选品来源信息、下载的原始文件
         p["source_files"] = old.get("source_files")
         for k in ("edit_rev", "edited_by", "edited_at"):
             p[k] = old.get(k)
         store.bump_rev(p, _uname())
-        # 选品工具推过来的草稿：填了颜色就算补齐了
+        # 选品来的草稿：填了颜色就算补齐了
         p["draft"] = bool(old.get("draft")) and not any((v.get("opt1_zh") or "").strip() for v in p.get("variants", []))
         if old.get("exported_at"):
             # v2.39：已导出产品的 SKU 跟着变体走，不按行号（以前删 / 加 / 挪了一行，后面的 SKU 会错位甚至重复）。

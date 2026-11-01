@@ -1,63 +1,9 @@
 "use strict";
-// 对接模块：设置 → AI 与对接 里的「店铺对接」和「3D选品工具对接」（v2.30 从 ops.js 搬过来）。
-// API 密钥在内核（app.js 的 INTG_UI），密钥列表加载好后发 intg-loaded 事件，这里接着画店铺和选品工具。
+// 对接模块：设置 → AI 与对接 里的「店铺对接」（v2.30 从 ops.js 搬过来）。
+// API 密钥在内核（app.js 的 INTG_UI），密钥列表加载好后发 intg-loaded 事件，这里接着画店铺。
 (function () {
   const isOwner = () => window.OPSH && OPSH.isOwner();
   let INTG = null;
-  // ---- 3D选品工具对接 ----
-  function curResult(t) {
-    if (!t) return '<span class="muted">还没测试过连接</span>';
-    return `<div>${t.steps.map((s) => `<div class="${s.ok ? "ok" : "bad"}">${s.ok ? "✔" : "✗"} ${esc(s.text)}</div>`).join("")}</div>
-      <div class="muted">测试时间 ${fmtTime(t.ts)}</div>`;
-  }
-  async function loadCurator() {
-    const r = await api("/api/curator");
-    if (document.activeElement !== $("#cur-url")) $("#cur-url").value = r.base_url || "";
-    $("#cur-key").value = "";
-    $("#cur-key").placeholder = r.key_set ? `已填（${r.key_mask}），不改就空着` : "还没填";
-    const lt = r.last_test;
-    $("#cur-badge").innerHTML = !r.base_url ? '<span class="pill">未设置</span>' : lt ? (lt.ok ? '<span class="pill ok-pill">已连接</span>' : '<span class="pill bad-pill">连接有问题</span>') : '<span class="pill warn-pill">未测试</span>';
-    $("#cur-result").innerHTML = curResult(lt);
-    $("#cur-open").classList.toggle("hidden", !r.base_url);
-    if (r.base_url) $("#cur-open").href = r.base_url;
-    const keys = (INTG ? INTG.keys : []).filter((k) => k.scope === "catalog" || /选品/.test(k.name));
-    $("#cur-keys").innerHTML = keys.length ? keys.map((k) => `<div><span class="mono" data-notr>${esc(k.name)}</span> ·
-      ${k.scope === "catalog" ? '<span class="pill tag-pill">建产品</span>' : k.scope === "read" ? '<span class="pill ok-pill">只读</span>' : esc(k.scope)}
-      · <span class="mono" data-notr>${esc(k.prefix)}…</span> · ${k.active ? "启用" : '<span class="bad">已停用</span>'} · 最后使用 ${k.last_used ? fmtTime(k.last_used) : "-"}（${k.uses || 0} 次）</div>`).join("")
-      : '<span class="warn">还没有给选品工具的密钥</span>';
-    $("#cur-count").textContent = r.imported ? `共 ${r.imported} 个` : "";
-    $("#cur-recent tbody").innerHTML = r.recent.map((x) => `<tr><td class="nowrap">${fmtTime(x.created_at)}</td>
-      <td><a class="link mono" data-curp="${esc(x.product_id)}" data-notr>${esc(x.product_id)}</a></td><td data-notr>${esc(x.name || "")}</td><td>${x.skus}</td>
-      <td>${x.draft ? '<span class="pill warn-pill">草稿·待完善</span>' : '<span class="pill ok-pill">已补齐</span>'}</td><td class="mono" data-notr>#${esc(x.source_id)}</td></tr>`).join("")
-      || '<tr><td colspan="6" class="muted">还没有推送过来的产品</td></tr>';
-  }
-  document.addEventListener("click", async (e) => {
-    if (!e.target.closest || !e.target.closest("#cur-card")) return;
-    const t = e.target;
-    try {
-      if (t.id === "cur-save") {
-        await busy(t, async () => { await api("/api/curator", { json: { base_url: $("#cur-url").value, api_key: $("#cur-key").value } }); toast("已保存"); });
-        const r = await api("/api/curator/test", { json: {} });
-        toast(r.ok ? "连接正常" : "已保存，但连接有问题，看下面的提示", !r.ok);
-        return loadCurator();
-      }
-      if (t.id === "cur-test") {
-        await busy(t, async () => {
-          const r = await api("/api/curator/test", { json: { base_url: $("#cur-url").value, api_key: $("#cur-key").value } });
-          toast(r.ok ? "连接正常" : "连接有问题，看下面的提示", !r.ok);
-        });
-        return loadCurator();
-      }
-      if (t.id === "cur-newkey" || t.id === "cur-newread") {
-        const cat = t.id === "cur-newkey";
-        const r = await api("/api/apikeys", { json: { name: cat ? "选品工具-建产品" : "选品工具-NAS", scope: cat ? "catalog" : "read" } });
-        $("#cur-keyout").innerHTML = `<p class="note-flag">${cat ? "建产品" : "只读"}密钥（只显示这一次，复制填到选品工具「设置 → ERP 对接 → ${cat ? "建产品密钥" : "只读密钥"}」）：<b class="mono" data-notr>${esc(r.key)}</b></p>`;
-        if (window.OPS) await OPS.loadIntegrations();
-        return;
-      }
-      if (t.dataset.curp) openProduct(t.dataset.curp);     // v2.53：直接打开编辑页，「← 返回」回到这里
-    } catch (err) { toast(err.message, true); }
-  });
   function renderShops() {
     const cl = (p) => (INTG.connectors.find((c) => c.platform === p) || {});
     $("#intg-shops tbody").innerHTML = INTG.shops.map((x) => {
@@ -219,7 +165,6 @@
     INTG = e.detail;
     if (!$("#intg-shopcard")) return;
     renderShops();
-    loadCurator().catch(() => {});
   });
 
   let HTML = null;

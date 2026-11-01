@@ -1,15 +1,12 @@
-"""产品规格（v2.16，对接规范 4.3）：选品工具推过来的规格（尺寸 / 版本 / 套装 / 造型，不含颜色）。
+"""产品规格（v2.16，对接规范 4.3）：规格（尺寸 / 版本 / 套装 / 造型，不含颜色）。
 
 产品里存两样：
   p["specs"]：规格列表 [{spec_id, position, kind, name_zh, name_th, name_en, is_default, size_mm, scale_pct, pack_qty, parts,
                grams, hours, files, recognize, status, reasons}]
-      status：ok 正常 / review 待确认（AI 没把握、名字里有颜色词、缺泰文名）/ removed_pending 选品工具删了、等人确认
+      status：ok 正常 / review 待确认（AI 没把握、名字里有颜色词、缺泰文名）
+      （旧状态 removed_pending 是旧「3D选品工具」同步产生的，v2.54 起不再使用，clear_removed_pending 把它改成 ok）
   p["variants"]：真正卖的 SKU = 规格 × 颜色（含「随机颜色」），每行 spec_id 指向规格，opt2_zh = 规格中文名。
-
-同步规则（PUT /api/v1/catalog/products/<编号>/variants，每次传完整列表，按 spec_id 对比）：
-  - 还没导出过（SKU 没锁）：新增 / 修改 / 删除都直接生效；
-  - 已导出（SKU 锁定）：新增照加（新 SKU 待上架），修改照改（SKU 不变，改名的标记待同步到平台），
-    删掉的不删，标记「选品工具已删除·待确认」，由人决定。
+v2.54：旧选品工具的规格同步（sync）和「规格由选品工具管理」的锁都去掉了，规格在 ERP 里可以随便改。
 """
 import re
 import time
@@ -55,7 +52,7 @@ def _num(v, name, label):
 
 
 def parse(raw, legacy_ok=True):
-    """校验并整理选品工具推来的 variants。返回 (specs, warnings)。不合格的抛 SpecError（中文说明）。"""
+    """校验并整理规格列表（选品采用时用）。返回 (specs, warnings)。不合格的抛 SpecError（中文说明）。"""
     if raw in (None, []):
         return [], []
     if not isinstance(raw, list):
@@ -172,119 +169,18 @@ def build_rows(p, specs):
     p["specs"] = [{k: v for k, v in s.items()} for s in specs]
 
 
-def sync(p, new_specs, now=None):
-    """按 spec_id 合并选品工具的最新规格列表。返回 {added, updated, unchanged, removed, removed_pending}。"""
-    now = now or time.time()
-    locked = bool(p.get("exported_at"))
-    old = {s["spec_id"]: s for s in p.get("specs") or []}
-    if not old:   # 2.16 以前建的产品：按规格名从变体里认出来
-        for v in p.get("variants") or []:
-            n = (v.get("opt2_zh") or "").strip()
-            if n and ("auto-" + n) not in old:
-                old["auto-" + n] = {"spec_id": "auto-" + n, "name_zh": n, "name_th": "", "status": "ok", "reasons": []}
-                v.setdefault("spec_id", "auto-" + n)
-        # 选品工具这次带了真正的 spec_id：按名字对上
-        for s in new_specs:
-            if s["spec_id"] not in old and ("auto-" + s["name_zh"]) in old:
-                o = old.pop("auto-" + s["name_zh"])
-                o["spec_id"] = s["spec_id"]
-                old[s["spec_id"]] = o
-                for v in p.get("variants") or []:
-                    if v.get("spec_id") == "auto-" + s["name_zh"]:
-                        v["spec_id"] = s["spec_id"]
-    res = {"added": [], "updated": [], "unchanged": 0, "removed": [], "removed_pending": []}
-    variants = p.setdefault("variants", [])
-    colors = _colors(p)
-    base = dict(variants[0]) if variants else {}
-    for k in ("sku", "spec_id", "image", "stock", "manual_price"):
-        base.pop(k, None)
-    opts_th = p.setdefault("copy", {}).setdefault("options_th", {})
-    merged = []
-    for s in new_specs:
-        o = old.get(s["spec_id"])
-        if not o:
-            # 新规格：按现有颜色展开
-            if len(variants) == 1 and not (variants[0].get("opt2_zh") or "").strip() and not variants[0].get("spec_id") \
-                    and not locked:
-                variants.clear()          # 原来是无规格产品的那一行：换成规格行
-            for c in colors:
-                variants.append(_row(base, s, c))
-            if locked:
-                s["new_after_export"] = now
-            res["added"].append(s["name_zh"])
-            if s["name_th"]:
-                opts_th[s["name_zh"]] = s["name_th"]
-            merged.append(dict(s, added_at=now))
-            continue
-        changed = []
-        if o.get("name_zh") != s["name_zh"]:
-            changed.append("名称")
-            for v in variants:
-                if v.get("spec_id") == s["spec_id"]:
-                    v["opt2_zh"] = s["name_zh"]
-                    if locked:
-                        v["platform_dirty"] = True     # SKU 不变，平台上的选项名要改
-        if (o.get("name_th") or "") != s["name_th"] and s["name_th"]:
-            changed.append("泰文名")
-            if locked:
-                for v in variants:
-                    if v.get("spec_id") == s["spec_id"]:
-                        v["platform_dirty"] = True
-        if s["name_th"]:
-            opts_th[s["name_zh"]] = s["name_th"]
-        for k, lab in (("grams", "克数"), ("hours", "时长")):
-            if (o.get(k) or 0) != (s[k] or 0):
-                changed.append(lab)
-                for v in variants:
-                    # 在 ERP 里切片过 / 手动改过的不覆盖
-                    if v.get("spec_id") == s["spec_id"] and v.get("grams_src") in ("curator", "pending", None) and s[k]:
-                        v[k] = s[k]
-                        if k == "grams":
-                            v["grams_src"] = "curator"
-        for k in ("kind", "name_en", "size_mm", "scale_pct", "pack_qty", "parts", "is_default", "position", "files", "recognize"):
-            if o.get(k) != s.get(k) and k not in ("position", "recognize", "files"):
-                changed.append(k)
-        ns = dict(o, **{k: v for k, v in s.items() if k not in ("status", "reasons", "rcodes")})
-        name_changed = "名称" in changed or "泰文名" in changed
-        if o.get("status") == "removed_pending":
-            ns["status"], ns["reasons"], ns["rcodes"] = "ok", [], []         # 选品工具又加回来了
-        elif s["status"] == "review" and not (o.get("confirmed_at") and not name_changed):
-            ns["status"], ns["reasons"], ns["rcodes"] = "review", s["reasons"], s["rcodes"]   # 有问题、人还没确认过（或确认后又改了名）
-        else:
-            ns["status"], ns["reasons"], ns["rcodes"] = "ok", [], []
-        if changed:
-            ns["updated_at"] = now
-            res["updated"].append(f"{s['name_zh']}（{'、'.join(dict.fromkeys(changed))}）")
-        else:
-            res["unchanged"] += 1
-        merged.append(ns)
-    new_ids = {s["spec_id"] for s in new_specs}
-    for sid, o in old.items():
-        if sid in new_ids:
-            continue
-        if o.get("kept_local"):          # 人已经决定留着（ERP 自己的规格）
-            merged.append(o)
-            continue
-        has_locked = locked and any(v.get("spec_id") == sid and v.get("sku") for v in variants)
-        if has_locked:
-            if o.get("status") != "removed_pending":
-                res["removed_pending"].append(o["name_zh"])
-            merged.append(dict(o, status="removed_pending", reasons=["选品工具里已经删除"], rcodes=[["spec.r.removed", ""]],
-                               removed_at=o.get("removed_at") or now))
-        else:
-            variants[:] = [v for v in variants if v.get("spec_id") != sid]
-            res["removed"].append(o["name_zh"])
-    if not variants:
-        variants.append(dict(base, opt1_zh="", opt2_zh="", sku=""))
-    merged.sort(key=lambda s: s.get("position") or 999)
-    p["specs"] = merged
-    if merged:
-        p["variation2_name_zh"] = p.get("variation2_name_zh") or "规格"
-    return res
+def clear_removed_pending(p):
+    """v2.54：旧选品工具「删了也保留」的待确认状态不再有意义，改成正常规格。返回是否改了。"""
+    n = 0
+    for x in p.get("specs") or []:
+        if x.get("status") == "removed_pending":
+            x.update(status="ok", reasons=[], rcodes=[], kept_local=True)
+            n += 1
+    return bool(n)
 
 
 def confirm(p, spec_id, action, user=""):
-    """ERP 里的人处理待确认的规格。action：ok 确认没问题 / delete 删掉（连同它的 SKU）/ keep 留着（选品工具删了也保留）。"""
+    """ERP 里的人处理待确认的规格。action：ok 确认没问题 / keep 留着 / delete 删掉（连同它的 SKU）。"""
     s = next((x for x in p.get("specs") or [] if x["spec_id"] == spec_id), None)
     if not s:
         raise SpecError("没有这个规格")
@@ -332,7 +228,7 @@ def spec_of(p, v):
 
 
 def review_problems(p):
-    """上架检查用：待确认的规格（阻止导出）、选品工具删除待确认的（只提醒）。"""
+    """上架检查用：待确认的规格（阻止导出）。"""
     errs, warns = [], []
     used = {v.get("spec_id") for v in p.get("variants") or []}
     for s in p.get("specs") or []:
@@ -340,8 +236,6 @@ def review_problems(p):
             continue
         if s.get("status") == "review":
             errs.append(f"规格「{s['name_zh']}」待确认（{'；'.join(s.get('reasons') or [])}），在「变体」里确认后才能导出")
-        elif s.get("status") == "removed_pending":
-            warns.append(f"规格「{s['name_zh']}」选品工具已经删除，请在「变体」里决定删掉还是保留")
     return errs, warns
 
 
@@ -370,7 +264,7 @@ def limits_problem(vs):
 
 
 def add_local_spec(p, name, grams=None, hours=None):
-    """ERP 里自己加的规格（选品工具没有的）：记成 kept_local，选品工具同步时保留。"""
+    """ERP 里自己加的规格：记成 source = erp。"""
     sp = p.setdefault("specs", [])
     for x in sp:
         if x.get("name_zh") == name:
@@ -385,7 +279,8 @@ def check_variants(p, old=None):
     """保存产品前检查变体（v2.22）。返回错误说明（空 = 没问题）。会顺手去掉颜色 / 规格前后的空格。
     · 同一个 颜色 + 规格 不能有两行；
     · 选项名长度、选项个数、SKU 个数不超过平台限制；
-    · 规格由选品工具管理的产品（p["specs"] 有内容）：ERP 里加的规格记成「ERP 自加」（kept_local），同步时保留。"""
+    · 产品有规格记录（p["specs"]）时，变体的 spec_id 跟着规格名走：改名 → 规格记录跟着改名（数据不丢），新名字 → 记成 ERP 自加。
+      v2.54 起规格可以随便改，不再有「由选品工具管理」的限制。"""
     vs = p.get("variants") or []
     if not vs:
         return "至少要有一个变体"
@@ -403,15 +298,22 @@ def check_variants(p, old=None):
     specs = (old or p).get("specs") or []
     if specs:
         p["specs"] = [dict(x) for x in specs]
+        by_id = {x["spec_id"]: x for x in p["specs"]}
         names = {x["name_zh"]: x for x in p["specs"]}
         for v in vs:
             if not v["opt2_zh"]:
-                return "这个商品的规格由选品工具管理，每一行都要选规格"
+                v.pop("spec_id", None)
+                continue
             if v["opt2_zh"] not in names:
-                # v2.22.1：允许在 ERP 里加规格（尺寸 / 型号 / 套装…），记成「ERP 自加」，选品工具同步时保留
-                names[v["opt2_zh"]] = add_local_spec(p, v["opt2_zh"], v.get("grams"), v.get("hours"))
+                cur = by_id.get(v.get("spec_id"))
+                if cur and cur["name_zh"] not in {w["opt2_zh"] for w in vs}:
+                    names.pop(cur["name_zh"], None)       # 改名：规格记录跟着改，克数 / 尺寸等数据留着
+                    cur["name_zh"] = v["opt2_zh"]
+                    names[v["opt2_zh"]] = cur
+                else:
+                    names[v["opt2_zh"]] = add_local_spec(p, v["opt2_zh"], v.get("grams"), v.get("hours"))
             v["spec_id"] = names[v["opt2_zh"]]["spec_id"]
         used = {v["opt2_zh"] for v in vs}
-        # ERP 自加的规格被删光 / 改了名：去掉；选品工具的规格不动（由「确认规格」处理）
+        # 自己加的规格被删光：去掉；其他规格记录留着（里面有克数 / 尺寸等数据）
         p["specs"] = [x for x in p["specs"] if not (x.get("source") == "erp" and x["name_zh"] not in used)]
     return ""

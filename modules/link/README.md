@@ -3,7 +3,7 @@
 店铺与系统对接——v2.30 从内核搬出来的模块。
 
 · 店铺对接：平台开放接口定时拉订单、授权、平台 Webhook 推送（连接器在 core/connectors，订单入库在内核）。
-· 3D选品工具：推送新产品建草稿（/api/v1/catalog/…、/api/v1/categories），设置里填选品工具地址和密钥。
+· 类目查询 /api/v1/categories（其他系统用）。旧的「3D选品工具」对接（/api/v1/catalog/…）在 v2.54 已移除，选品在「商品 → 选品」。
 · 运营分析系统写回：/api/v1/ops/…（ops 密钥）改标题、属性、售价、上下架；「商品 → 运营改动」查看 / 确认 / 撤回。
 API 密钥管理和只读查询接口（/api/v1/orders、skus、cost-params、profit…）在内核，关掉这个模块不受影响。
 
@@ -11,7 +11,6 @@ API 密钥管理和只读查询接口（/api/v1/orders、skus、cost-params、pr
 
 - `__init__.py`
 - `api.py`
-- `curator.py`
 - `module.py`
 - `opsapi.py`
 - `tests/t_lazada2412.py`
@@ -34,3 +33,4 @@ API 密钥管理和只读查询接口（/api/v1/orders、skus、cost-params、pr
 - （系统 v2.50.0）：选品搬进 ERP（商品 → 选品，modules/curate），设置里旧的「3D选品工具对接」卡片默认收起（legacy）；/api/v1/catalog/* 接口和代码照旧。
 - （系统 v2.53.0）：选品工具对接卡片里点产品编号直接打开编辑页（不先经过产品库），「← 返回」回到设置。
 - （系统 v2.53.0）：推过来的产品自动补全文案时按「系统 → AI 接口」的「上架文案」任务判断有没有 AI。
+- 1.7（系统 v2.54.0）：删掉旧的「3D选品工具」对接：curator.py、/api/curator*、POST /api/v1/catalog/products（+ /files、PUT /variants，现在 404）、设置里的选品工具卡片、config 的 curator_base_url / curator_api_key（升级时清掉旧密钥）。/api/v1/categories 留着（其他系统用，代码搬进 api.py）。「建产品」(catalog) 密钥行保留但不再有权限（设置里显示「建产品·已停用」，也不能再新建）。catalog_imports 表和旧推过来的产品数据都留着不动。升级时把 removed_pending 的规格改成正常规格（_migrate_v254）。

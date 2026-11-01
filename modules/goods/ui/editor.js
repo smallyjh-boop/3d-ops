@@ -11,7 +11,7 @@ function setPath(obj, path, val) {
 }
 function markDirty() { dirty = true; $("#ed-dirty").textContent = "（未保存）"; scheduleCheck(); if (window.SEO) SEO.schedule(); }
 
-// 选品工具推过来的产品：原站、许可、参考价、原始文件（v2.12）
+// 选品来的产品：原站、许可、参考价、原始文件（v2.12）
 function renderSource() {
   const s = P && P.source;
   if (!s) { $("#ed-source").innerHTML = ""; if (window.CURSRC) CURSRC.render(); return; }
@@ -26,7 +26,7 @@ function renderSource() {
         <div class="small">原站许可：<b data-notr>${esc(lc.name || "（没写）")}</b>${lc.auto ? ` · 系统初判：<span class="${lc.auto === "禁止商用" ? "bad" : ""}">${esc(lc.auto)}</span>` : ""}${lc.note ? ` <span class="muted">（${esc(lc.note)}）</span>` : ""}</div>
         <div class="row gap" style="margin-top:6px"><button class="mini primary-lite" data-lic="ok">✔ 核验通过（可以商用）</button>${lc.auto === "禁止商用" ? '<button class="mini" data-lic="force">仍然核验通过（已买授权）</button>' : ""}</div></div>`
     : `<div class="small ok">✔ 许可已核验可商用${lc.by ? `（<span data-notr>${esc(lc.by)}</span>）` : ""} <button class="mini" data-lic="undo">撤销</button></div>`;
-  $("#ed-source").innerHTML = `<div class="card src-card">${lic}${P.draft ? `<p class="warn"><b>草稿·待完善</b>：${s.source === "curate" ? "这个产品是在「选品」里采用的。" : "这个产品是 3D选品工具推过来的。"}请在「变体」里填好颜色（会自动生成 SKU 和售价），核对类目属性后再导出上架。</p>${(P.variants || []).some((v) => !v.grams || !v.hours) ? '<p class="warn small">有规格还没有克数 / 打印时长：在「变体」里按模型估算或切片后补上，成本和售价才准。</p>' : ""}` : ""}
+  $("#ed-source").innerHTML = `<div class="card src-card">${lic}${P.draft ? `<p class="warn"><b>草稿·待完善</b>：${s.source === "curate" ? "这个产品是在「选品」里采用的。" : "这个产品是从「选品」来的。"}请在「变体」里填好颜色（会自动生成 SKU 和售价），核对类目属性后再导出上架。</p>${(P.variants || []).some((v) => !v.grams || !v.hours) ? '<p class="warn small">有规格还没有克数 / 打印时长：在「变体」里按模型估算或切片后补上，成本和售价才准。</p>' : ""}` : ""}
     <div class="small">来源：<b data-notr>${esc(s.platform || s.source || "")}</b>${s.source_id ? ` <span class="muted" data-notr>#${esc(s.source_id)}</span>` : ""}${s.linked_manually ? ' <span class="muted">（手动建档，补传文件时对上）</span>' : ""}${s.author ? ` · 作者 <span data-notr>${esc(s.author)}</span>` : ""}
       ${s.source_url ? ` · <a href="${esc(s.source_url)}" target="_blank" rel="noopener">原站页面</a>` : ""}
       ${s.license_name ? `· 许可 <span data-notr>${esc(s.license_name)}</span>` : ""}${s.license_verified ? ' <span class="ok">✔ 已核验可商用</span>' : ""}
@@ -148,9 +148,9 @@ function renderPackage() {
   const st = P.package_status;
   $("#pkg-box").classList.toggle("is-check", st === "check" || st === "default");
   $("#btn-pkg-ok").classList.toggle("hidden", !(st === "check" || st === "ai" || st === "default"));
-  $("#pkg-note").innerHTML = st === "check" && P.package_src === "spec_ref" ? '<span class="bad">按选品工具的规格尺寸估算（多零件产品，尺寸只是最大零件的参考值），请核对后点「确认尺寸」</span>'
+  $("#pkg-note").innerHTML = st === "check" && P.package_src === "spec_ref" ? '<span class="bad">按规格尺寸估算（多零件产品，尺寸只是最大零件的参考值），请核对后点「确认尺寸」</span>'
     : st === "check" ? '<span class="bad">AI 估算的包裹尺寸，请核对后点「确认尺寸」</span>'
-    : st === "ai" && P.package_src === "spec" ? '<span>按选品工具的规格尺寸估算（最大规格 + 1 cm 余量）</span>'
+    : st === "ai" && P.package_src === "spec" ? '<span>按规格尺寸估算（最大规格 + 1 cm 余量）</span>'
     : st === "ai" ? '<span>AI 根据产品尺寸估算</span>'
     : st === "default" ? '<span class="bad">还是默认值，请填写实际包裹尺寸（或让 AI 估算）</span>'
     : "包裹重量 = 变体克数 + 包材重量，自动计算。";
@@ -278,20 +278,13 @@ function renderVariants() {
   renderColorChips();
   renderSpecReview();
   scheduleStockInfo();
-  const managed = specsManaged();
   $("#btn-add-spec").classList.remove("hidden");
   $("#btn-ren-spec").classList.toggle("hidden", !renamableSpecs().length);
-  $("#spec-lock-note").textContent = (managed ? (isTH() ? "แบบจากเครื่องมือคัดเลือกสินค้าจะซิงค์มาเอง แบบที่เพิ่มที่นี่จะถูกเก็บไว้ " : "选品工具的规格会自动同步；在这里加的规格标「ERP 自加」，同步时保留。") : "") +
-    (isTH() ? `ข้อจำกัดแพลตฟอร์ม: ชื่อตัวเลือก ≤ 20 ตัวอักษร, แต่ละชั้น ≤ 20 ตัวเลือก, รวม ≤ 50 SKU` : `平台限制：选项名最多 20 字，颜色 / 规格各最多 20 个，合计最多 50 个 SKU`);
+  $("#spec-lock-note").textContent = (isTH() ? `ข้อจำกัดแพลตฟอร์ม: ชื่อตัวเลือก ≤ 20 ตัวอักษร, แต่ละชั้น ≤ 20 ตัวเลือก, รวม ≤ 50 SKU` : `平台限制：选项名最多 20 字，颜色 / 规格各最多 20 个，合计最多 50 个 SKU`);
 }
 // v2.22：规格只能从已有的规格里选（或者「＋ 加规格」），不能随手打字加出「其它规格」
-function specsManaged() { return !!(P.specs && P.specs.length); }
-// 能在 ERP 里改名的规格：选品工具管理的商品只能改 ERP 自己加的
-function renamableSpecs() {
-  if (!specsManaged()) return specList();
-  const cur = new Set((P.specs || []).filter((x) => x.source !== "erp").map((x) => x.name_zh));
-  return specList().filter((s) => !cur.has(s));
-}
+// v2.54：旧选品工具对接移除，所有规格都能改名
+function renamableSpecs() { return specList(); }
 const VAR_LIMIT = { len: 20, each: 20, sku: 50 };
 function overLimit(addRows, addColors = 0, addSpecs = 0) {
   const nc = new Set(P.variants.map((v) => (v.opt1_zh || "").trim())).size + addColors;
@@ -307,9 +300,6 @@ function specList() {
   return out;
 }
 function specCell(v) {
-  const sp = (P.specs || []).find((x) => x.name_zh === (v.opt2_zh || "").trim());
-  if (specsManaged() && sp && sp.source === "erp") return `<span data-notr>${esc(uiOpt2(v.opt2_zh))}</span> <span class="src src-est">${isTH() ? "เพิ่มใน ERP" : "ERP 自加"}</span>`;
-  if (specsManaged()) return `<span data-notr title="${esc(v.opt2_zh || "")}">${esc(uiOpt2(v.opt2_zh)) || "—"}</span>`;
   const cur = (v.opt2_zh || "").trim();
   return `<select data-v2 data-notr style="width:110px"><option value="">—</option>${specList().map((s) => `<option value="${esc(s)}" ${s === cur ? "selected" : ""}>${esc(uiOpt2(s))}</option>`).join("")}
     <option value="__new">${isTH() ? "＋ แบบใหม่…" : "＋ 新规格…"}</option></select>`;
@@ -331,7 +321,6 @@ function specBadge(v) {
   const s = (P.specs || []).find((x) => x.spec_id && x.spec_id === v.spec_id);
   if (!s) return "";
   if (s.status === "review") return `<span class="src src-est">${TR("spec.badge_review")}</span>`;
-  if (s.status === "removed_pending") return `<span class="src src-est">${TR("spec.badge_removed")}</span>`;
   return "";
 }
 // 泰文界面：表格里的颜色、规格显示泰文（系统内部仍用中文做键，导出时用泰文）；改的时候泰文写回「选项泰文」（v2.19.1）
@@ -433,7 +422,7 @@ $("#ed-source").addEventListener("click", async (e) => {
   });
 });
 
-// 选品工具整理好的商品文案（选品工具 2.2）+ 侵权提示
+// 选品整理好的商品文案（只读）+ 侵权提示
 function renderCuratorCopy() {
   const box = $("#curator-copy"); if (!box) return;
   const L0 = P.curator_listing, ir = P.ip_risk;
@@ -469,18 +458,16 @@ $("#curator-copy").addEventListener("click", async (e) => {
   });
 });
 
-// 规格待确认（选品工具 AI 识别没把握、名字里有颜色词、选品工具删掉了）
+// 规格待确认（AI 识别没把握、名字里有颜色词）
 function renderSpecReview() {
   const box = $("#spec-review"); if (!box) return;
   const used = new Set((P.variants || []).map((v) => v.spec_id));
-  const list = (P.specs || []).filter((s) => used.has(s.spec_id) && (s.status === "review" || s.status === "removed_pending"));
+  const list = (P.specs || []).filter((s) => used.has(s.spec_id) && s.status === "review");
   const why = (s) => (s.rcodes && s.rcodes.length ? s.rcodes.map((x) => TR(x[0]) + (x[1] || "")) : (s.reasons || [])).join("；");
   box.innerHTML = list.length ? `<div class="warnbox small"><b>${TR("spec.need_confirm", { n: list.length })}</b>${TR("spec.need_confirm_tail")}` +
     list.map((s) => `<div class="row gap wrap" style="margin-top:4px"><span data-notr><b>${esc(s.name_zh)}</b>${s.name_th ? " / " + esc(s.name_th) : ""}</span>
       <span class="muted">${esc(why(s))}${s.recognize && s.recognize.evidence ? `<span data-notr>（${esc(s.recognize.evidence)}）</span>` : ""}</span>
-      ${s.status === "review"
-        ? `<button class="mini primary-lite" data-spec="${esc(s.spec_id)}" data-act="ok">${TR("spec.ok")}</button><button class="mini danger" data-spec="${esc(s.spec_id)}" data-act="delete">${TR("spec.delete")}</button>`
-        : `<button class="mini danger" data-spec="${esc(s.spec_id)}" data-act="delete">${TR("spec.delete_all")}</button><button class="mini" data-spec="${esc(s.spec_id)}" data-act="keep">${TR("spec.keep")}</button>`}</div>`).join("") +
+      <button class="mini primary-lite" data-spec="${esc(s.spec_id)}" data-act="ok">${TR("spec.ok")}</button><button class="mini danger" data-spec="${esc(s.spec_id)}" data-act="delete">${TR("spec.delete")}</button></div>`).join("") +
     `<div class="muted" style="margin-top:4px">${TR("spec.rename_hint")}</div></div>` : "";
 }
 $("#spec-review").addEventListener("click", async (e) => {
@@ -595,7 +582,6 @@ $("#btn-add-spec").addEventListener("click", () => {
   const like = P.variants[0] || {};
   for (const c of colors.length ? colors : [""]) {
     P.variants.push({ opt1_zh: c, opt2_zh: n, grams: like.grams ?? 0, hours: like.hours ?? 0, grams_src: like.grams_src, manual_price: null, image: "", stock: null, sku: "" });
-    if (specsManaged()) P.specs.push({ spec_id: "", name_zh: n, source: "erp", status: "ok" });
   }
   if (!(P.variation2_name_zh || "").trim()) { P.variation2_name_zh = "规格"; const f = document.querySelector('[data-f="variation2_name_zh"]'); if (f) f.value = "规格"; }
   markDirty(); renderVariants(); refreshPricing();

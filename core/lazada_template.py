@@ -312,7 +312,7 @@ def check_product(p, prices, cat=None, cfg=None):
         errors += lang_guard.lazada_problems(p, prices, cfg, cat)
     ir = p.get("ip_risk") or {}
     if ir.get("status") == "pending" and ir.get("items"):
-        errors.append("侵权待确认：选品工具提示可能涉及品牌 / 角色（" + "、".join(x.get("term", "") for x in ir["items"][:5])
+        errors.append("侵权待确认：选品检查提示可能涉及品牌 / 角色（" + "、".join(x.get("term", "") for x in ir["items"][:5])
                       + "），在「⑤ 上架文案」里确认后才能导出")
     from . import specs as _specs
     e2, w2 = _specs.review_problems(p)
