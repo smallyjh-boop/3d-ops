@@ -29,6 +29,7 @@ DEFAULT_CONFIG = {
     # ---------- 定价 ----------
     "platform_fee_rate": 0.20,           # 平台扣点占位值（Lazada），请到卖家后台核实后修改
     "shopee_fee_rate": 0.0,              # Shopee 扣点，0 = 和 Lazada 一样
+    "fee_min_orders": 10,                # v2.53：店铺×类目至少有几单结算数据才用「实际费率」，不够退回店铺整体 → 默认费率
     "default_markup": 1.0,               # 默认加价率：1.0 = 利润等于成本（100%）
     "min_markup": 1.0,                   # 低于这个加价率会标红警告
     "price_ending": 9,                   # 价格尾数，填 -1 表示不做尾数处理

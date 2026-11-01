@@ -656,13 +656,39 @@ async function refreshPricing() {
     tr.querySelector(".c-cost").innerHTML = `<span title="材料 ${c.material} + 机时 ${c.machine} + 包材 ${c.packaging} + 失败损耗 ${c.failure}${pcs ? "\n" + pcs : ""}">${c.total}</span>${pcs ? ` <span class="small" title="${esc(pcs)}" data-notr>🎨</span>` : ""}`;
     tr.querySelector(".c-sug").textContent = r.suggested_price;
     tr.querySelector(".c-final").innerHTML = `<b>${r.final_price}</b>` + (r.list_price !== r.final_price ? `<br><span class="muted small">划线 ${r.list_price}</span>` : "");
-    tr.querySelector(".c-profit").textContent = r.profit;
+    tr.querySelector(".c-profit").innerHTML = `<span title="${esc(feeTip(r.fee))}">${r.profit}</span>`;
     const mk = r.actual_markup == null ? "" : Math.round(r.actual_markup * 100) + "%";
     tr.querySelector(".c-mk").innerHTML = r.warning ? `<span class="bad" title="${esc(r.warning)}">${mk || "!"} ⚠</span>` : `<span class="ok">${mk}</span>`;
   });
   const s = res.summary;
+  renderShopPrices(res.by_shop);
   if (!s) { $("#price-note").textContent = ""; return; }
-  $("#price-note").textContent = `材料 ${s.thb_per_gram} 铢/克，机时 ${s.machine_hour_cost} 铢/小时，平台扣点 ${(CFG.platform_fee_rate * 100).toFixed(0)}%。鼠标停在成本上可看拆分。`;
+  const f0 = (res.rows[0] || {}).fee;
+  const pctTxt = f0 ? ((f0.pct * 100).toFixed(1) + "%" + (f0.fixed ? ` + ฿${f0.fixed}` : "")) : (CFG.platform_fee_rate * 100).toFixed(0) + "%";
+  $("#price-note").textContent = isTH()
+    ? `วัสดุ ${s.thb_per_gram} บาท/กรัม ค่าเครื่อง ${s.machine_hour_cost} บาท/ชม. ค่าธรรมเนียมแพลตฟอร์ม ${pctTxt}${f0 ? " (" + f0.source_th + ")" : ""} เอาเมาส์ชี้ที่ต้นทุน/กำไรเพื่อดูรายละเอียด`
+    : `材料 ${s.thb_per_gram} 铢/克，机时 ${s.machine_hour_cost} 铢/小时，平台费用 ${pctTxt}${f0 ? "（" + f0.source_zh + "）" : ""}。鼠标停在成本 / 利润上可看拆分。`;
+}
+// v2.53：平台费用拆分（每项 + 来源 实际 / 默认）做成提示文字
+function feeTip(f) {
+  if (!f) return "";
+  const th = isTH();
+  const head = th ? `ค่าธรรมเนียมรวม ${f.total} (${f.source_th})` : `平台费用合计 ${f.total}（${f.source_zh}${f.orders ? "，样本 " + f.orders + " 单" : ""}）`;
+  return head + "\n" + (f.items || []).map((x) => `${th ? x.th : x.zh}: ${(x.pct * 100).toFixed(1)}%${x.fixed ? " + ฿" + x.fixed : ""} = ${x.amount}`).join("\n");
+}
+// 同一个产品在每个店铺的成本 / 建议价 / 利润（店铺之间费率不同时才有区别）
+function renderShopPrices(list) {
+  const box = $("#price-shops"); if (!box) return;
+  if (!list || !list.length || !P.variants.length) { box.innerHTML = ""; return; }
+  const th = isTH();
+  const PL = { lazada: "Lazada", shopee: "Shopee" };
+  box.innerHTML = `<details><summary>${th ? "ราคา/กำไรแยกตามร้าน" : "各店铺的建议价 / 利润"}</summary><table class="grid"><thead><tr><th>${th ? "ร้านค้า" : "店铺"}</th><th>${th ? "ค่าธรรมเนียม" : "平台费用"}</th>
+    <th>${th ? "ต้นทุน" : "成本"}</th><th>${th ? "ราคาแนะนำ" : "建议价"}</th><th>${th ? "กำไร" : "利润"}</th></tr></thead><tbody>${list.map((s) => {
+      const r = (s.rows || [])[0] || {}; const f = r.fee || {};
+      return `<tr><td data-notr>${esc(PL[s.platform] || s.platform)}${s.shop ? " · " + esc(s.shop) : ""}</td>
+        <td title="${esc(feeTip(f))}">${((f.pct || 0) * 100).toFixed(1)}%${f.fixed ? " + ฿" + f.fixed : ""} <span class="muted small">${th ? f.source_th : f.source_zh}</span></td>
+        <td>${(r.cost || {}).total}</td><td>${r.suggested_price}</td><td class="${r.profit < 0 ? "bad" : ""}">${r.profit}</td></tr>`;
+    }).join("")}</tbody></table><div class="muted small">${th ? "แสดงแถวแรกของตารางตัวเลือก" : "按第一行规格显示"}</div></details>`;
 }
 
 // 图片

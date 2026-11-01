@@ -68,10 +68,26 @@ def colour_cost(cfg, colours, hours, material_type=None):
             "purge_g": round(sum(x["purge_g"] for x in per), 1)}
 
 
-def price_variant(cfg, variant, markup=None, material=None):
+def fee_rate_for(cfg, platform=None, shop=None, category=None):
+    """v2.53：某平台 / 店铺 / 类目的费率（真实优先、没有就用默认；见 core/feerates.py）。出错一律退回设置里的默认扣点。"""
+    try:
+        from . import feerates
+        return feerates.resolve(platform, shop, category, cfg)
+    except Exception:  # noqa: BLE001
+        from . import feerates
+        pct = float(cfg.get("platform_fee_rate") or 0)
+        return feerates._pack((platform or "lazada"), shop or "", category or "", {"default": {"pct": pct, "fixed": 0.0}}, "default", "default", 0, 0, None)
+
+
+def price_variant(cfg, variant, markup=None, material=None, platform=None, shop=None, category=None, rate=None):
     """返回该变体的成本拆分、建议价、最终价、实际加价率和警告。
-    v2.52：变体有 colour_usage（多色，打印方案算的每种颜色用量）时，材料按颜色分开算（cost.per_colour）。"""
-    fee = cfg["platform_fee_rate"]
+    v2.52：变体有 colour_usage（多色，打印方案算的每种颜色用量）时，材料按颜色分开算（cost.per_colour）。
+    v2.53：平台费用来自费率引擎：platform / shop / category 都不给 = 默认平台（Lazada）的默认店铺；返回里多 fee（每个费用项的拆分，中 / 泰文名）。"""
+    from . import feerates
+    if rate is None:
+        rate = fee_rate_for(cfg, platform, shop, category)
+    fee = rate["pct"]
+    fixed = rate["fixed"]
     mk = cfg["default_markup"] if markup in (None, "") else float(markup)
     cu = variant.get("colour_usage")
     if isinstance(cu, list) and len(cu) > 1:
@@ -85,14 +101,15 @@ def price_variant(cfg, variant, markup=None, material=None):
                                variant.get("hours"), material)
     else:
         cost = variant_cost(cfg, variant.get("grams"), variant.get("hours"), material)
-    suggested = nice_price(cost["total"] * (1 + mk) / (1 - fee), cfg["price_ending"])
-    floor = nice_price(cost["total"] * (1 + cfg["min_markup"]) / (1 - fee), cfg["price_ending"])
+    suggested = nice_price(feerates.price_for(cost["total"], mk, rate), cfg["price_ending"])
+    floor = nice_price(feerates.price_for(cost["total"], cfg["min_markup"], rate), cfg["price_ending"])
     manual_price = variant.get("manual_price")
     if manual_price not in (None, "", 0):  # 填了手动售价就以手动价为准（市场定价）
         final = float(manual_price)
     else:
         final = float(suggested)
-    net = final * (1 - fee)
+    fb = feerates.breakdown(rate, final)
+    net = final - fb["total"]
     actual_markup = (net - cost["total"]) / cost["total"] if cost["total"] > 0 else None
     warn = ""
     if not variant.get("grams") or not variant.get("hours"):
@@ -110,15 +127,34 @@ def price_variant(cfg, variant, markup=None, material=None):
         "final_price": round(final, 2),
         "list_price": round(list_price, 2),
         "special_price": round(final, 2) if rate > 0 else None,
-        "platform_fee": round(final * fee, 2),
+        "platform_fee": fb["total"],
+        "fee": fb,
         "profit": round(net - cost["total"], 2),
         "actual_markup": None if actual_markup is None else round(actual_markup, 4),
         "warning": warn,
     }
 
 
-def price_product(cfg, product):
-    return [price_variant(cfg, v, product.get("markup"), product.get("material")) for v in product.get("variants", [])]
+def price_product(cfg, product, platform=None, shop=None):
+    """整个产品每个变体的定价；类目取产品的类目（引擎按 店铺×类目 找费率）。"""
+    from . import feerates
+    cat = feerates.category_of(product)[0]
+    rate = fee_rate_for(cfg, platform, shop, cat)
+    return [price_variant(cfg, v, product.get("markup"), product.get("material"), rate=rate) for v in product.get("variants", [])]
+
+
+def price_by_shop(cfg, product):
+    """同一个产品在每个启用店铺的定价：[{platform, shop, rows}]。没有店铺记录时给一个默认 Lazada。"""
+    from . import feerates, db
+    out = []
+    try:
+        shops = [(r["platform"], r["name"]) for r in db.conn().execute(
+            "SELECT platform, name FROM shops WHERE enabled=1 AND platform IN ('lazada','shopee') ORDER BY platform, id")]
+    except Exception:  # noqa: BLE001
+        shops = []
+    for plat, name in shops or [("lazada", "")]:
+        out.append({"platform": plat, "shop": name, "rows": price_product(cfg, product, plat, name)})
+    return out
 
 
 def cost_summary(cfg):

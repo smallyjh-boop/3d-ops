@@ -334,3 +334,64 @@ def expenses_add():
 def expenses_delete(eid):
     finance.delete_expense(eid)
     return jsonify({"items": finance.list_expenses()})
+
+
+# ---------------- v2.53 平台费率 ----------------
+@bp.get("/api/fin/fees")
+def fin_fees():
+    """平台费率页：数字卡片、走势、店铺×类目表、默认费率、Shopee 导入状态、费率变动。"""
+    from modules.fin.logic import fees
+    return _wrap(lambda: fees.page((request.args.get("platform") or "").strip().lower()))
+
+
+@bp.post("/api/fin/fees/refresh")
+def fin_fees_refresh():
+    from modules.fin.logic import fees
+    return _wrap(lambda: {"ok": True, "counts": fees.refresh()})
+
+
+@bp.post("/api/fin/fees/defaults")
+def fin_fees_defaults():
+    """改默认费率：{platform, rate(0.2=20%)}（平台默认，就是设置里的扣点）或 {platform, category, rate, label}（类目默认；rate 空 = 删除）。"""
+    from core import feerates
+    b = request.get_json(force=True) or {}
+    plat = str(b.get("platform") or "").lower()
+    if plat not in feerates.PLATFORMS:
+        return err("平台不对")
+
+    def go():
+        if b.get("category"):
+            feerates.set_category_default(plat, b["category"], b.get("rate"), b.get("label") or "")
+        else:
+            feerates.set_platform_default(plat, b.get("rate"))
+        db.audit(auth.current_user()["username"], "财务·默认费率", plat, str(b.get("category") or "平台默认"))
+        return {"ok": True}
+    return _wrap(go)
+
+
+@bp.post("/api/fin/fees/min_orders")
+def fin_fees_min_orders():
+    from core import feerates
+    try:
+        n = max(1, int((request.get_json(force=True) or {}).get("min_orders")))
+    except (TypeError, ValueError):
+        return err("请填整数")
+    save_config({"fee_min_orders": n})
+    feerates.invalidate()
+    return jsonify({"ok": True, "min_orders": n})
+
+
+@bp.post("/api/fin/fees/recalc")
+def fin_fees_recalc():
+    """「按新费率重算建议价」：{platform, shop, ids?}。"""
+    from core import feerates
+    b = request.get_json(force=True) or {}
+    plat = str(b.get("platform") or "lazada").lower()
+    return _wrap(lambda: dict(feerates.recalc_suggested(load_config(), plat, b.get("shop") or "", b.get("ids"), auth.current_user()["username"]), ok=True))
+
+
+@bp.post("/api/fin/fees/ack")
+def fin_fees_ack():
+    from core import feerates
+    b = request.get_json(force=True) or {}
+    return jsonify({"ok": True, "n": feerates.ack_events(b.get("platform") or None, b.get("shop"), b.get("ids"))})

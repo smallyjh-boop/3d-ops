@@ -168,6 +168,13 @@ def fee_rate(platform, cfg=None):
                 return round(f["rate"] / 100, 4), "Lazada 财务流水的真实扣点（近 30 天）", "ค่าธรรมเนียมจริงจากรายการการเงิน Lazada (30 วัน)"
         except Exception:  # noqa: BLE001
             pass
+    try:        # v2.53：费率引擎（真实费率优先，没有就是设置里的默认）
+        from core import feerates
+        r = feerates.resolve(plat, None, None, cfg)
+        if r["source"] == "actual":
+            return round(r["pct"] + (r["fixed"] / 300.0 if r["fixed"] else 0.0), 4), "费率引擎的实际费率（近 30/90 天结算）", "อัตราจริงจากการชำระเงิน (30/90 วัน)"
+    except Exception:  # noqa: BLE001
+        pass
     if plat == "shopee" and tf(cfg.get("shopee_fee_rate"), 0):
         return tf(cfg.get("shopee_fee_rate"), 0), "设置里的 Shopee 扣点", "ค่าธรรมเนียม Shopee ที่ตั้งไว้"
     return tf(cfg.get("platform_fee_rate"), 0.2), "设置里的平台扣点", "ค่าธรรมเนียมแพลตฟอร์มที่ตั้งไว้"
