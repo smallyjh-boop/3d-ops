@@ -72,8 +72,17 @@
         <div class="row gap wrap"><label class="filebtn mini-btn">📁 ${Z("选照片", "เลือกรูป")}<input type="file" id="rcg-ocr" accept="image/*" multiple hidden></label>
         <span class="small muted">${Z("或者输入一段文字试试容错：", "หรือพิมพ์ข้อความลองดูการแก้คำผิด:")}</span>
         <input id="rcg-txt" placeholder="A1-O2-O3 / 3DPOOO1 WH" style="width:220px" data-notr><button class="mini" id="rcg-txt-go">${Z("认", "ตรวจ")}</button></div>
-        <div id="rcg-ocr-out" style="margin-top:8px"></div></div>`;
+        <div id="rcg-ocr-out" style="margin-top:8px"></div></div>
+      <div class="card"><div class="row between wrap gap"><h3>🧠 ${Z("员工确认过的参考照片", "รูปอ้างอิงที่พนักงานยืนยันแล้ว")}</h3>
+        <span class="row gap"><input id="rcg-lq" placeholder="${Z("SKU 或产品编号（空 = 全部）", "SKU หรือรหัสสินค้า (ว่าง = ทั้งหมด)")}" style="width:220px" data-notr><button class="mini" id="rcg-lgo">${Z("查看", "ดู")}</button></span></div>
+        <p class="small muted">${Z("员工在手机上点「就是它」的照片会变成参考图。认错存错了的：删掉，或者改到正确的 SKU（参考图马上重算）。",
+          "รูปที่พนักงานกด「ใช่อันนี้」บนมือถือจะกลายเป็นภาพอ้างอิง ถ้าบันทึกผิด: ลบ หรือเปลี่ยนเป็น SKU ที่ถูก (คำนวณภาพอ้างอิงใหม่ทันที)")}</p>
+        <div id="rcg-learned"></div></div>`;
     bindStatus(root, show);
+    const lg = () => window.RECOG && RECOG.learned($("#rcg-learned"), $("#rcg-lq").value.trim());
+    $("#rcg-lgo").onclick = lg;
+    $("#rcg-lq").onkeydown = (e) => { if (e.key === "Enter") lg(); };
+    lg();
     $("#rcg-files").onchange = async (e) => {
       const files = [...e.target.files]; e.target.value = "";
       for (const f of files) await testOne(f);

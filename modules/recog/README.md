@@ -7,12 +7,17 @@
 
 - **手机页 /m**（浏览器和安卓 App）：扫码输入框旁边「📷 识别」→「拍照识别产品」或「拍照读文字」（脚本 `ui/recog_ui.js` + `ui/m_recog.js`，
   `modules/mobile/ui/m.html` 里加载；认出来的码 `SCAN.feed(码, "photo")`）。
-- **电脑 / 平板网页**：打包核对（`#pk-code`）、发货交接（`#ho-code`，直接读面单文字）、货位页（`#loc-scan`）的扫码框旁边「📷 拍照识别」（`ui/desk.js`），
-  认出来的码填进扫码框、模拟回车。
+- **电脑 / 平板网页**（`ui/desk.js`）：打包核对（`#pk-code`）、发货交接（`#ho-code`，读面单）、货位（`#loc-scan`）、移库（`#mv-scan`，读货位牌）、
+  盘点「多出来的物品编码」（`[data-add]`，只填不回车）、采购到货（`#rc-scan`）、料卷（`#sp-scan`，读字）的扫码框旁边「📷」，认出来的码填进去、模拟回车。
+  手机页 /m 所有页面（含 v2.52 的上架 / 移库）用的是同一个扫码栏，都有「📷 识别」。
 - **安卓 App 的摄像头小窗**（App 1.1）：ML Kit 同时认文字，像码的文字（正则来自 `GET /api/mobile/code-patterns`，网页登录后 `Android3D.setTextPatterns(json)` 交给 App）
   连续 2 帧读到就 `onNativeScan(文字, "text")`；网页（`scan.js` / `desk.js`）先问 `/api/recog/text` 认成系统里的码（小标「文字」）。条码照旧。
 - **系统 → 识别测试**（`ui/page.js`）：上传一批实物照片（文件名用 SKU 开头就知道正确答案）看认得准不准、一键「设为参考图」；拍照读文字测试；
   参考图状态、AI 用量。设置 → 组件与插件 里也有一张卡片。
+
+- **参考照片管理**（1.1）：识别测试页「员工确认过的参考照片」、商品 360 抽屉最后一块（老板 / 上架）：看每张照片、删掉存错的、「改 SKU」挪到正确的 SKU，参考图马上重算。
+  手机结果页选完 10 秒内有「选错了，撤销」：删掉刚存的参考照片、重新打开结果让员工重选（员工只能撤销自己 10 分钟内的；页面上已经记的要在页面上改）。
+- **认不准的颜色**（1.1）：前 3 里有随机色 / 多色 / 彩虹 / 透明的规格时，结果页提示「颜色不可靠，请对一下实物」，并且不自动用第一个（AI 选的也不）。
 
 ## 拍照找产品怎么做（NAS 上不用显卡）
 
@@ -55,7 +60,10 @@
 | 接口 | 说明 | 生产角色 |
 |---|---|---|
 | `POST /api/recog/identify`（photo, src, ai） | 拍照找产品 → `{rid, candidates[{sku, product_id, name_zh, title_th, opt1_zh, img, score, conf, ai?, via}], need_pick, ai{used, ok, pick, confidence, reason, why}, ms}` | ✓ |
-| `POST /api/recog/confirm` `{rid, sku}` | 员工选了哪个（sku 空 = 都不是）；照片存成参考图 | ✓ |
+| `POST /api/recog/confirm` `{rid, sku}` | 员工选了哪个（sku 空 = 都不是）；照片存成参考图（同一次再确认会先删掉上次存的） | ✓ |
+| `POST /api/recog/unconfirm` `{rid}` | 撤销刚才的确认（员工：自己 10 分钟内的） | ✓ |
+| `GET /api/recog/learned?q=SKU或产品编号` / `GET /api/recog/learned/<编号>/<文件>` | 员工确认过的参考照片 | ✗ |
+| `POST /api/recog/learned/delete` `{pid, file}` / `.../move` `{pid, file, sku}` | 删掉 / 改到正确的 SKU（参考图重算） | ✗ |
 | `GET /api/recog/search?q=` | 「都不是」手动搜 | ✓ |
 | `GET /api/recog/text?q=&types=` | 文字 → 系统里的码 `{candidates, best}` | ✓ |
 | `POST /api/recog/ocr`（photo） | 拍照读文字 `{barcodes, lines, engine, candidates, best}` | ✓ |
@@ -73,10 +81,15 @@
 
 ## 评估（`tests/eval_recog.py`、`tests/eval_ocr.py`，不在 run_all 里，跑一次几分钟）
 
-    python modules/recog/tests/eval_recog.py --n 3 --model <u2netp.onnx>      # 不带 --model = 没有抠图模型
+    python modules/recog/tests/eval_recog.py --n 3 --download                 # 用设置卡片的接口下载抠图模型（--model 文件 也行；都不带 = 没有模型）
     python modules/recog/tests/eval_ocr.py --n 40                             # 装了 rapidocr 才测真的 OCR
+
+装了 onnxruntime + 下载的 u2netp + rapidocr_onnxruntime（pip）时的结果（1326 张模拟照片）：前 1 79%、前 3 93%、前 8 98%（全部变化一起：48 / 75 / 89%）；
+文字容错 800 条 98% 第一个对、自动用错 0；rapidocr 真读 104 张标签图（8 种字体、±20°、模糊、反光、暗、小字、坏条码）100% 认对，每张 0.6~1 秒。
 
 ## 改动记录
 
 - 1.0（系统 v2.52.0）：新模块。拍照找产品（服务器画 3D 多角度参考图 + 产品图 + 确认过的照片；本地特征比对前 8 + AI 看图挑；前 3 让员工点；越用越准）、
   拍照读文字（条码 + 本地 OCR / AI，容错认码）、App 摄像头认文字（正则接口）、手机页 / 打包核对 / 发货交接 / 货位页的 📷 按钮、识别测试页、设置和 AI 用量。
+- 1.1（系统 v2.52.0）：员工确认过的参考照片管理（识别测试页 + 商品 360：看、删、改 SKU，参考图重算）；手机结果页「选错了，撤销」；
+  随机色 / 多色 / 透明的规格提示员工核对、不自动用；移库、盘点、采购到货、料卷的扫码框也有 📷；AI 的理由给中文 + 泰文；评估脚本 `--download` 走设置卡片的下载接口。

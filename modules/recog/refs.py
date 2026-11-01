@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import threading
 import time
 
@@ -313,6 +314,76 @@ def add_photo(pid, sku, raw):
     except Exception:  # noqa: BLE001  产品删了之类：照片留着
         pass
     return fn
+
+
+def _learn_path(pid, fn):
+    fn = os.path.basename(str(fn or ""))
+    if not fn.endswith(".jpg") or "__" not in fn:
+        return None
+    p = os.path.join(LEARN_DIR, store.safe_id(pid), fn)
+    return p if os.path.isfile(p) else None
+
+
+def list_learned(pid=None, sku=None):
+    """员工确认过的参考照片：[{pid, sku, file, at, url}]（新的在前）。pid / sku 可以只看一个产品 / 一个 SKU。"""
+    out = []
+    if not os.path.isdir(LEARN_DIR):
+        return out
+    pids = [store.safe_id(pid)] if pid else sorted(os.listdir(LEARN_DIR))
+    for p_ in pids:
+        d = os.path.join(LEARN_DIR, p_)
+        if not os.path.isdir(d):
+            continue
+        for n in os.listdir(d):
+            if not n.endswith(".jpg") or "__" not in n:
+                continue
+            s_ = n.split("__")[0]
+            if sku and s_.upper() != _safe_name(sku).upper():
+                continue
+            try:
+                at = int(n.split("__")[1].split(".")[0][:13]) // 1000
+            except (ValueError, IndexError):
+                at = int(os.path.getmtime(os.path.join(d, n)))
+            out.append({"pid": p_, "sku": s_, "file": n, "at": at, "url": f"/api/recog/learned/{p_}/{n}"})
+    out.sort(key=lambda x: -x["at"])
+    return out
+
+
+def delete_learned(pid, fn, rebuild=True):
+    p = _learn_path(pid, fn)
+    if not p:
+        raise ValueError("这张参考照片找不到了")
+    os.remove(p)
+    if rebuild:
+        _rebuild(pid)
+    return True
+
+
+def move_learned(pid, fn, new_pid, new_sku):
+    """认错了：把照片挪到正确的 SKU（可以是别的产品）。"""
+    p = _learn_path(pid, fn)
+    if not p:
+        raise ValueError("这张参考照片找不到了")
+    d = os.path.join(LEARN_DIR, store.safe_id(new_pid))
+    os.makedirs(d, exist_ok=True)
+    nf = f"{_safe_name(new_sku)}__{fn.split('__', 1)[1]}"
+    shutil.move(p, os.path.join(d, nf))
+    _rebuild(pid)
+    if new_pid != pid:
+        _rebuild(new_pid)
+    return nf
+
+
+def _rebuild(pid):
+    try:
+        build_product(pid)
+    except FileNotFoundError:          # 产品删了：只删掉它的特征
+        try:
+            os.remove(os.path.join(REF_DIR, store.safe_id(pid) + ".npz"))
+        except OSError:
+            pass
+        with _lock:
+            _idx["key"] = None
 
 
 def learned_count():

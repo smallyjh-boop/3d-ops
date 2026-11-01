@@ -303,7 +303,8 @@ def text_image(text, rng, angle=0, blur=0.0, glare=False, dark=False, barcode=Fa
 
 # ---------------- 在测试数据里建产品（3D 模型 + 颜色规格，可选白底产品图） ----------------
 COLOR_CODE = {"白色": "WH", "黑色": "BK", "灰色": "GY", "红色": "RD", "粉色": "PK", "紫色": "PU", "蓝色": "BL", "天蓝色": "SB",
-              "绿色": "GN", "黄色": "YL", "橙色": "OR", "金色": "GD", "荧光绿": "C1"}
+              "绿色": "GN", "黄色": "YL", "橙色": "OR", "金色": "GD", "荧光绿": "C1",
+              "透明": "CL", "随机颜色": "RND", "多色": "MC"}
 
 
 def make_product(pid, name, tris, colors, image_colors=(), extra_images=()):

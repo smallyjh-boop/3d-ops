@@ -18,7 +18,7 @@ MODULE = {
     "id": "recog",
     "name_zh": "拍照识别（产品 / 文字）",
     "name_th": "ถ่ายรูปจดจำ (สินค้า / ตัวอักษร)",
-    "version": "1.0",
+    "version": "1.1",
     "desc_zh": "拍照找产品（没有条码的产品拍一下就知道是哪个 SKU）；拍照读货位牌 / 面单上的字；安卓 App 摄像头也认文字。",
     "desc_th": "ถ่ายรูปหาสินค้า (สินค้าไม่มีบาร์โค้ด ถ่ายรูปก็รู้ว่าเป็น SKU ไหน) ถ่ายรูปอ่านป้ายตำแหน่ง / ใบปะหน้า กล้องในแอป Android ก็อ่านตัวอักษรได้",
     "depends": [],
@@ -39,7 +39,7 @@ MODULE = {
                         "recog_ocr_ai": True},
     "public_paths": ["/m/recog/m_recog.js", "/m/recog/recog_ui.js"],     # 手机页登录前就加载的脚本（没有数据）
     "production_allow": [("GET", r"^/api/recog/(search|text|disp/|query/|status$)"),
-                         ("POST", r"^/api/recog/(identify|confirm|ocr)$")],
+                         ("POST", r"^/api/recog/(identify|confirm|unconfirm|ocr)$")],
     "owner_only": [("POST", r"^/api/recog/model/")],
     "startup": _start,
     "ui": {"html": "page.html", "page_js": ["page.js"], "boot_js": ["recog_ui.js", "desk.js"], "css": []},
