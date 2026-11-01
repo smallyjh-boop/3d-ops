@@ -4,23 +4,12 @@
 2026-11-01
 
 ## 当前状态
-- 已发布：v2.52.0（main，2026-11-01）
-- 测试机已装 OrcaSlicer 2.3.1（/opt/orca，PATH 里 orca-slicer），v20_test 和 model/t_printplan_orca 能真切片
-- v2.53.0（开发分支，未发版）已合入：
-  1. AI 接口统一管理：core/ai/ + modules/ai（系统 → AI 接口、AI 用量）；调用走 ai_copy.call(ai_copy.tcfg(cfg, "任务"), …) / ai.image；
-     旧键 ai_provider/ai_api_key/image_* 仍是默认 AI；save_config 改旧键会同步（conf.sync_legacy）
-  2. 场景图改进：core/scene_ai.py + goods ui/scenegen.js（候选 data/scene_cand/<产品>/），批量在产品列表勾选栏（真实出图服务商未线上验证）
-  3. 「返回」回到原来的地方：static/nav.js（NAV.keep 记模块状态），测试 t_nav253
-  4. 模型区：展示 / 打印分开、组装选零件 + 几何自动组合 mating.py、默认收起、按规格、一键切片、爆炸图、撤销（modules/model/README 1.3，截图脚本 tests/ui/shot253.js）
-  5. 仓库一本库存按区管：modules/inv/flows.py（料卷货位、生产区、待检 / 退货 / 次品 / 暂存区、打包台扣包材）；待检 / 退货 / 次品区成品不算可售（flows.unavailable_qty）；
-     打印机设置改动广播 printers.changed 立即同步生产区
-  6. 自动分组：产品库 / 采集箱 / 候选池（清理 + 回收站）/ 上架工作台，共用 static/groups.js + core/prodgroups.py；
-     铺货到第二个店铺记录在 p["lazada_api_shops"]（未在真店铺验证）
-  7. 库存同步重做：modules/listing/stocksync.py + stockadapters.py（Lazada update_price_quantity，Shopee / TikTok 先导出表）
-  8. 平台费率引擎：core/feerates.py（Lazada 财务流水 / Shopee 导入报表 → 店铺×类目×费用项的真实费率，30/90 天快照，回退链 店铺×类目 → 店铺 → 类目默认 → 平台默认）；
-     pricing.price_variant / price_product 多 platform、shop 参数并返回 fee 拆分；新页面 财务 → 平台费率（fin_fees）；Shopee 7 天没导入 / 费率变动 > 0.5 个百分点进待办；
-     测试 modules/fin/tests/t_feerates253.py。旧 platform_fee_rate / shopee_fee_rate 就是平台默认费率（原值保留）
-- 待做：打印机「网络诊断」按钮 → reviewer 审查 → 全量测试 → 发 v2.53.0
+- 已发布：v2.53.0（main，2026-11-01）：AI 接口统一管理、场景图、返回回原处、模型区（按规格 / 组装）、仓库全部进货位、自动分组、
+  库存同步重做（自动推送总开关默认关）、动态平台费率、生产 / 试打 / 打印测试、打印机网络诊断
+- 测试机已装 OrcaSlicer 2.3.1（/opt/orca，PATH 里 orca-slicer），v20_test 和真切片测试能跑
+- 老板 NAS：两个网口同网段（qvs0 192.168.31.2 没插线），临时删了路由；需要在 QNAP 把网口 1 改 DHCP 才能永久生效
+- 打印机：P1S（拓竹局域网）已连上；K1 Max 原厂固件能读状态，发送打印待「打印测试」验证；K1C 待填 IP
+- 下一步：等老板反馈；用户需要：核对库存同步对照表后再开自动推送、真机打印测试、真实照片测识别
 
 ## 已知问题 / 坑
 - 测试临时目录 /tmp/3dops-test-* 很大（每个约 0.8–1 GB），磁盘满时要清理
