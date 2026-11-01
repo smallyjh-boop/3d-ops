@@ -847,6 +847,14 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
     plate = next((x for x in plan["plates"] if x["id"] == plate_id), None)
     if not plate:
         raise ValueError("没有这一盘（刷新一下）")
+    # 整个文件放上盘、颜色来自文件（MakerWorld / 拓竹涂色 3MF）：导出时只能写「每个零件一个槽」，涂色会丢 → 不切，说清楚
+    from core import modellib
+    for it in plate.get("items") or []:
+        if it.get("part") in (None, ""):
+            ci = ((modellib._entry(p, it["id"]) or {}).get("info") or {}).get("colors") or {}
+            if ci.get("multicolor"):
+                raise ValueError("这一盘里有自带颜色的 3MF（涂色 / 多色项目文件），程序切会丢掉文件里的颜色。"
+                                 "请在电脑上用 Bambu Studio 打开原文件切片，再上传切片文件；或者把它拆成零件摆盘、每个零件选槽后再切。")
     names = [x.get("name") for x in cfg.get("printers") or []]
     if printer_idx is None:
         printer_idx = names.index(plate["printer"]) if plate["printer"] in names else 0

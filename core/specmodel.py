@@ -378,8 +378,11 @@ def check_auto_slice(prod):
     """程序自动切片前检查：多色模型做不了，返回说明（空 = 可以）。"""
     ci = colors_of(prod)
     if ci and ci.get("multicolor"):
-        return ("这是多色模型，程序不能自动切多色。请在电脑上用 Bambu Studio 打开这个模型文件切片，再上传切片文件。"
-                "需要的耗材：" + color_guide(ci))
+        if ci.get("painted"):
+            return ("这是涂色的多色模型，程序切会丢掉涂色。请在电脑上用 Bambu Studio 打开这个模型文件切片，再上传切片文件。"
+                    "需要的耗材：" + color_guide(ci))
+        return ("这是多色模型（不同零件不同颜色），这里的自动切片只能切单色。请到「打印方案」里摆盘、给每个零件选 AMS 槽，"
+                "再点「按这一盘切片」。需要的耗材：" + color_guide(ci))
     return ""
 
 

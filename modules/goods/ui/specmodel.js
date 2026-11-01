@@ -41,7 +41,9 @@
           <td class="nowrap"><button class="mini" data-spm-fill="${esc(s.spec)}">${Z("按模型填克数", "ใส่กรัมตามโมเดล")}</button>
             ${opts.recipe !== false ? `<button class="mini" data-spm-recipe="${esc(s.spec)}">${Z("打印方案", "แผนการพิมพ์")}</button>` : ""}</td></tr>`).join("") + "</tbody></table>"
         : ""}
-      ${mc.length ? `<div class="warn-box small">🎨 <b>${Z("多色模型", "โมเดลหลายสี")}</b>：${Z("程序不能自动切多色。请在电脑上用 Bambu Studio 打开模型文件切片，再上传切片文件。", "ระบบสไลซ์หลายสีอัตโนมัติไม่ได้ ให้สไลซ์ใน Bambu Studio แล้วอัปโหลด")}
+      ${mc.length ? `<div class="warn-box small">🎨 <b>${Z("多色模型", "โมเดลหลายสี")}</b>：${mc.some((x) => x.colors.painted)
+          ? Z("涂色的多色模型：程序切会丢掉涂色，请在电脑上用 Bambu Studio 打开模型文件切片，再上传切片文件。", "โมเดลลงสีหลายสี: ระบบสไลซ์จะทำให้สีหาย ให้สไลซ์ใน Bambu Studio แล้วอัปโหลดไฟล์")
+          : Z("不同零件不同颜色：到上面「🧩 打印方案」摆盘、给每个零件选 AMS 槽，再点「按这一盘切片」。", "แต่ละชิ้นคนละสี: ไปที่ \"🧩 แผนการพิมพ์\" ด้านบน จัดวางและเลือกช่อง AMS ให้แต่ละชิ้น แล้วกด \"สไลซ์ถาดนี้\"")}
         ${mc.map((x) => `<div><span data-notr>${esc(x.name)}</span>：<span data-notr>${esc(x.color_guide)}</span></div>`).join("")}</div>` : ""}
       ${!d.has_specs && mainE && (mainE.parts || []).length > 1 ? `<div class="row gap wrap" style="margin:6px 0"><button class="mini" data-spm-flat="">📐 ${Z("主模型分体平放", "วางแยกชิ้นโมเดลหลัก")}</button>
         <span class="small muted">${Z(`主模型有 ${mainE.parts.length} 个组件：每个按推荐方向平放排一盘，并让 AI 检查`, `มี ${mainE.parts.length} ชิ้น`)}</span></div>` : ""}
