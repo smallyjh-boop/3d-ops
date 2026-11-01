@@ -49,7 +49,15 @@ ok("武器" in ex("Pistol replica") and ex("Gun holder for wall") == "", "weapon
 ok("食物" in ex("Coffee mug") and ex("Spoon rest") == "", "food contact excluded, spoon rest ok")
 ok("成人" in ex("NSFW figure"), "adult excluded")
 ok(ex("Pikachu planter") == rules.EX_IP and ex("ที่วาง Stitch") == rules.EX_IP, "brand / anime excluded")
-ok(ex("Cable clip", {"single_color": False}) == rules.EX_MULTI, "multi-colour excluded")
+# v2.52：多色不再排除，只标「多色（需要 AMS）」并扣生产效率 / 利润分
+ok(ex("Cable clip", {"single_color": False}) == "", "multi-colour no longer excluded")
+_pm = rules.parts({"title": "Cable clip", "metrics": {}}, {"single_color": False, "est_minutes": 60, "est_grams": 20, "price_low": 99, "price_high": 129},
+                  load_config(), cost_fn=lambda g, h: 20)[0]
+_ps = rules.parts({"title": "Cable clip", "metrics": {}}, {"single_color": True, "est_minutes": 60, "est_grams": 20, "price_low": 99, "price_high": 129},
+                  load_config(), cost_fn=lambda g, h: 20)[0]
+ok(_pm["production"] == _ps["production"] - rules.MULTI_PROD_PENALTY and _pm["profit"] <= _ps["profit"] - rules.MULTI_PROFIT_PENALTY + 0.5,
+   f"multi-colour lowers production / profit {_pm} vs {_ps}")
+ok(rules.flags({"single_color": False}) == [rules.FLAG_MULTI] and rules.flags({"single_color": True}) == [], "multi-colour flag")
 ok("打印时间太长" in ex("Cable clip", {"est_minutes": 600}), "over-long print excluded")
 save_config({"cur_exclude_kids": False})
 ok(ex("Rattle toy for kids") == "", "kids rule can be switched off")

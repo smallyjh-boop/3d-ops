@@ -104,12 +104,18 @@
     if (!os.length) return '<span class="muted small">—</span>';
     return `<select data-mlori>${os.map((o) => `<option value="${o.key}" ${o.key === src.best ? "selected" : ""}>${ORI[o.key] || o.key}${o.key === src.best ? "（推荐）" : ""}${o.level === "bad" ? " ⚠" : ""}</option>`).join("")}</select>`;
   }
+  // v2.52：风险按编号翻译（以前误用了 L()，表格里显示成「risk.contact_warn」）；编号没有翻译时显示中文原文
+  function riskText(r) {
+    if (!r.code || !window.TR) return r.text || r.code || "";
+    const t = TR(r.code, r.vars || {});
+    return t && t !== r.code ? t : (r.text || r.code);
+  }
   function riskHtml(src, key) {
     const o = ((src && src.orients) || []).find((x) => x.key === key);
     if (!o) return "";
     const lv = LV[o.level] || LV.ok;
     return `<span class="pill ${lv[0]}">${lv[1]}</span> <span class="small muted">${esc(TR("lib.orient_line", { size: mm(o.size_mm), c: o.contact_cm2, o: o.overhang_cm2 }))}</span>` +
-      (o.risks || []).map((r) => `<div class="small ${r.level === "bad" ? "bad" : "warn"}">${r.level === "bad" ? "⚠" : "•"} ${esc(r.code ? L(r.code, r.vars) : r.text)}</div>`).join("");
+      (o.risks || []).map((r) => `<div class="small ${r.level === "bad" ? "bad" : "warn"}">${r.level === "bad" ? "⚠" : "•"} ${esc(riskText(r))}</div>`).join("");
   }
   function srcOf(id, part) {
     const i = LIB.items.find((y) => y.id === id) || {};

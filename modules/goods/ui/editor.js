@@ -65,6 +65,7 @@ async function renderEditor() {
   if (window.RECIPE) { const rw = $("#recipe-wrap"); if (rw && rw.open) RECIPE.mount($("#recipe-box"), P.id); else if ($("#recipe-box")) $("#recipe-box").dataset.pid = ""; }
   renderVariants(); renderImages();
   renderModel();
+  if (window.PLAN) PLAN.mountEditor().catch((e) => console.warn("打印方案", e));     // v2.52 打印方案（生产用）
   renderSource();
   renderCuratorCopy();
   await renderCategory();
@@ -650,7 +651,9 @@ async function refreshPricing() {
     const opt = (P.variants[i].opt1_zh || "").trim();
     tr.querySelector(".c-sku").innerHTML = esc(P.variants[i].sku || res.skus[i]) +
       (opt && !code ? '<br><span class="warn" title="不在颜色表里，用了自动代码。可到设置页颜色表添加">非标准颜色</span>' : "");
-    tr.querySelector(".c-cost").innerHTML = `<span title="材料 ${c.material} + 机时 ${c.machine} + 包材 ${c.packaging} + 失败损耗 ${c.failure}">${c.total}</span>`;
+    // v2.52 多色：成本按颜色拆分（打印方案算的每种颜色克数 + 换色冲刷废料）
+    const pcs = (c.per_colour || []).map((x) => `${x.colour} ${x.material} ${x.grams}g${x.purge_g ? "+" + x.purge_g : ""} = ${x.cost}`).join("；");
+    tr.querySelector(".c-cost").innerHTML = `<span title="材料 ${c.material} + 机时 ${c.machine} + 包材 ${c.packaging} + 失败损耗 ${c.failure}${pcs ? "\n" + pcs : ""}">${c.total}</span>${pcs ? ` <span class="small" title="${esc(pcs)}" data-notr>🎨</span>` : ""}`;
     tr.querySelector(".c-sug").textContent = r.suggested_price;
     tr.querySelector(".c-final").innerHTML = `<b>${r.final_price}</b>` + (r.list_price !== r.final_price ? `<br><span class="muted small">划线 ${r.list_price}</span>` : "");
     tr.querySelector(".c-profit").textContent = r.profit;

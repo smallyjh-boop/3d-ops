@@ -70,7 +70,36 @@ def init():
             c.execute(f"ALTER TABLE jobs ADD COLUMN {col} {typ}")
             if col == "qty_done":     # 老数据：已经打完的任务
                 c.execute("UPDATE jobs SET qty_done=qty WHERE status IN ('post','packed','done')")
+    rcols = {r[1] for r in c.execute("PRAGMA table_info(print_runs)")}
+    if "colors" not in rcols:      # v2.52 多色：这一盘每种颜色用多少克（JSON），打完按颜色扣耗材
+        c.execute("ALTER TABLE print_runs ADD COLUMN colors TEXT")
     c.commit()
+
+
+# ---------------- v2.52 多色（打印方案在 3D 模型模块：modules.public("model")） ----------------
+def job_colours(product_id, sku, color=""):
+    """这个任务每件要用的颜色：[{colour, material, grams}]（按打印方案；没有方案 / 模块关着 → []，当单色）。"""
+    from . import modules
+    pp = modules.public("model")
+    if not pp or not product_id:
+        return []
+    try:
+        return pp.job_colours(product_id, sku, color) or []
+    except Exception:  # noqa: BLE001  方案读不了不影响排单
+        return []
+
+
+def needs_multicolor(cols):
+    return len({c.get("colour") for c in cols or [] if c.get("colour")}) > 1
+
+
+def ams_text(cols, lang="zh"):
+    """「AMS 槽 1 白 PLA · 槽 2 黑 PLA」"""
+    if not needs_multicolor(cols):
+        return ""
+    if lang == "th":
+        return " · ".join(f"{'AMS ' if i == 0 else ''}ช่อง {i + 1} {c['colour']} {c['material']}" for i, c in enumerate(cols))
+    return " · ".join(f"{'AMS ' if i == 0 else ''}槽 {i + 1} {c['colour']} {c['material']}" for i, c in enumerate(cols))
 
 
 def _now():
@@ -272,10 +301,16 @@ def schedule():
                         (COALESCE(j.qty_done,0)>0) DESC, COALESCE(o.ship_by, 9e12), COALESCE(o.order_time, j.created_at), j.id""").fetchall()
     overhead = float(cfg.get("est_overhead_h") or 0.15)
     no_file_penalty = float(cfg.get("no_file_penalty_h") or 6) * 3600
+    cc = {}
     for j in jobs:
         best = None
         need_tech = fleet.job_tech(j["material"])
         fits = [fleet.tech_of(printers[i]) == need_tech for i in range(len(avail))]
+        ck = (j["product_id"], j["sku"], j["color"])
+        if ck not in cc:
+            cc[ck] = needs_multicolor(job_colours(*ck))
+        if cc[ck]:          # v2.52：要多色的任务只排给有 AMS / 多色的打印机
+            fits = [f and fleet.is_multicolor(printers[i]) for i, f in enumerate(fits)]
         pinned = j["pin"] and j["printer"] is not None and j["printer"] < len(avail) and usable[j["printer"]] and fits[j["printer"]]
         plans = {i: plan_for(j, i, names) for i in range(len(avail)) if usable[i] and fits[i] and (not pinned or i == j["printer"])}
         if not plans:      # 没有这种类型的打印机（例如树脂件但没有光固化机）：先不分配
@@ -311,8 +346,16 @@ def list_jobs(statuses=None, order_id=None):
     sql += " ORDER BY COALESCE(j.printer, 99), COALESCE(j.planned_start, 9e12), j.id"
     out = []
     prs = load_config().get("printers") or []
+    cc = {}
     for r in c.execute(sql, args):
         d = dict(r)
+        ck = (d.get("product_id"), d.get("sku"), d.get("color"))
+        if ck not in cc:
+            cc[ck] = job_colours(*ck)
+        if needs_multicolor(cc[ck]):          # v2.52：多色任务卡片显示「AMS 槽 1 白 PLA · 槽 2 黑 PLA」
+            d["colours"] = cc[ck]
+            d["ams_line"] = ams_text(cc[ck])
+            d["ams_line_th"] = ams_text(cc[ck], "th")
         pi = d.get("printer")
         d["printer_code"] = (prs[pi].get("code") or "") if pi is not None and 0 <= pi < len(prs) else ""
         d["printer_model"] = (prs[pi].get("name") or "") if pi is not None and 0 <= pi < len(prs) else ""
@@ -547,7 +590,8 @@ def send_options(job_id, printer_idx=None):
                           + (f"；一盘最多 {capacity} 个，剩下的下一盘再打" if remaining + merge_total > capacity else ""))}
     best = next((f for f in usable), next((f for f in files if f.get("machine_ok", True)), files[0] if files else None))
     mcheck = material_check(j, print_files.ensure_params(best) if best else None, idx)
-    return {"material_check": mcheck,
+    cols = job_colours(j["product_id"], j["sku"], j["color"])
+    return {"material_check": mcheck, "colours": cols if needs_multicolor(cols) else [],
             "job": j, "printer": idx, "printer_name": pname, "remaining": remaining, "merge": merge, "capacity": capacity,
             "files": files, "usable_files": [f["id"] for f in usable], "has_model": bool(p and p.get("model")),
             "recipe": recipe, "recipe_zh": recipes.summary_zh(recipe) if recipe else "",
@@ -692,6 +736,14 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
     if send and mc["tray_warn"] and not confirm.get("tray_override"):
         raise ValueError(mc["tray_warn"] + "。如果料盘读数不准、你已经确认装的是对的，请勾选「料盘读数不准，我已确认」")
     j["material"] = mc["need"]
+    cols = job_colours(j["product_id"], j["sku"], j["color"])
+    multi = needs_multicolor(cols)
+    if multi:
+        from . import fleet
+        prs = load_config().get("printers") or []
+        if idx < len(prs) and not fleet.is_multicolor(prs[idx]):
+            raise ValueError(f"这个产品要多色打印（{ams_text(cols)}），「{names[idx]}」没有 AMS / 多色。"
+                             "请换一台有 AMS 的打印机（设置 → 打印机「有 AMS / 多色」）")
     # 分配件数
     alloc, left = {}, count
     for x in jobs:
@@ -704,6 +756,11 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
     extra = max(0, left)
     grams = f["grams"] if f else (j["grams_each"] or 0) * count
     hours = f["hours"] if f else (j["hours_each"] or 1) * count
+    run_cols = None
+    if multi:      # 每种颜色这一盘用多少（按打印方案的比例，总数按切片文件 / 任务克数）
+        tot = sum(x["grams"] for x in cols) * count
+        k = (float(grams) / tot) if grams and tot else 1.0
+        run_cols = [{"colour": x["colour"], "material": x["material"], "grams": round(x["grams"] * count * k, 1)} for x in cols]
     remote = ""
     warning = ""
     if send:
@@ -711,6 +768,14 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
             raise ValueError("没有切片文件，不能发送")
         info = codes.color_hex(load_config()).get(j["color"] or "") or {}
         slot = tray
+        if multi and slot in (None, ""):        # v2.52 多色：每个颜色在 AMS 里找最接近的料盘（ams_mapping）
+            cmap = codes.color_hex(load_config())
+            slot = []
+            for x in run_cols:
+                m = pr.match_tray(idx, (cmap.get(x["colour"]) or {}).get("hex"), x["material"])
+                if not m or (m[2] > 60 and not force_color):
+                    raise ValueError(f"打印机 AMS 里没有接近「{x['colour']}」的料（需要：{ams_text(cols)}）。请先装好料，或选择料盘后再发送")
+                slot.append(int(m[0]))
         if slot in (None, ""):
             m = pr.match_tray(idx, info.get("hex"), j["material"] or "")
             if m:
@@ -718,16 +783,18 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
                 if m[2] > 60 and not force_color:
                     raise ValueError(f"打印机料盘里没有接近「{j['color']}」的颜色（最接近的是 {m[1].get('label')}）。"
                                      f"请先换料，或选择料盘后再发送")
-        warning = materials.check_job_stock(grams or 0, j["material"], j["color"], idx)
+        warning = materials.check_job_stock(grams or 0, j["material"], j["color"], idx) if not multi else "；".join(
+            w for w in (materials.check_job_stock(x["grams"], x["material"], x["colour"], idx) for x in run_cols) if w)
         rname = f"R{_now():.0f}"[-7:] + "_" + os.path.splitext(f["filename"].replace(".gcode.3mf", ".3mf"))[0][:40]
         rname += ".gcode.3mf" if f["kind"] == "3mf" else ".gcode"
-        remote = pr.send_file(idx, print_files.path_of(f), rname, f["kind"], None if slot in (None, "") else int(slot))
+        remote = pr.send_file(idx, print_files.path_of(f), rname, f["kind"], None if slot in (None, "", []) else (slot if isinstance(slot, list) else int(slot)))
         pr.mark_sent(idx, remote)
     now = _now()
     rid = c.execute("""INSERT INTO print_runs(printer, product_id, sku, name, color, material, file_id, count, grams, hours, status,
-                       alloc, extra, sent, remote_file, started_at, username) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       alloc, extra, sent, remote_file, started_at, username, colors) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (idx, j["product_id"], j["sku"], j["name"], j["color"], j["material"], f["id"] if f else None, count,
-                     grams, hours, "printing", json.dumps(alloc), extra, 1 if send else 0, remote, now, user)).lastrowid
+                     grams, hours, "printing", json.dumps(alloc), extra, 1 if send else 0, remote, now, user,
+                     json.dumps(run_cols, ensure_ascii=False) if run_cols else None)).lastrowid
     for jid in alloc:
         c.execute("UPDATE jobs SET status='printing', run_id=?, printer=?, started_at=COALESCE(started_at, ?), pin=1, alert='', "
                   "updated_at=?, updated_by=? WHERE id=?", (rid, idx, now, now, user, int(jid)))
@@ -737,7 +804,25 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
             _olog(x["order_id"], user, f"开始打印 {names[idx]}（这一盘 {alloc[str(x['id'])]} 个）",
                   "已发送到打印机" if send else "手动开始")
     schedule()
-    return {"run_id": rid, "count": count, "alloc": alloc, "extra": extra, "warning": warning, "file": f}
+    return {"run_id": rid, "count": count, "alloc": alloc, "extra": extra, "warning": warning, "file": f, "colours": run_cols}
+
+
+def _consume(r, frac, reason, user, failed=False):
+    """v2.52：扣耗材。多色的一盘按每种颜色分别扣（库存模块的公开接口 inventory.consume_production），单色照旧。"""
+    cols = []
+    try:
+        cols = json.loads(r.get("colors") or "null") or []
+    except (TypeError, ValueError):
+        cols = []
+    if cols:
+        for x in cols:
+            g = round(float(x.get("grams") or 0) * frac, 1)
+            if g > 0:
+                inventory.consume_production(x.get("material") or r["material"], x.get("colour") or r["color"], g, reason, user,
+                                             r["printer"], f"run:{r['id']}", failed=failed)
+        return
+    inventory.consume_production(r["material"], r["color"], round((r["grams"] or 0) * frac, 1) if failed else (r["grams"] or 0),
+                                 reason, user, r["printer"], f"run:{r['id']}", failed=failed)
 
 
 def _drop_cancelled_partial(c, user=""):
@@ -768,7 +853,7 @@ def finish_run(rid, user="", actual_count=None):
         return r
     alloc = json.loads(r["alloc"] or "{}")
     now = _now()
-    inventory.consume_production(r["material"], r["color"], r["grams"] or 0, f"打印完成 批次#{rid}", user, r["printer"], f"run:{rid}")
+    _consume(r, 1.0, f"打印完成 批次#{rid}", user)
     for jid, n in alloc.items():
         j = c.execute("SELECT * FROM jobs WHERE id=?", (int(jid),)).fetchone()
         if not j:      # v2.39：任务已经不在了（订单被删）→ 打好的件进成品库存，别中途报错（报错时耗材已经扣了）
@@ -808,7 +893,7 @@ def fail_run(rid, reason="", note="", user=""):
     prog = pr.get_status(r["printer"]).get("progress")
     frac = (float(prog) / 100) if isinstance(prog, (int, float)) and prog > 0 else 0.5
     grams = round((r["grams"] or 0) * frac, 1)
-    inventory.consume_production(r["material"], r["color"], grams, f"打印失败 批次#{rid}", user, r["printer"], f"run:{rid}", failed=True)
+    _consume(r, frac, f"打印失败 批次#{rid}", user, failed=True)
     now = _now()
     c.execute("INSERT INTO failures(ts, run_id, printer, product_id, sku, reason, note, grams, username) VALUES(?,?,?,?,?,?,?,?,?)",
               (now, rid, r["printer"], r["product_id"], r["sku"], reason or "其他", note, grams, user))

@@ -140,7 +140,60 @@ def parse_gcode_text(text, material="PLA"):
             hours = int(m.group(1)) / 3600
     if grams is None and hours is None:
         return None
-    return {"grams": round(grams, 1) if grams else None, "hours": round(hours, 2) if hours else None}
+    out = {"grams": round(grams, 1) if grams else None, "hours": round(hours, 2) if hours else None}
+    mc = gcode_filaments(text, material)          # v2.52：多色 —— 每个耗材的克数、冲刷废料、换色次数
+    if len(mc.get("filaments") or []) > 1:
+        out.update(mc)
+    return out
+
+
+def slice_info_filaments(xml):
+    """拓竹 / Orca 切片文件 Metadata/slice_info.config 里每个耗材的用量：
+    <filament id="1" type="PLA" color="#FFFFFF" used_m="1.23" used_g="3.45" />。返回 [{slot, type, hex, grams, meters}]（按槽号）。"""
+    out = {}
+    for m in re.finditer(r"<filament\b([^>]*)/?>", xml or ""):
+        a = dict(re.findall(r'([\w:]+)="([^"]*)"', m.group(1)))
+        try:
+            slot = int(a.get("id") or 0)
+        except ValueError:
+            continue
+        if slot <= 0:
+            continue
+        try:
+            g, mm = float(a.get("used_g") or 0), float(a.get("used_m") or 0)
+        except ValueError:
+            continue
+        cur = out.setdefault(slot, {"slot": slot, "type": a.get("type") or "", "hex": (a.get("color") or "")[:7], "grams": 0.0, "meters": 0.0})
+        cur["grams"] = round(cur["grams"] + g, 2)       # 几个盘的同一个耗材加在一起
+        cur["meters"] = round(cur["meters"] + mm, 3)
+    return [out[k] for k in sorted(out)]
+
+
+def gcode_filaments(text, material="PLA"):
+    """G-code 头 / 尾注释里的多耗材信息（OrcaSlicer / Bambu Studio / PrusaSlicer）：
+    ; filament used [g] = 3.45, 1.20      每个耗材的克数
+    ; total filament used for wipe tower [g] = 1.1    擦料塔（冲刷）用料
+    ; flush ... / ; total filament change = 12        换色次数（有的版本写在 ; filament change times / total toolchanges）
+    返回 {filaments: [{slot, grams}], purge_g, changes}（没有的项不返回）。"""
+    out = {}
+    m = re.search(r";\s*filament used \[g\]\s*[:=]\s*([\d.,\s]+)", text or "", re.I)
+    if m:
+        nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", m.group(1))]
+        if nums:
+            out["filaments"] = [{"slot": i + 1, "grams": round(g, 2)} for i, g in enumerate(nums)]
+    for pat in (r";\s*total filament used for wipe tower \[g\]\s*[:=]\s*([\d.]+)",
+                r";\s*(?:total )?flush(?:ed)? (?:volume|filament)[^=:\n]*\[g\]\s*[:=]\s*([\d.]+)"):
+        m = re.search(pat, text or "", re.I)
+        if m:
+            out["purge_g"] = round(float(m.group(1)), 2)
+            break
+    for pat in (r";\s*total filament change\s*[:=]\s*(\d+)", r";\s*filament change times\s*[:=]\s*(\d+)",
+                r";\s*total toolchanges\s*[:=]\s*(\d+)"):
+        m = re.search(pat, text or "", re.I)
+        if m:
+            out["changes"] = int(m.group(1))
+            break
+    return out
 
 
 def _scan_text(data):
@@ -162,9 +215,21 @@ def parse_sliced_file(path, material="PLA"):
                 weights = [float(x) for x in re.findall(r'key="weight"\s+value="([\d.]+)"', xml)]
                 preds = [float(x) for x in re.findall(r'key="prediction"\s+value="([\d.]+)"', xml)]
                 if weights or preds:
-                    return {"grams": round(sum(weights), 1) if weights else None,
-                            "hours": round(sum(preds) / 3600, 2) if preds else None,
-                            "source": "slice_info", "plates": max(len(weights), len(preds))}
+                    out = {"grams": round(sum(weights), 1) if weights else None,
+                           "hours": round(sum(preds) / 3600, 2) if preds else None,
+                           "source": "slice_info", "plates": max(len(weights), len(preds))}
+                    fil = slice_info_filaments(xml)          # v2.52：多色 —— 每种耗材用了多少
+                    if fil:
+                        out["filaments"] = fil
+                        if not weights:
+                            out["grams"] = round(sum(f["grams"] for f in fil), 1)
+                    gc = [n for n in names if n.lower().endswith(".gcode")]
+                    if gc:
+                        mc = gcode_filaments(_scan_text(z.read(gc[0])))
+                        for k in ("purge_g", "changes"):
+                            if mc.get(k) is not None:
+                                out[k] = mc[k]
+                    return out
             gcodes = [n for n in names if n.lower().endswith(".gcode")]
             total_g = total_h = 0.0
             found = False
@@ -640,10 +705,16 @@ def _as_stl(model_path, out_dir):
         return None
 
 
+# v2.52 多色切片：开擦料塔（冲刷换色的料）、换色时冲刷（OrcaSlicer 工艺参数）
+MULTI_OVERRIDES = {"enable_prime_tower": "1", "flush_into_infill": "1", "flush_into_support": "1"}
+
+
 def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, overrides=None, keep_to=None,
-               copies=1, orient=True, filament_name=None, filament_overrides=None):
+               copies=1, orient=True, filament_name=None, filament_overrides=None, arrange=True, filaments=None):
     """调用 OrcaSlicer 命令行切片，返回 {grams, hours, source, log}。
-    v2.20：配置（打印机 / 工艺 / 耗材）在 NAS 上算好写成文件；切片本身有电脑在线时交给电脑（core/accel），不然在 NAS 上做。"""
+    v2.20：配置（打印机 / 工艺 / 耗材）在 NAS 上算好写成文件；切片本身有电脑在线时交给电脑（core/accel），不然在 NAS 上做。
+    v2.52：arrange=False 按文件里摆好的位置切（手动摆盘）；filaments=[{material, hex}]（多色，每个 AMS 槽一个）——
+    每槽写一份耗材配置（颜色按槽），结果里带每个耗材的克数（filaments）、冲刷废料（purge_g）。多色只在本机切（不交给电脑）。"""
     from . import accel
     from . import orca_profiles as op
     exe, idx, machine, process, filament = resolve_profiles(cfg, printer_index, material, filament_name)
@@ -655,6 +726,18 @@ def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, ov
             mname = mcfg.get("name") or machine
             p_path, _ = op.write_flat(idx, process, "process", out_dir, mname, overrides)
             f_path, _ = op.write_flat(idx, filament, "filament", out_dir, mname, filament_overrides)
+            if filaments and len(filaments) > 1:          # v2.52 多色：每个槽一份耗材配置（按材料选，颜色按槽）
+                fps_ = []
+                for k, fl in enumerate(filaments):
+                    _e, _i, _m, _p, fname_k = resolve_profiles(cfg, printer_index, fl.get("material") or material, None)
+                    fo = dict(filament_overrides or {})
+                    if fl.get("hex"):
+                        fo["filament_colour"] = [fl["hex"]]
+                    sub = os.path.join(out_dir, f"fil{k + 1}")
+                    os.makedirs(sub, exist_ok=True)
+                    fk, _ = op.write_flat(idx, fname_k, "filament", sub, mname, fo)
+                    fps_.append(fk)
+                f_path = ";".join(fps_)
         except op.ProfileError as e:
             raise SliceError(f"「{p.get('name')}」的配置有问题：{e}") from e
         used = f"打印机配置：{machine}\n工艺配置：{process}\n耗材配置：{filament}\n"
@@ -665,8 +748,13 @@ def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, ov
         size_mb = os.path.getsize(model_path) / 1048576
         timeout = max(timeout, min(3600, int(600 + size_mb * 30)))
         params = {"orient": bool(orient), "copies": int(copies or 1), "timeout": timeout, "material": material, "used": used,
-                  "keep": bool(keep_to), "model_name": os.path.basename(model_path)}
+                  "keep": bool(keep_to), "model_name": os.path.basename(model_path), "arrange": bool(arrange)}
         name = params["model_name"]
+        if ";" in f_path:          # 多色：几份耗材配置，只在本机切
+            result = run_cli(exe, m_path, p_path, f_path, model_path, os.path.join(out_dir, "work"), params, keep_to, model_name=name)
+            result["printer"] = printer_index
+            result["profiles"] = {"machine": machine, "process": process, "filament": filament, "filaments": len(filaments)}
+            return result
 
         def remote_done(res, files):
             if keep_to:
@@ -701,7 +789,7 @@ def run_cli(exe, m_path, p_path, f_path, model_path, out_dir, params, keep_to=No
         model_path = fixed
     out_3mf = os.path.join(out_dir, "result.gcode.3mf")
     # 注意：--export-3mf 只能写文件名（会放进 --outputdir），写完整路径会变成「目录/目录/文件」导致找不到
-    cmd = [exe, "--arrange", "1", "--orient", "1" if params.get("orient", True) else "0", "--slice", "0",
+    cmd = [exe, "--arrange", "1" if params.get("arrange", True) else "0", "--orient", "1" if params.get("orient", True) else "0", "--slice", "0",
            "--load-settings", f"{m_path};{p_path}",
            "--load-filaments", f_path,
            "--allow-newer-file",

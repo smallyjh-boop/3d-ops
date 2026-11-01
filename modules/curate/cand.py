@@ -61,7 +61,7 @@ def badge(row, cfg=None):
             est += f" · {rules.tf(ai['est_grams']):.0f}g"
     return {"score": row["score"], "parts": db.jl(row["parts"]), "excluded": row["excluded"], "excluded_th": rules.REASON_TH.get(row["excluded"], ""),
             "category": row["category"], "category_th": rules.CATEGORY_TH.get(row["category"], ""), "est": est.strip(" ·"), "measured": measured,
-            "single": ai.get("single_color"), "reason": str(ai.get("reason") or "")[:160], "reason_th": str(ai.get("reason_th") or "")[:200], "keywords": ai.get("thai_keywords") or [],
+            "single": ai.get("single_color"), "flags": rules.flags(ai), "reason": str(ai.get("reason") or "")[:160], "reason_th": str(ai.get("reason_th") or "")[:200], "keywords": ai.get("thai_keywords") or [],
             "price": f"฿{rules.tf(ai.get('price_low')):.0f}–{rules.tf(ai.get('price_high')):.0f}" if ai.get("price_low") else "",
             "ai": bool(ai), "ai_error": row["ai_error"], "status": row["status"], "product_id": row["product_id"],
             "capture_bad": row["capture_bad"], "capture_bad_th": BAD_TH.get(row["capture_bad"], ""), "refreshing": bool(row["refresh_at"])}

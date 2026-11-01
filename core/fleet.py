@@ -55,6 +55,20 @@ def tech_of(p):
     return (m or {}).get("tech", "fdm")
 
 
+def is_multicolor(p):
+    """v2.52：这台打印机能不能打多色（有 AMS / 多色）。设置里勾了就按设置；没设置时拓竹 A1 / P1S / P2S / X1 / H2 系列算能
+    （常配 AMS），P1P、创想三维 K1 / K1C / K1 Max 算不能。"""
+    v = (p or {}).get("ams")
+    if v in (True, False):
+        return v
+    if isinstance(v, str) and v.strip():
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    if tech_of(p) == "resin":
+        return False
+    m = model_info((p or {}).get("name")) or {}
+    return m.get("brand") == "bambu" and m.get("prefix") != "P1P"
+
+
 def job_tech(material):
     return "resin" if is_resin(material) else "fdm"
 CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]{0,15}$")

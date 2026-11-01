@@ -69,7 +69,7 @@ MODULE = {
             ("cur_priority", "优先类目（逗号分隔）")]),
         ("选品 · 排除规则", [
             ("cur_max_minutes", "单件打印时长上限（分钟，超过就排除）"), ("cur_max_grams", "单件克数上限"),
-            ("cur_single_color_only", "只要单色（要多色打印的排除）", "bool"), ("cur_exclude_kids", "排除儿童玩具（泰国要 TISI 认证）", "bool"),
+            ("cur_exclude_kids", "排除儿童玩具（泰国要 TISI 认证）", "bool"),
             ("cur_calibrate", "按实测（ERP 生产记录、切片）校准 AI 估算的时长 / 克数（至少 5 个样本）", "bool")]),
         ("选品 · 提醒、巡逻和下载（浏览器扩展）", [
             ("cur_alert_score", "多少分以上算高分（进今日待办）"), ("cur_alert_on", "高分新模型也推到手机（运营分析的手机提醒）", "bool"),
@@ -80,7 +80,7 @@ MODULE = {
     ],
     "config_defaults": {"cur_w_demand": 30, "cur_w_production": 25, "cur_w_profit": 15, "cur_w_competition": 10, "cur_w_popularity": 15,
                         "cur_w_listing": 5, "cur_priority": "车和摩托配件,收纳整理,宠物,植物园艺,桌面办公,手机电脑配件,替换件适配件",
-                        "cur_max_minutes": 240, "cur_max_grams": 80, "cur_single_color_only": True, "cur_exclude_kids": True, "cur_calibrate": True,
+                        "cur_max_minutes": 240, "cur_max_grams": 80, "cur_exclude_kids": True, "cur_calibrate": True,
                         "cur_alert_score": 70, "cur_alert_on": True, "cur_watch_on": True, "cur_watch_daily_cap": 30, "cur_watch_gap_min": 3,
                         "cur_watch_gap_max": 8, "cur_dl_speed": "normal", "cur_auto_download": True},
     "todo": _todo,

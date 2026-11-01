@@ -7,6 +7,12 @@
   const FST = { draft: "草稿（未复核）", reviewed: "已复核（未试打）", verified: "已试打验证" };
   let BOARD = null, PR_TIMER = null, BOARD_TIMER = null;
 
+  // v2.52 多色：「AMS 槽 1 白 PLA · 槽 2 黑 PLA」（按打印方案；只排给有 AMS 的打印机）
+  function amsLine(cols) {
+    if (!cols || cols.length < 2) return "";
+    return `<div class="small ams-line">🎨 <b>AMS</b> ${cols.map((c, i) => `${Z("槽", "ช่อง")} ${i + 1} ${H().colorTxt(c.colour)} <span class="mat-badge" data-notr>${esc(c.material)}</span>`).join(" · ")}
+      <span class="muted">${Z("（多色，只能用有 AMS 的打印机）", "(หลายสี ใช้ได้เฉพาะเครื่องที่มี AMS)")}</span></div>`;
+  }
   function show(name) {
     clearInterval(PR_TIMER); clearInterval(BOARD_TIMER);
     if (name === "production") { loadBoard(); BOARD_TIMER = setInterval(() => { if (!document.hidden && !$("#modal:not(.hidden)")) loadBoard().catch(() => {}); }, 20000); }
@@ -55,6 +61,7 @@
       ${prodHead(j)}
       <div class="jbig">${j.material ? `<span class="mat-badge" data-notr>${esc(j.material)}</span>` : ""} ${h.colorTxt(j.color)}
         <b class="qty">× ${j.remaining ?? j.qty}</b>${j.qty_done ? `<span class="small muted"> / 共 ${j.qty}，已打 ${j.qty_done}</span>` : ""} ${kind}</div>
+      ${amsLine(j.colours)}
       ${j.custom_note ? `<div class="note-flag" data-notr>✎ ${esc(j.custom_note)}</div>` : ""}
       ${j.buyer_note ? `<div class="small" data-notr>💬 ${esc(j.buyer_note)}</div>` : ""}
       ${j.note && j.kind !== "order" ? `<div class="small muted" data-notr>${esc(j.note)}</div>` : ""}
@@ -133,7 +140,8 @@
       <div id="sd-file" class="sd-box"></div>
       <div id="sd-review" class="sd-box hidden"><b>这一盘的文件还没试打验证，请人工确认：</b>
         ${o.review_items.map(([k, lab]) => `<label class="row small"><input type="checkbox" data-ri="${k}"> ${esc(lab)}</label>`).join("")}</div>
-      <label class="row bedclear"><input type="checkbox" id="sd-mat-ok"> <b>打印机里装的是 <span data-notr>${esc(o.material_check.need)}</span> ${H().colorTxt(j.color)}（已经看过料盘 / 料架）</b></label>
+      ${(o.colours || []).length > 1 ? amsLine(o.colours) : ""}
+      <label class="row bedclear"><input type="checkbox" id="sd-mat-ok"> <b>${(o.colours || []).length > 1 ? Z("AMS 里每个槽装的颜色和上面一样（已经看过料盘）", "สีในแต่ละช่อง AMS ตรงกับด้านบน (ดูถาดแล้ว)") : `打印机里装的是 <span data-notr>${esc(o.material_check.need)}</span> ${H().colorTxt(j.color)}（已经看过料盘 / 料架）`}</b></label>
       ${o.material_check.tray_warn ? `<label class="row small warn"><input type="checkbox" id="sd-tray-ok"> 料盘读数不准，我已确认装的是 <span data-notr>${esc(o.material_check.need)}</span></label>` : ""}
       <label class="row bedclear"><input type="checkbox" id="sd-clear"> <b>热床已经清空，上一盘的零件和废料都拿走了</b></label>
       <div class="row gap wrap">

@@ -286,7 +286,7 @@ const PRINTERS_CARD = () => `<div class="card cfg-group"><h3>打印机与 OrcaSl
         <label class="small">台数<input id="pr-add-n" type="number" min="1" max="50" value="1" style="width:60px"></label>
         <button id="pr-add" class="mini">＋ 添加</button>
         <span class="small muted">共 ${(CFG.printers || []).length} 台：${prCountByModel()}</span></div>
-      <table class="grid" id="printer-table"><thead><tr><th>机器编码</th><th>机型</th><th>备注（位置等）</th><th>类型</th><th>启用</th><th>每小时克数</th><th title="发送切片文件前核对：文件的喷嘴直径要和这里一样">喷嘴 mm</th><th title="填了就核对切片文件用的热床板；不填不核对">现在装的热床板</th><th>打印机配置 (machine)</th><th>工艺配置 (process)</th><th>耗材配置 (filament)</th><th></th></tr></thead><tbody>
+      <table class="grid" id="printer-table"><thead><tr><th>机器编码</th><th>机型</th><th>备注（位置等）</th><th>类型</th><th>启用</th><th title="有 AMS（自动换料系统），能打多色。多色的生产任务只排给勾了的打印机">有 AMS / 多色</th><th>每小时克数</th><th title="发送切片文件前核对：文件的喷嘴直径要和这里一样">喷嘴 mm</th><th title="填了就核对切片文件用的热床板；不填不核对">现在装的热床板</th><th>打印机配置 (machine)</th><th>工艺配置 (process)</th><th>耗材配置 (filament)</th><th></th></tr></thead><tbody>
       ${(CFG.printers || []).map((p, i) => printerRow(p, i)).join("")}
       </tbody></table>
       <datalist id="dl-machine"></datalist>
@@ -445,6 +445,13 @@ function renderSummary(s) {
 }
 const PLATES = [["", "不核对"], ["Textured PEI Plate", "纹理 PEI 板"], ["Smooth PEI Plate", "光面 PEI 板"], ["Cool Plate", "低温板"],
   ["Engineering Plate", "工程板"], ["High Temp Plate", "高温板"], ["SuperTack Plate", "超粘板"]];
+// v2.52：有 AMS / 多色（没设置过时按机型：拓竹 A1 / P1S / P2S / X1 / H2 算有，P1P、创想 K1 / K1C / K1 Max 算没有；和 core/fleet.is_multicolor 一样）
+function amsDefault(p) {
+  if (p.ams === true || p.ams === false) return p.ams;
+  if (p.tech === "resin") return false;
+  const n = String(p.name || "").toLowerCase();
+  return /bambu|^a1|p1s|p2s|x1|h2[sd]/.test(n) && !/p1p/.test(n);
+}
 function printerRow(p, i) {
   return `<tr data-i="${i}">
         <td><input data-p="code" value="${esc(p.code || "")}" placeholder="自动编号" style="width:84px" class="mono" data-notr></td>
@@ -452,6 +459,7 @@ function printerRow(p, i) {
         <td><input data-p="note" value="${esc(p.note || "")}" style="width:100px" data-notr></td>
         <td><select data-p="tech" style="width:90px"><option value="fdm" ${p.tech !== "resin" ? "selected" : ""}>FDM</option>${p.tech === "resin" || !window.MODKIT || MODKIT.enabled("resin") ? `<option value="resin" ${p.tech === "resin" ? "selected" : ""}>光固化</option>` : ""}</select></td>
         <td><input type="checkbox" data-p="enabled" ${p.enabled === false ? "" : "checked"}></td>
+        <td><input type="checkbox" data-p="ams" ${amsDefault(p) ? "checked" : ""} title="有 AMS / 多色"></td>
         <td><input data-p="g_per_h" value="${esc(p.g_per_h)}" style="width:60px"></td>
         <td>${p.tech === "resin" ? '<input type="hidden" data-p="nozzle" value="0.4"><span class="muted small">—</span>' : `<input data-p="nozzle" value="${esc(p.nozzle ?? 0.4)}" style="width:52px">`}</td>
         <td>${p.tech === "resin" ? '<input type="hidden" data-p="plate" value="">' : `<select data-p="plate">${PLATES.map(([v, l]) => `<option value="${v}" ${(p.plate || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select>`}</td>
@@ -497,6 +505,8 @@ $("#cfg-form").addEventListener("change", (e) => {
     if (m && g) g.value = m.g_per_h || 20;
     const t = tr.querySelector('[data-p="tech"]');
     if (m && t) t.value = m.tech || "fdm";
+    const am = tr.querySelector('[data-p="ams"]');
+    if (am) am.checked = amsDefault({ name: e.target.value, tech: (m && m.tech) || "fdm" });
   }
 });
 $("#cfg-form").addEventListener("click", async (e) => {

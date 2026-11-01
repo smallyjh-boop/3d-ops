@@ -109,15 +109,18 @@
 
   <div class="card" id="model-card">
     <div class="row between wrap gap">
-      <h3>③ 3D 模型（STL / 3MF）：自动算克数时长、自动出商品图</h3>
-      <div class="row gap"><button class="mini primary-lite" id="btn-model-lib" title="全部模型文件：看尺寸、选哪个当 3D 模型、多个组件合并、每个零件单独选摆放方向、预览摆盘">📚 模型库 / 摆盘</button>
+      <h3>③ 3D 模型（STL / 3MF）：展示用的 3D 和商品图 + 生产用的打印方案</h3>
+      <div class="row gap"><button class="mini primary-lite" id="btn-model-lib" title="全部模型文件：看尺寸、选哪个当 3D 模型、多个组件合并、每个零件单独选摆放方向、预览摆盘">📚 模型库（全部文件）</button>
       <label class="filebtn">上传模型文件<input id="model-input" type="file" accept=".stl,.3mf" hidden></label></div>
     </div>
     <div id="model-empty" class="muted small" data-ed-free>上传 STL 或 3MF 后，可以 360° 预览、自动估算克数和打印时长、一键生成多颜色多角度商品图和尺寸图。没有模型也可以跳过这一步。</div>
+    <section class="ed-sec ed-sec-show" id="show-sec">
+      <div class="ed-sec-h"><span class="ed-sec-tag show">🖼 展示</span><b>商品页用：3D 预览、组装好的样子、颜色效果、商品图</b>
+        <span class="muted small">（只管好看，不影响生产）</span></div>
     <div id="model-body" class="model-grid hidden">
       <div>
         <div id="viewer" class="viewer"></div>
-        <div class="muted small">拖动旋转 · 滚轮缩放 · 右键平移</div>
+        <div class="muted small">拖动旋转 · 滚轮缩放 · 右键平移 <span id="asm-badge"></span></div>
         <div class="small" style="margin-top:6px">预览颜色：</div><div id="view-chips" class="chips"></div>
         <div class="row gap wrap small print-look">
           <label class="row gap"><input type="checkbox" id="pl-on" checked> 真实打印质感（层纹、顶面走线）</label>
@@ -131,14 +134,6 @@
       </div>
       <div>
         <div id="model-info" class="small"></div>
-        <h4>克数 / 打印时长</h4>
-        <div class="row gap wrap">
-          <select id="printer-select"></select>
-          <button id="btn-est">用估算值填入全部变体</button>
-          <button id="btn-orca">OrcaSlicer 自动切片</button>
-          <label class="filebtn">导入切片文件<input id="sliced-input" type="file" accept=".gcode,.gco,.3mf" hidden></label>
-        </div>
-        <div id="est-box" class="small"></div>
         <h4>生成商品图</h4>
         <div class="row gap wrap small">
           <label class="row gap"><input type="checkbox" id="r-colors" checked> 每个颜色一张主图</label>
@@ -152,17 +147,40 @@
           <select id="snap-color" hidden></select>
         </div>
         <div id="render-progress" class="muted small"></div>
+        <div class="asm-entry" data-ed-free>
+          <h4>组装（多个零件的模型）</h4>
+          <p class="muted small">零件是分开打印的（例如 身体 + 头 + 底座）：在 3D 里用鼠标把每个零件拖到 / 转到商品照片里的位置，保存后 3D 预览和商品图都按组装好的样子显示。打印时零件还是按「打印方案」平放。</p>
+          <div class="row gap wrap"><button class="primary-lite" id="btn-asm">🧩 打开组装视图</button><span id="asm-note" class="small muted"></span></div>
+        </div>
       </div>
     </div>
-    <div id="spec-model-box" class="card-sub"></div>
+    <div id="asm-box" class="asm-box hidden" data-ed-free></div>
+    </section>
+
+    <section class="ed-sec ed-sec-plan" id="plan-sec">
+      <div class="ed-sec-h"><span class="ed-sec-tag plan">🧩 打印方案</span><b>生产用：每个规格打几盘、怎么摆、用哪几个 AMS 颜色槽；生产任务、成本、扣耗材都按这里</b></div>
+      <div id="plan-box" data-ed-free></div>
+      <details class="plan-more" id="est-wrap">
+        <summary><b>克数 / 打印时长（估算 · 切片）</b> <span class="muted small">按整个 3D 模型估算，或用 OrcaSlicer 切片、导入切片文件</span></summary>
+        <div class="row gap wrap">
+          <select id="printer-select"></select>
+          <button id="btn-est">用估算值填入全部变体</button>
+          <button id="btn-orca">OrcaSlicer 自动切片</button>
+          <label class="filebtn">导入切片文件<input id="sliced-input" type="file" accept=".gcode,.gco,.3mf" hidden></label>
+        </div>
+        <div id="est-box" class="small"></div>
+      </details>
+      <div id="spec-model-box" class="card-sub"></div>
+      <details class="recipe-wrap" id="recipe-wrap" data-needmod="prod"><summary><b>⚙ 切片参数与切片文件</b> <span class="muted small">（方向、支撑、参数、一盘几个 → 切片 → 检查 → 复核 → 试打验证）</span></summary>
+        <div id="recipe-box"></div></details>
+    </section>
+
     <div id="advice-box">
       <h4>AI 打印建议 + 产品描述</h4>
       <p class="muted small">AI 会分析模型（6 个摆放方向的悬空面积、底面接触、尺寸）和渲染图，结合你的提示词，给出：给客户看的用途/卖点描述、建议材质、摆放方向、层高、壁数、填充率、支撑和注意事项。没有模型时按产品信息和第一张图片分析。</p>
       <textarea id="advice-prompt" rows="2" placeholder="提示词（可空）：例如 放在车里用、要结实耐用、给小孩玩、要软一点、户外晒太阳、要好看的外观面…"></textarea>
       <div class="row gap" style="margin-top:6px"><button id="btn-advice" class="primary">AI 分析并生成建议</button><span id="advice-prog" class="muted small"></span></div>
       <div id="advice-out"></div>
-      <details class="recipe-wrap" id="recipe-wrap" data-needmod="prod"><summary><b>🧩 打印方案与切片文件</b> <span class="muted small">（方向、支撑、参数、一盘几个 → 切片 → 检查 → 复核 → 试打验证）</span></summary>
-        <div id="recipe-box"></div></details>
     </div>
   </div>
 

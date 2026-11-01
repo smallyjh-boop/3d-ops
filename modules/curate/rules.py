@@ -4,7 +4,8 @@
 打分的六项（每项 0–100，权重在「设置 → 商品 → 选品」）：
   demand 泰国需求 · production 生产效率（时长 / 克数 / 单色 / 零件数）· profit 利润（ERP 成本价 vs 估计售价）
   competition 竞争少 · popularity 原站热度 · listing 上架难度
-命中排除规则的（儿童玩具（TISI）、宗教、武器、接触食物、成人、品牌 / 动漫角色、多色、打印太久）标红，不推荐。
+命中排除规则的（儿童玩具（TISI）、宗教、武器、接触食物、成人、品牌 / 动漫角色、打印太久）标红，不推荐。
+v2.52：多色不再排除（有拓竹 P1S + AMS 能打多色）：标「多色（需要 AMS）」，生产效率和利润分扣一些（换色冲刷废料、时间长、只能上 AMS 机）。
 """
 import math
 import re
@@ -62,7 +63,11 @@ CATEGORY_TH = {"车和摩托配件": "อุปกรณ์รถยนต์แ
 EXCLUDE = copyrules.SENSITIVE
 EX_KIDS = EXCLUDE[0][0]
 EX_IP = "可能侵权（品牌 / 动漫角色）"
-EX_MULTI = "需要多色打印"
+EX_MULTI = "需要多色打印"            # v2.52 起不再用来排除，只留着给旧数据显示
+FLAG_MULTI = "多色（需要 AMS）"
+FLAG_TH = {FLAG_MULTI: "หลายสี (ต้องมี AMS)"}
+MULTI_PROD_PENALTY = 25     # 生产效率扣分（换色慢、只能上 AMS 机）
+MULTI_PROFIT_PENALTY = 10   # 利润扣分（冲刷废料、时间长）
 REASON_TH = {EX_KIDS: "ของเล่นเด็ก (ต้องมี มอก.)", "宗教造型（佛像等，敏感）": "รูปทรงทางศาสนา (อ่อนไหว)", "类似武器": "คล้ายอาวุธ",
              "接触食物（打印件不卫生）": "สัมผัสอาหาร (ไม่ถูกสุขอนามัย)", "成人用品": "สินค้าผู้ใหญ่", EX_IP: "อาจละเมิดลิขสิทธิ์ (แบรนด์ / ตัวการ์ตูน)",
              EX_MULTI: "ต้องพิมพ์หลายสี"}
@@ -79,7 +84,7 @@ def ip_hits(*texts):
 PART_KEYS = ("demand", "production", "profit", "competition", "popularity", "listing")
 PART_ZH = {"demand": "泰国需求", "production": "生产效率", "profit": "利润", "competition": "竞争少", "popularity": "原站热度", "listing": "上架难度"}
 
-DEFAULT_PREFS = {"cur_max_minutes": 240, "cur_max_grams": 80, "cur_single_color_only": True, "cur_exclude_kids": True,
+DEFAULT_PREFS = {"cur_max_minutes": 240, "cur_max_grams": 80, "cur_exclude_kids": True,
                  "cur_w_demand": 30, "cur_w_production": 25, "cur_w_profit": 15, "cur_w_competition": 10, "cur_w_popularity": 15, "cur_w_listing": 5,
                  "cur_priority": "车和摩托配件,收纳整理,宠物,植物园艺,桌面办公,手机电脑配件,替换件适配件", "cur_calibrate": True}
 
@@ -159,10 +164,9 @@ def parts(c, ai, cfg, real=None, calib=None, cost_fn=None, fee=0.2):
             excluded = f"打印时间太长（约 {mins / 60:.1f} 小时，上限 {mx_m / 60:.1f}）"
     else:
         production = 55
-    if ai.get("single_color") is False:
-        production -= 35
-        if p["cur_single_color_only"] and not excluded:
-            excluded = EX_MULTI
+    multi = ai.get("single_color") is False
+    if multi:                                # v2.52：不排除，只扣分（见 flags()）
+        production -= MULTI_PROD_PENALTY
     production -= min(30, max(0, int(tf(ai.get("parts"), 1)) - 2) * 6)
     if ai.get("needs_hardware"):
         production -= 15
@@ -174,6 +178,8 @@ def parts(c, ai, cfg, real=None, calib=None, cost_fn=None, fee=0.2):
         cost = cost_fn(grams or 30, (mins or 60) / 60)
         margin = (mid * (1 - fee) - cost) / mid if mid else 0
         profit = _clamp(margin * 160)
+    if multi:
+        profit = _clamp(profit - MULTI_PROFIT_PENALTY)
     comp = {"low": 100, "medium": 60, "high": 20}.get(str(ai.get("competition") or ""), 50)
     m = c.get("metrics") or {}
     heat = num(m.get("makes")) * 3 + num(m.get("downloads")) + num(m.get("likes")) * 1.5 + num(m.get("boosts")) * 2 + num(m.get("collects"))
@@ -183,6 +189,11 @@ def parts(c, ai, cfg, real=None, calib=None, cost_fn=None, fee=0.2):
     listing = _clamp(tf(ai.get("listing"), 60))
     out = {"demand": demand, "production": production, "profit": profit, "competition": comp, "popularity": popularity, "listing": listing}
     return {k: round(v) for k, v in out.items()}, excluded, cat
+
+
+def flags(ai):
+    """提示标签（不排除）：多色 → 「多色（需要 AMS）」。"""
+    return [FLAG_MULTI] if (ai or {}).get("single_color") is False else []
 
 
 def score(pp, cfg):

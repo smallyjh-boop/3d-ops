@@ -83,6 +83,8 @@ def post_config():
                               # v2.32：发送切片文件前核对喷嘴直径、热床板
                               "nozzle": _nozzle(pr.get("nozzle")),
                               "plate": str(pr.get("plate") or "").strip()[:40]})
+                if "ams" in pr:       # v2.52：有 AMS / 多色（没写时按机型：拓竹算有，创想 K1 系列算没有）
+                    clean[-1]["ams"] = pr.get("ams") not in (False, "false", "0", 0, "")
                 # 连接设置（IP/访问码）在打印机页单独保存：按机器编码保留原来的
                 prev = by_code.get(code) if code else (old_pr[i] if i < len(old_pr) and not old_pr[i].get("code") else None)
                 if prev and prev.get("conn"):
