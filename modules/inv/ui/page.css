@@ -124,3 +124,9 @@
 .gs-prow { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #f1f5f9; cursor: pointer; flex-direction: row }
 .gs-put { margin: 10px 0; padding: 8px 10px; background: #fffbeb; border-radius: 8px }
 @media (max-width: 700px) { .gs-tools input[type=search] { min-width: 0; flex: 1 } }
+/* v2.54.1：全局 input{width:100%} 让勾选框被拉宽、内容被挤到右边 —— 勾选框固定在左、文字靠左 */
+.gs-prow { margin: 0; justify-content: flex-start; text-align: left }
+.gs-prow input[type=checkbox] { width: auto; flex: 0 0 auto; margin: 0 }
+.gs-prow .gs-img { flex: 0 0 auto }
+.gs-prow > span { flex: 1 1 auto; min-width: 0 }
+.gs-prow:hover { background: #f8fafc }
