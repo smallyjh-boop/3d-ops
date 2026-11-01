@@ -22,6 +22,7 @@
     "t.stock": ["库存", "สต็อก"], "t.stock.s": ["查数量、入库、出库", "ดูจำนวน รับเข้า เบิกออก"],
     "t.count": ["盘点", "ตรวจนับ"], "t.count.s": ["扫货位再扫商品", "สแกนตำแหน่งแล้วสแกนสินค้า"],
     "t.loc": ["货位", "ตำแหน่งจัดเก็บ"], "t.loc.s": ["在哪、放哪、换位置", "อยู่ไหน วางที่ไหน ย้ายที่"],
+    "t.rcv": ["采购到货", "รับของจัดซื้อ"], "t.rcv.s": ["扫采购单 / 物品，点数入库", "สแกนใบสั่งซื้อ / สินค้า นับแล้วรับเข้า"],
     "scan.any": ["直接扫任何码：订单、商品、货位都认得", "สแกนได้เลย: ออเดอร์ สินค้า ตำแหน่ง ระบบรู้จักหมด"],
     "ph.scan": ["扫码或输入…", "สแกนหรือพิมพ์…"],
     "logout": ["退出登录", "ออกจากระบบ"],
@@ -102,6 +103,17 @@
     "l.stop": ["结束", "เสร็จ"], "l.put_ok": ["✔ {c} → {l}", "✔ {c} → {l}"], "l.where": ["在", "อยู่ที่"], "l.shelf": ["货架 {c}", "ชั้นวาง {c}"],
     "l.nofile": ["还没有库存档，先在「库存」里入库", "ยังไม่มีในสต็อก ให้รับเข้าที่「สต็อก」ก่อน"],
     "l.takeoff_q": ["把 {c} 从货位拿下来？", "เอา {c} ออกจากตำแหน่ง?"],
+    // 采购到货（v2.51）
+    "r.scan": ["扫采购单号 / 物流单号 / 物品条码", "สแกนเลขใบสั่งซื้อ / เลขพัสดุ / บาร์โค้ดสินค้า"], "r.transit": ["在途的采购单", "ใบสั่งซื้อที่กำลังส่ง"],
+    "r.none": ["没有在途的采购单", "ไม่มีใบสั่งซื้อที่กำลังส่ง"], "r.late": ["晚了 {n} 天", "ช้า {n} วัน"], "r.today": ["今天到", "ถึงวันนี้"],
+    "r.days": ["还有 {n} 天", "อีก {n} วัน"], "r.left": ["还没到", "ยังไม่ถึง"], "r.got": ["这次到了", "ถึงรอบนี้"], "r.roll": ["卷", "ม้วน"],
+    "r.issue": ["⚠ 有问题（少发 / 破损）", "⚠ มีปัญหา (ขาด / เสีย)"], "r.k.short": ["少发", "ส่งขาด"], "r.k.damaged": ["破损", "เสียหาย"],
+    "r.k.wrong": ["发错", "ส่งผิด"], "r.k.extra": ["多发", "ส่งเกิน"], "r.iq": ["数量", "จำนวน"], "r.inote": ["说明", "หมายเหตุ"],
+    "r.loc": ["放到货位（可空）", "วางตำแหน่ง (เว้นได้)"], "r.ok": ["✅ 确认入库", "✅ ยืนยันรับเข้า"], "r.done": ["已入库：{no}", "รับเข้าแล้ว: {no}"],
+    "r.print": ["🏷 打印物品标签", "🏷 พิมพ์ป้ายสินค้า"], "r.next": ["下一张", "ใบถัดไป"], "r.notopen": ["这张采购单不在途：{st}", "ใบสั่งซื้อนี้ไม่ได้อยู่ระหว่างส่ง: {st}"],
+    "r.notin": ["{c} 不在这张采购单里", "{c} ไม่อยู่ในใบสั่งซื้อนี้"], "r.noitem_po": ["{c} 没有在途的采购单", "{c} ไม่มีใบสั่งซื้อที่กำลังส่ง"],
+    "r.pick": ["这个物品在几张采购单里，选一张", "สินค้านี้อยู่หลายใบ เลือกหนึ่งใบ"], "r.plus": ["{c} +1", "{c} +1"], "r.zero": ["全部清零（扫一件加一件）", "ล้างเป็น 0 (สแกนทีละชิ้น)"],
+    "r.noperm": ["你的账号没有「入库」权限", "บัญชีของคุณไม่มีสิทธิ์「รับเข้า」"], "r.nopur": ["采购模块没有打开", "ไม่ได้เปิดโมดูลจัดซื้อ"],
     // 状态
     "st.unpaid": ["未付款", "ยังไม่ชำระ"], "st.to_ship": ["待发货", "รอจัดส่ง"], "st.shipped": ["已发货", "จัดส่งแล้ว"], "st.completed": ["已完成", "สำเร็จ"],
     "st.cancelled": ["已取消", "ยกเลิกแล้ว"], "st.returned": ["退货/退款", "คืนสินค้า/คืนเงิน"], "st.delivery_failed": ["拒收/派送失败", "ปฏิเสธรับ/ส่งไม่สำเร็จ"],
@@ -227,7 +239,7 @@
   }
 
   // ---------------- 页面框架 ----------------
-  let ME = null, PERMS = {}, INV = true, CUR = null;
+  let ME = null, PERMS = {}, INV = true, PUR = false, CUR = null;
   const view = () => $("#view");
   const SCREENS = {};
   function go(name, arg) {
@@ -293,7 +305,7 @@
   async function boot() {
     let b;
     try { b = await api("/api/mobile/boot"); } catch (e) { if (e.status !== 401) { view().innerHTML = `<div class="card bad">${esc(e.message)}</div>`; setTimeout(boot, 5000); } return; }
-    ME = b.user; PERMS = b.perms || {}; INV = !!b.inv;
+    ME = b.user; PERMS = b.perms || {}; INV = !!b.inv; PUR = !!b.pur;
     $(".scanbar").classList.remove("hidden");
     if (SCAN.wanted()) SCAN.start(); else if (!SCAN.isApp()) $("#cam").classList.remove("hidden");
     qbadge(); flush();
@@ -303,7 +315,7 @@
   // ---------------- 首页 ----------------
   SCREENS.home = {
     show() {
-      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["count", "🧮"], ["loc", "🗄"]] : [])];
+      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["count", "🧮"], ["loc", "🗄"]] : []), ...(PUR ? [["rcv", "📥"]] : [])];
       view().innerHTML = `<div class="me"><span data-notr>👤 ${esc(ME.display_name || ME.username)}</span>
           <span class="row"><a href="/" class="small">${T("full")}</a><button class="sm" id="logout">${T("logout")}</button></span></div>
         <div class="tiles">${tiles.map(([k, ic]) => `<button class="tile" data-go="${k}"><span class="ti">${ic}</span>${T("t." + k)}<small>${T("t." + k + ".s")}</small></button>`).join("")}</div>
@@ -884,6 +896,122 @@
       } catch (e) { SCAN.bad(); this.msg = ["bad", e.message]; this.render(); }
     },
   };
+
+  // ---------------- 采购到货（v2.51）：扫采购单 / 物流单号 / 物品码 → 点数 → 记差异 → 放货位 → 入库 ----------------
+  // 打开一张采购单后，再扫这张单里的物品条码 = 这一行 +1（第一次扫从 1 开始数），适合一件一件点数。
+  SCREENS.rcv = {
+    po: null, msg: null, open: {}, counted: {},
+    async show(arg) {
+      this.po = null; this.msg = null;
+      if (!PUR) { view().innerHTML = lastMsg("bad", T("r.nopur")); return; }
+      if (arg) { await this.scan(arg); return; }
+      await this.list();
+    },
+    refresh() { if (this.po) this.load(this.po.id); else this.list(); },
+    async list() {
+      view().innerHTML = `<p class="hint"><span class="big-ic">📥</span>${T("r.scan")}</p>${this.msg ? lastMsg(this.msg[0], this.msg[1]) : ""}<div id="r-list"></div>`;
+      try {
+        const r = await api("/api/inv/pur/transit");
+        $("#r-list").innerHTML = `<div class="card"><b>${T("r.transit")}</b>${r.pos.length ? `<ul class="list">${r.pos.map((p) => `<li class="tap" data-po="${p.id}">
+          <div class="grow"><div class="mono" data-notr><b>${esc(p.no)}</b></div><div class="small muted" data-notr>${esc(p.supplier || "")}${p.tracking ? " · " + esc(p.tracking) : ""}</div></div>
+          <span class="small">${this.eta(p)}</span></li>`).join("")}</ul>` : `<p class="muted">${T("r.none")}</p>`}</div>`;
+        view().querySelectorAll("[data-po]").forEach((li) => li.addEventListener("click", () => this.load(+li.dataset.po).catch((e) => toast(e.message, true))));
+      } catch (e) { toast(e.message, true); }
+    },
+    eta(p) {
+      if (!p.expected_date) return "";
+      const d = Math.round((new Date(p.expected_date + "T00:00:00") - new Date(new Date().toDateString())) / 86400000);
+      return d < 0 ? `<b class="bad">${T("r.late", { n: -d })}</b>` : d === 0 ? `<b>${T("r.today")}</b>` : T("r.days", { n: d });
+    },
+    async load(id, beep) {
+      const r = await api(`/api/inv/po/${id}`);
+      if (!["ordered", "partial"].includes(r.po.status)) { SCAN.warn(); this.msg = ["warn", T("r.notopen", { st: srv(r.po.status_zh) })]; this.po = null; return this.list(); }
+      if (beep) SCAN.ok();
+      this.po = r.po; this.open = {}; this.counted = {};
+      this.render();
+    },
+    left(l) { return Math.max(0, (l.qty || 0) - (l.received || 0)); },
+    render() {
+      const p = this.po;
+      const lines = p.lines.filter((l) => this.left(l) > 1e-9);
+      view().innerHTML = `${this.msg ? lastMsg(this.msg[0], this.msg[1]) : ""}
+        <div class="card"><div class="row between"><span class="mono" style="font-size:20px;font-weight:800" data-notr>${esc(p.no)}</span><span class="small">${this.eta(p)}</span></div>
+          <div class="small muted" data-notr>${esc((p.supplier || {}).name || "")}${p.tracking ? " · " + esc(p.carrier || "") + " " + esc(p.tracking) : ""}</div>
+          <button class="sm" id="r-zero" style="margin-top:8px">${T("r.zero")}</button></div>
+        ${lines.map((l) => { const roll = !!l.rolls, left = roll ? this.left(l) / (l.net_g || 1000) : this.left(l), c = this.counted[l.id];
+          return `<div class="card" data-rl="${l.id}"><div class="nm" data-notr><b>${esc(nm(l.name_zh, l.name_th))}</b></div>
+            <div class="small muted"><span data-notr>${esc(l.code)}</span> · ${T("r.left")} <b>${+left.toFixed(3)}</b> ${roll ? T("r.roll") : `<span data-notr>${esc(l.unit || "")}</span>`}</div>
+            <div class="small muted" style="margin-top:8px">${T("r.got")}</div>
+            <div class="step"><button data-m="-">−</button><input type="number" inputmode="decimal" data-r="qty" value="${c != null ? c : +left.toFixed(3)}"><button data-m="+">+</button></div>
+            <input data-r="loc" placeholder="${esc(T("r.loc"))}" value="${esc(l.location || "")}" style="margin-top:8px" data-notr>
+            <button class="sm" data-iss style="margin-top:8px">${T("r.issue")}</button>
+            <div class="col ${this.open[l.id] ? "" : "hidden"}" data-issbox style="margin-top:6px"><select data-r="kind">${["short", "damaged", "wrong", "extra"].map((k) => `<option value="${k}">${T("r.k." + k)}</option>`).join("")}</select>
+              <input type="number" inputmode="decimal" data-r="iq" placeholder="${esc(T("r.iq"))}"><input data-r="note" placeholder="${esc(T("r.inote"))}" data-notr></div></div>`; }).join("")}
+        <button class="big primary" id="r-ok">${T("r.ok")}</button>`;
+      view().querySelectorAll("[data-rl]").forEach((box) => {
+        const id = +box.dataset.rl, q = box.querySelector('[data-r="qty"]');
+        box.querySelectorAll("[data-m]").forEach((b) => b.addEventListener("click", () => { q.value = Math.max(0, (+q.value || 0) + (b.dataset.m === "+" ? 1 : -1)); this.counted[id] = +q.value; }));
+        q.addEventListener("input", () => { this.counted[id] = q.value; });
+        box.querySelector("[data-iss]").addEventListener("click", () => { this.open[id] = !this.open[id]; box.querySelector("[data-issbox]").classList.toggle("hidden", !this.open[id]); });
+      });
+      $("#r-zero").addEventListener("click", () => { view().querySelectorAll('[data-r="qty"]').forEach((x) => { x.value = 0; this.counted[+x.closest("[data-rl]").dataset.rl] = 0; }); });
+      $("#r-ok").addEventListener("click", (e) => this.submit(e.target));
+    },
+    async submit(btn) {
+      if (PERMS["inv.in"] === false) { SCAN.bad(); toast(T("r.noperm"), true); return; }
+      const p = this.po, qtys = {}, issues = [], locations = {};
+      view().querySelectorAll("[data-rl]").forEach((box) => {
+        const id = box.dataset.rl, l = p.lines.find((x) => String(x.id) === id), g = (k) => box.querySelector(`[data-r="${k}"]`).value.trim();
+        if (+g("qty") > 0) qtys[id] = g("qty");
+        if (this.open[+id] && (+g("iq") > 0 || g("note"))) issues.push({ line_id: +id, kind: g("kind"), qty: g("iq") || 0, note: g("note") });
+        if (g("loc") && g("loc").toUpperCase() !== String(l.location || "").toUpperCase()) locations[l.item_id] = g("loc");
+      });
+      btn.disabled = true;
+      try {
+        const r = await send("/api/inv/pur/receive", { po_id: p.id, qtys, issues, locations }, `${T("t.rcv")} ${p.no}`);
+        SCAN.ok();
+        if (r.queued) { this.msg = ["warn", T("offline.q")]; this.po = null; return this.list(); }
+        (r.warnings || []).forEach((w) => toast(srv(w), true));
+        const ls = Object.entries(qtys).map(([k, v]) => `${k}:${Math.ceil(+v)}`).join(",");
+        view().innerHTML = `${lastMsg("ok", T("r.done", { no: p.no }))}<div class="col">
+          ${ls ? `<a class="btn big" href="/print/pur-labels?po=${encodeURIComponent(p.no)}&lines=${ls}${TH() ? "&lang=th" : ""}" target="_blank">${T("r.print")}</a>` : ""}
+          <button class="big primary" id="r-next">${T("r.next")}</button></div>`;
+        this.po = null; this.msg = null;
+        $("#r-next").addEventListener("click", () => this.list());
+      } catch (e) { SCAN.bad(); this.msg = ["bad", e.message]; btn.disabled = false; this.render(); }
+    },
+    async scan(code) {
+      try {
+        if (this.po) {
+          const k = code.trim().toUpperCase();
+          const l = this.po.lines.find((x) => String(x.code || "").toUpperCase() === k && this.left(x) > 1e-9);
+          if (l) {
+            const box = view().querySelector(`[data-rl="${l.id}"]`), q = box.querySelector('[data-r="qty"]');
+            this.byScan = this.byScan || {};
+            const n = this.byScan[l.id] ? (+q.value || 0) + 1 : 1;
+            this.byScan[l.id] = true;
+            q.value = n; this.counted[l.id] = n; SCAN.ok(); toast(T("r.plus", { c: l.code }));
+            box.scrollIntoView({ block: "center", behavior: "smooth" });
+            return;
+          }
+        }
+        const r = await api(`/api/inv/pur/scan?code=${encodeURIComponent(code)}`);
+        this.msg = null;
+        if (r.type === "po") { this.byScan = {}; return this.load(r.po.id, true); }
+        if (r.type === "item") {
+          if (r.pos.length === 1) { this.byScan = {}; await this.load(r.pos[0].id, true); return this.scan(code); }
+          if (!r.pos.length) { SCAN.bad(); this.msg = ["bad", T("r.noitem_po", { c: code })]; return this.po ? this.render() : this.list(); }
+          SCAN.warn();
+          const s = sheet(`<h3>${T("r.pick")}</h3><ul class="list">${r.pos.map((p) => `<li class="tap" data-po="${p.id}"><b class="mono grow" data-notr>${esc(p.no)}</b><span class="small" data-notr>${esc(p.supplier || "")}</span></li>`).join("")}</ul>`);
+          s.querySelectorAll("[data-po]").forEach((li) => li.addEventListener("click", async () => { closeSheet(); this.byScan = {}; await this.load(+li.dataset.po, true); this.scan(code); }));
+          return;
+        }
+        SCAN.bad(); this.msg = ["bad", this.po ? T("r.notin", { c: code }) : T("unknown", { c: code })];
+        return this.po ? this.render() : this.list();
+      } catch (e) { SCAN.bad(); toast(e.message, true); }
+    },
+  };
+
 
   // ---------------- 启动 ----------------
   document.documentElement.lang = TH() ? "th" : "zh";

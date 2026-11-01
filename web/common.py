@@ -594,7 +594,10 @@ def _ext_cors(resp):   # 浏览器扩展跨域访问 /api/v1/…（v2.30 从客�
 
 # v2.39：库存 / 采购的金额（平均成本、库存金额、单价、采购金额、付款）只给老板和有「入库」「付款」权限的员工看
 INV_MONEY = {"avg_cost", "value", "unit_cost", "amount", "goods_total", "ship_fee", "other_fee", "total", "paid", "payments",
-             "unpaid", "in_transit", "month_paid", "month_received", "price", "stock_value_now"}
+             "unpaid", "in_transit", "month_paid", "month_received", "price", "stock_value_now",
+             # v2.51 采购：到手单价、人民币金额、税、建议采购金额、价格历史、比价
+             "landed", "est_cost", "total_cur", "goods_total_cur", "tax_fee", "unit_price", "price_thb", "last_landed", "compare",
+             "spend", "refund"}
 
 
 def _sees_inv_money(u):

@@ -11,6 +11,8 @@
   采购    suppliers() save_supplier()  save_po(dict) get_po(id) list_po(status) po_action(id, order/cancel/close/tracking)
           receive_po(id, {行id: 数量}) pay_po(id, 金额, 方式, 日期) in_transit() suggest() po_from_suggest(物品ids)
           po_summary()  （采购模块概况，v2.21）
+          po_issues(status) resolve_po_issue(id, 处理办法)  po_return(id, {行id: 数量})  default_fx()   （v2.51：到货差异、退货、汇率）
+          receive_po(id, qtys, user, note, issues=[{line_id, kind, qty, note}])  pay_po(..., refund=True) 供应商退款
   财务    finance_events(since) finance_month(YYYY-MM)       （给财务模块：采购付款 / 到货等事件、按月汇总）
   发货    pack_rules()                                      （发货出库时另外扣的包材规则；出库单在 modules/inv/shipout.py）
   耗材    filament_available() → {(材料, 颜色代码): 克}      （自动库存、随机颜色选料用）
@@ -76,6 +78,12 @@ in_transit = _po.in_transit
 suggest = _po.suggest
 po_from_suggest = _po.po_from_suggest
 po_summary = _po.summary
+po_issues = _po.issues
+resolve_po_issue = _po.resolve_issue
+po_return = _po.return_goods
+default_fx = _po.default_fx
+default_currency = _po.default_currency
+PO_ISSUE_KINDS = _po.ISSUE_KINDS
 PO_STATUS = _po.STATUS
 PAY_METHODS = _po.METHODS
 finance_events = _finance.events

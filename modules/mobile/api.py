@@ -41,7 +41,7 @@ def mobile_boot():
     perms = u.get("perms") or db.user_perms(u.get("role"))
     cfg = load_config()
     return jsonify({"user": {k: u.get(k) for k in ("username", "display_name", "role", "lang")}, "perms": perms,
-                    "inv": modules.enabled("inv"), "version": VERSION, "scan_key": cfg.get("scan_order_key") or "both",
+                    "inv": modules.enabled("inv"), "pur": modules.enabled("pur") and modules.enabled("inv"), "version": VERSION, "scan_key": cfg.get("scan_order_key") or "both",
                     "can_cancel_view": True})
 
 

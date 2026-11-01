@@ -109,7 +109,8 @@
         <span class="inv-fil ${fil ? "" : "hidden"}">${f("loss_rate", "损耗率（空 = 用设置里的）", 'type="number" step="0.01"')}</span>
         ${f("brand", "品牌")}${f("spec", "规格")}${f("reorder_point", "补货线（低于就提醒）", 'type="number" step="any"')}
         ${f("reorder_qty", "每次补多少（空 = 自动）", 'type="number" step="any"')}
-        <label>默认供应商<select data-k="supplier_id" data-notr ${edit ? "" : "disabled"}><option value="">—</option>${(SUPS || []).map((x) => `<option value="${x.id}" ${x.id === it.supplier_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+        <label>默认供应商<span class="row gap"><select data-k="supplier_id" data-notr ${edit ? "" : "disabled"}><option value="">—</option>${(SUPS || []).map((x) => `<option value="${x.id}" ${x.id === it.supplier_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
+          ${id && window.MODKIT && MODKIT.enabled("pur") ? `<button type="button" class="mini" id="inv-pur" title="${TH() ? "ผู้ขาย ลิงก์ซื้อ ประวัติราคา" : "供应商、购买链接、价格历史、比价"}">🛒 ${TH() ? "ข้อมูลจัดซื้อ" : "采购资料"}</button>` : ""}</span></label>
         ${f("location", "货位（例如 A1-02-03，空 = 没有货位）", 'list="loc-dl" data-notr')}<datalist id="loc-dl" data-notr>${((window.INVLOC && INVLOC.list()) || []).map((l) => `<option value="${esc(l.code)}">${esc(INVLOC.human ? INVLOC.human(l.code) : "")}${l.items ? "" : (TH() ? " ·ว่าง" : " ·空")}</option>`).join("")}</datalist>${f("link", "购买链接")}${f("note", "备注")}
       </div>
       ${id && r.loc ? `<p class="small">📍 ${r.loc.code ? `<a href="#" data-locgo="${r.loc.id}" class="mono" data-notr>${esc(r.loc.code)}</a> <span data-notr>${esc(TH() ? r.loc.human_th : r.loc.human_zh)}</span>`
@@ -121,6 +122,8 @@
     m.classList.add("wide");
     const cs = m.querySelector('[data-k="category"]');
     cs.onchange = () => { const isF = cs.value === "filament"; m.querySelectorAll(".inv-fil").forEach((x) => x.classList.toggle("hidden", !isF)); if (isF) m.querySelector('[data-k="unit"]').value = "g"; };
+    const pb = m.querySelector("#inv-pur");          // v2.51：物品的采购资料（采购模块）
+    if (pb) pb.onclick = () => MODKIT.load("pur").then(() => window.PURPO && PURPO.itemDialog(id)).catch((e) => toast(e.message, true));
     const sv = m.querySelector("#inv-it-save");
     if (sv) sv.onclick = () => busy(sv, async () => {
       const d = { id: id || undefined };
