@@ -47,6 +47,25 @@ def classify_error(msg):
     return "other", m[:200]
 
 
+def lazada_primary_id():
+    """主店铺 = 第一个启用的 Lazada 店铺（和 lazada_push.push 里的 primary 一致）。"""
+    r = db.conn().execute("SELECT id FROM shops WHERE platform='lazada' AND enabled=1 ORDER BY id").fetchone()
+    return r["id"] if r else None
+
+
+def product_ids(p, shop_id):
+    """{SKU 大写: (item_id, sku_id)}：这个产品用接口推送到「这个店铺」时记下的编号。
+    主店铺看 p["lazada_api"]，其它店铺只看 p["lazada_api_shops"][店铺id]——绝不拿主店铺的编号去推别的店铺。"""
+    shop_id = int(shop_id)
+    if shop_id == lazada_primary_id():
+        st = p.get("lazada_api") or {}
+    else:
+        st = (p.get("lazada_api_shops") or {}).get(str(shop_id)) or {}
+    if not st.get("item_id"):
+        return {}
+    return {str(k).strip().upper(): (str(st["item_id"]), str(v)) for k, v in (st.get("skus") or {}).items() if v}
+
+
 class LazadaAdapter(StockAdapter):
     platform = "lazada"
     label = "Lazada"
@@ -81,17 +100,19 @@ class LazadaAdapter(StockAdapter):
     def push(self, shop, items):
         res = {}
         ids = self._ids(shop["id"])
+        pcache = {}
         todo = []
         for it in items:
             k = it["sku"].upper()
             hit = ids.get(k)
             if not hit:
-                try:                                              # 用接口推送过的产品，产品里记着编号
+                try:                                              # 用接口推送过的产品，产品里记着编号（按店铺分开记）
                     from . import stocksync
-                    p = store.load(stocksync.product_of(k))
-                    st = p.get("lazada_api") or {}
-                    if st.get("item_id") and (st.get("skus") or {}).get(k):
-                        hit = (str(st["item_id"]), str(st["skus"][k]), "")
+                    pid = stocksync.product_of(k)
+                    if pid not in pcache:
+                        pcache[pid] = store.load(pid)
+                    h2 = product_ids(pcache[pid], shop["id"]).get(k)
+                    hit = (h2[0], h2[1], "") if h2 else None
                 except Exception:  # noqa: BLE001
                     hit = None
             if not hit:

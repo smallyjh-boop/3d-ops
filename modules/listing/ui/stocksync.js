@@ -23,7 +23,7 @@
       r.innerHTML = `<div class="row between wrap" style="margin-bottom:8px"><div class="ux-tabs" id="ss-tabs"></div>
         <div class="row gap wrap"><select id="ss-shop" class="small" style="width:auto"></select>
         <input id="ss-q" class="small" style="width:180px" placeholder="${E(Z("搜索 SKU / 产品", "ค้นหา SKU / สินค้า"))}">
-        <button class="mini primary-lite" id="ss-check" title="${E(Z("立即拉平台库存、对照、推待同步的", "ดึงสต็อกจากแพลตฟอร์ม เทียบ และส่งที่รอซิงก์ทันที"))}">🔄 ${E(Z("立即检查", "ตรวจสอบทันที"))}</button>
+        <button class="mini primary-lite" id="ss-check" title="${E(Z("立即拉平台库存并对照（自动推送开着时才会推待同步的）", "ดึงสต็อกจากแพลตฟอร์มและเทียบทันที (ส่งที่รอซิงก์เฉพาะเมื่อเปิดส่งอัตโนมัติ)"))}">🔄 ${E(Z("立即检查", "ตรวจสอบทันที"))}</button>
         <button class="mini" id="ss-pushall">⚡ ${E(Z("一键全部重推", "ส่งใหม่ทั้งหมด"))}</button>
         <button class="mini" id="ss-rules">⚙ ${E(Z("默认规则", "กฎเริ่มต้น"))}</button></div></div>
         <div id="ss-body"></div>`;
@@ -44,8 +44,14 @@
     SS.data = d;
     const sel = $("#ss-shop");
     sel.innerHTML = `<option value="">${E(Z("全部店铺", "ทุกร้าน"))}</option>` + d.shops.map((s) => `<option value="${s.id}" data-notr ${String(s.id) === String(SS.shop) ? "selected" : ""}>${E(s.name)} ${s.api ? "" : "(" + Z("导出", "ส่งออก") + ")"}</option>`).join("");
-    body.innerHTML = kpiHtml(d) + chartsHtml(d) + tableHtml(d) + `<div id="ss-bar" class="ss-bar hidden"></div>`;
+    body.innerHTML = bannerHtml(d) + kpiHtml(d) + chartsHtml(d) + tableHtml(d) + `<div id="ss-bar" class="ss-bar hidden"></div>`;
     syncBar();
+  }
+
+  function bannerHtml(d) {
+    if (d.settings && d.settings.auto) return "";
+    return `<div class="card ss-banner" style="border-left:4px solid var(--warn,#e8a317);margin-bottom:8px"><b>⚠ ${E(Z("自动推送未开启：先核对对照表，再开启", "ยังไม่เปิดการส่งอัตโนมัติ: ตรวจตารางเทียบก่อน แล้วค่อยเปิด"))}</b>
+      <div class="small muted">${E(Z("现在只拉平台库存并显示差异，不会自动改平台库存。核对无误后到 设置 → 库存同步规则 打开「自动推送总开关」。手动推送不受影响。", "ตอนนี้ดึงสต็อกจากแพลตฟอร์มและแสดงความต่างเท่านั้น ไม่แก้สต็อกบนแพลตฟอร์มอัตโนมัติ เมื่อตรวจแล้วให้เปิด \"สวิตช์ส่งอัตโนมัติ\" ที่ ตั้งค่า → กฎซิงก์สต็อก การส่งด้วยมือไม่ได้รับผลกระทบ"))}</div></div>`;
   }
 
   function kpiHtml(d) {
@@ -122,7 +128,11 @@
       params.alloc = a; if (a !== "share") { const v = prompt(a === "percent" ? Z("百分比（%）", "เปอร์เซ็นต์ (%)") : Z("固定件数", "จำนวนคงที่"), "50"); if (v == null) return; params.alloc_val = +v; }
       params.per_shop = !!SS.shop;
     }
-    if (action === "lock") { const v = prompt(Z("锁定为（件）", "ล็อกไว้ที่ (ชิ้น)"), "0"); if (v == null) return; params.qty = +v; }
+    if (action === "lock") {
+      const v = prompt(Z("锁定为（件）", "ล็อกไว้ที่ (ชิ้น)"), ""); if (v == null) return;
+      if (!String(v).trim() || !isFinite(+v) || +v < 0) { toast(Z("请填写要锁定的件数（数字）", "กรุณาระบุจำนวนที่จะล็อก (ตัวเลข)"), true); return; }
+      params.qty = +v;
+    }
     if (action === "zero" && !confirm(Z("把选中的 SKU 在平台上改成 0（临时停售）？", "ตั้งสต็อกเป็น 0 บนแพลตฟอร์ม (หยุดขายชั่วคราว)?"))) return;
     try {
       const r = await api("/api/stocksync/bulk", { json: { action, cells, params } });

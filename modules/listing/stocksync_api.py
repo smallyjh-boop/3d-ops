@@ -105,7 +105,7 @@ def ss_rules_save():
         return err(str(e))
     stocksync.reset_cache()
     skus = [b["key"]] if b.get("scope") == "sku" else None
-    res = stocksync.sync_pending("rule", _uname(), skus=skus)
+    res = stocksync.sync_pending("rule", _uname(), skus=skus, explicit=bool(skus))        # 自动推送没开时，只有改单个 SKU 的规则才马上推
     return jsonify({"ok": True, "rule": rule, "sync": {k: res[k] for k in ("pushed", "failed", "skipped")}})
 
 

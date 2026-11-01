@@ -52,6 +52,11 @@ _idx = {"t": 0, "v": None, "path": None}
 PULL_INFO = {}                  # {shop_id: {"at", "error"}}
 
 
+def auto_enabled(cfg=None):
+    """自动推送总开关（升级后默认关，老板核对对照表后才开）。开了以后旧的 Lazada 库存推送循环不再推。"""
+    return settings(cfg)["auto"]
+
+
 def init():
     c = db.conn()
     c.executescript(SCHEMA)
@@ -78,7 +83,10 @@ def settings(cfg=None):
             return float(cfg.get(k, d))
         except (TypeError, ValueError):
             return float(d)
-    return {"safety": int(num("ss_safety", 0)), "cap": int(num("ss_cap", 20)), "printer_units": int(num("ss_printer_units", 0)),
+    cap_raw = cfg.get("ss_cap")                     # 没填 = 沿用旧引擎的「库存上限」stock_cap（默认 50），升级不改变上限
+    cap = int(num("ss_cap", 50)) if cap_raw not in (None, "") else int(num("stock_cap", 50))
+    auto = str(cfg.get("ss_auto_push", "0")) not in ("0", "False", "false", "", "None")
+    return {"auto": auto, "default_stock": int(num("default_stock", 50)), "safety": int(num("ss_safety", 0)), "cap": cap, "printer_units": int(num("ss_printer_units", 0)),
             "virtual_min": max(1, int(num("ss_virtual_min", 1))), "interval": int(num("ss_interval_min", 15)),
             "low_qty": int(num("ss_low_qty", 2)), "cover_days": num("ss_cover_days", 3), "mismatch_min": max(1, int(num("ss_mismatch_min", 1))),
             "unsynced_hours": num("ss_unsynced_hours", 24), "retry_max": max(1, int(num("ss_retry_max", 3))),
@@ -265,7 +273,14 @@ def compute(skus=None, shop_ids=None):
             continue
         h = idx[sku]
         p, v = h["p"], h["p"]["variants"][h["i"]]
-        in_shops = [s for s in shp if (s["platform"] in h["plats"]) or (s["id"], sku) in have]
+        in_shops = []
+        for s in shp:
+            if s["platform"] == "lazada":
+                # 接口店铺：SKU 在这个店铺的在线商品里，或这个产品用接口推送到这个店铺过，才有单元格（不拿主店铺的编号去推别的店铺）
+                if (s["id"], sku) in have or sku in stockadapters.product_ids(p, s["id"]):
+                    in_shops.append(s)
+            elif (s["platform"] in h["plats"]) or (s["id"], sku) in have:
+                in_shops.append(s)
         if not in_shops:
             continue
         pid = p["id"]
@@ -281,7 +296,12 @@ def compute(skus=None, shop_ids=None):
         for s in in_shops:
             rule = _resolve(rules, st, sku, pid, s["id"])
             safety = max(0, int(rule["safety"] or 0))
-            phys = max(0, oh - rsv - safety)
+            if auto_on:
+                base = oh - rsv - safety
+            else:                                       # 没开自动库存：和旧引擎一样——变体里手填的数，没填用默认库存（按单生产）
+                mv = v.get("stock")
+                base = (int(mv) if mv not in (None, "") else st["default_stock"]) - safety
+            phys = max(0, base)
             virt_on = (rule["virtual"] == "on") or (rule["virtual"] is None and auto_on)
             virt = 0
             if virt_on and units:
@@ -290,7 +310,7 @@ def compute(skus=None, shop_ids=None):
                 virt = min(cap, units, pcap)
                 if virt < st["virtual_min"]:
                     virt = 0                                       # 耗材不够 → 掉到 0
-            cells[s["id"]] = {"shop": s, "rule": rule, "phys": phys, "virt": virt, "pool": phys + virt, "raw": oh - rsv - safety}
+            cells[s["id"]] = {"shop": s, "rule": rule, "phys": phys, "virt": virt, "pool": phys + virt, "raw": base}
         # 分配：fixed 先定，percent 按各自的池子比例，share 全给
         for sid, cc in cells.items():
             a, pool = cc["rule"]["alloc"], cc["pool"]
@@ -309,7 +329,7 @@ def compute(skus=None, shop_ids=None):
         row["sellable"] = total
         row["virtual"] = max((cc["virt"] for cc in cells.values()), default=0)
         supply = oh + (units or 0 if (auto_on or any(cc["virt"] for cc in cells.values())) else 0)
-        row["oversold"] = row["open_orders"] > supply or oh - rsv < 0
+        row["oversold"] = bool(auto_on) and (row["open_orders"] > supply or oh - rsv < 0)       # 按单生产的产品不看实物库存
         daily = row["sold30"] / 30.0
         row["cover_days"] = round(total / daily, 1) if daily > 0 else None
         row["low"] = total <= st["low_qty"] or (row["cover_days"] is not None and row["cover_days"] < st["cover_days"])
@@ -490,8 +510,11 @@ def push_cells(cells, reason="manual", user="", data=None, force=False, override
     return out
 
 
-def sync_pending(reason="timer", user="系统", skus=None, shop_ids=None, retry=True, data=None):
-    """把待同步的单元格推出去。失败的按退避时间自动重试，次数用完不再自动试（出待办，手动重试）。"""
+def sync_pending(reason="timer", user="系统", skus=None, shop_ids=None, retry=True, data=None, explicit=False):
+    """把待同步的单元格推出去。失败的按退避时间自动重试，次数用完不再自动试（出待办，手动重试）。
+    自动触发（定时 / 库存事件 / 规则变更）要「自动推送」总开关开着才推；手动（reason=manual 或 explicit=True）不受限。"""
+    if reason != "manual" and not explicit and not auto_enabled():
+        return {"pushed": 0, "failed": 0, "skipped": 0, "items": [], "auto_off": True}
     data = data or compute(skus, shop_ids)
     st = data["settings"]
     now = time.time()
@@ -525,13 +548,15 @@ def edit_qty(sku, shop_id, qty, user="", lock=False):
     cell = next((r["cells"].get(sid) for r in data["rows"] if r["sku"] == sku), None)
     if cell is None:
         raise ValueError("这个 SKU 在这个店铺没有")
-    if lock:
-        _set_state(sku, sid, locked=qty)
     if cell["api"]:
         res = push_cells([(sku, sid)], "manual", user, data=data, override={(sku, sid): qty}, force=True)
         if res["failed"]:
-            raise RuntimeError(res["items"][0]["error"])
+            raise RuntimeError(res["items"][0]["error"])             # 推失败：不写锁定（不然显示已锁定、又永远不会重试）
+        if lock:
+            _set_state(sku, sid, locked=qty)
         return res
+    if lock:
+        _set_state(sku, sid, locked=qty)
     _set_state(sku, sid, want=qty)                                     # 没接口：记下要显示的数，出在待导出表里
     return {"pushed": 0, "failed": 0, "skipped": 1, "items": [], "export": True}
 
@@ -549,6 +574,17 @@ def bulk(action, cells, params=None, user=""):
     """批量：push 推送 / recalc 按规则重算 / safety 设安全库存 / alloc 改分配 / zero 设 0（临时停售）/ resume 恢复 / lock / unlock / export 标记。
     cells = [{sku, shop_id}]（shop_id 空 = 这个 SKU 在所有店铺）。"""
     params = params or {}
+    lock_qty = None
+    if action == "lock":                                      # 锁定必须明确给一个数（不再默认 0）
+        q = params.get("qty")
+        if q is None or (isinstance(q, str) and not q.strip()):
+            raise ValueError("请填写要锁定的库存数量")
+        try:
+            lock_qty = int(float(q))
+        except (TypeError, ValueError):
+            raise ValueError("锁定数量必须是数字") from None
+        if lock_qty < 0:
+            raise ValueError("库存不能是负数")
     sk = sorted({c["sku"].upper() for c in cells})
     data = compute(sk)
     todo = []
@@ -565,12 +601,12 @@ def bulk(action, cells, params=None, user=""):
     if action == "safety":
         for sku in {s for s, _ in todo}:
             set_rule("sku", sku, 0, {"safety": int(params.get("safety") or 0)}, user)
-        return sync_pending("rule", user, skus=sk, data=compute(sk))
+        return sync_pending("rule", user, skus=sk, data=compute(sk), explicit=True)
     if action == "alloc":
         for sku, sid in todo:
             set_rule("sku", sku, sid if params.get("per_shop") else 0,
                      {"alloc": params.get("alloc") or "share", "alloc_val": params.get("alloc_val")}, user)
-        return sync_pending("rule", user, skus=sk, data=compute(sk))
+        return sync_pending("rule", user, skus=sk, data=compute(sk), explicit=True)
     if action == "zero":
         for sku, sid in todo:
             _set_state(sku, sid, paused=1)
@@ -581,7 +617,7 @@ def bulk(action, cells, params=None, user=""):
         return sync_pending("manual", user, skus=sk, data=compute(sk))
     if action == "lock":
         for sku, sid in todo:
-            set_lock(sku, sid, int(params.get("qty") if params.get("qty") is not None else 0), user)
+            set_lock(sku, sid, lock_qty, user)
         return {"ok": True, "n": len(todo)}
     if action == "unlock":
         for sku, sid in todo:
@@ -685,20 +721,25 @@ def pull_platform(shop_ids=None):
         if got is None:
             continue
         now = time.time()
+        known = {r["sku"]: r["pushed"] for r in _c().execute("SELECT sku, pushed FROM ss_state WHERE shop_id=?", (s["id"],))}
         for sku, d in got.items():
-            _set_state(sku.upper(), s["id"], platform_qty=int(d.get("qty") or 0), platform_at=now, plat_status=d.get("status") or "")
+            q = int(d.get("qty") or 0)
+            kw = {"platform_qty": q, "platform_at": now, "plat_status": d.get("status") or ""}
+            if known.get(sku.upper()) is None:
+                kw["pushed"] = q                       # 第一次见到：平台现在显示的数就是「上次推的数」，数字没变化之前什么都不推
+            _set_state(sku.upper(), s["id"], **kw)
         PULL_INFO[s["id"]] = {"at": now, "error": ""}
         out[s["id"]] = {"n": len(got), "error": ""}
     return out
 
 
 def run_check(user="系统", pull=True):
-    """定时检查：拉平台库存 → 对照 → 推待同步 / 重试失败。"""
+    """定时检查：拉平台库存 → 对照 → 推待同步 / 重试失败（「自动推送」没开时只拉和对照，不推）。"""
     pulled = pull_platform() if pull else {}
     data = compute()
     touch_all(data)
     res = sync_pending("timer", user, data=data)
-    return {"pulled": pulled, "pushed": res["pushed"], "failed": res["failed"]}
+    return {"pulled": pulled, "pushed": res["pushed"], "failed": res["failed"], "auto": auto_enabled()}
 
 
 # ---------------- 事件 ----------------
@@ -715,7 +756,8 @@ def reason_kind(reason, delta=0):
 
 def on_stock_changed(sku="", delta=0, reason="", **kw):
     """成品库存变化（core/production.stock_add 广播）→ 这个 SKU 标记待查，稍后（防抖）同步。"""
-    if not sku or not settings()["event"]:
+    st = settings()
+    if not sku or not st["event"] or not st["auto"]:
         return
     k = reason_kind(reason, delta)
     with _lock:
@@ -733,7 +775,8 @@ def on_order_status(oid=None, **kw):
         skus = [r["sku"].upper() for r in _c().execute("SELECT sku FROM order_items WHERE order_id=?", (oid,)) if r["sku"]]
     except Exception:  # noqa: BLE001
         return
-    if not skus or not settings()["event"]:
+    st = settings()
+    if not skus or not st["event"] or not st["auto"]:
         return
     with _lock:
         for s in skus:

@@ -25,8 +25,9 @@ K, K2 = skus[0], skus[1]
 p["exported_at"] = int(time.time()) - 1000
 p["shopee_exported_at"] = int(time.time()) - 900
 p["listing"] = {"lazada": {"status": "live"}, "shopee": {"status": "live"}}
-p["stock_auto"] = False
+p["stock_auto"] = True
 store.save(p)
+cfg0 = config.load_config(); cfg0["ss_auto_push"] = True; config.save_config(cfg0)      # 自动推送总开关（默认关，测试里开）
 
 # ---- 假 Lazada ----
 PLAT = {s: 5 for s in skus}            # 平台上现在显示的库存
@@ -117,6 +118,7 @@ key = ("PLA", stockcalc._ckey(config.load_config(), col))
 AV = {key: 410.0}
 stockcalc.available = lambda cfg=None, fresh=True: AV
 S.reset_cache()
+S.set_rule("product", PID, 0, {"virtual": "off"})          # 产品是自动库存：这里先把虚拟库存关掉，下面按 SKU 开
 cc = cell(K2)
 ok(cc["virt"] == 0, "virtual stock is off unless enabled")
 S.set_rule("sku", K2, 0, {"virtual": "on", "cap": 20})
@@ -326,6 +328,151 @@ ok(next(s for s in S.compute()["shops"] if s["id"] == -1)["api"], "adapter regis
 S.sync_pending("manual", "t")
 ok(FakeShopee.got and cell(K, -1)["status"] == "synced", "pending cells now pushed through the new adapter")
 AD._REG.pop("shopee")
+
+# ================= v2.53 发版前审查的修复 =================
+from modules.listing import lazada_push as LP
+_saved = [dict(r) for r in db.conn().execute("SELECT * FROM ss_state")]
+def _restore_state():
+    _c2 = db.conn(); _c2.execute("DELETE FROM ss_state")
+    for r_ in _saved:
+        _c2.execute("INSERT INTO ss_state(" + ",".join(r_) + ") VALUES(" + ",".join("?" * len(r_)) + ")", list(r_.values()))
+    _c2.commit()
+def _set_cfg(**kw):
+    c_ = config.load_config(); c_.update(kw); config.save_config(c_)
+
+# ---- 1a 升级：ss_state 为空 + 自动推送默认关 → 什么都不推，对照表照样拉平台数 ----
+_c2 = db.conn(); _c2.execute("DELETE FROM ss_state"); _c2.commit()
+ok(S.settings({"x": 1})["auto"] is False and S.settings({"x": 1})["cap"] == 50, "upgrade default (no ss_* keys): auto push OFF, cap 50")
+_set_cfg(ss_auto_push=False)
+ok(not S.auto_enabled(), "auto push switch off")
+S.INLINE = True
+calls.clear()
+production.stock_add(K, 1, "备货打印", "t")                 # 事件：自动推送关着，不推
+ok(not calls, f"stock event pushes nothing while auto push is off ({calls[:3]})")
+S.INLINE = False
+PLAT.update({sk: 7 for sk in skus})
+r = S.run_check("系统")
+ok(not calls and r["pushed"] == 0 and r["auto"] is False, f"timer check with empty state pushes nothing ({calls[:3]})")
+ok(cell(K)["platform"] == 7, "matrix still pulls the platform quantity while auto is off")
+# ---- 1b 第一次基线：拉回来的平台数记为上次推的数 ----
+_row = db.conn().execute("SELECT pushed, platform_qty FROM ss_state WHERE sku=? AND shop_id=?", (K, sid)).fetchone()
+ok(_row["pushed"] == 7 and _row["platform_qty"] == 7 and cell(K)["last"] == 7, "baseline: pulled platform qty recorded as last pushed")
+mx = C.get("/api/stocksync/matrix").get_json()
+ok(mx["settings"]["auto"] is False, "matrix API tells the UI auto push is off (banner)")
+n0 = len(calls)
+r = C.post("/api/stocksync/rules", json={"scope": "shop", "key": "", "shop_id": sid, "data": {"safety": 1}}).get_json()
+ok(len(calls) == n0 and r["sync"]["pushed"] == 0, "shop-wide rule change does not push while auto push is off")
+S.set_rule("shop", "", sid, {"safety": None})
+# 数字没变的 SKU：基线=目标，开了自动推送也不推
+_c2 = db.conn()
+for sk in skus:
+    _t = cell(sk)["target"]; _c2.execute("UPDATE ss_state SET pushed=?, platform_qty=? WHERE sku=? AND shop_id=?", (_t, _t, sk, sid)); PLAT[sk] = _t
+_c2.commit()
+_set_cfg(ss_auto_push=True)
+calls.clear()
+r = S.run_check("系统")
+ok(not calls and r["auto"], f"auto on + nothing changed -> still nothing pushed ({calls[:3]})")
+S.INLINE = True
+production.stock_add(K, 2, "备货打印", "t")
+ok(calls and last_push(K) == cell(K)["target"], "auto on: an actual change is pushed")
+S.INLINE = False
+_restore_state()
+
+# ---- 1c 没开自动库存的变体：沿用旧引擎的数（手填 / 默认库存），不是实物库存 ----
+pp = store.load(PID); pp["stock_auto"] = False
+for v in pp["variants"]:
+    if v["sku"] == K: v["stock"] = 12
+    if v["sku"] == K2: v.pop("stock", None)
+store.save(pp); S.reset_cache()
+_set_cfg(default_stock=50)
+ok(cell(K)["computed"] == 12 and cell(K)["target"] == 12, f"non-auto variant keeps its hand-filled stock 12, not goods stock ({cell(K)['computed']})")
+ok(cell(K2)["computed"] == 50, f"non-auto variant without a number uses default_stock 50 ({cell(K2)['computed']})")
+ok(not next(r for r in fresh()["rows"] if r["sku"] == K2)["oversold"], "made-to-order product is never flagged oversold from goods stock")
+pp = store.load(PID); pp["stock_auto"] = True
+for v in pp["variants"]:
+    v.pop("stock", None)
+store.save(pp); S.reset_cache()
+c_ = config.load_config(); c_.pop("ss_cap", None); c_["stock_cap"] = 50; config.save_config(c_)
+ok(S.settings()["cap"] == 50, "upgrade default cap follows old stock_cap (50)")
+_set_cfg(ss_cap="20"); ok(S.settings()["cap"] == 20, "explicit ss_cap wins")
+c_ = config.load_config(); c_.pop("ss_cap", None); config.save_config(c_)
+
+# ---- 2 新旧引擎：新的开了，旧循环不推；新的关，保持旧行为 ----
+_old = {"n": 0}
+_orig_ss = LP.sync_stock
+LP.sync_stock = lambda user="", how="api": (_old.__setitem__("n", _old["n"] + 1) or {"synced": 0, "skipped": 0, "failed": []})
+_set_cfg(ss_auto_push=True)
+ok(LP._auto_stock_sync() is None and _old["n"] == 0, "new engine on -> old lazada loop does not push")
+_set_cfg(ss_auto_push=False)
+ok(LP._auto_stock_sync() is not None and _old["n"] == 1, "new engine off -> old loop behaves as before")
+LP.sync_stock = _orig_ss
+_set_cfg(ss_auto_push=True)
+
+# ---- 3 只给 SKU 真在的店铺建单元格；编号按店铺分开 ----
+sid2 = integrations.save_shop({"platform": "lazada", "name": "LZ2", "enabled": True,
+                               "creds": {"app_key": "k", "app_secret": "s", "access_token": "t", "refresh_token": "r"}})
+pp = store.load(PID)
+pp["lazada_api"] = {"item_id": "111", "skus": {K: "9000", K2: "9001"}}
+store.save(pp); S.reset_cache()
+d = fresh()
+ok(sid2 in {s_["id"] for s_ in d["shops"]}, "second Lazada shop exists")
+ok(all(sid2 not in r["cells"] for r in d["rows"]), "no cells for a Lazada shop where the SKU is not online (even if exported to Lazada)")
+ok(all(sid in r["cells"] for r in d["rows"] if r["sku"] in (K, K2)), "main shop keeps its cells")
+pp = store.load(PID); pp["lazada_api_shops"] = {str(sid2): {"item_id": "222", "skus": {K: "8000"}}}; store.save(pp); S.reset_cache()
+d = fresh()
+ok(sid2 in next(r for r in d["rows"] if r["sku"] == K)["cells"] and sid2 not in next(r for r in d["rows"] if r["sku"] == K2)["cells"],
+   "second shop gets a cell only for the SKU recorded in lazada_api_shops[shop]")
+pp = store.load(PID)
+ok(AD.product_ids(pp, sid)[K] == ("111", "9000") and AD.product_ids(pp, sid2)[K] == ("222", "8000"), "ids are per shop_id")
+ok(K2 not in AD.product_ids(pp, sid2) and AD.product_ids(pp, 9999) == {}, "no fallback to the main shop's ids for another shop")
+_c2 = db.conn(); _c2.execute("DELETE FROM online_items WHERE shop_id=?", (sid,)); _c2.commit()      # 主店铺在线表没有 → 用 p["lazada_api"]
+calls.clear()
+_shp2 = next(s_ for s_ in d["shops"] if s_["id"] == sid2)
+res = AD.get("lazada").push(_shp2, [{"sku": K2, "qty": 3}])
+ok(not res[K2]["ok"] and not calls, "pushing a SKU the 2nd shop does not have fails locally with no API call (no main-shop id fallback)")
+res = AD.get("lazada").push(next(s_ for s_ in d["shops"] if s_["id"] == sid), [{"sku": K2, "qty": 3}])
+ok(res[K2]["ok"] and (K2, 3) in calls, "main shop still falls back to its own recorded ids")
+_c2 = db.conn(); _c2.execute("DELETE FROM shops WHERE id=?", (sid2,)); _c2.execute("DELETE FROM online_items WHERE shop_id=?", (sid2,))
+_c2.execute("DELETE FROM ss_state WHERE shop_id=?", (sid2,)); _c2.commit()
+pp = store.load(PID); pp.pop("lazada_api_shops", None); pp.pop("lazada_api", None); store.save(pp); S.reset_cache()
+C.post("/api/online/sync", json={"shop_id": sid})
+
+# ---- 4 批量锁定必须给数量 ----
+for badp, why in (({}, "missing"), ({"qty": ""}, "empty"), ({"qty": "abc"}, "non-numeric"), ({"qty": -2}, "negative")):
+    n0 = len(calls)
+    r = C.post("/api/stocksync/bulk", json={"action": "lock", "cells": [{"sku": K, "shop_id": sid}], "params": badp})
+    ok(r.status_code == 400 and len(calls) == n0 and not cell(K)["locked"], f"bulk lock with {why} qty is rejected, nothing pushed/locked")
+r = C.post("/api/stocksync/bulk", json={"action": "lock", "cells": [{"sku": K, "shop_id": sid}], "params": {"qty": 0}})
+ok(r.status_code == 200 and cell(K)["locked"] and last_push(K) == 0, "an explicit 0 is a valid lock")
+S.set_lock(K, sid, None, "t"); S.sync_pending("manual", "t")
+_ui = open(os.path.join(APP, "modules/listing/ui/stocksync.js"), encoding="utf-8").read()
+ok("params.qty = +v" in _ui and "请填写要锁定的件数" in _ui and 'ล็อกไว้ที่ (ชิ้น)"), "")' in _ui, "UI validates the bulk-lock quantity")
+
+# ---- 5 锁定的推送失败：不写锁定，之后还会重试 ----
+FAIL.update(on=True, msg="timeout while connecting")
+try:
+    S.edit_qty(K, sid, 4, "t", lock=True); _raised = False
+except RuntimeError:
+    _raised = True
+c = cell(K)
+ok(_raised and not c["locked"] and c["status"] == "failed", f"lock + failed push -> not locked, shows failed ({c['status']})")
+FAIL["on"] = False
+_c2 = db.conn(); _c2.execute("UPDATE ss_state SET next_retry=NULL WHERE sku=?", (K,)); _c2.commit()
+S.sync_pending("timer", "t")
+ok(cell(K)["status"] == "synced" and not cell(K)["locked"], "retried afterwards with the computed number")
+S.edit_qty(K, sid, 4, "t", lock=True)
+ok(cell(K)["locked"] and cell(K)["target"] == 4 and last_push(K) == 4, "lock written after the push succeeds")
+S.set_lock(K, sid, None, "t"); S.sync_pending("manual", "t")
+
+# ---- 角色：/api/stocksync/* 老板 + 上架客服可以，生产员不行 ----
+db.create_user("lst", "secret123", "listing", "L"); db.create_user("prd", "secret123", "production", "P")
+for u_, want_ in (("lst", 200), ("prd", 403)):
+    cl = A.app.test_client(); cl.post("/api/auth/login", json={"username": u_, "password": "secret123"})
+    codes_ = {cl.get("/api/stocksync/matrix").status_code, cl.get("/api/stocksync/log").status_code}
+    ok(codes_ == {want_}, f"role {u_}: /api/stocksync/* -> {codes_}")
+ok(C.get("/api/stocksync/matrix").status_code == 200, "owner can use /api/stocksync/*")
+ok("自动推送未开启：先核对对照表，再开启" in _ui and "ยังไม่เปิดการส่งอัตโนมัติ" in _ui, "UI shows the bilingual auto-push-off banner")
+ok('if (!confirm(Z("把所有接口店铺的库存全部重新推一遍' in _ui, "UI asks for confirmation before force-push-all")
 
 # ---- 商品 360 记录块 / 页面 / 设置 ----
 r = C.get(f"/api/p360/{K}").get_json()

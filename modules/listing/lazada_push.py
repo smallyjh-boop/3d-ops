@@ -498,14 +498,29 @@ def _loop():
         if mins <= 0 or time.time() - last < mins * 60:
             continue
         last = time.time()
-        try:
-            r = sync_stock("系统", "auto")
-            if r["failed"]:
-                diag.log.warning("Lazada 库存自动同步有失败：%s", r["failed"][:3])
-        except PushError:
-            pass                                   # 没有 Lazada 店铺：不用同步
-        except Exception as e:  # noqa: BLE001
-            diag.log.warning("Lazada 库存自动同步失败：%s", e)
+        _auto_stock_sync()
+
+
+def _auto_stock_sync():
+    """旧引擎的自动推送一次。v2.53：新的库存同步开了「自动推送」就由它唯一负责推（两套公式不同，同时推会来回改）——这里什么都不做。
+    返回 None = 没推（新引擎在管）；否则 sync_stock 的结果。"""
+    from core import diag
+    try:
+        from . import stocksync
+        if stocksync.auto_enabled():
+            return None
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        r = sync_stock("系统", "auto")
+        if r["failed"]:
+            diag.log.warning("Lazada 库存自动同步有失败：%s", r["failed"][:3])
+        return r
+    except PushError:
+        pass                                   # 没有 Lazada 店铺：不用同步
+    except Exception as e:  # noqa: BLE001
+        diag.log.warning("Lazada 库存自动同步失败：%s", e)
+    return None
 
 
 def start():

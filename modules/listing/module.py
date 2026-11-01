@@ -46,9 +46,10 @@ MODULE = {
         ("lazada_stock_sync_min", "库存自动推到 Lazada：每隔几分钟把「库存待同步」里用接口推送过的 SKU 改掉（0 = 关，只手动点）",
          ["0", "15", "30", "60", "120"])]),
         ("库存同步规则（默认值，可按产品 / SKU / 店铺单独改）", [
+            ("ss_auto_push", "自动推送总开关：先在「库存同步」对照总表核对平台数和系统数，没问题再打开。关着时只拉平台库存、显示差异，不自动推（手动推送不受影响）；打开后上面 Lazada 的旧自动推送不再运行", "bool"),
             ("ss_safety", "安全库存：每个 SKU 平台显示的数 = 成品库存 − 订单占住的 − 这个数"),
             ("ss_alloc", "多个店铺怎么分：share 每个店铺都显示全部 / percent 按比例 / fixed 固定件数（在对照总表里改具体数）", ["share", "percent", "fixed"]),
-            ("ss_cap", "按需打印的虚拟库存上限（耗材够做几件、最多显示这么多；耗材不够显示 0）"),
+            ("ss_cap", "按需打印的虚拟库存上限（耗材够做几件、最多显示这么多；耗材不够显示 0；留空 = 跟「库存上限」stock_cap，默认 50）"),
             ("ss_printer_units", "每台打印机能撑多少件的虚拟库存（0 = 不按打印机限制）"),
             ("ss_interval_min", "定时检查：每隔几分钟拉平台库存、对照、推待同步的（0 = 只靠库存变化触发）", ["0", "5", "10", "15", "30", "60"]),
             ("ss_event_sync", "成品库存 / 订单变化时马上同步", "bool"),
@@ -58,7 +59,7 @@ MODULE = {
             ("ss_cover_days", "快卖完：按近 30 天销量，够卖不到几天"),
             ("ss_mismatch_min", "对不上：平台显示和系统差几件以上才算"),
             ("ss_unsynced_hours", "超过多少小时没同步发待办")])],
-    "config_defaults": {"lazada_stock_sync_min": "30", "ss_interval_min": "15", "ss_safety": "0", "ss_cap": "20", "ss_low_qty": "2",
+    "config_defaults": {"lazada_stock_sync_min": "30", "ss_interval_min": "15", "ss_safety": "0", "ss_auto_push": False, "ss_low_qty": "2",
                         "ss_cover_days": "3", "ss_mismatch_min": "1", "ss_unsynced_hours": "24", "ss_retry_max": "3", "ss_event_sync": True,
                         "ss_source": "total", "ss_alloc": "share", "ss_printer_units": "0", "ss_virtual_min": "1"},
     "events": {"stock.changed": _on_stock, "order.status": _on_order},       # v2.53 库存同步：成品库存 / 订单变化时马上同步
