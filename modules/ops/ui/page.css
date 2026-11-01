@@ -58,3 +58,21 @@
 #ops-life table.grid td { vertical-align: middle }
 [data-p360] { cursor: pointer }
 .oa-grid2 .ux-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)) }
+/* v2.51 多店铺：各店铺对比、最好 / 最差、每个店铺的同步小圆点 */
+.oa-bw { font-size: 11px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.oa-bw .ok { color: var(--ux-ok) } .oa-bw .bad { color: var(--ux-bad) }
+.oa-sd { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #cbd5e1; vertical-align: middle; flex: none }
+.oa-sd.ux-ok { background: #22c55e } .oa-sd.ux-warn { background: #f59e0b } .oa-sd.ux-bad { background: #ef4444 }
+.oa-dots { display: inline-flex; gap: 6px; align-items: center; height: 30px } .oa-dots .oa-sd { width: 14px; height: 14px }
+table.oa-cmp th.oa-sort { cursor: pointer; user-select: none; white-space: nowrap } table.oa-cmp th.oa-sort.on { color: var(--ux-info, #2563eb) }
+table.oa-cmp td { white-space: nowrap; vertical-align: middle } table.oa-cmp td .small { font-size: 11px }
+table.oa-cmp tfoot td, tr.oa-total td { border-top: 2px solid #e2e8f0; font-weight: 600; background: #f8fafc }
+.oa-plat { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 8px; background: #f1f5f9; color: #475569; margin-right: 2px }
+.oa-plat-lazada { background: #eef2ff; color: #3730a3 } .oa-plat-shopee { background: #fff1eb; color: #c2410c } .oa-plat-tiktok { background: #f1f5f9; color: #111827 }
+.oa-sub-h { margin: 4px 0 2px }
+h4.oa-perf-shop { margin: 12px 0 2px; display: flex; gap: 8px; align-items: baseline } h4.oa-perf-shop:first-child { margin-top: 0 }
+.oa-perf-each { margin-top: 8px; border-top: 1px solid #f1f5f9; padding-top: 6px } .oa-perf-each > summary { color: var(--ux-info, #2563eb) }
+/* 卡片里有「最好 / 最差」两行时：走势小图挪到右上角，文字占满整行 */
+.ops-sub .ux-kpi .ux-kpi-s:has(.oa-bw) { padding-right: 0 }
+.ops-sub .ux-kpi:has(.oa-bw) .ux-spark { top: 10px; bottom: auto; width: 64px; height: 20px }
+.ops-sub .ux-kpi-v .ux-dot { font-size: 16px }

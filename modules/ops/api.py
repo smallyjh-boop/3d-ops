@@ -42,13 +42,19 @@ def oa_lifecycle():
 def oa_lazada():
     days = max(1, min(90, int(request.args.get("days") or 30)))
     owner = auth.is_owner()
+    # v2.51：和总览同一个筛选条——选了店铺只看这个 Lazada 店铺；选了别的平台 → 这一页没有数（页面上说清楚）
+    plat, shop = str(request.args.get("platform") or ""), str(request.args.get("shop") or "")
+    ids = (lazada.shop_ids_of(shop) if plat in ("", "lazada") else []) if shop else ([] if plat and plat != "lazada" else None)
 
     def go():
-        out = {"status": lazada.status(), "reviews": lazada.reviews_list(days), "shops": lazada.shops(),
-               "sync_min": load_config().get("oa_lz_sync_min")}
+        out = {"status": lazada.status(ids), "reviews": lazada.reviews_list(days, shop_ids=ids), "shops": lazada.shops(),
+               "sync_min": load_config().get("oa_lz_sync_min"), "filters": dash.filters(), "scope": {"platform": plat, "shop": shop, "shop_ids": ids}}
         if owner:
-            out.update(summary=lazada.summary(days), reverse=lazada.reverse_list(days), performance=lazada.performance(),
-                       fees=lazada.fee_rates(days))
+            perf = lazada.performance(ids)
+            out.update(summary=lazada.summary(days, ids), reverse=lazada.reverse_list(days, shop_ids=ids), performance=perf,
+                       perf_count=lazada.perf_count([m for p in perf for m in p["metrics"]]),
+                       perf_combined=lazada.perf_combined(perf) if len(perf) > 1 else None,
+                       fees=lazada.fee_rates(days, ids), per_shop=list(lazada.per_shop(days).values()) if ids is None else None)
         return out
     return _wrap(go)
 

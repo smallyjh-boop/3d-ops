@@ -45,6 +45,9 @@
   const daysOf = (f) => (window.OPSHUB ? OPSHUB.days(f) : 30);
 
   // ---------------- Lazada 小工具：同步状态一个点、店铺表现进度条、费用条形图 ----------------
+  const RAW = (s) => `<span data-notr>${esc(s)}</span>`;                       // 店铺名之类的原始数据（不翻译）
+  const NOSHOP = () => Z("（没填店铺）", "(ไม่ระบุร้าน)");
+  const shopName = (x) => (x.shop ? RAW(x.shop) : `<span class="muted">${NOSHOP()}</span>`);
   function syncDot(st) {
     if (!st || !st.length) return null;
     const bad = st.filter((s) => s.error), ok = st.filter((s) => !s.error && s.last_ok);
@@ -54,34 +57,156 @@
       return { tone: "bad", html: UX.dot("bad", Z(`${bad.length} 项出错`, `ผิดพลาด ${bad.length} รายการ`)), sub: Z(`${ok.length} 项正常`, `ปกติ ${ok.length} รายการ`), help: why };
     }
     if (!ok.length) return { tone: "warn", html: UX.dot("warn", Z("还没同步过", "ยังไม่เคยซิงค์")), sub: "" };
-    return { tone: "ok", html: UX.dot("ok", Z(`${ok.length} 项正常 · ${hm(last)}`, `ปกติ ${ok.length} รายการ · ${hm(last)}`)), sub: day(last) };
+    return { tone: "ok", html: UX.dot("ok", Z(`${ok.length} 项正常`, `ปกติ ${ok.length} รายการ`)), sub: `${day(last)} ${hm(last)}` };
   }
-  function perfCount(perf) {
-    const all = (perf || []).flatMap((p) => p.metrics.filter((x) => x.ok != null));
-    return { ok: all.filter((x) => x.ok).length, n: all.length };
+  // v2.51：几个 Lazada 店铺 → 一个店铺一个小圆点（鼠标放上去看店铺名和情况）
+  function shopDots(st) {
+    const by = {};
+    (st || []).forEach((s) => { (by[s.shop_id] = by[s.shop_id] || { shop: s.shop, rows: [] }).rows.push(s); });
+    return Object.values(by).map((x) => {
+      const bad = x.rows.filter((s) => s.error), ok = x.rows.filter((s) => !s.error && s.last_ok);
+      const tone = bad.length ? "bad" : ok.length ? "ok" : "warn";
+      const tip = `${x.shop}：${bad.length ? bad.map((s) => Z(s.zh, s.th)).join("、") + " " + Z("出错", "ผิดพลาด") : ok.length ? Z("正常", "ปกติ") : Z("还没同步过", "ยังไม่เคยซิงค์")}`;
+      return { tone, tip, shop: x.shop };
+    });
   }
+  const toneDot = (tone, tip) => `<i class="oa-sd ux-${tone}" title="${esc(tip || "")}" data-notr></i>`;     // 提示里有店铺名（原始数据）
+  const perfTxt = (c) => (!c ? "—" : `${Z(`${c.ok}/${c.n} 达标`, `ผ่าน ${c.ok}/${c.n}`)}${c.nodata ? ` · ${Z(`${c.nodata} 项暂无数据`, `ไม่มีข้อมูล ${c.nodata} รายการ`)}` : ""}`);
+  // 一个指标一行：没数据 = 灰色「暂无数据」；有数和要求 = 进度条；只有文字 = 照原样
+  function meterOf(x, sub) {
+    const label = Z(x.zh, x.th), raw = x.known === false;
+    if (x.nodata) return UX.meter({ label, value: null, targetText: x.target, sub, subHtml: true, labelRaw: raw });
+    if (x.v != null && x.t != null) return UX.meter({ label, value: x.v, target: x.t, better: x.better, text: x.value, targetText: x.target, sub, subHtml: true, labelRaw: raw });
+    return `<div class="ux-meter ${x.ok === false ? "ux-bad" : x.ok ? "ux-ok" : ""}"><span class="ux-meter-l"><span ${raw ? "data-notr" : ""}>${esc(label)}</span>${sub ? `<small>${sub}</small>` : ""}</span><span></span>
+      <span class="ux-meter-v" data-notr>${esc(x.value)}</span><span class="ux-meter-r" data-notr>${esc(x.target || "")} ${x.ok === false ? "✗" : x.ok ? "✓" : ""}</span></div>`;
+  }
+  const meterHead = (third) => `<div class="ux-meter ux-meter-h"><span class="ux-meter-l"></span><span class="small muted">${Z("竖线 = 平台要求", "เส้นตั้ง = เกณฑ์แพลตฟอร์ม")}</span><span class="ux-meter-v small muted">${third || Z("现在", "ตอนนี้")}</span><span class="ux-meter-r">${Z("要求", "เกณฑ์")}</span></div>`;
   function perfMeters(perf) {
     if (!perf || !perf.length) return UX.empty(Z("还没同步过店铺表现", "ยังไม่เคยซิงค์ประสิทธิภาพร้าน"));
-    return perf.map((p) => `${perf.length > 1 ? `<h4 data-notr>${esc(p.shop)}</h4>` : ""}
-      <div class="ux-meter ux-meter-h"><span class="ux-meter-l"></span><span class="small muted">${Z("竖线 = 平台要求", "เส้นตั้ง = เกณฑ์แพลตฟอร์ม")}</span><span class="ux-meter-v small muted">${Z("现在", "ตอนนี้")}</span><span class="ux-meter-r">${Z("要求", "เกณฑ์")}</span></div>
-      ${p.metrics.map((x) => (x.v != null && x.t != null ? UX.meter({ label: Z(x.zh, x.th), value: x.v, target: x.t, better: x.better, text: x.value, targetText: x.target })
-        : `<div class="ux-meter ${x.ok === false ? "ux-bad" : x.ok ? "ux-ok" : "ux-none"}"><span class="ux-meter-l">${esc(Z(x.zh, x.th))}</span><span></span>
-          <span class="ux-meter-v" data-notr>${esc(x.value)}</span><span class="ux-meter-r" data-notr>${esc(x.target || "")} ${x.ok === false ? "✗" : x.ok ? "✓" : ""}</span></div>`)).join("")}
+    return perf.map((p) => `${perf.length > 1 ? `<h4 class="oa-perf-shop">${RAW(p.shop)} <span class="small muted">${perfTxt(p.count)}</span></h4>` : ""}
+      ${meterHead()}${p.metrics.length ? p.metrics.map((x) => meterOf(x)).join("") : UX.empty(Z("接口没给指标", "API ไม่ได้ส่งตัวชี้วัด"))}
       <div class="small muted">${Z("更新于", "อัปเดต")} ${fmtTime(p.at)}</div>`).join("");
+  }
+  // v2.51：几个店铺合起来：每个指标显示最差的那个店铺，下面「各店铺」展开看每个店铺
+  function perfSummary(perf, comb) {
+    if (!comb || !perf || perf.length < 2) return perfMeters(perf);
+    return `${meterHead(Z("最差", "แย่สุด"))}${comb.map((g) => {
+      const w = g.worst;
+      const others = g.shops.length - 1;
+      const sub = w ? `${Z("最差", "แย่สุด")}：${RAW(w.shop)}${g.bad_n > 1 ? ` · <span class="bad">${Z(`${g.bad_n} 个店铺没达标`, `ไม่ผ่าน ${g.bad_n} ร้าน`)}</span>` : ""}`
+        : (others > 0 ? Z(`${g.shops.length} 个店铺都没数据`, `ทั้ง ${g.shops.length} ร้านไม่มีข้อมูล`) : "");
+      return meterOf(w ? { ...w, zh: g.zh, th: g.th, known: g.known } : { zh: g.zh, th: g.th, known: g.known, nodata: true, target: (g.shops[0] || {}).target }, sub);
+    }).join("")}
+      <details class="oa-det oa-perf-each"><summary class="small">${Z("各店铺", "แต่ละร้าน")} (${perf.length})</summary>${perfMeters(perf)}</details>`;
   }
   function feeBars(f) {
     if (!f || !f.fees || !f.fees.length) return UX.empty(Z("还没有财务流水", "ยังไม่มีรายการการเงิน"));
-    return UX.bars(f.fees.filter((x) => x.amount).slice(0, 12).map((x) => ({ label: x.fee_name, value: Math.abs(x.amount), tone: x.amount > 0 ? "ok" : "",
+    return UX.bars(f.fees.filter((x) => x.amount).slice(0, 12).map((x) => ({ label: x.fee_name, raw: true, value: Math.abs(x.amount), tone: x.amount > 0 ? "ok" : "",
       text: `${m0(x.amount)}${x.rate != null ? ` · ${x.rate}%` : ""}` })));
   }
-  const reviewRow = (r) => `<div class="oa-li"><span class="${r.rating != null && r.rating <= 3 ? "bad" : "ok"}"><b>${r.rating ?? "—"}★</b></span>
+  const reviewRow = (r, multi) => `<div class="oa-li"><span class="${r.rating != null && r.rating <= 3 ? "bad" : "ok"}"><b>${r.rating ?? "—"}★</b></span>
     <span class="oa-li-t" data-notr>${esc(r.content || "")}${r.content ? "" : `<span class="muted">${Z("（没写内容）", "(ไม่มีข้อความ)")}</span>`}
-      <span class="small muted">${esc(r.item_name || r.item_id || "")} · ${day(r.created)}</span></span>
+      <span class="small muted">${multi && r.shop ? `${esc(r.shop)} · ` : ""}${esc(r.item_name || r.item_id || "")} · ${day(r.created)}</span></span>
     ${r.reply ? `<span class="small ok">${Z("已回复", "ตอบแล้ว")}</span>` : `<span class="small warn">${Z("没回复", "ยังไม่ตอบ")}</span>`}</div>`;
   const RTYPE = (t) => ({ RETURN: Z("退货退款", "คืนสินค้า"), ONLY_REFUND: Z("仅退款", "คืนเงินอย่างเดียว"), CANCEL: Z("取消", "ยกเลิก") }[(t || "").toUpperCase()] || t || "");
-  const reverseRow = (r) => `<div class="oa-li"><span class="small">${esc(RTYPE(r.request_type))}</span>
+  const reverseRow = (r, multi) => `<div class="oa-li"><span class="small">${esc(RTYPE(r.request_type))}</span>
     <span class="oa-li-t"><span class="mono" data-notr>${esc(r.order_no)}</span> <span class="small muted" data-notr>${esc(r.reason || "")}</span>
-      <span class="small muted">${day(r.created)} · <span data-notr>${esc(r.status || "")}</span></span></span><b class="num">${m(r.refund_amount)}</b></div>`;
+      <span class="small muted">${multi && r.shop ? `${RAW(r.shop)} · ` : ""}${day(r.created)} · <span data-notr>${esc(r.status || "")}</span></span></span><b class="num">${m(r.refund_amount)}</b></div>`;
+
+  // ---------------- v2.51 各店铺对比（总览、全部店铺时） ----------------
+  let CMP = { by: "shop", sort: "revenue", dir: -1 };
+  const bwText = (bw, k, fmt) => {
+    const x = bw && bw[k];
+    if (!x) return "";
+    const nm = (s) => `${s.shop ? RAW(s.shop) : esc(PLAT(s.platform))}`;
+    return `<div class="oa-bw" data-notr title="${esc(`${x.best.shop || PLAT(x.best.platform)} ${fmt(x.best.value)} · ${x.worst.shop || PLAT(x.worst.platform)} ${fmt(x.worst.value)}`)}">`
+      + `<span class="ok">${Z("最好", "ดีสุด")}：${nm(x.best)}</span></div><div class="oa-bw" data-notr><span class="bad">${Z("最差", "แย่สุด")}：${nm(x.worst)}</span></div>`;
+  };
+  function cmpCols(cp, lzOn) {
+    const c = [
+      ["name", CMP.by === "platform" ? Z("平台", "แพลตฟอร์ม") : Z("店铺", "ร้าน")], ["revenue", Z("销售额", "ยอดขาย")], ["profit", Z("利润", "กำไร")], ["n", Z("订单", "ออเดอร์")], ["margin", Z("利润率", "อัตรากำไร")],
+    ];
+    if (cp.cs) c.push(["unreplied", Z("没回复的聊天", "แชทยังไม่ตอบ")]);
+    c.push(["to_ship", Z("待发货", "รอส่ง")]);
+    if (lzOn) c.push(["rating", Z("评分", "คะแนน")], ["perf", Z("店铺表现", "ประสิทธิภาพร้าน")], ["sync", Z("同步", "ซิงค์")]);
+    return c;
+  }
+  const sortVal = (r, k) => (k === "name" ? `${r.platform} ${r.shop}`.toLowerCase() : k === "perf" ? (r.perf && r.perf.n ? r.perf.ok / r.perf.n : null)
+    : k === "sync" ? (r.sync ? { bad: 0, warn: 1, ok: 2 }[r.sync.tone] : null) : r[k]);
+  function cmpCell(r, k, total) {
+    const dash = '<span class="muted">—</span>';
+    if (k === "name") {
+      if (total) return `<b>${Z("合计", "รวม")}</b>`;
+      if (CMP.by === "platform") return `<a href="#" data-cmp-plat="${esc(r.platform)}"><b>${esc(PLAT(r.platform))}</b></a> <span class="small muted">${Z(`${r.shops} 个店铺`, `${r.shops} ร้าน`)}</span>`;
+      const nm = r.shop ? `<a href="#" data-cmp-shop="${esc(r.shop)}" data-plat="${esc(r.platform)}" data-notr>${esc(r.shop)}</a>` : `<span class="muted">${NOSHOP()}</span>`;
+      return `<span class="oa-plat oa-plat-${esc(r.platform)}">${esc(PLAT(r.platform))}</span> ${nm}`;
+    }
+    if (k === "revenue") return m0(r.revenue);
+    if (k === "profit") return `<span class="${neg(r.profit)}">${m0(r.profit)}</span>`;
+    if (k === "n") return r.n;
+    if (k === "margin") return r.margin == null ? dash : `<span class="${r.margin < 0 ? "bad" : r.margin < 10 ? "warn" : ""}">${r.margin}%</span>`;
+    if (k === "unreplied") return r.unreplied == null ? dash : r.unreplied ? `<b class="bad">${r.unreplied}</b>` : "0";
+    if (k === "to_ship") return `${r.to_ship || 0}${r.overdue ? ` <span class="small bad">${Z(`超时 ${r.overdue}`, `เลย ${r.overdue}`)}</span>` : ""}`;
+    if (k === "rating") return r.rating == null ? dash : `${r.rating}★ <span class="small muted">(${r.reviews})</span>${r.bad_open ? ` <span class="small bad" title="${Z("差评没回复", "รีวิวแย่ยังไม่ตอบ")}">✎${r.bad_open}</span>` : ""}`;
+    if (k === "perf") {
+      if (!r.perf) return dash;
+      const t = r.perf.n ? `<span class="${r.perf.ok < r.perf.n ? "bad" : "ok"}">${Z(`${r.perf.ok}/${r.perf.n} 达标`, `ผ่าน ${r.perf.ok}/${r.perf.n}`)}</span>` : dash;
+      return `${t}${r.perf.nodata ? `<div class="small muted">${Z(`${r.perf.nodata} 项暂无数据`, `ไม่มีข้อมูล ${r.perf.nodata} รายการ`)}</div>` : ""}`;
+    }
+    if (k === "sync") {
+      if (!r.sync) return dash;
+      if (total || CMP.by === "platform") return `${toneDot(r.sync.tone)} <span class="small muted">${r.sync.bad ? Z(`${r.sync.bad} 个店铺出错`, `ผิดพลาด ${r.sync.bad} ร้าน`) : Z(`${r.sync.n} 个店铺`, `${r.sync.n} ร้าน`)}</span>`;
+      const tip = r.sync.errors && r.sync.errors.length ? r.sync.errors.map((e) => `${Z(e.zh, e.th)}：${Z(e.hint || e.error, e.hint_th || e.hint || e.error)}`).join("\n")
+        : r.sync.tone === "ok" ? `${Z("正常", "ปกติ")} · ${fmtTime(r.sync.last_ok)}` : Z("还没同步过", "ยังไม่เคยซิงค์");
+      return `${toneDot(r.sync.tone, tip)} <span class="small muted">${r.sync.tone === "bad" ? Z(`${r.sync.bad} 项出错`, `ผิดพลาด ${r.sync.bad}`) : r.sync.last_ok ? hm(r.sync.last_ok) : Z("没同步", "ยังไม่ซิงค์")}</span>`;
+    }
+    return "";
+  }
+  function cmpCard(cp, lzOn) {
+    const lz = lzOn && cp.rows.some((r) => r.lz_shop_id);
+    const cols = cmpCols(cp, lz);
+    const rows = [...(CMP.by === "platform" ? cp.by_platform : cp.rows)].sort((a, b) => {
+      const x = sortVal(a, CMP.sort), y = sortVal(b, CMP.sort);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (x < y ? -1 : x > y ? 1 : 0) * CMP.dir;
+    });
+    const th = cols.map(([k, l]) => `<th class="${k === "name" ? "" : "num"} oa-sort ${CMP.sort === k ? "on" : ""}" data-cmp-sort="${k}">${l}${CMP.sort === k ? (CMP.dir < 0 ? " ▼" : " ▲") : ""}</th>`).join("");
+    const body = rows.map((r) => `<tr>${cols.map(([k]) => `<td class="${k === "name" ? "" : "num"}">${cmpCell(r, k)}</td>`).join("")}</tr>`).join("");
+    const foot = `<tr class="oa-total">${cols.map(([k]) => `<td class="${k === "name" ? "" : "num"}">${cmpCell(cp.total, k, true)}</td>`).join("")}</tr>`;
+    return UX.card({ id: "oa-cmp", title: Z("各店铺对比", "เปรียบเทียบแต่ละร้าน"),
+      help: Z("一个店铺一行（同一个利润算法，合计 = 上面的数字）。点表头排序，点店铺名只看这个店铺。评分、店铺表现、同步只有 Lazada 店铺有（接口拉的）。",
+        "หนึ่งร้านหนึ่งแถว (คิดกำไรแบบเดียวกัน ยอดรวม = ตัวเลขด้านบน) กดหัวตารางเพื่อเรียง กดชื่อร้านเพื่อดูเฉพาะร้านนั้น คะแนน ประสิทธิภาพร้าน และการซิงค์มีเฉพาะร้าน Lazada"),
+      right: UX.tabs([["shop", Z("按店铺", "ตามร้าน")], ["platform", Z("按平台", "ตามแพลตฟอร์ม")]], CMP.by, "cmpby"),
+      body: `<div class="oa-wrap"><table class="grid oa-cmp"><thead><tr>${th}</tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table></div>` });
+  }
+  function cmpClick(e, box, d, lzOn) {
+    const by = e.target.closest('[data-ux-group="cmpby"] [data-ux-tab]');
+    const so = e.target.closest("[data-cmp-sort]");
+    if (by || so) {
+      if (by) CMP.by = by.dataset.uxTab;
+      else if (CMP.sort === so.dataset.cmpSort) CMP.dir = -CMP.dir;
+      else { CMP.sort = so.dataset.cmpSort; CMP.dir = so.dataset.cmpSort === "name" ? 1 : -1; }
+      const c = box.querySelector("#oa-cmp");
+      if (c) c.outerHTML = cmpCard(d.compare, lzOn);
+      return true;
+    }
+    const sh = e.target.closest("[data-cmp-shop]");
+    if (sh) {
+      e.preventDefault();
+      const name = sh.dataset.cmpShop, plats = new Set(d.compare.rows.filter((r) => r.shop === name).map((r) => r.platform));
+      if (window.OPSHUB) OPSHUB.set({ shop: name, platform: plats.size > 1 ? sh.dataset.plat : (F().platform || "") });
+      return true;
+    }
+    const pl = e.target.closest("[data-cmp-plat]");
+    if (pl) {
+      e.preventDefault();
+      if (window.OPSHUB) OPSHUB.set({ platform: pl.dataset.cmpPlat, shop: "" });
+      return true;
+    }
+    return false;
+  }
 
   // ---------------- 经营概况 → 总览 ----------------
   async function dashPage(box) {
@@ -96,26 +221,49 @@
     const setRate = Math.round((d.fee_rate_setting || 0) * 1000) / 10;
     const rv = lz.reviews || {}, rs = lz.reverse || {};
     const sd = syncDot(lz.status);
-    const pc = perfCount(lz.performance);
+    const pc = lz.perf_count || { ok: 0, n: 0, nodata: 0 };
+    const cp = d.compare && d.compare.rows.length > 1 ? d.compare : null;          // v2.51：全部店铺 + 至少 2 个店铺 → 各店铺对比
+    const bw = cp ? cp.best_worst : null;
+    const lzRows = cp ? cp.rows.filter((r) => r.lz_shop_id) : [];
+    const multiLz = (lz.shops || 0) > 1;
     const estNote = h.orders_fee_estimated ? Z(`近 30 天 ${h.orders_fee_estimated}/${h.orders_30d} 单的平台费是按扣点估算的；Lazada 财务流水拉下来以后按真实扣费算。`,
       `${h.orders_fee_estimated}/${h.orders_30d} ออเดอร์ใน 30 วันใช้ค่าธรรมเนียมประมาณ ดึงรายการการเงิน Lazada แล้วจะใช้ค่าจริง`) : "";
+    const sub2 = (a, b) => `${a ? esc(a) : ""}${b || ""}`;                        // 卡片下面：▲▼ + 「最好 / 最差」
     const kp1 = [
-      { icon: "💰", label: Z("销售额", "ยอดขาย"), value: m0(k.revenue), spark: inP.length > 1 ? inP.map((x) => x.revenue) : days.map((x) => x.revenue), sub: dTxt(delta(k.revenue, p.revenue)), help: Z("▲▼ = 和前面同样长的一段时间比", "▲▼ = เทียบกับช่วงก่อนหน้าที่ยาวเท่ากัน") },
+      { icon: "💰", label: Z("销售额", "ยอดขาย"), value: m0(k.revenue), spark: inP.length > 1 ? inP.map((x) => x.revenue) : days.map((x) => x.revenue),
+        sub: sub2(dTxt(delta(k.revenue, p.revenue)), bwText(bw, "revenue", m0)), subHtml: true, help: Z("▲▼ = 和前面同样长的一段时间比", "▲▼ = เทียบกับช่วงก่อนหน้าที่ยาวเท่ากัน") },
       { icon: "📈", label: Z("利润", "กำไร"), value: m0(k.profit), tone: k.profit < 0 ? "bad" : "ok", spark: (inP.length > 1 ? inP : days).map((x) => x.profit),
-        sub: dTxt(delta(k.profit, p.profit)), help: Z("每单利润 = 收入 − 平台费 − 生产成本，和「财务」同一个算法。", "กำไรต่อออเดอร์ = รายได้ − ค่าธรรมเนียม − ต้นทุนผลิต คิดแบบเดียวกับโมดูลการเงิน") + (estNote ? "\n" + estNote : "") },
+        sub: sub2(dTxt(delta(k.profit, p.profit)), bwText(bw, "profit", m0)), subHtml: true,
+        help: Z("每单利润 = 收入 − 平台费 − 生产成本，和「财务」同一个算法。", "กำไรต่อออเดอร์ = รายได้ − ค่าธรรมเนียม − ต้นทุนผลิต คิดแบบเดียวกับโมดูลการเงิน") + (estNote ? "\n" + estNote : "") },
       { icon: "🧾", label: Z("订单", "ออเดอร์"), value: k.n, spark: (inP.length > 1 ? inP : days).map((x) => x.orders), sub: Z(`客单价 ${m0(k.aov)}`, `เฉลี่ย/ออเดอร์ ${m0(k.aov)}`) },
-      { icon: "％", label: Z("利润率", "อัตรากำไร"), value: pct(k.margin), tone: k.margin != null && k.margin < 10 ? "warn" : "", sub: p.margin != null ? Z(`上一段 ${p.margin}%`, `ช่วงก่อน ${p.margin}%`) : "" },
+      { icon: "％", label: Z("利润率", "อัตรากำไร"), value: pct(k.margin), tone: k.margin != null && k.margin < 10 ? "warn" : "",
+        sub: sub2(p.margin != null ? Z(`上一段 ${p.margin}%`, `ช่วงก่อน ${p.margin}%`) : "", bwText(bw, "margin", pct)), subHtml: true },
     ];
     if (d.fin_net) kp1.push({ icon: "🏦", label: Z("30 天净利润", "กำไรสุทธิ 30 วัน"), value: m0(d.fin_net.net), tone: d.fin_net.net < 0 ? "bad" : "", go: "tab:fin_overview",
       sub: d.fin_net.net_margin != null ? `${d.fin_net.net_margin}%` : "", help: Z("财务口径：扣了支出、固定费用、售后损失", "ตามบัญชี: หักค่าใช้จ่าย ค่าคงที่ และความเสียหายหลังการขาย") });
+    // Lazada：几个店铺时同步状态一个店铺一个点；扣点、评分、店铺表现标出最差的店铺
+    const dots = multiLz ? shopDots(lz.status) : [];
+    const worstBy = (rows, key, cmp) => rows.filter((r) => r[key] != null).sort(cmp)[0];
+    const feeW = lzRows.filter((r) => r.fee_rate != null).length > 1 ? worstBy(lzRows, "fee_rate", (a, b) => b.fee_rate - a.fee_rate) : null;
+    const rateW = lzRows.filter((r) => r.rating != null).length > 1 ? worstBy(lzRows, "rating", (a, b) => a.rating - b.rating) : null;
+    const perfW = lzRows.filter((r) => r.perf && r.perf.n).length > 1 ? worstBy(lzRows.map((r) => ({ ...r, pr: r.perf && r.perf.n ? r.perf.ok / r.perf.n : null })), "pr", (a, b) => a.pr - b.pr) : null;
+    const wLine = (r, txt) => (r ? `<div class="oa-bw"><span class="bad">${Z("最差", "แย่สุด")}：${RAW(r.shop)} ${txt}</span></div>` : "");
     const kp2 = showLz && lz.shops ? [
-      sd ? { icon: "🔄", label: Z("Lazada 同步", "ซิงค์ Lazada"), value: sd.html, html: true, tone: sd.tone === "bad" ? "bad" : "", sub: sd.sub, help: sd.help, go: "tab:ops_lazada" } : null,
-      { icon: "🏷", label: Z("真实扣点", "ค่าธรรมเนียมจริง"), value: fees.rate == null ? "—" : `${fees.rate}%`, tone: fees.rate != null && fees.rate > setRate + 1 ? "warn" : "",
-        sub: Z(`设置里 ${setRate}%`, `ที่ตั้งไว้ ${setRate}%`), help: Z("Lazada 财务流水里平台扣的钱 ÷ 商品金额。比设置里的高很多时，到「设置 → 成本」改扣点。", "เงินที่แพลตฟอร์มหัก ÷ ยอดสินค้า จากรายการการเงิน Lazada ถ้าสูงกว่าที่ตั้งไว้มาก ให้แก้ที่「ตั้งค่า → ต้นทุน」") },
-      { icon: "⭐", label: Z("评价", "รีวิว"), value: rv.avg != null ? `${rv.avg} ★` : "—", tone: rv.bad_open ? "bad" : "", go: "tab:ops_lazada",
-        sub: Z(`${rv.n || 0} 条 · 差评 ${rv.bad || 0} · 没回复 ${rv.bad_open || 0}`, `${rv.n || 0} รีวิว · แย่ ${rv.bad || 0} · ยังไม่ตอบ ${rv.bad_open || 0}`) },
+      dots.length > 1 ? { icon: "🔄", label: Z("Lazada 同步", "ซิงค์ Lazada"), html: true, value: `<span class="oa-dots">${dots.map((x) => toneDot(x.tone, x.tip)).join("")}</span>`,
+        tone: dots.some((x) => x.tone === "bad") ? "bad" : "", go: "tab:ops_lazada", subHtml: true,
+        sub: dots.some((x) => x.tone !== "ok") ? dots.filter((x) => x.tone !== "ok").map((x) => `<span class="${x.tone}">${RAW(x.shop)}</span>`).join(" · ") + ` ${Z("有问题", "มีปัญหา")}`
+          : Z(`${dots.length} 个店铺都正常`, `ปกติทั้ง ${dots.length} ร้าน`), help: sd ? sd.help : "" }
+        : sd ? { icon: "🔄", label: Z("Lazada 同步", "ซิงค์ Lazada"), value: sd.html, html: true, tone: sd.tone === "bad" ? "bad" : "", sub: sd.sub, help: sd.help, go: "tab:ops_lazada" } : null,
+      { icon: "🏷", label: Z("真实扣点", "ค่าธรรมเนียมจริง"), value: fees.rate == null ? "—" : `${fees.rate}%`, tone: fees.rate != null && fees.rate > setRate + 1 ? "warn" : "", subHtml: true,
+        sub: esc(Z(`设置里 ${setRate}%`, `ที่ตั้งไว้ ${setRate}%`)) + (feeW ? `<div class="oa-bw">${Z("最高", "สูงสุด")}：${RAW(feeW.shop)} ${feeW.fee_rate}%</div>` : ""),
+        help: Z("Lazada 财务流水里平台扣的钱 ÷ 商品金额。比设置里的高很多时，到「设置 → 成本」改扣点。", "เงินที่แพลตฟอร์มหัก ÷ ยอดสินค้า จากรายการการเงิน Lazada ถ้าสูงกว่าที่ตั้งไว้มาก ให้แก้ที่「ตั้งค่า → ต้นทุน」") },
+      { icon: "⭐", label: Z("评价", "รีวิว"), value: rv.avg != null ? `${rv.avg} ★` : "—", tone: rv.bad_open ? "bad" : "", go: "tab:ops_lazada", subHtml: true,
+        sub: esc(Z(`${rv.n || 0} 条 · 差评 ${rv.bad || 0} · 没回复 ${rv.bad_open || 0}`, `${rv.n || 0} รีวิว · แย่ ${rv.bad || 0} · ยังไม่ตอบ ${rv.bad_open || 0}`)) + (rateW ? wLine(rateW, `${rateW.rating}★`) : "") },
       { icon: "↩️", label: Z("退货退款", "คืนสินค้า/เงิน"), value: rs.n || 0, tone: rs.n ? "warn" : "", sub: m0(rs.refund || 0), go: "tab:ops_lazada" },
-      pc.n ? { icon: "🏪", label: Z("店铺表现", "ประสิทธิภาพร้าน"), value: Z(`${pc.ok}/${pc.n} 达标`, `ผ่าน ${pc.ok}/${pc.n}`), tone: pc.ok < pc.n ? "bad" : "ok", go: "tab:ops_lazada" } : null,
+      pc.n || pc.nodata ? { icon: "🏪", label: Z("店铺表现", "ประสิทธิภาพร้าน"), value: pc.n ? Z(`${pc.ok}/${pc.n} 达标`, `ผ่าน ${pc.ok}/${pc.n}`) : "—", tone: pc.n ? (pc.ok < pc.n ? "bad" : "ok") : "",
+        go: "tab:ops_lazada", subHtml: true,
+        sub: (pc.nodata ? esc(Z(`${pc.nodata} 项暂无数据`, `ไม่มีข้อมูล ${pc.nodata} รายการ`)) : "") + (perfW ? wLine(perfW, `${perfW.perf.ok}/${perfW.perf.n}`) : ""),
+        help: Z("没有数据的指标不算达标，也不算不达标。", "ตัวชี้วัดที่ไม่มีข้อมูลไม่นับว่าผ่านหรือไม่ผ่าน") } : null,
     ] : [];
     const cols = UX.columns(days.map((x) => ({ label: x.day, value: Math.max(0, x.revenue), text: `${m0(x.revenue)} · ${Z("利润", "กำไร")} ${m0(x.profit)} · ${x.orders} ${Z("单", "ออเดอร์")}`,
       tone: x.profit < 0 ? "bad" : x.day < d.period.from ? "info" : "" })), { h: 140, from: days.length ? days[0].day : "", to: days.length ? days[days.length - 1].day : "" });
@@ -132,16 +280,21 @@
       .map(([o, c, l]) => `<div class="oa-li"><span class="${c} small">${l}</span><span class="oa-li-t"><span>${esc(PLAT(o.platform))} <span class="mono" data-notr>${esc(o.order_no)}</span></span></span>
         <span class="small">${o.hours_left < 0 ? Z(`超 ${-o.hours_left} 小时`, `เกิน ${-o.hours_left} ชม.`) : Z(`剩 ${o.hours_left} 小时`, `เหลือ ${o.hours_left} ชม.`)}</span></div>`).join("");
     const pr = d.production;
+    const feeShops = lzRows.filter((r) => r.fee_item);
+    const feeEach = feeShops.length > 1 ? `<div class="small muted oa-sub-h">${Z("各店铺扣点", "ค่าธรรมเนียมแต่ละร้าน")}</div>${UX.bars(feeShops.map((r) => ({ label: r.shop, raw: true, value: r.fee_rate || 0,
+      tone: r.fee_rate != null && r.fee_rate > setRate + 1 ? "warn" : "", text: `${r.fee_rate}% · ${m0(r.fee_deducted)}` })))}<div class="small muted oa-sub-h">${Z("按费用名（全部店铺）", "ตามชื่อค่าธรรมเนียม (ทุกร้าน)")}</div>` : "";
     box.innerHTML = `${UX.kpis(kp1)}${kp2.filter(Boolean).length ? UX.kpis(kp2) : ""}
+      ${cp ? cmpCard(cp, showLz) : ""}
       ${UX.card({ title: Z("每日销售额", "ยอดขายรายวัน"), help: Z("柱子 = 每天销售额（鼠标放上去看利润、单数）；红色 = 当天亏损；灰色 = 选的时间段之前（对比用）", "แท่ง = ยอดขายต่อวัน (ชี้เมาส์ดูกำไร/ออเดอร์) สีแดง = วันนั้นขาดทุน สีเทา = ก่อนช่วงที่เลือก"), body: cols })}
       ${showLz && lz.shops ? `<div class="oa-grid2">
-        ${UX.card({ title: Z("店铺表现", "ประสิทธิภาพร้าน"), right: `<button class="mini" data-ops-go="ops_lazada">${Z("全部", "ทั้งหมด")}</button>`, body: perfMeters(lz.performance) })}
+        ${UX.card({ title: Z("店铺表现", "ประสิทธิภาพร้าน"), help: Z("几个店铺时每个指标显示最差的那个店铺；「各店铺」展开看每个店铺。灰色「暂无数据」= 平台还没给这个数，不算达标。", "ถ้ามีหลายร้าน แต่ละตัวชี้วัดแสดงร้านที่แย่ที่สุด กด「แต่ละร้าน」เพื่อดูทุกร้าน สีเทา「ยังไม่มีข้อมูล」= แพลตฟอร์มยังไม่ให้ตัวเลข ไม่นับว่าผ่าน"),
+          right: `${pc.n || pc.nodata ? `<span class="small muted">${perfTxt(pc)}</span> ` : ""}<button class="mini" data-ops-go="ops_lazada">${Z("全部", "ทั้งหมด")}</button>`, body: perfSummary(lz.performance, lz.perf_combined) })}
         ${UX.card({ title: Z("平台扣了哪些钱", "แพลตฟอร์มหักอะไรบ้าง"), help: Z("Lazada 财务流水按费用名分；绿色 = 平台补贴 / 返还", "แยกตามชื่อค่าธรรมเนียมจากรายการการเงิน Lazada สีเขียว = เงินคืน/อุดหนุน"),
-          right: fees.item_amount ? `<span class="small muted">${Z("商品金额", "ยอดสินค้า")} ${m0(fees.item_amount)} · ${Z("扣了", "หัก")} ${m0(fees.deducted)}</span>` : "", body: feeBars(fees) })}
+          right: fees.item_amount ? `<span class="small muted">${Z("商品金额", "ยอดสินค้า")} ${m0(fees.item_amount)} · ${Z("扣了", "หัก")} ${m0(fees.deducted)}</span>` : "", body: feeEach + feeBars(fees) })}
         ${UX.card({ title: Z("最新评价", "รีวิวล่าสุด"), right: `<button class="mini" data-ops-go="ops_lazada">${Z("全部", "ทั้งหมด")}</button>`,
-          body: (lz.reviews_recent || []).length ? lz.reviews_recent.map(reviewRow).join("") : UX.empty(Z("这段时间没有评价", "ช่วงนี้ไม่มีรีวิว")) })}
+          body: (lz.reviews_recent || []).length ? lz.reviews_recent.map((r) => reviewRow(r, multiLz)).join("") : UX.empty(Z("这段时间没有评价", "ช่วงนี้ไม่มีรีวิว")) })}
         ${UX.card({ title: Z("退货退款", "คืนสินค้า / คืนเงิน"), right: `<button class="mini" data-ops-go="ops_lazada">${Z("全部", "ทั้งหมด")}</button>`,
-          body: (lz.reverse_recent || []).length ? lz.reverse_recent.map(reverseRow).join("") : UX.empty(Z("这段时间没有退货退款", "ช่วงนี้ไม่มีการคืนสินค้า")) })}
+          body: (lz.reverse_recent || []).length ? lz.reverse_recent.map((r) => reverseRow(r, multiLz)).join("") : UX.empty(Z("这段时间没有退货退款", "ช่วงนี้ไม่มีการคืนสินค้า")) })}
       </div>` : ""}
       <div class="oa-grid2">
         ${UX.card({ title: Z("按平台", "ตามแพลตฟอร์ม"), help: Z("销售额 · 订单数；红色 = 亏损", "ยอดขาย · จำนวนออเดอร์ สีแดง = ขาดทุน"), body: plat })}
@@ -164,6 +317,7 @@
           [Z("平台费是估算的订单（30 天）", "ออเดอร์ค่าธรรมเนียมประมาณ (30 วัน)"), h.orders_fee_estimated, "warn"]].map(([l, v, t]) => ({ label: l, value: v || 0, tone: v ? t : "" })))}
         ${h.unknown_skus.length ? `<p class="small">${Z("没对上产品的 SKU", "SKU ที่จับคู่สินค้าไม่ได้")}：<span class="mono" data-notr>${esc(h.unknown_skus.join(", "))}</span></p>` : ""}
         <p class="small muted">${d.breakdown_source === "fin" ? Z("利润和「财务」模块同一个算法（平台、SKU 的数直接取自财务）。", "กำไรใช้วิธีคิดเดียวกับโมดูลการเงิน") : ""}</p></details>`;
+    box.onclick = (e) => { if (cp) cmpClick(e, box, d, showLz); };
   }
 
   // 市场与计划（下一个大促、进行中的计划、竞品动态、流量）
@@ -182,25 +336,55 @@
   // ---------------- 经营概况 → 店铺与评价（Lazada 数据） ----------------
   let RV_FILTER = "bad";
   async function lzPage(box) {
-    const days = daysOf(F());
-    const d = await api(`/api/oa/lazada?days=${Math.max(1, Math.min(90, days))}`);
+    const fl = F(), days = daysOf(fl);
+    const d = await api("/api/oa/lazada?" + qs({ days: Math.max(1, Math.min(90, days)), platform: fl.platform, shop: fl.shop }));
+    if (window.OPSHUB && d.filters) OPSHUB.options(d.filters);
+    box.onclick = null;
     if (!d.shops.length) {
       box.innerHTML = UX.empty(Z("还没有开着的 Lazada 店铺：先到「设置 → AI 与对接 → 店铺对接」接上 Lazada。", "ยังไม่มีร้าน Lazada ที่เปิดใช้: ไปเชื่อมที่「ตั้งค่า → AI และการเชื่อมต่อ → เชื่อมต่อร้าน」ก่อน"));
       return;
     }
+    // v2.51：和总览同一个筛选条——选了不是 Lazada 的平台 / 店铺：这一页没有数，说清楚
+    if (d.scope && Array.isArray(d.scope.shop_ids) && !d.scope.shop_ids.length) {
+      box.innerHTML = UX.card({ body: `${UX.empty(fl.shop ? Z(`选的店铺不是 Lazada 店铺：这一页只有 Lazada 店铺的数据（评价、退货、店铺表现都是 Lazada 接口拉的）。`,
+        `ร้านที่เลือกไม่ใช่ร้าน Lazada: หน้านี้มีเฉพาะข้อมูลร้าน Lazada (รีวิว คืนสินค้า ประสิทธิภาพร้าน ดึงจาก API ของ Lazada)`)
+        : Z("这一页只有 Lazada 店铺的数据：把上面的平台换成「全部平台」或 Lazada。", "หน้านี้มีเฉพาะข้อมูลร้าน Lazada: เปลี่ยนแพลตฟอร์มด้านบนเป็น「ทุกแพลตฟอร์ม」หรือ Lazada"))}
+        <p><button class="mini" data-lz-all>${Z("看全部 Lazada 店铺", "ดูทุกร้าน Lazada")}</button></p>` });
+      box.onclick = (e) => { if (e.target.closest("[data-lz-all]") && window.OPSHUB) OPSHUB.set({ platform: "lazada", shop: "" }); };
+      return;
+    }
+    const multi = d.status.some((s) => s.shop_id !== (d.status[0] || {}).shop_id);
     const sd = syncDot(d.status);
     const every = Number(d.sync_min || 0);
-    const st = d.status.map((s) => `<div class="oa-li">${UX.dot(s.error ? "bad" : s.last_ok ? "ok" : "warn", "")}<span class="oa-li-t"><span data-notr>${esc(s.shop)}</span> · ${esc(Z(s.zh, s.th))}
+    const st = d.status.map((s) => `<div class="oa-li">${UX.dot(s.error ? "bad" : s.last_ok ? "ok" : "warn", "")}<span class="oa-li-t"><span><span data-notr>${esc(s.shop)}</span> · ${esc(Z(s.zh, s.th))}</span>
         ${s.error ? `<span class="small bad" data-notr>${esc(s.error)}</span>${s.hint ? `<span class="small"><b>${Z("怎么办", "ต้องทำอะไร")}：</b>${esc(Z(s.hint, s.hint_th || s.hint))}</span>` : ""}` : ""}</span>
       <span class="small muted">${s.last_ok ? fmtTime(s.last_ok) : Z("还没同步过", "ยังไม่เคยซิงค์")}</span></div>`).join("");
     const rv = d.reviews.filter((r) => RV_FILTER === "all" || (RV_FILTER === "bad" ? r.rating != null && r.rating <= 3 : !r.reply));
     const nBad = d.reviews.filter((r) => r.rating != null && r.rating <= 3).length, nOpen = d.reviews.filter((r) => !r.reply).length;
-    let html = UX.card({ title: Z("同步状态", "สถานะการซิงค์"), help: Z("用的是「店铺对接」里授权的 Lazada 应用。显示没有权限时：到 open.lazada.com 的 App Console 给应用申请对应的 API 权限，批下来后重新授权店铺。",
+    // v2.51：全部店铺时一个店铺一行：同步、店铺表现、评价、退货、真实扣点（点店铺名只看这个店铺）
+    let eachShop = "";
+    if (own() && d.per_shop && d.per_shop.length > 1) {
+      const fr = (x) => (x.rate == null ? '<span class="muted">—</span>' : `${x.rate}%`);
+      eachShop = UX.card({ title: Z("各店铺", "แต่ละร้าน"), body: tbl([Z("店铺", "ร้าน"), Z("同步", "ซิงค์"), Z("店铺表现", "ประสิทธิภาพร้าน"), Z("评分", "คะแนน"), Z("差评没回复", "รีวิวแย่ยังไม่ตอบ"),
+        Z("退货退款", "คืนสินค้า/เงิน"), Z("真实扣点", "ค่าธรรมเนียมจริง")], d.per_shop.map((x) => `<tr>
+          <td><a href="#" data-lz-shop="${esc(x.shop)}" data-notr>${esc(x.shop)}</a></td>
+          <td>${toneDot(x.sync.tone, x.sync.errors.map((e) => `${Z(e.zh, e.th)}：${Z(e.hint || e.error, e.hint_th || e.hint || e.error)}`).join("\n"))} <span class="small muted">${x.sync.bad ? Z(`${x.sync.bad} 项出错`, `ผิดพลาด ${x.sync.bad}`) : x.sync.last_ok ? fmtTime(x.sync.last_ok) : Z("还没同步过", "ยังไม่เคยซิงค์")}</span></td>
+          <td class="small">${x.perf ? `<span class="${x.perf.ok < x.perf.n ? "bad" : "ok"}">${perfTxt(x.perf)}</span>` : '<span class="muted">—</span>'}</td>
+          <td class="num">${x.reviews.avg != null ? `${x.reviews.avg}★ <span class="small muted">(${x.reviews.n})</span>` : '<span class="muted">—</span>'}</td>
+          <td class="num ${x.reviews.bad_open ? "bad" : ""}">${x.reviews.bad_open}</td>
+          <td class="num">${x.reverse.n}${x.reverse.refund ? ` <span class="small muted">${m0(x.reverse.refund)}</span>` : ""}</td>
+          <td class="num">${fr(x.fees)}</td></tr>`).concat(d.summary ? [`<tr class="oa-total"><td><b>${Z("合计", "รวม")}</b></td><td>${sd ? sd.html : ""}</td>
+          <td class="small">${perfTxt(d.perf_count)}</td><td class="num">${d.summary.reviews.avg != null ? `${d.summary.reviews.avg}★ <span class="small muted">(${d.summary.reviews.n})</span>` : "—"}</td>
+          <td class="num">${d.summary.reviews.bad_open}</td><td class="num">${d.summary.reverse.n}${d.summary.reverse.refund ? ` <span class="small muted">${m0(d.summary.reverse.refund)}</span>` : ""}</td>
+          <td class="num">${fr(d.summary.fees)}</td></tr>`] : [])) });
+    }
+    let html = eachShop + UX.card({ title: Z("同步状态", "สถานะการซิงค์"), help: Z("用的是「店铺对接」里授权的 Lazada 应用。显示没有权限时：到 open.lazada.com 的 App Console 给应用申请对应的 API 权限，批下来后重新授权店铺。",
         "ใช้แอป Lazada ที่อนุญาตไว้ใน「เชื่อมต่อร้าน」 ถ้าขึ้นว่าไม่มีสิทธิ์: ขอสิทธิ์ API ใน App Console ที่ open.lazada.com แล้วอนุญาตร้านใหม่"),
       right: `${sd ? sd.html : ""} <span class="small muted">${every ? Z(`每 ${every} 分钟自动同步`, `ซิงค์อัตโนมัติทุก ${every} นาที`) : Z("自动同步关着", "ปิดซิงค์อัตโนมัติ")}</span>
         ${own() ? `<button class="mini" data-lz-sync>${Z("立即同步", "ซิงค์ตอนนี้")}</button>` : ""}`,
-      body: `<details ${sd && sd.tone === "bad" ? "open" : ""}><summary class="small muted">${Z("每一项的情况", "รายละเอียดแต่ละรายการ")}</summary>${st}</details>` });
-    if (own() && d.performance) html += UX.card({ title: Z("店铺表现", "ประสิทธิภาพร้าน"), body: perfMeters(d.performance) });
+      body: `<details ${sd && sd.tone === "bad" && !multi ? "open" : ""}><summary class="small muted">${Z("每一项的情况", "รายละเอียดแต่ละรายการ")}</summary>${st}</details>` });
+    if (own() && d.performance) html += UX.card({ title: Z("店铺表现", "ประสิทธิภาพร้าน"), right: d.perf_count && (d.perf_count.n || d.perf_count.nodata) ? `<span class="small muted">${perfTxt(d.perf_count)}</span>` : "",
+      body: perfSummary(d.performance, d.perf_combined) });
     if (own() && d.fees) {
       const f = d.fees;
       html += UX.card({ title: Z("真实扣点（财务流水）", "ค่าธรรมเนียมจริง (รายการการเงิน)"), help: Z("拉到了商品金额那一行的订单，流水自动记进「财务 → 平台对账」，利润按真实扣费算。", "ออเดอร์ที่มีแถวยอดสินค้าแล้ว จะบันทึกเข้า「การเงิน → กระทบยอดแพลตฟอร์ม」อัตโนมัติ และคิดกำไรจากค่าธรรมเนียมจริง"),
@@ -218,18 +402,21 @@
         Z("没有评价", "ไม่มีรีวิว")) });
     if (own() && d.reverse) {
       html += UX.card({ title: Z("退货退款", "คืนสินค้า / คืนเงิน"), body: tbl([Z("时间", "เวลา"), Z("订单", "ออเดอร์"), Z("类型", "ประเภท"), "SKU", Z("原因", "เหตุผล"), Z("状态", "สถานะ"), Z("退款", "คืนเงิน")],
-        d.reverse.map((r) => `<tr><td class="small nowrap">${fmtTime(r.created)}</td><td class="mono" data-notr>${esc(r.order_no)}</td><td>${esc(RTYPE(r.request_type))}</td>
+        d.reverse.map((r) => `<tr><td class="small nowrap">${fmtTime(r.created)}${multi ? `<div class="muted" data-notr>${esc(r.shop || "")}</div>` : ""}</td><td class="mono" data-notr>${esc(r.order_no)}</td><td>${esc(RTYPE(r.request_type))}</td>
           <td class="mono small" data-p360="${esc(r.seller_sku)}" data-notr>${esc(r.seller_sku)}</td><td class="small" data-notr>${esc(r.reason)}</td>
           <td class="small ${r.open ? "warn" : "muted"}" data-notr>${esc(r.status)}</td><td class="num">${m(r.refund_amount)}</td></tr>`), Z("这段时间没有退货退款", "ช่วงนี้ไม่มีการคืนสินค้า")) });
     }
     box.innerHTML = html;
     box.onclick = async (e) => {
+      const ls = e.target.closest("[data-lz-shop]");
+      if (ls) { e.preventDefault(); if (window.OPSHUB) OPSHUB.set({ shop: ls.dataset.lzShop }); return; }
       const f = e.target.closest('[data-ux-group="rv"] [data-ux-tab]');
       if (f) { RV_FILTER = f.dataset.uxTab; return show("ops_lazada"); }
       const sy = e.target.closest("[data-lz-sync]");
       if (sy) {
         return busy(sy, async () => {
-          const r = await apiJob("/api/oa/lazada/sync", { json: {} });
+          const one = d.scope && Array.isArray(d.scope.shop_ids) && d.scope.shop_ids.length === 1;      // 选了一个店铺：只同步它
+          const r = await apiJob("/api/oa/lazada/sync", { json: one ? { shop_id: d.scope.shop_ids[0] } : {} });
           const bad = (r.shops || []).flatMap((s) => Object.values(s.kinds || {}).filter((k) => k.error));
           toast(bad.length ? Z(`同步完了，${bad.length} 项出错（看同步状态）`, `ซิงค์เสร็จ มีข้อผิดพลาด ${bad.length} รายการ`) : Z("同步完了", "ซิงค์เสร็จแล้ว"), !!bad.length);
           show("ops_lazada");

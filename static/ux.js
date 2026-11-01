@@ -52,17 +52,23 @@
       ${opts.from || opts.to ? `<div class="ux-cols-x"><span>${E(opts.from || "")}</span><span>${E(opts.to || "")}</span></div>` : ""}`;
   }
 
-  /** 指标进度条（有要求线）：{label, value, target, better: "high"|"low", text?, targetText?}；value 为空 = 灰色没数据 */
+  /** 指标进度条（有要求线）：{label, value, target, better: "high"|"low", text?, targetText?, sub?, subHtml?, labelRaw?}；
+   *  value 为空 = 灰色「暂无数据」（v2.51：不画空进度条，也不算达标 / 不达标）；sub = 标签下面一行小字（例如哪个店铺；subHtml = 已经是 HTML），labelRaw = 标签是原始数据（不翻译） */
   function meter(m) {
     const has = m.value != null && m.value !== "" && !isNaN(+m.value);
     const v = has ? +m.value : 0, t = +m.target || 0;
     const top = Math.max(v, t, 1) * 1.15;
     const ok = !has ? null : m.better === "low" ? v <= t : v >= t;
-    return `<div class="ux-meter ${has ? (ok ? "ux-ok" : "ux-bad") : "ux-none"}">
-      <span class="ux-meter-l">${E(m.label)}</span>
-      <span class="ux-meter-t"><i style="width:${has ? Math.min(100, Math.round(100 * v / top)) : 0}%"></i><b style="left:${Math.min(100, Math.round(100 * t / top))}%" title="${E(m.targetText || t)}"></b></span>
-      <span class="ux-meter-v">${has ? E(m.text != null ? m.text : v) : "—"}</span>
-      <span class="ux-meter-r">${E(m.targetText || "")} ${has ? (ok ? "✓" : "✗") : ""}</span></div>`;
+    const lab = `<span class="ux-meter-l"><span${m.labelRaw ? " data-notr" : ""}>${E(m.label)}</span>${m.sub ? `<small>${m.subHtml ? m.sub : E(m.sub)}</small>` : ""}</span>`;
+    if (!has) {
+      return `<div class="ux-meter ux-none">${lab}
+        <span class="ux-meter-nd">${window.I18N && I18N.lang === "th" ? "ยังไม่มีข้อมูล" : "暂无数据"}</span>
+        <span class="ux-meter-v">—</span><span class="ux-meter-r">${E(m.targetText || "")}</span></div>`;
+    }
+    return `<div class="ux-meter ${ok ? "ux-ok" : "ux-bad"}">${lab}
+      <span class="ux-meter-t"><i style="width:${Math.min(100, Math.round(100 * v / top))}%"></i><b style="left:${Math.min(100, Math.round(100 * t / top))}%" title="${E(m.targetText || t)}"></b></span>
+      <span class="ux-meter-v">${E(m.text != null ? m.text : v)}</span>
+      <span class="ux-meter-r">${E(m.targetText || "")} ${ok ? "✓" : "✗"}</span></div>`;
   }
 
   /** 空状态：一行灰字 */

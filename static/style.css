@@ -784,7 +784,9 @@ html.in-app .m-app-chip{display:inline-flex}
 .ux-meter-t i{display:block;height:100%;border-radius:5px;background:#86efac}.ux-meter.ux-bad .ux-meter-t i{background:#fca5a5}
 .ux-meter-t b{position:absolute;top:-3px;width:2px;height:16px;background:#111827;border-radius:1px}
 .ux-meter-v{font-weight:700;text-align:right;font-variant-numeric:tabular-nums}.ux-meter.ux-bad .ux-meter-v{color:var(--ux-bad)}.ux-meter.ux-ok .ux-meter-v{color:var(--ux-ok)}
-.ux-meter-r{font-size:12px;color:var(--muted);white-space:nowrap}.ux-meter.ux-none{opacity:.55}
+.ux-meter-r{font-size:12px;color:var(--muted);white-space:nowrap}.ux-meter.ux-none{opacity:1}.ux-meter.ux-none .ux-meter-l,.ux-meter.ux-none .ux-meter-v{color:var(--muted)}
+.ux-meter-nd{font-size:12px;color:var(--muted);background:#f8fafc;border:1px dashed #e2e8f0;border-radius:5px;padding:0 8px;line-height:16px;text-align:center}
+.ux-meter-l small{display:block;font-size:11px;color:var(--muted);font-weight:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ux-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:0 0 12px}
 .ux-tab{border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;padding:8px 12px;color:#4b5563;font-weight:500}
 .ux-tab:hover{color:var(--ink);border-color:transparent;border-bottom-color:#cbd5e1}
@@ -792,4 +794,4 @@ html.in-app .m-app-chip{display:inline-flex}
 .ux-tab b{background:#e5e7eb;border-radius:9px;padding:0 6px;font-size:11px;margin-left:2px}.ux-tab.on b{background:#dbeafe}
 .ux-dot{display:inline-flex;align-items:center;gap:6px}.ux-dot i{width:8px;height:8px;border-radius:50%;background:#9ca3af}
 .ux-dot.ux-ok i{background:var(--ux-ok)}.ux-dot.ux-warn i{background:#f59e0b}.ux-dot.ux-bad i{background:var(--ux-bad)}
-@media (max-width:760px){.ux-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.ux-kpi-v{font-size:20px}.ux-meter{grid-template-columns:1fr 70px;}.ux-meter-t{grid-column:1/-1;order:3}}
+@media (max-width:760px){.ux-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.ux-kpi-v{font-size:20px}.ux-meter{grid-template-columns:1fr 70px;}.ux-meter-t,.ux-meter-nd{grid-column:1/-1;order:3}}

@@ -137,18 +137,23 @@ def loss_orders(rows, limit=50):
     return sorted(out, key=lambda x: x["profit"])[:limit]
 
 
-def shipping(warn_hours=12):
-    """待发货订单的发货时效 + 近 30 天发货准时率（有最晚发货时间和发货时间的订单）。"""
+def shipping(warn_hours=12, platform="", shop=""):
+    """待发货订单的发货时效 + 近 30 天发货准时率（有最晚发货时间和发货时间的订单）。v2.51：可以只看一个平台 / 店铺（筛选条）。"""
     now = time.time()
     c = db.conn()
+    w, a = "", []
+    if platform:
+        w += " AND COALESCE(platform,'')=?"; a.append(platform)
+    if shop:
+        w += " AND COALESCE(shop,'')=?"; a.append(shop)
     rows = [dict(r) for r in c.execute(
-        "SELECT id, platform, order_no, order_time, ship_by, COALESCE(hold,0) hold FROM orders WHERE status='to_ship' ORDER BY ship_by")]
+        f"SELECT id, platform, order_no, order_time, ship_by, COALESCE(hold,0) hold FROM orders WHERE status='to_ship'{w} ORDER BY ship_by", a)]
     overdue = [r for r in rows if r["ship_by"] and r["ship_by"] < now]
     soon = [r for r in rows if r["ship_by"] and now <= r["ship_by"] < now + warn_hours * 3600]
     for r in overdue + soon:
         r["hours_left"] = round((r["ship_by"] - now) / 3600, 1)
-    done = c.execute("SELECT order_time, ship_by, shipped_at FROM orders WHERE shipped_at IS NOT NULL AND order_time>=?",
-                     (day_start(29),)).fetchall()
+    done = c.execute(f"SELECT order_time, ship_by, shipped_at FROM orders WHERE shipped_at IS NOT NULL AND order_time>=?{w}",
+                     (day_start(29), *a)).fetchall()
     with_deadline = [r for r in done if r["ship_by"]]
     late = sum(1 for r in with_deadline if r["shipped_at"] > r["ship_by"])
     hours = [(r["shipped_at"] - r["order_time"]) / 3600 for r in done if r["order_time"] and r["shipped_at"] >= r["order_time"]]
@@ -345,10 +350,14 @@ def daily_range(rows, s, e):
 
 
 def filters():
-    """筛选条的选项：有订单的平台、店铺（近 180 天）。"""
+    """筛选条的选项：有订单的平台、店铺（近 180 天）+ 店铺对接里开着的店铺（v2.51，还没订单也能选）。"""
     c = db.conn()
-    rows = c.execute("SELECT COALESCE(platform,'') p, COALESCE(shop,'') s, COUNT(*) n FROM orders WHERE order_time>=? "
-                     "GROUP BY 1, 2 ORDER BY n DESC", (day_start(179),)).fetchall()
+    rows = [dict(r) for r in c.execute("SELECT COALESCE(platform,'') p, COALESCE(shop,'') s, COUNT(*) n FROM orders WHERE order_time>=? "
+                                       "GROUP BY 1, 2 ORDER BY n DESC", (day_start(179),))]
+    try:
+        rows += [{"p": r["platform"] or "", "s": r["name"] or ""} for r in c.execute("SELECT platform, name FROM shops WHERE enabled=1 ORDER BY id")]
+    except Exception:  # noqa: BLE001  还没有店铺表
+        pass
     plats, shops_ = [], []
     for r in rows:
         if r["p"] and r["p"] not in plats:
@@ -356,6 +365,132 @@ def filters():
         if r["s"] and not any(x["shop"] == r["s"] and x["platform"] == r["p"] for x in shops_):
             shops_.append({"platform": r["p"], "shop": r["s"]})
     return {"platforms": plats, "shops": shops_[:40]}
+
+
+# ---------------- v2.51 多店铺：各店铺对比 ----------------
+NUMS = ("n", "revenue", "fee", "cost", "profit")
+
+
+def cs_unreplied():
+    """客服模块：每个（平台, 店铺）有几个会话是买家最后说话、还没回（和客服工作台「没回复」同一个口径）。客服模块关着 → None。"""
+    from core import modules
+    if modules.is_loaded() and not modules.enabled("cs"):
+        return None
+    try:
+        rows = db.conn().execute(
+            "SELECT LOWER(COALESCE(c.platform,'')) p, COALESCE(NULLIF(c.shop,''), s.name, '') sh, COUNT(*) n FROM cs_conv c "
+            "LEFT JOIN shops s ON s.id=c.shop_id WHERE c.status='open' AND COALESCE(c.kind,'')!='system' "
+            "AND (SELECT m.role FROM cs_msg m WHERE m.conv_id=c.id AND m.role IN ('buyer','seller') ORDER BY m.id DESC LIMIT 1)='buyer' "
+            "GROUP BY 1, 2").fetchall()
+    except Exception:  # noqa: BLE001  客服的表还没建
+        return None
+    return {(r["p"], r["sh"]): r["n"] for r in rows}
+
+
+def _finish(x):
+    for k in ("revenue", "fee", "cost", "profit"):
+        x[k] = round(x[k], 2)
+    x["margin"] = round(x["profit"] / x["revenue"] * 100, 1) if x["revenue"] else None
+    x["aov"] = round(x["revenue"] / x["n"], 2) if x["n"] else None
+    return x
+
+
+def _total(rows, **extra):
+    """几行（店铺）合成一行：钱、单数相加，利润率重算，评分按评价条数加权，店铺表现达标数相加。"""
+    t = {**extra, **{k: 0 for k in NUMS}, "to_ship": 0, "overdue": 0, "unreplied": None, "reviews": 0, "rating": None, "bad_open": 0,
+         "returns": 0, "refund": 0.0, "fee_item": 0.0, "fee_deducted": 0.0, "fee_rate": None, "perf": None, "sync": None, "shops": len(rows)}
+    rsum = 0.0
+    tones = []
+    for r in rows:
+        for k in NUMS:
+            t[k] += r[k]
+        for k in ("to_ship", "overdue", "bad_open", "returns", "reviews"):
+            t[k] += r.get(k) or 0
+        t["refund"] += r.get("refund") or 0
+        t["fee_item"] += r.get("fee_item") or 0
+        t["fee_deducted"] += r.get("fee_deducted") or 0
+        if r.get("unreplied") is not None:
+            t["unreplied"] = (t["unreplied"] or 0) + r["unreplied"]
+        if r.get("rating") is not None and r.get("reviews"):
+            rsum += r["rating"] * r["reviews"]
+        if r.get("perf"):
+            p = t["perf"] or {"ok": 0, "n": 0, "nodata": 0}
+            t["perf"] = {k: p[k] + r["perf"][k] for k in p}
+        if r.get("sync"):
+            tones.append(r["sync"]["tone"])
+    t["rating"] = round(rsum / t["reviews"], 2) if t["reviews"] and rsum else None
+    t["refund"], t["fee_item"], t["fee_deducted"] = round(t["refund"], 2), round(t["fee_item"], 2), round(t["fee_deducted"], 2)
+    t["fee_rate"] = round(t["fee_deducted"] / t["fee_item"] * 100, 2) if t["fee_item"] else None
+    if tones:
+        t["sync"] = {"tone": "bad" if "bad" in tones else ("warn" if "warn" in tones else "ok"), "bad": tones.count("bad"), "n": len(tones)}
+    return _finish(t)
+
+
+def best_worst(rows):
+    """KPI 卡片上「最好：A · 最差：B」：有订单的店铺至少 2 个才有；利润率只比有销售额的。"""
+    out = {}
+    for k in ("revenue", "profit", "margin"):
+        c = [r for r in rows if r["n"] and r.get(k) is not None]
+        if len(c) < 2:
+            continue
+        hi, lo = max(c, key=lambda r: r[k]), min(c, key=lambda r: r[k])
+        if hi[k] == lo[k]:
+            continue
+        out[k] = {"best": {"platform": hi["platform"], "shop": hi["shop"], "value": hi[k]},
+                  "worst": {"platform": lo["platform"], "shop": lo["shop"], "value": lo[k]}}
+    return out
+
+
+def shop_compare(in_period, plat="", lz_days=30):
+    """「各店铺对比」：一个（平台, 店铺）一行——销售额、利润、单数、利润率（和上面的数字同一个利润函数，合计 = 总览），
+    待发货、客服没回复、Lazada 评分 / 退货 / 真实扣点 / 店铺表现达标数 / 同步状态；by_platform = 按平台合起来。"""
+    groups = {}
+
+    def g(p, s):
+        k = ((p or "").lower(), s or "")
+        if k not in groups:
+            groups[k] = {"platform": k[0], "shop": k[1], **{f: 0 for f in NUMS}}
+        return groups[k]
+    for o, _i, p in in_period:
+        x = g(o["platform"], o["shop"])
+        x["n"] += 1
+        for f in ("revenue", "fee", "cost", "profit"):
+            x[f] += p[f]
+    c = db.conn()
+    try:
+        for r in c.execute("SELECT platform, name FROM shops WHERE enabled=1"):
+            if not plat or (r["platform"] or "").lower() == plat.lower():
+                g(r["platform"], r["name"])
+    except Exception:  # noqa: BLE001
+        pass
+    now = time.time()
+    for r in c.execute("SELECT LOWER(COALESCE(platform,'')) p, COALESCE(shop,'') s, COUNT(*) n, SUM(CASE WHEN ship_by<? THEN 1 ELSE 0 END) late "
+                       "FROM orders WHERE status='to_ship' GROUP BY 1, 2", (now,)):
+        if not plat or r["p"] == plat.lower():
+            x = g(r["p"], r["s"])
+            x["to_ship"], x["overdue"] = r["n"], r["late"] or 0
+    cs = cs_unreplied()
+    from . import lazada
+    lz = {(v["shop"] or "").strip().lower(): v for v in lazada.per_shop(lz_days).values()}
+    rows = []
+    for x in groups.values():
+        x.setdefault("to_ship", 0)
+        x.setdefault("overdue", 0)
+        x["unreplied"] = cs.get((x["platform"], x["shop"]), 0) if cs is not None else None
+        v = lz.get(x["shop"].strip().lower()) if x["platform"] == "lazada" and x["shop"] else None
+        x["lz_shop_id"] = v["shop_id"] if v else None
+        if v:
+            x.update(reviews=v["reviews"]["n"], rating=v["reviews"]["avg"], bad_open=v["reviews"]["bad_open"], returns=v["reverse"]["n"],
+                     refund=v["reverse"]["refund"], fee_item=v["fees"]["item_amount"], fee_deducted=v["fees"]["deducted"], fee_rate=v["fees"]["rate"],
+                     perf=v["perf"], sync=v["sync"])
+        rows.append(_finish(x))
+    rows.sort(key=lambda r: (-r["revenue"], -r["n"], r["platform"], r["shop"]))
+    plats = {}
+    for r in rows:
+        plats.setdefault(r["platform"], []).append(r)
+    by_platform = sorted((_total(v, platform=k, shop="") for k, v in plats.items()), key=lambda r: (-r["revenue"], r["platform"]))
+    return {"rows": rows, "total": _total(rows, platform="", shop=""), "by_platform": by_platform, "best_worst": best_worst(rows),
+            "cs": cs is not None}
 
 
 def dashboard(args=None):
@@ -387,20 +522,26 @@ def dashboard(args=None):
         warn_h = float(cfg.get("oa_ship_warn_hours") or 12)
     except (TypeError, ValueError):
         warn_h = 12
-    lz = lazada.summary(max(1, (dt.date.today() - s).days + 1))
-    lz["performance"] = lazada.performance()
-    lz["status"] = lazada.status()
-    lz["reviews_recent"] = lazada.reviews_list(max(1, (dt.date.today() - s).days + 1), limit=5)
-    lz["reverse_recent"] = lazada.reverse_list(max(1, (dt.date.today() - s).days + 1), limit=5)
-    period_af = aftersales(max(1, (dt.date.today() - s).days + 1))
+    lz_days = max(1, (dt.date.today() - s).days + 1)
+    # v2.51：选了店铺 → Lazada 的数只算这个店铺（店铺名对上 Lazada 店铺）；选了别的平台 → 没有 Lazada 的数
+    lz_ids = (lazada.shop_ids_of(shop) if plat in ("", "lazada") else []) if shop else ([] if plat and plat != "lazada" else None)
+    lz = lazada.summary(lz_days, lz_ids)
+    lz["performance"] = lazada.performance(lz_ids)
+    lz["perf_count"] = lazada.perf_count([m for p_ in lz["performance"] for m in p_["metrics"]])
+    lz["perf_combined"] = lazada.perf_combined(lz["performance"]) if len(lz["performance"]) > 1 else None
+    lz["status"] = lazada.status(lz_ids)
+    lz["reviews_recent"] = lazada.reviews_list(lz_days, limit=5, shop_ids=lz_ids)
+    lz["reverse_recent"] = lazada.reverse_list(lz_days, limit=5, shop_ids=lz_ids)
+    period_af = aftersales(lz_days)
+    compare = None if shop else shop_compare(in_period, plat, lz_days)
     return {"period": {"from": s.isoformat(), "to": e.isoformat(), "days": days, "platform": plat, "shop": shop},
             "kpi": _sum(rows, since, until), "kpi_prev": _sum(rows, prev_since, since),
             "daily": daily_range(rows, chart_s, e), "filters": filters(),
             "summary": summ, "platforms": plats, "skus": sorted(skus, key=lambda x: -x["profit"])[:20],
-            "breakdown_source": src, "fin_net": fin_net_30d(), "loss_orders": loss_orders(in_period), "shipping": shipping(warn_h),
+            "breakdown_source": src, "fin_net": fin_net_30d(), "loss_orders": loss_orders(in_period), "shipping": shipping(warn_h, plat, shop),
             "cod": cod_stats(30), "aftersales": af, "aftersales_period": period_af, "pricing": pricing_issues(cfg)[:50],
             "health": data_health([r for r in rows if (r[0]["order_time"] or 0) >= day_start(29)], cfg),
-            "production": production(), "materials": materials_low(), "lazada": lz,
+            "production": production(), "materials": materials_low(), "lazada": lz, "compare": compare,
             "fee_rate_setting": cfg.get("platform_fee_rate"), "market": market_summary(cfg)}
 
 

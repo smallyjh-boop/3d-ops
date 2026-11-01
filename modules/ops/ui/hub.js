@@ -139,7 +139,13 @@
       else rowFilter();
     }, 250);
   });
-  window.OPSHUB = { show, pages: PAGES, pageOf: (t) => PAGE_OF[t] || (PAGES[t] ? t : ""), filter: () => ({ ...FL }), days, options(o) {
+  // v2.51：页面里点店铺名（各店铺对比）→ 改筛选条再重画（和自己在下拉框里选一样，记在这台电脑上）
+  function set(patch) {
+    Object.assign(FL, patch || {});
+    if (FL.shop && !(OPTS.shops || []).some((x) => x.shop === FL.shop)) OPTS = { ...OPTS, shops: [...(OPTS.shops || []), { platform: FL.platform || "", shop: FL.shop }] };
+    save(); frame(CUR.page, CUR.sub); return render();
+  }
+  window.OPSHUB = { show, set, pages: PAGES, pageOf: (t) => PAGE_OF[t] || (PAGES[t] ? t : ""), filter: () => ({ ...FL }), days, options(o) {
     if (!o) return;
     const before = JSON.stringify(OPTS);
     OPTS = { platforms: o.platforms && o.platforms.length ? o.platforms : OPTS.platforms, shops: o.shops || [] };

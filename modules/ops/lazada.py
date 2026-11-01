@@ -5,7 +5,10 @@
   评价      /review/seller/history/list（按商品、每次最多 7 天）+ /review/seller/list/v2（每次 10 条）→ 表 oa_lz_review；
             差评（≤ 3 星）没回复的进今日待办；可以在页面上直接回复（/review/seller/reply/add）。
   退货退款  /reverse/getreverseordersforseller → 表 oa_lz_reverse（一行一个退货商品），看板上算售后（退款）金额。
-  店铺表现  /seller/performance/get → 表 oa_lz_perf（原样存最新一次）。
+  店铺表现  /seller/performance/get → 表 oa_lz_perf（每个店铺一行，原样存最新一次）。
+
+v2.51 多店铺：所有表都带 shop_id；看板 / 店铺与评价的「店铺」筛选把店铺名换成 shop_id 传进来（shop_ids），
+没筛选时 per_shop() 给每个店铺一份评价、退货、真实扣点、店铺表现、同步状态（「各店铺对比」用）。
 
 每个店铺每类数据的同步状态在 oa_lz_state：上次成功时间、出错原因；没开接口权限会写清楚去哪里申请。
 后台每隔 oa_lz_sync_min 分钟自动同步一次（0 = 只手动），页面上有「立即同步」。
@@ -68,6 +71,20 @@ def init():
 def _ensure():
     if db.DB_PATH not in _inited:
         init()
+
+
+def _in(shop_ids, col="shop_id"):
+    """shop_ids=None → 不筛；[] → 一个都不要；[1, 2] → 只要这几个店铺。返回 (SQL 片段, 参数)。"""
+    if shop_ids is None:
+        return "", ()
+    ids = [int(x) for x in shop_ids]
+    return (f" AND {col} IN ({','.join('?' * len(ids))})", tuple(ids)) if ids else (" AND 0", ())
+
+
+def shop_ids_of(name):
+    """店铺筛选（订单里的店铺名）→ Lazada 店铺 id 列表（名字对不上 = []）。"""
+    n = str(name or "").strip().lower()
+    return [s["id"] for s in shops() if (s["name"] or "").strip().lower() == n]
 
 
 def shops():
@@ -231,12 +248,13 @@ def push_to_fin(shop, user="系统"):
     return res
 
 
-def fee_rates(days=30):
-    """真实扣点：近 N 天流水里 平台扣的钱 ÷ 商品金额，按费用名分开。"""
+def fee_rates(days=30, shop_ids=None):
+    """真实扣点：近 N 天流水里 平台扣的钱 ÷ 商品金额，按费用名分开（shop_ids 只算这几个店铺）。"""
     _ensure()
     since = (dt.date.today() - dt.timedelta(days=days - 1)).isoformat()
-    rows = db.conn().execute("SELECT fee_name, is_item, SUM(amount) a, COUNT(*) n FROM oa_lz_tx WHERE day>=? GROUP BY fee_name, is_item",
-                             (since,)).fetchall()
+    w, a = _in(shop_ids)
+    rows = db.conn().execute(f"SELECT fee_name, is_item, SUM(amount) a, COUNT(*) n FROM oa_lz_tx WHERE day>=?{w} GROUP BY fee_name, is_item",
+                             (since, *a)).fetchall()
     item = sum(r["a"] or 0 for r in rows if r["is_item"])
     fees = [{"fee_name": r["fee_name"], "amount": round(r["a"] or 0, 2), "lines": r["n"],
              "rate": round(-(r["a"] or 0) / item * 100, 2) if item else None} for r in rows if not r["is_item"]]
@@ -333,10 +351,11 @@ def reply_review(shop_id, review_id, content, user=""):
     return {"ok": True}
 
 
-def reviews_list(days=30, bad_only=False, unreplied=False, limit=300):
+def reviews_list(days=30, bad_only=False, unreplied=False, limit=300, shop_ids=None):
     _ensure()
-    q = "SELECT * FROM oa_lz_review WHERE created>=?"
-    a = [time.time() - int(days) * 86400]
+    w, wa = _in(shop_ids)
+    q = "SELECT * FROM oa_lz_review WHERE created>=?" + w
+    a = [time.time() - int(days) * 86400, *wa]
     if bad_only:
         q += " AND rating IS NOT NULL AND rating<=3"
     if unreplied:
@@ -451,12 +470,15 @@ def sync_reverse(conn, shop, user="系统"):
 CLOSED_WORDS = ("close", "cancel", "refund_success", "refunded", "complete", "finish", "reject", "success")
 
 
-def reverse_list(days=30, limit=300):
+def reverse_list(days=30, limit=300, shop_ids=None):
     _ensure()
-    rows = [dict(r) for r in db.conn().execute("SELECT * FROM oa_lz_reverse WHERE created>=? ORDER BY created DESC LIMIT ?",
-                                               (time.time() - int(days) * 86400, int(limit)))]
+    w, wa = _in(shop_ids)
+    rows = [dict(r) for r in db.conn().execute(f"SELECT * FROM oa_lz_reverse WHERE created>=?{w} ORDER BY created DESC LIMIT ?",
+                                               (time.time() - int(days) * 86400, *wa, int(limit)))]
+    names = {r["id"]: r["name"] for r in db.conn().execute("SELECT id, name FROM shops")}
     for r in rows:
         r.pop("raw", None)
+        r["shop"] = names.get(r["shop_id"], "")
         r["open"] = not any(w in (r["status"] or "").lower() for w in CLOSED_WORDS)
     return rows
 
@@ -502,8 +524,11 @@ def _metrics(d):
 
 
 # v2.49：店铺表现的指标名（接口给的是英文 / 代码）→ 中文、泰文；better = 越高越好 high / 越低越好 low
+# v2.51：补全 Lazada 卖家表现里见过的指标（Basket size、转化率、访客……）；对不上的按代码转成能读的英文（BASKET_SIZE → Basket size）
 PERF_NAMES = [
+    (r"basket|\baov\b|average.?order.?value|avg.?order|ขนาดตะกร้า|มูลค่าตะกร้า", "客单价（每单金额）", "มูลค่าเฉลี่ยต่อออเดอร์", "high"),
     (r"cancel|ยกเลิก", "取消率", "อัตราการยกเลิก", "low"),
+    (r"fast.?(ship|deliver|handover)|\bffd\b|ส่งด่วน|ส่งเร็ว", "快速发货率", "อัตราส่งสินค้าเร็ว", "high"),
     (r"late|lsr|ล่าช้า", "迟发率", "อัตราส่งล่าช้า", "low"),
     (r"ship.?on.?time|on.?time|\bsot\b|ส่งตรงเวลา|ตรงเวลา", "准时发货率", "อัตราส่งตรงเวลา", "high"),
     (r"response.?time|reply.?time|เวลาตอบ", "聊天回复时间", "เวลาตอบแชท", "low"),
@@ -514,8 +539,16 @@ PERF_NAMES = [
     (r"fake|counterfeit|ipr|violat|penalt|point|ละเมิด|คะแนนโทษ", "违规扣分", "คะแนนโทษ", "low"),
     (r"fail|ndr|non.?deliver|ส่งไม่สำเร็จ", "派送失败率", "อัตราส่งไม่สำเร็จ", "low"),
     (r"fulfil|ffr|จัดส่งสำเร็จ", "履约率", "อัตราการจัดส่งสำเร็จ", "high"),
+    (r"conversion|\bcvr\b|\bcr\b|อัตราการซื้อ|คอนเวอร์ชัน", "转化率", "อัตราการซื้อ", "high"),
+    (r"visitor|traffic|\buv\b|page.?view|\bpv\b|ผู้เข้าชม", "访客数", "จำนวนผู้เข้าชม", "high"),
+    (r"\bgmv\b|revenue|sales|ยอดขาย", "销售额", "ยอดขาย", "high"),
+    (r"buyer|customer|ผู้ซื้อ|ลูกค้า", "买家数", "จำนวนผู้ซื้อ", "high"),
+    (r"content|quality|image|คุณภาพ", "商品信息质量", "คุณภาพข้อมูลสินค้า", "high"),
+    (r"campaign|promotion|voucher|แคมเปญ|โปรโมชั่น", "活动参与", "การเข้าร่วมแคมเปญ", "high"),
     (r"listing|sku|สินค้าที่ลง", "在售商品数", "จำนวนสินค้าที่ขาย", "high"),
+    (r"order|ออเดอร์|คำสั่งซื้อ", "订单数", "จำนวนออเดอร์", "high"),
 ]
+NO_DATA = {"", "-", "--", "—", "n/a", "na", "null", "none", "nan", "no data", "ไม่มีข้อมูล", "暂无数据"}
 
 
 def _numv(v):
@@ -523,24 +556,74 @@ def _numv(v):
     return float(m.group(0)) if m else None
 
 
+def readable(name):
+    """指标代码 → 能读的英文：BASKET_SIZE / basketSize → Basket size。"""
+    t = re.sub(r"([a-z])([A-Z])", r"\1 \2", str(name or "")).replace("_", " ").replace(".", " ").strip()
+    t = re.sub(r"\s+", " ", t)
+    return t[:1].upper() + t[1:].lower() if t else ""
+
+
 def perf_label(m):
-    """一个指标：加上 zh / th 名字、数值 v、要求 t、better（high / low）、ok。"""
+    """一个指标：加上 zh / th 名字、数值 v、要求 t、better（high / low）、ok、nodata（接口没给数 → 不算达标也不算不达标）。"""
     raw = f"{m.get('type') or ''} {m.get('name') or ''}".lower()
-    zh, th, better = m.get("name") or "", m.get("name") or "", None
+    zh = th = readable(m.get("name") or m.get("type") or "")
+    better, known = None, False
     for pat, z, t, b in PERF_NAMES:
         if re.search(pat, raw):
-            zh, th, better = z, t, b
+            zh, th, better, known = z, t, b, True
             break
     tg = str(m.get("target") or "")
     if re.search(r"[<≤]|max|below|ไม่เกิน|น้อยกว่า", tg, re.I):
         better = "low"
     elif re.search(r"[>≥]|min|above|อย่างน้อย|มากกว่า", tg, re.I):
         better = "high"
-    v, t = _numv(m.get("value")), _numv(tg)
-    ok = m.get("ok")
-    if ok is None and v is not None and t is not None and better:
+    val = str(m.get("value") if m.get("value") is not None else "").strip()
+    v, t = _numv(val), _numv(tg)
+    nodata = val.lower() in NO_DATA or (v is None and not re.search(r"[a-zA-Z฀-๿一-鿿]", val))
+    ok = None if nodata else m.get("ok")
+    if ok is None and not nodata and v is not None and t is not None and better:
         ok = v <= t if better == "low" else v >= t
-    return {**m, "zh": zh, "th": th, "better": better or "high", "v": v, "t": t, "ok": ok}
+    return {**m, "key": str(m.get("type") or m.get("name") or zh), "zh": zh, "th": th, "known": known, "better": better or "high",
+            "v": None if nodata else v, "t": t, "ok": ok, "nodata": nodata}
+
+
+def perf_count(metrics):
+    """达标几项 / 有数据又能判断的几项 / 暂无数据几项（没数据的不算达标）。"""
+    metrics = list(metrics or [])
+    judged = [x for x in metrics if not x.get("nodata") and x.get("ok") is not None]
+    return {"ok": sum(1 for x in judged if x["ok"]), "n": len(judged), "nodata": sum(1 for x in metrics if x.get("nodata"))}
+
+
+def _worse(a, b):
+    """两个店铺的同一个指标，哪个更差（不达标比达标差；同样就按 better 比数值）。"""
+    ka = (0 if a.get("ok") is False else 1, a["v"] if a["better"] == "high" else -a["v"])
+    kb = (0 if b.get("ok") is False else 1, b["v"] if b["better"] == "high" else -b["v"])
+    return a if ka <= kb else b
+
+
+def perf_combined(perf):
+    """多个店铺合起来看：每个指标一行，worst = 最差的那个店铺的数，shops = 各店铺的数。"""
+    out, idx = [], {}
+    for p in perf or []:
+        for m in p["metrics"]:
+            k = m.get("key") or m["zh"]
+            if k not in idx:
+                idx[k] = {"key": k, "zh": m["zh"], "th": m["th"], "known": m.get("known", True), "better": m["better"], "shops": []}
+                out.append(idx[k])
+            idx[k]["shops"].append({**m, "shop_id": p["shop_id"], "shop": p["shop"]})
+    for g in out:
+        w = None
+        for x in g["shops"]:
+            if not x.get("nodata") and x.get("v") is not None:
+                w = x if w is None else _worse(w, x)
+        if w is None:
+            w = next((x for x in g["shops"] if not x.get("nodata")), None)
+        g["worst"] = w
+        g["nodata"] = w is None
+        g["ok_n"] = sum(1 for x in g["shops"] if x.get("ok") is True)
+        g["bad_n"] = sum(1 for x in g["shops"] if x.get("ok") is False)
+        g["nodata_n"] = sum(1 for x in g["shops"] if x.get("nodata"))
+    return out
 
 
 def sync_performance(conn, shop, user="系统"):
@@ -551,16 +634,22 @@ def sync_performance(conn, shop, user="系统"):
     return {"metrics": len(_metrics(d))}
 
 
-def performance():
+def performance(shop_ids=None):
+    """每个店铺一份（oa_lz_perf 一个店铺一行）：[{shop_id, shop, at, metrics, count}]。关掉的店铺不显示。"""
     _ensure()
     names = {s["id"]: s["name"] for s in shops()}
+    w, a = _in(shop_ids)
     out = []
-    for r in db.conn().execute("SELECT * FROM oa_lz_perf ORDER BY shop_id"):
+    for r in db.conn().execute(f"SELECT * FROM oa_lz_perf WHERE 1=1{w} ORDER BY shop_id", a):
+        if r["shop_id"] not in names:
+            continue
         try:
             d = json.loads(r["data"] or "{}")
         except ValueError:
             d = {}
-        out.append({"shop_id": r["shop_id"], "shop": names.get(r["shop_id"], ""), "at": r["at"], "metrics": [perf_label(m) for m in _metrics(d)], "category": d.get("main_category_name") if isinstance(d, dict) else ""})
+        ms = [perf_label(m) for m in _metrics(d)]
+        out.append({"shop_id": r["shop_id"], "shop": names.get(r["shop_id"], ""), "at": r["at"], "metrics": ms, "count": perf_count(ms),
+                    "category": d.get("main_category_name") if isinstance(d, dict) else ""})
     return out
 
 
@@ -626,12 +715,15 @@ def sync(shop_id=None, kinds=None, user="系统"):
     return {"shops": out}
 
 
-def status():
+def status(shop_ids=None):
     """每个店铺每类数据：上次成功、出错原因和怎么办。"""
     _ensure()
     st = {(r["shop_id"], r["kind"]): dict(r) for r in db.conn().execute("SELECT * FROM oa_lz_state")}
+    want = None if shop_ids is None else {int(x) for x in shop_ids}
     out = []
     for sh in shops():
+        if want is not None and sh["id"] not in want:
+            continue
         for k, (zh, th, api_name) in KINDS.items():
             s = st.get((sh["id"], k)) or {}
             out.append({"shop_id": sh["id"], "shop": sh["name"], "kind": k, "zh": zh, "th": th, "api": api_name,
@@ -640,24 +732,65 @@ def status():
     return out
 
 
-def summary(days=30):
-    """看板用：评价、退货退款、真实扣点、同步出错。"""
+def summary(days=30, shop_ids=None):
+    """看板用：评价、退货退款、真实扣点、同步出错（shop_ids = 只算这几个店铺；None = 全部）。"""
     _ensure()
     c = db.conn()
     since = time.time() - days * 86400
+    w, a = _in(shop_ids)
     rv = c.execute("SELECT COUNT(*) n, AVG(rating) avg, SUM(CASE WHEN rating<=3 THEN 1 ELSE 0 END) bad, "
                    "SUM(CASE WHEN rating<=3 AND COALESCE(reply,'')='' AND can_reply=1 THEN 1 ELSE 0 END) bad_open "
-                   "FROM oa_lz_review WHERE created>=?", (since,)).fetchone()
-    rs = c.execute("SELECT COUNT(DISTINCT reverse_id) n, COUNT(*) lines, SUM(COALESCE(refund_amount,0)) refund FROM oa_lz_reverse WHERE created>=?",
-                   (since,)).fetchone()
-    by_type = {r[0] or "?": r[1] for r in c.execute("SELECT request_type, COUNT(DISTINCT reverse_id) FROM oa_lz_reverse WHERE created>=? "
-                                                    "GROUP BY request_type", (since,))}
-    errs = [s for s in status() if s["error"]]
-    return {"shops": len(shops()), "reviews": {"n": rv["n"] or 0, "avg": round(rv["avg"], 2) if rv["avg"] else None, "bad": rv["bad"] or 0,
-                                               "bad_open": rv["bad_open"] or 0},
+                   f"FROM oa_lz_review WHERE created>=?{w}", (since, *a)).fetchone()
+    rs = c.execute(f"SELECT COUNT(DISTINCT reverse_id) n, COUNT(*) lines, SUM(COALESCE(refund_amount,0)) refund FROM oa_lz_reverse WHERE created>=?{w}",
+                   (since, *a)).fetchone()
+    by_type = {r[0] or "?": r[1] for r in c.execute(f"SELECT request_type, COUNT(DISTINCT reverse_id) FROM oa_lz_reverse WHERE created>=?{w} "
+                                                    "GROUP BY request_type", (since, *a))}
+    st = status(shop_ids)
+    want = None if shop_ids is None else {int(x) for x in shop_ids}
+    return {"shops": len([s_ for s_ in shops() if want is None or s_["id"] in want]),
+            "reviews": {"n": rv["n"] or 0, "avg": round(rv["avg"], 2) if rv["avg"] else None, "bad": rv["bad"] or 0, "bad_open": rv["bad_open"] or 0},
             "reverse": {"n": rs["n"] or 0, "lines": rs["lines"] or 0, "refund": round(rs["refund"] or 0, 2), "by_type": by_type},
-            "fees": fee_rates(days), "errors": errs,
-            "last_ok": c.execute("SELECT MAX(last_ok) FROM oa_lz_state").fetchone()[0]}
+            "fees": fee_rates(days, shop_ids), "errors": [x for x in st if x["error"]],
+            "last_ok": c.execute(f"SELECT MAX(last_ok) FROM oa_lz_state WHERE 1=1{w}", a).fetchone()[0]}
+
+
+def sync_tone(st):
+    """一个店铺的同步状态 → {tone: ok / warn / bad, ok, bad, last_ok, errors}（页面上一个小圆点）。"""
+    bad = [x for x in st if x["error"]]
+    good = [x for x in st if not x["error"] and x["last_ok"]]
+    return {"tone": "bad" if bad else ("ok" if good else "warn"), "ok": len(good), "bad": len(bad),
+            "last_ok": max([x["last_ok"] or 0 for x in st] or [0]) or None,
+            "errors": [{"kind": x["kind"], "zh": x["zh"], "th": x["th"], "error": x["error"][:200], "hint": x["hint"], "hint_th": x["hint_th"]}
+                       for x in bad]}
+
+
+def per_shop(days=30):
+    """「各店铺对比」用：每个开着的 Lazada 店铺一份 {shop_id: {shop, reviews, reverse, fees, perf, sync}}。"""
+    _ensure()
+    c = db.conn()
+    since = time.time() - days * 86400
+    rv = {r["shop_id"]: r for r in c.execute(
+        "SELECT shop_id, COUNT(*) n, AVG(rating) avg, SUM(CASE WHEN rating<=3 THEN 1 ELSE 0 END) bad, "
+        "SUM(CASE WHEN rating<=3 AND COALESCE(reply,'')='' AND can_reply=1 THEN 1 ELSE 0 END) bad_open "
+        "FROM oa_lz_review WHERE created>=? GROUP BY shop_id", (since,))}
+    rs = {r["shop_id"]: r for r in c.execute(
+        "SELECT shop_id, COUNT(DISTINCT reverse_id) n, SUM(COALESCE(refund_amount,0)) refund FROM oa_lz_reverse WHERE created>=? GROUP BY shop_id",
+        (since,))}
+    perf = {p["shop_id"]: p for p in performance()}
+    st = status()
+    out = {}
+    for sh in shops():
+        i = sh["id"]
+        r, x, p = rv.get(i), rs.get(i), perf.get(i)
+        f = fee_rates(days, [i])                   # 和合起来的真实扣点同一个算法（按费用名合计）
+        out[i] = {"shop_id": i, "shop": sh["name"],
+                  "reviews": {"n": (r["n"] or 0) if r else 0, "avg": round(r["avg"], 2) if r and r["avg"] else None,
+                              "bad": (r["bad"] or 0) if r else 0, "bad_open": (r["bad_open"] or 0) if r else 0},
+                  "reverse": {"n": (x["n"] or 0) if x else 0, "refund": round((x["refund"] or 0) if x else 0, 2)},
+                  "fees": {k: f[k] for k in ("item_amount", "deducted", "credits", "rate")},
+                  "perf": p["count"] if p else None, "perf_at": p["at"] if p else None,
+                  "sync": sync_tone([x_ for x_ in st if x_["shop_id"] == i])}
+    return out
 
 
 # ---------------- 后台定时 ----------------
