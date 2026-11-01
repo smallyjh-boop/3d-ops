@@ -60,6 +60,7 @@ def inv_item(iid):
     it = inv.get_item(iid)
     if not it:
         return err("没有这个物品", 404)
+    inv.units.decorate([it])                    # v2.55：耗材带「几卷」
     from modules.inv import locations, wms
     loc = locations.get_loc(it["location"]) if it.get("location") else None
     return jsonify({"ok": True, "item": it, "moves": inv.moves(item_id=it["id"], limit=100), "locs": wms.item_locations(it["id"]),

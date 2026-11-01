@@ -619,19 +619,26 @@ def suggest():
     c = db.conn()
     tr = in_transit()
     out = {}
-    for r in c.execute("SELECT * FROM inv_items WHERE active=1"):
-        it = ledger.item_row(r)
+    from . import units
+    items = [ledger.item_row(r) for r in c.execute("SELECT * FROM inv_items WHERE active=1")]
+    units.decorate(items, c)
+    for it in items:
         have = (it["qty"] or 0) + tr.get(it["id"], 0)
         need, why = 0.0, ""
-        if it.get("reorder_point") is not None and have <= it["reorder_point"]:
+        if it.get("reorder_point") is not None and units.below(it, tr.get(it["id"], 0)):
             target = it.get("reorder_qty") or max(it["reorder_point"], 1)
             need = max(target, it["reorder_point"] * 2 - have) if not it.get("reorder_qty") else target
             why = f"库存 + 在途 {have:g} ≤ 补货线 {it['reorder_point']:g}"
         if need > 0:
-            out[it["id"]] = {"item": it, "qty": need, "why": why, "transit": tr.get(it["id"], 0)}
+            ent = {"item": it, "qty": need, "why": why, "transit": tr.get(it["id"], 0)}
+            if it["category"] == "filament":          # v2.55：耗材按整卷买（树脂按整瓶）
+                net = units.roll_g_of(it)
+                rolls = max(1, math.ceil(need / net - 1e-9))
+                ent.update(qty=rolls * net, rolls=rolls, net_g=net)
+                ent["why"] = f"库存 + 在途 {units.fmt_g(have)} ≤ 补货线 {it.get('reorder_zh') or units.fmt_g(it['reorder_point'])}，补 {rolls} 卷"
+            out[it["id"]] = ent
     try:
         from .. import materials
-        spool_g = float(load_config().get("filament_spool_kg") or 1.0) * 1000
         for row in materials.plan()["rows"]:
             if not (row.get("urgent") or row.get("short")) or not row.get("suggest_spools"):
                 continue
@@ -641,6 +648,7 @@ def suggest():
                 continue
             it = ledger.item_row(r)
             transit = tr.get(it["id"], 0)
+            spool_g = units.roll_g_of(it)
             rolls = max(0, int(row["suggest_spools"]) - int(math.floor(transit / spool_g)))
             if rolls <= 0:
                 continue

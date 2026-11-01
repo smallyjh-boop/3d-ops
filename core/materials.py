@@ -277,8 +277,8 @@ def _deduct(c, k, g, printer_code):
 
 
 # ---------------- 按卷操作 ----------------
-def receive(material, color, count, net_g=1000, brand="", price=None, user=""):
-    """入库 N 卷（未开封）。返回新卷编号。"""
+def receive(material, color, count, net_g=1000, brand="", price=None, user="", opened=False, reason=None):
+    """入库 N 卷（默认未开封；opened=True = 退回来的开封卷）。每卷一条料卷记录、一个编号（F0001…）。返回新卷编号。"""
     m, col = _key(material, color)
     n = int(count or 0)
     if not 1 <= n <= 200:
@@ -287,15 +287,70 @@ def receive(material, color, count, net_g=1000, brand="", price=None, user=""):
     if not 10 <= net <= 10000:
         raise ValueError("每卷克数不对")
     c = db.conn()
-    ids = [_new_spool(c, m, col, net, net, "sealed", brand=brand, price=float(price) if price not in (None, "") else None)
+    now = time.time()
+    ids = [_new_spool(c, m, col, net, net, "open" if opened else "sealed", brand=brand,
+                      price=float(price) if price not in (None, "") else None, now=now, opened_at=now if opened else None)
            for _ in range(n)]
     _settle_negative(c, (m, col))
     _sync(c, (m, col))
     with context(kind=(getattr(_CTX, "v", None) or {}).get("kind") or "purchase",
                  **({"unit_cost": float(price) / net} if price not in (None, "") else {})):
-        _logrow(c, (m, col), n * net / 1000.0, f"入库 {n} 卷" + (f"（{brand}）" if brand else ""), user)
+        _logrow(c, (m, col), n * net / 1000.0, reason or (f"入库 {n} 卷" + (f"（{brand}）" if brand else "")), user)
     c.commit()
     return [f"F{i:04d}" for i in ids]
+
+
+def take_rolls(material, color, count=0, codes=None, user="", reason="领用"):
+    """整卷（瓶）出库（领用 / 报废 / 盘点少了几卷）：codes 给了就拿这几卷，没给就先拿未开封的、再拿剩得少的已开封的。
+    在机上的不拿（先下机）。这几卷记用完、剩余清零，库存减去它们当时剩的克数。返回 {codes, grams}。"""
+    m, col = _key(material, color)
+    k = (m, col)
+    c = db.conn()
+    if codes:
+        rows = []
+        for cd in codes:
+            r = c.execute("SELECT * FROM spools WHERE code=? OR id=?", (str(cd).upper(), int(cd) if str(cd).isdigit() else -1)).fetchone()
+            if not r or (r["material"], r["color"]) != k:
+                raise ValueError(f"{cd} 不是 {m} {col} 的料卷")
+            if r["status"] == "empty":
+                raise ValueError(f"{r['code']} 已经用完了")
+            if r["status"] == "loaded":
+                raise ValueError(f"{r['code']} 还在 {r['printer']} 上，先下机")
+            rows.append(r)
+    else:
+        n = int(count or 0)
+        if n < 1:
+            raise ValueError("卷数要大于 0")
+        pool = c.execute("SELECT * FROM spools WHERE material=? AND color=? AND status IN ('sealed','open') AND "
+                         "(status='sealed' OR remaining_g>0) ORDER BY CASE status WHEN 'sealed' THEN 0 ELSE 1 END, "
+                         "CASE status WHEN 'open' THEN remaining_g ELSE 0 END, id", k).fetchall()
+        if len(pool) < n:
+            raise ValueError(f"{m} {col} 在库的只有 {len(pool)} 卷（在机上的要先下机），不够出 {n} 卷")
+        rows = pool[:n]
+    now = time.time()
+    total = sum(max(0.0, r["remaining_g"] or 0) for r in rows)
+    ids = [r["id"] for r in rows]
+    for r in rows:
+        c.execute("UPDATE spools SET remaining_g=0, status='empty', printer=NULL, slot=NULL, emptied_at=?, updated_at=? WHERE id=?",
+                  (now, now, r["id"]))
+    _sync(c, k)
+    if total > 0:
+        _logrow(c, k, -total / 1000.0, f"{reason} {len(rows)} 卷（{'、'.join(r['code'] for r in rows)}）", user)
+    c.commit()
+    _notify(ids[:1], "empty", user)          # 同一个颜色，同步一次就够
+    return {"codes": [r["code"] for r in rows], "grams": round(total, 1)}
+
+
+def _notify(ids, action, user=""):
+    """料卷变了：库存模块把它们的货位跟上（模块没开就算了）。"""
+    try:
+        from . import modules
+        m = modules.public("inv")
+        if m is not None and hasattr(m, "on_spool"):
+            for i in ids:
+                m.on_spool(i, action, user)
+    except Exception as e:  # noqa: BLE001  货位记不上不影响出入库
+        logging.getLogger("3dops").warning("料卷货位没跟上（%s）：%s", action, e)
 
 
 def _settle_negative(c, k):

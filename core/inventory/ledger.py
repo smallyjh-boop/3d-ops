@@ -52,6 +52,11 @@ KINDS = {
 def init():
     c = db.conn()
     c.executescript(SCHEMA)
+    # v2.55 耗材双单位：补货线的单位（roll / kg / 空 = 按克）和填的数、每卷（瓶）净重。老数据全是空 = 照旧按克，不用转
+    have = {r[1] for r in c.execute("PRAGMA table_info(inv_items)")}
+    for col, typ in (("reorder_unit", "TEXT"), ("reorder_value", "REAL"), ("roll_g", "REAL")):
+        if col not in have:
+            c.execute(f"ALTER TABLE inv_items ADD COLUMN {col} {typ}")
     c.commit()
 
 
@@ -103,7 +108,7 @@ def _next_code(c, category, material="", color_code=""):
 
 
 FIELDS = ("name_zh", "name_th", "category", "unit", "spec", "brand", "material", "color", "color_code", "loss_rate",
-          "reorder_point", "reorder_qty", "supplier_id", "location", "link", "note", "active")
+          "reorder_point", "reorder_qty", "supplier_id", "location", "link", "note", "active", "reorder_unit", "reorder_value", "roll_g")
 
 
 def save_item(d, user=""):
@@ -111,9 +116,13 @@ def save_item(d, user=""):
     c = db.conn()
     now = _now()
     vals = {k: d.get(k) for k in FIELDS if k in d}
-    for k in ("loss_rate", "reorder_point", "reorder_qty"):
+    for k in ("loss_rate", "reorder_point", "reorder_qty", "reorder_value", "roll_g"):
         if k in vals:
             vals[k] = None if vals[k] in (None, "") else float(vals[k])
+    if "roll_g" in vals and vals["roll_g"] is not None and not 10 <= vals["roll_g"] <= 20000:
+        raise ValueError("每卷净重要在 10 到 20000 克之间")
+    vals.pop("reorder_unit", None)           # v2.55：单位和数一起处理（units.apply_reorder，同时把克数写进 reorder_point）
+    vals.pop("reorder_value", None)
     if "supplier_id" in vals:
         vals["supplier_id"] = int(vals["supplier_id"]) if vals["supplier_id"] not in (None, "") else None
     if vals.get("material"):
@@ -129,6 +138,12 @@ def save_item(d, user=""):
         if it["category"] == "filament" and ("material" in vals or "color" in vals) and \
                 (vals.get("material", it["material"]) != it["material"] or vals.get("color", it["color"]) != it["color"]):
             raise ValueError("耗材的材料和颜色建好后不能改（和料卷、产品颜色对应）；不对的话新建一个，旧的停用")
+        if it["category"] == "filament":
+            if "reorder_point" in d and not ({"reorder_unit", "reorder_value"} & set(d)):      # 老接口直接给克数 = 回到按克
+                vals["reorder_unit"] = vals["reorder_value"] = None
+            else:
+                from . import units
+                units.apply_reorder(vals, d, it)
         if vals:
             c.execute("UPDATE inv_items SET " + ", ".join(f"{k}=?" for k in vals) + ", updated_at=? WHERE id=?",
                       (*vals.values(), now, it["id"]))
@@ -150,6 +165,9 @@ def save_item(d, user=""):
     if c.execute("SELECT 1 FROM inv_items WHERE code=?", (code,)).fetchone():
         raise ValueError(f"编码 {code} 已经有了")
     vals.setdefault("active", 1)
+    if cat == "filament":
+        from . import units
+        units.apply_reorder(vals, d, {})
     cols = ["code", *vals.keys(), "qty", "avg_cost", "created_at", "updated_at"]
     c.execute(f"INSERT INTO inv_items({', '.join(cols)}) VALUES({', '.join('?' * len(cols))})",
               (code, *vals.values(), 0, float(d.get("avg_cost") or 0), now, now))

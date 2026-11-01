@@ -30,6 +30,7 @@ from . import presets as _presets
 from . import purchase as _po
 from . import ledger as _led
 from . import report as _rep
+from . import units as _units
 from .. import db
 
 CATEGORIES = _led.CATEGORIES
@@ -62,6 +63,7 @@ docs = _docs.list_docs
 stocktake_start = _docs.stocktake_start
 stocktake_save = _docs.stocktake_save
 stocktake_confirm = _docs.stocktake_confirm
+resolve_count = _docs.resolve_count
 expense = _rep.expense
 alerts = _rep.alerts
 overview = _rep.overview
@@ -91,6 +93,7 @@ finance_month = _finance.month_summary
 pack_rules = _pack.rules
 seed_presets = _presets.seed
 consume_production = _fil.consume_production
+units = _units
 
 
 def items(category="", q="", low_only=False, include_inactive=False):
@@ -104,7 +107,7 @@ def items(category="", q="", low_only=False, include_inactive=False):
         conds.append("(code LIKE ? OR name_zh LIKE ? OR name_th LIKE ? OR brand LIKE ? OR spec LIKE ?)")
         args += [f"%{q}%"] * 5
     if low_only:
-        conds.append("reorder_point IS NOT NULL AND qty<=reorder_point")
+        conds.append("reorder_point IS NOT NULL")          # 是不是低于补货线要看补货线的单位（按卷的数卷），下面再筛
     sql += (" WHERE " + " AND ".join(conds) if conds else "") + " ORDER BY category, code"
     tr = _po.in_transit()
     out = []
@@ -112,4 +115,5 @@ def items(category="", q="", low_only=False, include_inactive=False):
         it = _led.item_row(r)
         it["transit"] = tr.get(it["id"], 0)
         out.append(it)
-    return out
+    _units.decorate(out)               # v2.55：耗材补上「几卷」、按补货线的单位重算 low
+    return [x for x in out if x["low"]] if low_only else out

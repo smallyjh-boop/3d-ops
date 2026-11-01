@@ -58,15 +58,30 @@ def open_pos():
     return out
 
 
+def _po_docs(po_no):
+    return [x for x in inv.docs("purchase") if x.get("ref") == f"po:{po_no}"]       # 新的在前
+
+
+def _spools(po_no, before):
+    """v2.55：这次到货入库新建的料卷（每卷一个编号，标签 /print/spools?ids=…）。before = 入库前这张采购单已有的入库单数。"""
+    ds = _po_docs(po_no)
+    if len(ds) <= before:
+        return []
+    d = inv.doc(ds[0]["id"])
+    return d["spool_codes"] if d else []
+
+
 def receive(po_id, qtys, issues=None, locations=None, note="", user=""):
-    """到货：入库 + 差异 + 放货位。locations：{物品id: 货位编号}（库存模块关着就不放）。"""
+    """到货：入库 + 差异 + 放货位。locations：{物品id: 货位编号}（库存模块关着就不放）。返回里 spools = 这次新建的料卷编号。"""
     ensure()
+    p0 = inv.get_po(po_id)
+    before = len(_po_docs(p0["no"]))
     loc_mod = modules.public("inv")
     if loc_mod is not None and hasattr(loc_mod, "putaway_batch"):
         # v2.52：这次到的货按填的货位上架，没填的按上架推荐（同一物品已在的货位 → 附近空位 → 空位）
         with loc_mod.putaway_batch(locations or {}, user) as pb:
             po = inv.receive_po(po_id, qtys or {}, user, note or "", issues or [])
-        return {"po": inv.get_po(po["id"]), "placed": pb["placed"], "warnings": pb["warnings"]}
+        return {"po": inv.get_po(po["id"]), "placed": pb["placed"], "warnings": pb["warnings"], "spools": _spools(po["no"], before)}
     po = inv.receive_po(po_id, qtys or {}, user, note or "", issues or [])
     placed, warn = [], []
     for iid, code in (locations or {}).items():
@@ -81,7 +96,7 @@ def receive(po_id, qtys, issues=None, locations=None, note="", user=""):
             placed.append({"item_id": int(iid), "code": code.upper()})
         except ValueError as e:
             warn.append(str(e))
-    return {"po": inv.get_po(po["id"]), "placed": placed, "warnings": warn}
+    return {"po": inv.get_po(po["id"]), "placed": placed, "warnings": warn, "spools": _spools(po["no"], before)}
 
 
 def labels_html(po_no, counts, lang="zh"):

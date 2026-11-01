@@ -14,6 +14,42 @@
   const areaTxt = (d) => ((d.ref || "").startsWith("area:") ? d.ref.slice(5) : "");
   const sign = (v) => (v > 0 ? "+" : "") + num(v);
 
+  // v2.55 耗材盘点三种数法：g 直接填克数 · 卷 数几卷（多的建成新料卷、少的记用完）· ⚖ 一卷一卷称毛重（毛重 − 空料盘 = 剩余）
+  const modeSel = (mode, noG) => `<select data-mode class="st-mode" title="${esc(Z("怎么数", "นับแบบไหน"))}">${noG ? "" : `<option value="g" ${mode === "g" ? "selected" : ""}>g</option>`}
+    <option value="roll" ${mode === "roll" ? "selected" : ""}>${esc(Z("卷", "ม้วน"))}</option><option value="weigh" ${mode === "weigh" ? "selected" : ""}>⚖</option></select>`;
+  const filCell = (counted, mode, rolls, noG) => modeSel(mode, noG) + ` <input type="number" min="0" step="any" data-c value="${mode === "roll" && rolls != null ? rolls : counted ?? ""}" class="loc-mq" placeholder="—"> <button class="mini hidden" data-wg>⚖</button>`;
+  function readCell(tr, key) {
+    const sel = tr.querySelector("[data-mode]"), inp = tr.querySelector("[data-c]");
+    if (!sel || sel.value === "g") return inp.value === "" ? null : inp.value;
+    if (sel.value === "roll") return inp.value === "" ? null : { rolls: inp.value };
+    return tr.dataset.weigh ? { weigh: JSON.parse(tr.dataset.weigh) } : null;
+  }
+  async function weighDialog(tr, material, color, loc) {
+    const r = await api(`/api/inv/spools?material=${encodeURIComponent(material)}&color=${encodeURIComponent(color)}&status=active${loc ? "&loc=" + encodeURIComponent(loc) : ""}`);
+    const old = tr.dataset.weigh ? JSON.parse(tr.dataset.weigh) : [];
+    const m = MODAL.open(`<h3>⚖ ${esc(Z("称重盘点", "ตรวจนับด้วยการชั่ง"))} <span data-notr>${esc(material)} ${esc(color)}</span></h3>
+      <p class="small muted">${esc(Z(`放秤上称整卷（含空料盘）；剩余 = 毛重 − 空料盘 ${num(r.tare_g)} g（设置里改）。没称的卷不变。`, `ชั่งทั้งม้วน (รวมแกนเปล่า); เหลือ = น้ำหนักรวม − แกนเปล่า ${num(r.tare_g)} g (แก้ในตั้งค่า) ม้วนที่ไม่ได้ชั่งไม่เปลี่ยน`))}</p>
+      <table class="grid small"><thead><tr><th>${esc(Z("料卷", "ม้วน"))}</th><th>${esc(Z("账面剩余", "ในระบบ"))}</th><th>${esc(Z("毛重 g", "น้ำหนักรวม g"))}</th></tr></thead><tbody>
+      ${(r.items || []).map((s) => `<tr data-sc="${esc(s.code)}"><td class="mono" data-notr>${esc(s.code)}${s.loc ? ` <span class="muted">${esc(s.loc.code)}</span>` : ""}</td><td>${num(s.remaining_g)} g</td>
+        <td><input type="number" min="0" step="any" data-g value="${(old.find((e) => e.code === s.code) || {}).gross ?? ""}" style="width:90px"></td></tr>`).join("") || `<tr><td colspan="3" class="muted">${esc(Z("这里没有料卷", "ไม่มีม้วนที่นี่"))}</td></tr>`}</tbody></table>
+      <div class="row gap" style="margin-top:8px"><button class="primary" id="wg-ok">${esc(Z("确定", "ตกลง"))}</button><button data-mclose>${esc(Z("取消", "ยกเลิก"))}</button></div>`);
+    m.querySelector("#wg-ok").onclick = () => {
+      const ents = [...m.querySelectorAll("tr[data-sc]")].map((t) => ({ code: t.dataset.sc, gross: t.querySelector("[data-g]").value })).filter((e) => e.gross !== "");
+      const wb = tr.querySelector("[data-wg]");
+      if (ents.length) { tr.dataset.weigh = JSON.stringify(ents); wb.textContent = "⚖ " + ents.length + Z(" 卷已称", " ม้วนชั่งแล้ว"); } else { delete tr.dataset.weigh; wb.textContent = "⚖"; }
+      MODAL.close();
+    };
+  }
+  function wireModes(root, locOf) {
+    root.querySelectorAll("[data-mode]").forEach((sel) => {
+      const tr = sel.closest("tr"), inp = tr.querySelector("[data-c]"), btn = tr.querySelector("[data-wg]");
+      const sync = () => { const w = sel.value === "weigh"; btn.classList.toggle("hidden", !w); inp.readOnly = w; if (!w) delete tr.dataset.weigh; };
+      sel.onchange = () => { inp.value = ""; sync(); if (sel.value === "weigh") btn.click(); };
+      btn.onclick = () => weighDialog(tr, tr.dataset.mat, tr.dataset.col, locOf(tr)).catch((e) => toast(e.message, true));
+      sync();
+    });
+  }
+
   async function page() {
     if (DOC) return open(DOC);
     const box = BOX(); if (!box) return;
@@ -86,12 +122,13 @@
         <span class="small muted">${esc(Z("没数的货位不调整", "ช่องที่ยังไม่นับจะไม่ปรับ"))}</span></div>` : "") +
       `<div class="st-locs">${d.locs.map((l) => `<div class="card st-loc ${l.done ? "done" : ""}" data-sl="${esc(l.code)}">
         <div class="row between"><b class="mono" data-notr>${esc(l.code)}</b><span class="small">${l.done ? `✓ <span data-notr>${esc(l.by)}</span>` : `<span class="muted">${esc(Z("还没数", "ยังไม่นับ"))}</span>`}${l.diffs ? ` · <b class="bad">${esc(Z(`${l.diffs} 个差异`, `ต่าง ${l.diffs}`))}</b>` : ""}</span></div>
-        <table class="grid small"><tbody>${l.rows.map((x) => `<tr data-iid="${x.item_id}"><td data-notr><b class="mono">${esc(x.code)}</b><div class="small muted">${esc(itName(x))}</div></td>
-          <td class="nowrap small">${esc(Z("账面", "ในระบบ"))} ${num(x.book)}</td>
-          <td>${draft ? `<input type="number" min="0" step="any" data-c value="${x.counted ?? ""}" class="loc-mq" placeholder="—">` : num(x.counted)}</td>
+        <table class="grid small"><tbody>${l.rows.map((x) => `<tr data-iid="${x.item_id}" ${x.fil ? `data-mat="${esc(x.material)}" data-col="${esc(x.color)}"` : ""}><td data-notr><b class="mono">${esc(x.code)}</b><div class="small muted">${esc(itName(x))}</div></td>
+          <td class="nowrap small">${esc(Z("账面", "ในระบบ"))} ${x.fil ? `<span data-notr>${esc(TH() ? x.book_text_th : x.book_text_zh)}</span>` : num(x.book)}</td>
+          <td class="nowrap">${draft ? (x.fil ? filCell(x.counted, "roll", null, true) : `<input type="number" min="0" step="any" data-c value="${x.counted ?? ""}" class="loc-mq" placeholder="—">`) : num(x.counted)}</td>
           <td class="${x.diff ? (x.diff < 0 ? "bad" : "ok") : ""}">${x.diff == null || !x.diff ? "" : sign(x.diff)}</td></tr>`).join("") || `<tr><td class="muted">${esc(Z("空货位", "ช่องว่าง"))}</td></tr>`}</tbody></table>
         ${draft ? `<div class="row gap" style="margin-top:6px"><input data-add placeholder="${esc(Z("多出来的物品编码", "รหัสสินค้าที่เจอเพิ่ม"))}" class="st-add" data-notr><button class="mini primary" data-save>${esc(Z("这个货位数完了", "ช่องนี้นับเสร็จ"))}</button></div>` : ""}</div>`).join("")}</div>`;
     $("#st-back").onclick = back;
+    wireModes(box, (tr) => (tr.closest("[data-sl]") || {}).dataset ? tr.closest("[data-sl]").dataset.sl : "");
     const ok = $("#st-ok");
     if (ok) ok.onclick = () => {
       if (!confirm(Z("确认盘点？数过的货位按实盘数调整库存。", "ยืนยันตรวจนับ? ช่องที่นับแล้วจะปรับสต็อกตามจำนวนจริง"))) return;
@@ -99,7 +136,7 @@
     };
     box.querySelectorAll("[data-save]").forEach((b) => b.addEventListener("click", () => busy(b, async () => {
       const card = b.closest("[data-sl]"), counts = {};
-      card.querySelectorAll("tr[data-iid]").forEach((tr) => { const v = tr.querySelector("[data-c]").value; if (v !== "") counts[tr.dataset.iid] = v; });
+      card.querySelectorAll("tr[data-iid]").forEach((tr) => { const v = readCell(tr); if (v !== null && v !== "") counts[tr.dataset.iid] = v; });
       const add = card.querySelector("[data-add]").value.trim();
       if (add) { const q = prompt(Z(`${add} 数到几个？`, `${add} นับได้กี่ชิ้น?`), "1"); if (q == null) return; counts[add] = q; }
       await api(`/api/inv/stocktake/${d.id}/loc`, { json: { code: card.dataset.sl, counts, complete: true } });
@@ -113,11 +150,12 @@
     box.innerHTML = head + `<div class="row gap wrap st-bar">${draft ? `<button class="primary" id="st-save">${esc(Z("保存已填的数", "บันทึกที่กรอกแล้ว"))}</button>
         ${can("inv.adjust") ? `<button class="danger" id="st-ok">${esc(Z("确认盘点（调整库存）", "ยืนยันตรวจนับ (ปรับสต็อก)"))}</button>` : `<span class="muted small">${esc(Z("填完让老板确认", "กรอกเสร็จแล้วให้เจ้าของยืนยัน"))}</span>`}` : ""}</div>
       <div class="tbl-x"><table class="grid small" id="st-tbl"><thead><tr><th>${esc(Z("编码", "รหัส"))}</th><th>${esc(Z("名称", "ชื่อ"))}</th><th>${esc(Z("开单时账面", "ในระบบตอนเปิด"))}</th><th>${esc(Z("现在账面", "ในระบบตอนนี้"))}</th><th>${esc(Z("实盘数", "นับได้"))}</th><th>${esc(Z("差异", "ส่วนต่าง"))}</th><th>${esc(Z("货位", "ตำแหน่ง"))}</th></tr></thead><tbody>` +
-      d.lines.map((l) => `<tr><td class="mono" data-notr>${esc(l.code)}</td><td data-notr>${esc(itName(l))}</td>
+      d.lines.map((l) => `<tr data-line="${l.id}" ${l.category === "filament" ? `data-mat="${esc(l.material)}" data-col="${esc(l.color)}"` : ""}><td class="mono" data-notr>${esc(l.code)}</td><td data-notr>${esc(itName(l))}</td>
         <td>${num(l.expected)}</td><td>${num(l.now_qty)} <span data-notr>${esc(uLab(l.unit))}</span></td>
-        <td>${draft ? `<input type="number" step="any" data-line="${l.id}" value="${l.counted ?? ""}" class="loc-mq">` : num(l.counted)}</td>
+        <td class="nowrap">${draft ? (l.category === "filament" ? `<span data-notr class="small muted">${esc(l.units ? (TH() ? l.units.text_th : l.units.text_zh) : "")}</span><br>${filCell(l.counted, l.count_mode === "rolls" ? "roll" : "g", l.counted_rolls)}` : `<input type="number" step="any" data-line="${l.id}" value="${l.counted ?? ""}" class="loc-mq">`) : num(l.counted)}</td>
         <td class="${l.diff ? (l.diff < 0 ? "bad" : "ok") : ""}">${l.diff == null ? (draft ? "" : num(l.qty)) : sign(l.diff)}</td><td class="mono" data-notr>${esc(l.location || "")}</td></tr>`).join("") + "</tbody></table></div>";
-    const counts = () => { const o = {}; $$("#st-tbl [data-line]").forEach((el) => { o[el.dataset.line] = el.value === "" ? null : el.value; }); return o; };
+    const counts = () => { const o = {}; $$("#st-tbl tr[data-line]").forEach((tr) => { const plain = tr.querySelector("input[data-line]"); o[tr.dataset.line] = plain ? (plain.value === "" ? null : plain.value) : readCell(tr); }); return o; };
+    wireModes(box, () => "");
     $("#st-back").onclick = back;
     const sv = $("#st-save");
     if (sv) sv.onclick = () => busy(sv, async () => { await api(`/api/inv/stocktake/${d.id}/save`, { json: { counts: counts() } }); toast(Z("已保存", "บันทึกแล้ว")); open(d.id); });

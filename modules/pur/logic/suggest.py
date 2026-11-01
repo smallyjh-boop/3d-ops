@@ -21,6 +21,7 @@ import time
 from core import db, inventory as inv
 from core.config import load_config
 from core.inventory import purchase as _kp
+from core.inventory import units as _units
 
 from . import links as _links
 
@@ -119,6 +120,7 @@ def compute(include_all=False):
         rules[r["item_id"]] = rules.get(r["item_id"], 0) + r["qty"] * (items_day if r["per"] == "item" else od30)
     today = dt.date.today()
     stocked = {r[0] for r in c.execute("SELECT DISTINCT item_id FROM inv_moves")}
+    ustats = _units.spool_stats(c)           # v2.55：每个耗材几卷（补货线按卷的数卷比）
     rows = []
     for r in c.execute("SELECT * FROM inv_items WHERE active=1 AND category!='goods'"):
         it = dict(r)
@@ -154,7 +156,9 @@ def compute(include_all=False):
         days = (avail / rate) if rate > 0 else (None if avail >= 0 else 0.0)
         target = rate * (lead + p["safety_days"] + p["cover_days"]) + pending
         need = max(0.0, target - qty - transit)
-        below = it.get("reorder_point") is not None and qty + transit <= float(it["reorder_point"])
+        if is_fil:
+            it["units"] = _units.for_item(it, ustats, cfg)
+        below = it.get("reorder_point") is not None and _units.below(it, transit)
         if below:
             why.append("reorder")
             rq = it.get("reorder_qty") or max(float(it["reorder_point"]) * 2 - qty - transit, 1)
@@ -170,7 +174,7 @@ def compute(include_all=False):
             urgency = "green"
         if urgency == "green":
             need = 0.0 if not include_all else need
-        sq, rolls, net = round_qty(need, link, is_fil, p["spool_g"])
+        sq, rolls, net = round_qty(need, link, is_fil, _units.roll_g_of(it, cfg))
         if not include_all and urgency == "green":
             continue
         if not include_all and iid not in stocked and transit <= 0 and pending <= 0:
@@ -191,7 +195,11 @@ def compute(include_all=False):
             order_by = (today + dt.timedelta(days=max(0, int(math.floor(days - lead - p["safety_days"]))))).isoformat()
         rows.append({
             "item": {k: it.get(k) for k in ("id", "code", "name_zh", "name_th", "category", "unit", "material", "color", "qty",
-                                            "reorder_point", "reorder_qty", "supplier_id", "avg_cost")},
+                                            "reorder_point", "reorder_qty", "supplier_id", "avg_cost", "reorder_unit", "reorder_value")},
+            "stock": it.get("units"), "qty_kg": round(sq / 1000.0, 3) if is_fil else None,
+            "transit_rolls": round(transit / (net or _units.roll_g_of(it, cfg)), 2) if is_fil else None,
+            "reorder_zh": _units.reorder_text(it).get("reorder_zh") if is_fil else None,
+            "reorder_th": _units.reorder_text(it).get("reorder_th") if is_fil else None,
             "transit": round(transit, 3), "pending": round(pending, 1), "use30": round(use30, 3), "daily": round(rate, 4),
             "available": round(avail, 3), "days": None if days is None else round(days, 1), "lead": lead,
             "safety": p["safety_days"], "order_by": order_by, "urgency": urgency, "why": why,

@@ -73,3 +73,9 @@
 - 2.2（系统 v2.54.0，发版前审查修复）：一键补货的「在做 / 在途」算上生产单草稿 / 还没建任务的行和采购单草稿，点两次不会重复建；手填数量的 SKU 已有补货草稿时拒绝并提示改那张草稿。
 - 2.2（系统 v2.55.0）：生产 → 生产单的「建议生产」和这里的「一键补货」用同一套缺口 / 在做 / 整盘取整计算（core/po.suggest 直接用 goodsstock.rows，没有另算）；从生产单页选产品建的草稿也算「在做」，一键补货不会再重复建。测试 modules/prod/tests/t_po255.py。
 - 系统 v2.55.0：生产区货位（inv_printer_locs）加 pid 列，按打印机稳定 id 认货架：改编码 / 批量重新编号 / 两台互换编码时货架号不变，货位名称、备注、「打印机 XXX · 槽」显示跟着新编码；已删打印机的旧行让位、旧数据（没有 pid）仍按编码 / 序号认。出入库记录、料卷里存的打印机编码由 core/fleetcodes.rename_codes 一起改。测试 modules/prod/tests/t_codes255.py。
+- 2.3（系统 v2.55.0）：耗材两个单位——卷 + 重量（树脂：瓶 + 毫升）。克仍是唯一的数量来源（inv_items.qty = 料卷剩余克数之和），`core/inventory/units.py` 负责「怎么数、怎么说」：
+  库存表「2 卷（1 整卷 + 1 开封卷）· 1.97 kg」（卷数从料卷数：未开封 / 已开封 / 在机上，用完的和记成负数的占位卷不算；`inv.items()` 自动带 `units`）；货位分布「A1-01-01：1 卷 · 1.0 kg」「PR2-01-01（打印机上）：1 卷 · 973 g」（`views._split` 的 `rolls / grams / text_zh / text_th`）；
+  补货线可选单位 卷 / kg（`inv_items.reorder_unit / reorder_value`，`reorder_point` 同步成克，老数据全空 = 照旧按克；按卷的提醒用真实卷数比，库存页、今日提醒、概况、补货建议一致），每卷净重 `inv_items.roll_g`（空 = 设置 filament_spool_kg）；
+  入库 / 退回 N 卷 = 新建 N 条料卷记录（编号 F0001…，开单后可打印每卷标签 `/print/spools`），领用 / 报废按卷 = 先拿未开封的再拿剩得少的（在机上的先下机）；单据行 `rolls / net_g / opened / spools`，`doc.spool_codes`；打印扣料照旧按克扣在机上那卷；
+  盘点三种数法：克 · 数卷（多了建新料卷、少了记用完；整数）· 称重（`{weigh: [{code, gross}]}`，毛重 − 空料盘 inv_spool_tare_g = 剩余）；按货位盘点也包含按卷管的耗材（只能数卷或称重，没数的不算 0）。
+  迁移：ledger.init 只加三列、可重复。测试 modules/inv/tests/t_units255.py。

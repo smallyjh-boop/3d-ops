@@ -8,6 +8,7 @@
 """
 from core import db
 from core import inventory as inv
+from core.inventory import units
 
 VIEWS = ("stock", "all", "zero", "inactive")
 
@@ -17,11 +18,13 @@ def _stocked_ids():
 
 
 def is_low(it, stocked):
-    return it.get("reorder_point") is not None and (it.get("qty") or 0) <= it["reorder_point"] and it["id"] in stocked
+    """入过库、并且低于补货线（耗材按补货线的单位：按卷的数卷，按公斤 / 克的比重量，见 core/inventory/units.py）。"""
+    return it["id"] in stocked and it.get("reorder_point") is not None and units.below(it)
 
 
 def _split():
-    """v2.53：每个物品放在哪些货位：{物品id: [{code, qty, ztype, zone}]}（拣货区在前、按走路顺序）"""
+    """v2.53：每个物品放在哪些货位：{物品id: [{code, qty, ztype, zone}]}（拣货区在前、按走路顺序）。
+    v2.55：耗材每个货位另外带 rolls（几卷）、grams、text_zh / text_th（「A1-01-01：1 卷 · 1.0 kg」「PR2-01-01（打印机上）：1 卷 · 973 g」）。"""
     from . import locations as L, wms
     c = db.conn()
     try:
@@ -29,11 +32,22 @@ def _split():
         rows = wms._qty_rows(c)
     except Exception:  # noqa: BLE001  货位表还没建
         return {}
+    lstat = units.loc_stats(c)
+    fil = {r["id"]: (r["material"], r["color"]) for r in c.execute("SELECT id, material, color FROM inv_items WHERE category='filament'")}
     out = {}
     for r in rows:
         l = locs.get(r["loc_id"])
         if l:
-            out.setdefault(r["item_id"], []).append({"code": l["code"], "qty": round(r["qty"], 6), "ztype": l["ztype"], "zone": l["zone"]})
+            x = {"code": l["code"], "qty": round(r["qty"], 6), "ztype": l["ztype"], "zone": l["zone"]}
+            k = fil.get(r["item_id"])
+            if k:
+                st = (lstat.get(k) or {}).get(r["loc_id"]) or {"rolls": 0, "grams": r["qty"]}
+                x["rolls"], x["grams"] = st["rolls"], round(st["grams"], 1)
+                zh, th = units.loc_text(k[0], st["rolls"], st["grams"])
+                on = l["ztype"] == "production"
+                x["text_zh"] = f"{l['code']}{'（打印机上）' if on else ''}：{zh}"
+                x["text_th"] = f"{l['code']}{' (บนเครื่องพิมพ์)' if on else ''}: {th}"
+            out.setdefault(r["item_id"], []).append(x)
     for v in out.values():
         v.sort(key=lambda x: (0 if x["ztype"] == "pick" else 1, L.sort_key(x["code"])))
     return out
@@ -68,6 +82,8 @@ def listing(view="stock", category="", q="", zone="", loc=""):
         it["loc_n"] = len(where)
         it["locs"] = where
         it["unplaced"] = round(max(0.0, (it.get("qty") or 0) - placed), 6) if where or it.get("location") else 0
+        if it.get("units"):                       # v2.55：还没上架的是几卷
+            it["unplaced_rolls"] = max(0, it["units"]["rolls"] - sum(x.get("rolls", 0) for x in where))
         it["low"] = is_low(it, stocked)
         has = abs(it.get("qty") or 0) > 1e-9 or (it.get("transit") or 0) > 0
         if view == "inactive" and it.get("active"):

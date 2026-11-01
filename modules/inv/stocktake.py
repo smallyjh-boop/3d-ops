@@ -5,8 +5,11 @@
   物品这一行的实盘数 = 现在的总数 − 数过的货位上现在的数 + 数过的货位上数到的数（没数的货位、待上架照原样）。
   确认：库存按「实盘 − 账面」调整（盘点单原来的逻辑），数过的货位上的数改成数到的数。
 """
+import json
+
 from core import db
 from core import inventory as inv
+from core.inventory import units
 
 from . import locations as L
 from . import flows, wms
@@ -35,8 +38,8 @@ def start(area, user="", note="", category=""):
             ids.add(int(l["fixed_item"]))
         for iid in ids:
             it = wms._item(c, iid)
-            if it and it["active"] and (not category or it["category"] == category) and not flows.spool_item(c, iid):
-                pairs.append((l, iid))       # v2.53：按料卷管的耗材用料卷称重盘点
+            if it and it["active"] and (not category or it["category"] == category):
+                pairs.append((l, iid))       # v2.55：按料卷管的耗材也在货位盘点里：数这个货位上有几卷，或者一卷一卷称重
     item_ids = sorted({iid for _l, iid in pairs})
     label = ",".join(L.norm_code(p) for p in parts)
     d = inv.stocktake_start(category or "", user, note, label, item_ids=item_ids, allow_empty=True)
@@ -67,11 +70,23 @@ def count(doc_id, code, counts, user="", complete=True):
         raise ValueError(f"没有货位 {code}")
     if not c.execute("SELECT 1 FROM inv_loc_count_locs WHERE doc_id=? AND loc_id=?", (d["id"], loc["id"])).fetchone():
         raise ValueError(f"{loc['code']} 不在这张盘点单的范围里")
-    got = {}
+    got, extras = {}, {}
+    lst = units.loc_stats(c)
     for k, v in (counts or {}).items():
-        r = c.execute("SELECT id FROM inv_items WHERE id=? OR UPPER(code)=UPPER(?)", (int(k) if str(k).isdigit() else -1, str(k))).fetchone()
+        r = c.execute("SELECT * FROM inv_items WHERE id=? OR UPPER(code)=UPPER(?)", (int(k) if str(k).isdigit() else -1, str(k))).fetchone()
         if not r:
             raise ValueError(f"没有物品 {k}")
+        if not isinstance(v, dict) and flows.spool_item(c, r["id"]):
+            raise ValueError(f"{r['code']} 是按卷管的耗材：要数卷数或者称重，不能直接填克数")
+        if isinstance(v, dict):                  # v2.55：耗材数卷 {rolls: n} / 称重 {weigh: [{code, gross}]}
+            here = (lst.get((r["material"], r["color"])) or {}).get(loc["id"]) or {"rolls": 0, "grams": 0.0}
+            q, ex = inv.resolve_count(dict(r), v, wms.loc_qty(c, r["id"], loc["id"]), here["rolls"])
+            if q is None:
+                continue
+            got[r["id"]] = q
+            if ex:
+                extras[r["id"]] = ex
+            continue
         try:
             q = float(v)
         except (TypeError, ValueError):
@@ -86,8 +101,24 @@ def count(doc_id, code, counts, user="", complete=True):
         if not c.execute("SELECT 1 FROM inv_doc_lines WHERE doc_id=? AND item_id=?", (d["id"], iid)).fetchone():
             it = wms._item(c, iid)                 # 盘到了单子上没有的物品（放错货位的）：加一行
             c.execute("INSERT INTO inv_doc_lines(doc_id, item_id, expected) VALUES(?,?,?)", (d["id"], iid, it["qty"] or 0))
+    for iid, ex in extras.items():               # 这一行是怎么数的（卷数 / 称重）记在盘点单行上，确认时按这个改料卷
+        ln = c.execute("SELECT id, extra FROM inv_doc_lines WHERE doc_id=? AND item_id=?", (d["id"], iid)).fetchone()
+        old = json.loads(ln["extra"]) if ln and ln["extra"] else {}
+        if old.get("mode") != ex["mode"]:
+            old = {}
+        if ex["mode"] == "rolls":
+            by = old.get("by_loc") or {}
+            by[str(loc["id"])] = [ex["rolls"], ex["sys_rolls"]]
+            ex = {"mode": "rolls", "by_loc": by, "delta_rolls": sum(a - b for a, b in by.values())}
+        else:
+            sp = {e["code"]: e for e in old.get("spools") or []}
+            sp.update({e["code"]: e for e in ex["spools"]})
+            ex = {"mode": "weigh", "spools": list(sp.values())}
+        c.execute("UPDATE inv_doc_lines SET extra=? WHERE id=?", (json.dumps(ex), ln["id"]))
     if complete:
-        c.execute("UPDATE inv_loc_count SET counted=0 WHERE doc_id=? AND loc_id=? AND counted IS NULL", (d["id"], loc["id"]))
+        for r in c.execute("SELECT item_id FROM inv_loc_count WHERE doc_id=? AND loc_id=? AND counted IS NULL", (d["id"], loc["id"])).fetchall():
+            if not flows.spool_item(c, r["item_id"]):          # 按卷管的耗材没数 = 没盘，不算 0（算 0 会把这个货位上的料卷全扣掉）
+                c.execute("UPDATE inv_loc_count SET counted=0 WHERE doc_id=? AND loc_id=? AND item_id=?", (d["id"], loc["id"], r["item_id"]))
     c.execute("UPDATE inv_loc_count_locs SET done=1, counted_by=?, counted_at=? WHERE doc_id=? AND loc_id=?",
               (user, wms._now(), d["id"], loc["id"]))
     _sync_lines(c, d["id"])
@@ -112,8 +143,9 @@ def summary(doc_id):
     d = inv.doc(doc_id)
     if not d:
         raise ValueError("没有这张盘点单")
-    items = {r["id"]: r for r in c.execute("SELECT id, code, name_zh, name_th, unit, avg_cost FROM inv_items")}
+    items = {r["id"]: r for r in c.execute("SELECT id, code, name_zh, name_th, unit, avg_cost, category, material, color FROM inv_items")}
     locs = []
+    lst = units.loc_stats(c)
     for r in c.execute("SELECT * FROM inv_loc_count_locs WHERE doc_id=?", (d["id"],)):
         rows = []
         for x in c.execute("SELECT * FROM inv_loc_count WHERE doc_id=? AND loc_id=?", (d["id"], r["loc_id"])):
@@ -121,9 +153,14 @@ def summary(doc_id):
             if not it:
                 continue
             book = x["expected"] if d["status"] != "draft" else wms.loc_qty(c, x["item_id"], r["loc_id"])
-            rows.append({"item_id": x["item_id"], "code": it["code"], "name_zh": it["name_zh"], "name_th": it["name_th"], "unit": it["unit"],
-                         "book": book, "counted": x["counted"], "diff": None if x["counted"] is None else round(x["counted"] - book, 6),
-                         "amount": None if x["counted"] is None else round((x["counted"] - book) * float(it["avg_cost"] or 0), 2)})
+            row = {"item_id": x["item_id"], "code": it["code"], "name_zh": it["name_zh"], "name_th": it["name_th"], "unit": it["unit"],
+                   "book": book, "counted": x["counted"], "diff": None if x["counted"] is None else round(x["counted"] - book, 6),
+                   "amount": None if x["counted"] is None else round((x["counted"] - book) * float(it["avg_cost"] or 0), 2)}
+            if it["category"] == "filament":                   # v2.55：耗材这个货位上账面几卷（可以数卷、可以称重）
+                here = (lst.get((it["material"], it["color"])) or {}).get(r["loc_id"]) or {"rolls": 0, "grams": 0.0}
+                row.update(fil=True, material=it["material"], color=it["color"], book_rolls=here["rolls"],
+                           book_text_zh=units.loc_text(it["material"], here["rolls"], book)[0], book_text_th=units.loc_text(it["material"], here["rolls"], book)[1])
+            rows.append(row)
         rows.sort(key=lambda x: x["code"])
         locs.append({"code": r["code"], "loc_id": r["loc_id"], "done": bool(r["done"]), "by": r["counted_by"] or "", "at": r["counted_at"],
                      "rows": rows, "diffs": sum(1 for x in rows if x["diff"])})
@@ -152,9 +189,12 @@ def confirm(doc_id, user=""):
                   (wms.loc_qty(c, r["item_id"], r["loc_id"]), d["id"], r["loc_id"], r["item_id"]))
     c.commit()
     ids = {r["item_id"] for r in rows}
-    with wms.quiet(ids):
+    moded = {r[0] for r in c.execute("SELECT item_id FROM inv_doc_lines WHERE doc_id=? AND extra LIKE '%\"mode\"%'", (d["id"],))}
+    with wms.quiet(ids - moded):                 # v2.55：按卷数 / 称重盘的耗材，货位上的数由料卷自己跟（不用 quiet）
         out = inv.stocktake_confirm(d["id"], user)
     code_of = {r["id"]: r["code"] for r in c.execute("SELECT id, code FROM inv_locations")}
+    ids -= moded
+    rows = [r for r in rows if r["item_id"] not in moded]
     for r in rows:
         old = wms.loc_qty(c, r["item_id"], r["loc_id"])
         if abs(old - r["counted"]) > 1e-9:

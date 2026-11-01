@@ -58,13 +58,15 @@
         `<tr><td class="mono" data-notr>${esc(x.code)}</td><td data-notr>${esc(nm(x))}</td><td>${x.idle_days}${Z(" 天", " วัน")}</td>${money ? `<td>฿${num(x.value)}</td>` : ""}</tr>`).join("")}</tbody></table>` }) : ""}</div>`;
   }
 
-  // 库存表里「分布在」：A1-01-01 ×4 · 待检 QC1-01-01 ×1
+  // 库存表里「分布在」：A1-01-01 ×4 · 待检 QC1-01-01 ×1；v2.55 耗材按卷：A1-01-01：1 卷 · 1.0 kg · PR2-01-01（打印机上）：1 卷 · 973 g
   function split(it) {
     const xs = it.locs || [];
     if (!xs.length) return it.location ? `<a href="#" data-locgo-code="${esc(it.location)}" class="mono" data-notr>${esc(it.location)}</a>` : "";
     const q = (v) => (it.unit === "g" ? num(v) : num(v, 2));
-    return xs.slice(0, 4).map((x) => `<span class="inv-loc z-${esc(x.ztype)}" title="${esc(ztName(x.ztype))}"><a href="#" data-locgo-code="${esc(x.code)}" class="mono" data-notr>${esc(x.code)}</a> ×${q(x.qty)}</span>`).join(" ")
-      + (xs.length > 4 ? ` <span class="muted">+${xs.length - 4}</span>` : "");
+    const one = (x) => (x.text_zh
+      ? `<span class="inv-loc z-${esc(x.ztype)}" title="${esc(ztName(x.ztype))}" data-notr><a href="#" data-locgo-code="${esc(x.code)}" class="mono">${esc(x.code)}</a>${esc((TH() ? x.text_th : x.text_zh).slice(x.code.length))}</span>`
+      : `<span class="inv-loc z-${esc(x.ztype)}" title="${esc(ztName(x.ztype))}"><a href="#" data-locgo-code="${esc(x.code)}" class="mono" data-notr>${esc(x.code)}</a> ×${q(x.qty)}</span>`);
+    return xs.slice(0, 4).map(one).join(it.units ? "<br>" : " ") + (xs.length > 4 ? ` <span class="muted">+${xs.length - 4}</span>` : "");
   }
   function zoneSelect(zones, cur) {
     const opts = (zones || []).map((o) => `<option value="${esc(o.value)}" ${o.value === cur ? "selected" : ""}>${o.zone ? esc(o.zone) + " · " : ""}${esc(ztName(o.ztype))}${o.name ? " · " + esc(o.name) : ""}</option>`).join("");

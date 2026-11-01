@@ -40,6 +40,7 @@ v2.52.0、v2.53.0 已发布；v2.54.0 已发布
   两处打开的是同一份方案、同样可以编辑，切片文件列表放在编辑器下面｜modules/model、core/recipes.py｜v2.55.0 开发中
 
 - [~] T28：耗材双单位：卷 + 重量（库存、货位分布、补货线按卷或公斤、入库 / 出库按卷、打印按克、盘点数卷或称重、采购按卷）｜modules/inv、core/materials.py、modules/pur｜v2.55.0 开发中
+- [x] T28：耗材双单位：卷 + 重量（库存、货位分布、补货线按卷或公斤、入库 / 出库按卷、打印按克、盘点数卷或称重、采购按卷）｜modules/inv、core/materials.py、modules/pur｜已做（v2.55.0 开发分支，待发版）：core/inventory/units.py，测试 inv/t_units255、pur/t_pur255
 
 - [~] T29：新建生产单改成选产品：默认「建议生产」清单（图片、销量、库存、在做、缺口、建议数量和理由，按急迫排序）、全部产品按销量排、规格展开、已选清单 + 合计；生产单页顶部建议生产卡片｜core/po.py、modules/prod/ui/po.js｜v2.55.0 开发中
 - [x] T29：新建生产单改成选产品：默认「建议生产」清单（图片、销量、库存、在做、缺口、建议数量和理由，按急迫排序）、全部产品按销量排、规格展开、已选清单 + 合计；生产单页顶部建议生产卡片｜core/po.py、modules/prod/ui/po.js｜v2.55.0 已做（modules/prod/tests/t_po255.py）

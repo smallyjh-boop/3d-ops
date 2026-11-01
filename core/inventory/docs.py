@@ -5,7 +5,7 @@ import json
 import math
 
 from .. import db
-from . import ledger
+from . import ledger, units
 
 DOC_KINDS = {"purchase": ("采购入库", "RK", 1), "return": ("退回入库", "TH", 1), "issue": ("领用出库", "LY", -1),
              "scrap": ("报废", "BF", -1), "adjust": ("调整", "TZ", 0), "stocktake": ("盘点", "PD", 0),
@@ -24,33 +24,44 @@ def _no(c, kind):
 
 
 def _fil_apply(it, kind, qty, unit_cost, doc_id, user, reason, printer="", extra=None):
-    """耗材：调用 materials（料卷跟着变），流水由 materials 回调记（带单号）。qty 有正负。"""
+    """耗材：调用 materials（料卷跟着变），流水由 materials 回调记（带单号）。qty 有正负。
+    v2.55 按卷：入库 / 退回 N 卷 = 新建 N 条料卷记录（每卷一个编号和标签）；领用 / 报废 N 卷 = 这 N 卷记用完。
+    返回 {codes, grams}（按卷的才有）。"""
     from .. import materials
     extra = extra or {}
     ctx = {"kind": kind, "doc_id": doc_id, "printer": printer or ""}
     if unit_cost not in (None, ""):
         ctx["unit_cost"] = float(unit_cost)
+    res = {}
     with materials.context(**ctx):
-        if kind == "purchase" and qty > 0 and extra.get("rolls"):
-            materials.receive(it["material"], it["color"], int(extra["rolls"]), float(extra.get("net_g") or 1000),
-                              extra.get("brand") or "", (float(unit_cost) * float(extra.get("net_g") or 1000)) if unit_cost not in (None, "") else None,
-                              user)
+        if qty > 0 and extra.get("rolls") and kind in ("purchase", "return", "adjust"):
+            net = float(extra.get("net_g") or 1000)
+            res["codes"] = materials.receive(it["material"], it["color"], int(extra["rolls"]), net, extra.get("brand") or "",
+                                             (float(unit_cost) * net) if unit_cost not in (None, "") else None, user,
+                                             opened=bool(extra.get("opened")) and kind == "return", reason=reason)
+            res["grams"] = int(extra["rolls"]) * net
+        elif qty < 0 and extra.get("rolls") and kind in ("issue", "scrap", "adjust"):
+            r = materials.take_rolls(it["material"], it["color"], int(extra["rolls"]), extra.get("spools") or None, user, reason)
+            res.update(r)
+            res["grams"] = -r["grams"]
         elif qty < 0:
             materials.consume(it["material"], it["color"], -qty, reason, user)
         else:
             materials.add_stock(it["material"], it["color"], qty / 1000.0, user, reason)
+    return res
 
 
 def _apply(c, it, kind, qty, unit_cost, doc_id, user, reason, printer="", extra=None):
     if it["category"] == "filament":
         c.commit()                       # materials 用同一个连接，自己提交
-        _fil_apply(it, kind, qty, unit_cost, doc_id, user, reason, printer, extra)
+        return _fil_apply(it, kind, qty, unit_cost, doc_id, user, reason, printer, extra)
     elif it["category"] == "goods":
         c.commit()
         from . import goods
         goods.apply(it, kind, qty, unit_cost, doc_id, user, reason)
     else:
         ledger.post(c, it["id"], kind, qty, unit_cost, reason, user, doc_id, "", printer)
+    return {}
 
 
 def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, allow_negative=False):
@@ -63,18 +74,24 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
     c = db.conn()
     clean = []
     so_far = {}           # v2.39：同一个物品写了好几行 → 累计起来看库存够不够
+    so_rolls = {}
     for i, ln in enumerate(lines or []):
         it = ledger.get_item(ln.get("item_id"))
         if not it:
             raise ValueError(f"第 {i + 1} 行：没有这个物品")
         if not it["active"]:
             raise ValueError(f"第 {i + 1} 行：{it['name_zh']} 已停用")
+        rolled = bool(ln.get("rolls")) and it["category"] == "filament" and kind in ("purchase", "return", "issue", "scrap")
         try:
             q = float(ln.get("qty") or 0)
-            if ln.get("rolls") and it["category"] == "filament" and kind == "purchase":
-                q = int(ln["rolls"]) * float(ln.get("net_g") or 1000)
-        except (TypeError, ValueError):
-            raise ValueError(f"第 {i + 1} 行：数量不对")
+            if rolled:                                  # v2.55：按卷填（卷数 × 每卷净重，没填净重 = 物品的默认）
+                nr = float(ln["rolls"])
+                if nr != int(nr) or nr < 1:
+                    raise ValueError(f"第 {i + 1} 行：卷数要填整数")
+                ln = dict(ln, rolls=int(nr), net_g=float(ln.get("net_g") or units.roll_g_of(it)))
+                q = ln["rolls"] * ln["net_g"]
+        except (TypeError, ValueError) as e:
+            raise ValueError(str(e) if str(e).startswith("第") else f"第 {i + 1} 行：数量不对")
         if not math.isfinite(q):                      # v2.39："nan" / "inf" 会把库存写坏
             raise ValueError(f"第 {i + 1} 行：数量不对")
         if not q or (sign and q < 0):
@@ -84,6 +101,13 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
         if qty < 0 and not allow_negative and it["category"] != "filament" and (it["qty"] or 0) + so_far[it["id"]] < -1e-6:
             raise ValueError(f"第 {i + 1} 行：{it['name_zh']} 库存只有 {it['qty']:g} {it['unit']}，不够出"
                              + ("（这张单里同一个物品有好几行，合起来算）" if so_far[it["id"]] != qty else ""))
+        if rolled and qty < 0:                           # 整卷出库：够不够卷（在机上的不算，先下机）先看清楚，别开了单再报错
+            so_rolls[it["id"]] = so_rolls.get(it["id"], 0) + ln["rolls"]
+            st = units.spool_stats().get((it["material"], it["color"])) or {"sealed": 0, "open": 0}
+            if ln.get("spools"):
+                pass
+            elif so_rolls[it["id"]] > st["sealed"] + st["open"]:
+                raise ValueError(f"第 {i + 1} 行：{it['name_zh']} 在库的只有 {st['sealed'] + st['open']} 卷（在机上的要先下机），不够出 {so_rolls[it['id']]} 卷")
         uc = ln.get("unit_cost")
         if uc not in (None, ""):
             uc = float(uc)
@@ -101,14 +125,21 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
     doc_id = c.execute("INSERT INTO inv_docs(no, kind, status, note, printer, ref, created_by, created_at, done_by, done_at) "
                        "VALUES(?,?,?,?,?,?,?,?,?,?)", (no, kind, "done", str(note or "")[:500], printer or "", ref or "",
                                                        user, now, user, now)).lastrowid
+    line_ids = []
     for it, qty, uc, lnote, ln in clean:
-        c.execute("INSERT INTO inv_doc_lines(doc_id, item_id, qty, unit_cost, note, extra) VALUES(?,?,?,?,?,?)",
-                  (doc_id, it["id"], qty, uc, lnote, json.dumps({k: ln.get(k) for k in ("rolls", "net_g", "brand", "po_line") if ln.get(k)})))
+        line_ids.append(c.execute("INSERT INTO inv_doc_lines(doc_id, item_id, qty, unit_cost, note, extra) VALUES(?,?,?,?,?,?)",
+                                  (doc_id, it["id"], qty, uc, lnote,
+                                   json.dumps({k: ln.get(k) for k in ("rolls", "net_g", "brand", "po_line", "opened") if ln.get(k)}))).lastrowid)
     c.commit()
     label = DOC_KINDS[kind][0]
-    for it, qty, uc, lnote, ln in clean:
-        _apply(c, it, ln.get("move_kind") or move_kind or kind, qty, uc, doc_id, user, f"{label} {no}" + (f"：{lnote or note}" if (lnote or note) else ""), printer,
-               {k: ln.get(k) for k in ("rolls", "net_g", "brand")})
+    for (it, qty, uc, lnote, ln), lid in zip(clean, line_ids):
+        res = _apply(c, it, ln.get("move_kind") or move_kind or kind, qty, uc, doc_id, user,
+                     f"{label} {no}" + (f"：{lnote or note}" if (lnote or note) else ""), printer,
+                     {k: ln.get(k) for k in ("rolls", "net_g", "brand", "opened", "spools")})
+        if res.get("codes"):                           # 每卷的编号记在这一行里（标签、追溯用）；整卷出库的克数以实际那几卷为准
+            ex = {k: ln.get(k) for k in ("rolls", "net_g", "brand", "po_line", "opened") if ln.get(k)}
+            ex["spools"] = res["codes"]
+            c.execute("UPDATE inv_doc_lines SET qty=?, extra=? WHERE id=?", (res["grams"], json.dumps(ex), lid))
     _set_amount(c, doc_id)
     c.commit()
     db.audit(user, f"库存·{label}", no, f"{len(clean)} 行")
@@ -184,22 +215,72 @@ def stocktake_start(category="", user="", note="", area="", codes=None, item_ids
     return get(doc_id)
 
 
+def resolve_count(it, v, book_g=None, book_rolls=None, tare=None):
+    """盘点填的一个数 → (实盘克数或数量, extra)。普通数 = 物品单位的数量；
+    v2.55 耗材可以填 {"rolls": 数到几卷} 或 {"weigh": [{code, gross, tare?}]}（每卷称毛重，减去空料盘 = 净重）或 {"grams": 克}。
+    book_g / book_rolls：这次盘的范围（整个物品，或者一个货位）里账面的克数和卷数，不给 = 整个物品。"""
+    if not isinstance(v, dict):
+        return (None if v in (None, "") else _num(v)), None
+    if it["category"] != "filament":
+        raise ValueError("只有耗材能按卷数 / 称重盘点")
+    stats = units.spool_stats().get((it["material"], it["color"])) or {"rolls": 0, "grams": 0.0}
+    bg = float(it["qty"] or 0) if book_g is None else float(book_g)
+    br = stats["rolls"] if book_rolls is None else book_rolls
+    if "rolls" in v:
+        if v["rolls"] in (None, ""):
+            return None, None
+        n = _num(v["rolls"])
+        if n != int(n):
+            raise ValueError("卷数要填整数（半卷的称重）")
+        return round(units.rolls_to_grams(it, n, bg, br), 3), {"mode": "rolls", "rolls": int(n), "sys_rolls": int(br)}
+    if "weigh" in v:
+        from .. import materials
+        ents, before, after = [], 0.0, 0.0
+        t0 = units.tare_g() if tare in (None, "") else float(tare)
+        for e in v["weigh"] or []:
+            if e.get("gross") in (None, ""):
+                continue
+            sp = materials.spool_get(e.get("code"))
+            if not sp or (sp["material"], sp["color"]) != (it["material"], it["color"]):
+                raise ValueError(f"{e.get('code')} 不是 {it['material']} {it['color']} 的料卷")
+            g = _num(e["gross"])
+            if g > 20000:
+                raise ValueError("毛重要填 0–20000 克")
+            t = t0 if e.get("tare") in (None, "") else _num(e["tare"])
+            net = round(max(0.0, g - t), 1)
+            before += max(0.0, float(sp["remaining_g"] or 0))
+            after += net
+            ents.append({"code": sp["code"], "gross": g, "tare": t, "net": net})
+        if not ents:
+            return None, None
+        return round(max(0.0, bg - before + after), 3), {"mode": "weigh", "spools": ents}
+    if "grams" in v:
+        return (None if v["grams"] in (None, "") else _num(v["grams"])), None
+    raise ValueError("盘点的数不对")
+
+
+def _num(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):      # v2.41：以前把 Python 的原始报错丢给用户
+        raise ValueError(f"实盘数「{v}」要填数字")
+    if not math.isfinite(x) or x < 0:
+        raise ValueError(f"实盘数「{v}」要填 0 或正数")
+    return x
+
+
 def stocktake_save(doc_id, counts, user=""):
-    """填实盘数（可以分几次填）。counts：{line_id: 数量 或 None（清空）}。"""
+    """填实盘数（可以分几次填）。counts：{line_id: 数量 或 None（清空）}；耗材还可以 {rolls: 几卷} / {weigh: [{code, gross}]}。"""
     c = db.conn()
     d = c.execute("SELECT * FROM inv_docs WHERE id=?", (int(doc_id),)).fetchone()
     if not d or d["kind"] != "stocktake" or d["status"] != "draft":
         raise ValueError("这张盘点单已经确认或不存在")
     for lid, v in (counts or {}).items():
-        try:
-            val = None if v in (None, "") else float(v)
-        except (TypeError, ValueError):      # v2.41：以前把 Python 的原始报错丢给用户
-            raise ValueError(f"实盘数「{v}」要填数字")
-        if val is not None and (not math.isfinite(val) or val < 0):
-            raise ValueError(f"实盘数「{v}」要填 0 或正数")
-        if val is not None and val < 0:
-            raise ValueError("实盘数不能是负数")
-        c.execute("UPDATE inv_doc_lines SET counted=? WHERE id=? AND doc_id=?", (val, int(lid), d["id"]))
+        ln = c.execute("SELECT item_id FROM inv_doc_lines WHERE id=? AND doc_id=?", (int(lid), d["id"])).fetchone()
+        if not ln:
+            continue
+        val, ex = resolve_count(ledger.get_item(ln["item_id"]), v)
+        c.execute("UPDATE inv_doc_lines SET counted=?, extra=? WHERE id=? AND doc_id=?", (val, json.dumps(ex) if ex else None, int(lid), d["id"]))
     c.commit()
     return get(d["id"])
 
@@ -219,7 +300,14 @@ def stocktake_confirm(doc_id, user=""):
     n = 0
     for ln in lines:
         it = ledger.get_item(ln["item_id"])
-        diff = float(ln["counted"]) - float(it["qty"] or 0)
+        ex = json.loads(ln["extra"]) if ln["extra"] else {}
+        q0 = float(it["qty"] or 0)
+        diff = float(ln["counted"]) - q0
+        if it["category"] == "filament" and ex.get("mode"):
+            if _confirm_fil(c, it, ex, d, user):
+                n += 1
+            c.execute("UPDATE inv_doc_lines SET qty=? WHERE id=?", (float(ledger.get_item(it["id"])["qty"] or 0) - q0, ln["id"]))
+            continue
         c.execute("UPDATE inv_doc_lines SET qty=? WHERE id=?", (diff, ln["id"]))
         if abs(diff) < (0.5 if it["category"] == "filament" else 1e-6):
             continue
@@ -241,6 +329,29 @@ def stocktake_confirm(doc_id, user=""):
     return get(d["id"])
 
 
+def _confirm_fil(c, it, ex, d, user):
+    """耗材按卷数 / 称重盘点的确认：多出来的卷建成新料卷（带编号标签），少了的卷记用完；称重的把那几卷剩余克数改成净重。返回有没有差异。"""
+    from .. import materials
+    c.commit()
+    changed = False
+    with materials.context(kind="adjust", doc_id=d["id"]):
+        if ex["mode"] == "rolls":
+            delta = int(ex.get("delta_rolls", int(ex.get("rolls", 0)) - int(ex.get("sys_rolls", 0))))
+            if delta > 0:
+                materials.receive(it["material"], it["color"], delta, units.roll_g_of(it), "", None, user, reason=f"盘点 {d['no']} 多 {delta} 卷")
+                changed = True
+            elif delta < 0:
+                materials.take_rolls(it["material"], it["color"], -delta, None, user, f"盘点 {d['no']} 少")
+                changed = True
+        elif ex["mode"] == "weigh":
+            for e in ex.get("spools") or []:
+                sp = materials.spool_get(e["code"])
+                if sp and abs(float(sp["remaining_g"] or 0) - e["net"]) >= 0.5:
+                    materials.spool_action(sp["id"], "weigh", user, grams=e["net"])
+                    changed = True
+    return changed
+
+
 def get(doc_id):
     c = db.conn()
     d = c.execute("SELECT * FROM inv_docs WHERE id=? OR no=?", (int(doc_id) if str(doc_id).isdigit() else -1, str(doc_id))).fetchone()
@@ -249,13 +360,31 @@ def get(doc_id):
     out = dict(d)
     out["kind_zh"] = DOC_KINDS.get(d["kind"], (d["kind"],))[0]
     out["lines"] = []
-    for ln in c.execute("SELECT l.*, i.code, i.name_zh, i.name_th, i.unit, i.category, i.qty AS now_qty, i.location FROM inv_doc_lines l "
+    for ln in c.execute("SELECT l.*, i.code, i.name_zh, i.name_th, i.unit, i.category, i.material, i.color, i.qty AS now_qty, i.location FROM inv_doc_lines l "
                         "JOIN inv_items i ON i.id=l.item_id WHERE l.doc_id=? ORDER BY l.id", (d["id"],)):
         x = dict(ln)
+        try:
+            ex = json.loads(x.get("extra") or "null") or {}
+        except ValueError:
+            ex = {}
+        x["spools"] = ex.get("spools") or []
+        x["rolls"] = ex.get("rolls") if d["kind"] != "stocktake" else None
+        x["net_g"] = ex.get("net_g")
+        if d["kind"] == "stocktake":
+            x["count_mode"] = ex.get("mode") or ""
+            x["counted_rolls"] = ex.get("rolls") if ex.get("mode") == "rolls" else None
+        if x.get("category") == "filament":
+            x["units"] = _line_units(c, x["item_id"])
         if d["kind"] == "stocktake" and x["counted"] is not None and d["status"] == "draft":
             x["diff"] = round(float(x["counted"]) - float(x["now_qty"] or 0), 3)
         out["lines"].append(x)
+    out["spool_codes"] = [cd for x in out["lines"] for cd in x["spools"]]       # v2.55：这张单进出的料卷（打标签用）
     return out
+
+
+def _line_units(c, item_id):
+    r = c.execute("SELECT * FROM inv_items WHERE id=?", (item_id,)).fetchone()
+    return units.for_item(dict(r)) if r else None
 
 
 def list_docs(kind="", days=None, limit=200):
