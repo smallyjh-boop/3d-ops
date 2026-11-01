@@ -385,6 +385,35 @@ def printer_test(idx):
     return jsonify({"type": t, "status": st, "status_zh": printers_mod.STATE_ZH.get(st.get("state"), "")})
 
 
+@bp.post("/api/printers/<int:idx>/netdiag")
+def printer_netdiag(idx):
+    """v2.53.0：网络诊断。端口结果和结论所有人可见；服务器网卡 / 路由 / ARP 只有老板能看。"""
+    from core import netdiag
+    cfg = load_config()
+    printers = cfg.get("printers") or []
+    if idx >= len(printers):
+        return err("打印机不存在")
+    c = printers[idx].get("conn") or {}
+    ip = (c.get("host") or c.get("ip") or "").strip()
+    if not ip:
+        return err("还没填 IP：先填好点「保存」，再做网络诊断")
+    ctype = c.get("type") or "auto"
+    if ctype == "auto":
+        ctype = c.get("detected") or "auto"
+    owner = auth.is_owner()
+    r = netdiag.diagnose(ip, ctype, with_net=owner)
+    ok_ports = [p["port"] for p in r["ports"] if p["kind"] == "ok"]
+    if 8883 in ok_ports and c.get("serial") and c.get("access_code"):  # 拓竹：顺便试一次登录
+        mqtt = "ok"
+        try:
+            printers_mod.test(printers[idx])
+        except Exception as e:
+            m = str(e)
+            mqtt = "nostatus" if "序列号" in m else ("auth" if ("访问码" in m or "授权" in m) else None)
+        r["conclusions"] = netdiag.conclusions(ctype, r["ports"], r["net"], ip, mqtt)
+    return jsonify(r)
+
+
 @bp.post("/api/printers/<int:idx>/command")
 def printer_command(idx):
     cmd = (request.get_json(force=True) or {}).get("cmd")
