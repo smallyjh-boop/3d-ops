@@ -318,7 +318,8 @@ def images_rendered(pid):
     for item in body.get("images") or []:
         try:
             items.append({"img": _decode_data_url(item.get("data") or ""), "kind": item.get("kind", ""),
-                          "color": item.get("color", "")})
+                          "color": item.get("color", ""), "random": bool(item.get("random")),
+                          "badge": body.get("random_badge")})
         except Exception:
             continue
     added = _add_images(p, items, replace_renders=body.get("replace_renders", True),

@@ -130,6 +130,8 @@ def post_config():
                     if code in seen:
                         return err(f"颜色代码「{code}」重复了")
                     seen.add(code)
+                    if len(parts) > 4 and parts[4] and not re.fullmatch(r"#[0-9a-fA-F]{6}", parts[4]):
+                        return err(f"颜色「{parts[0]}」的预览颜色要写成 #RRGGBB（例 #CFCBC4），或留空")
                     rows.append((parts + ["", "", ""])[:5])
             if not rows:
                 return err("颜色表不能为空")

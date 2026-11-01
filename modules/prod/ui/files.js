@@ -13,7 +13,7 @@
     const z = m.metrics && m.metrics.size;
     if (!z) return "";
     const a = Array.isArray(z) ? z : [z.x, z.y, z.z];
-    return a.every((v) => isFinite(+v)) ? ` · ${a.map((v) => Math.round(+v)).join("×")} mm` : "";
+    const t = UX.sizeText(a, "×"); return t ? ` · ${t}` : "";
   }
 
   async function load() {
@@ -89,7 +89,7 @@
   }
   // ---------------- 模型库（v2.13） ----------------
   const ORIGIN = { curator: ["选品", "tag-pill"], upload: ["上传", ""], merged: ["合并", "warn-pill"] };
-  const mm = (s) => (s ? s.map((v) => Math.round(+v)).join(" × ") + " mm" : "");
+  const mm = (s) => (s ? UX.sizeText(s) : "");
   const estTxt = (i) => {
     if (!i) return "";
     if (i.sliced_result && (i.sliced_result.grams || i.sliced_result.hours)) return `<b>${H().num(i.sliced_result.grams, 0) || "?"} g · ${H().num(i.sliced_result.hours, 1) || "?"} h</b> <span class="small muted">（文件里的切片数据）</span>`;

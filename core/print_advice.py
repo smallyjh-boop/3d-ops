@@ -6,7 +6,7 @@
 """
 import json
 
-from . import ai_copy
+from . import ai_copy, fmtnum
 
 MATERIALS = ["PLA", "PETG", "TPU", "ABS", "ASA", "PLA-CF", "PETG-CF", "PA", "PC"]
 PATTERNS = ["gyroid", "grid", "cubic", "crosshatch", "rectilinear", "honeycomb", "lightning"]
@@ -116,7 +116,7 @@ def advise(cfg, product, analysis, prompt="", image_b64=None):
         name=product.get("name_zh") or "（未填写）",
         features=product.get("features_zh") or "（未填写）",
         material=product.get("material") or "PLA",
-        size=" × ".join(str(x) for x in (a.get("size_mm") or [])) or product.get("size_text") or "-",
+        size=" × ".join(fmtnum.num(x) for x in (a.get("size_mm") or [])) or product.get("size_text") or "-",
         volume=est.get("volume_cm3", "-"), surface=a.get("surface_cm2", "-"), grams=grams,
         tall_thin="是" if a.get("tall_thin") else "否",
         orients=orients, best=a.get("best", "bottom"), prompt=prompt or "（无）",

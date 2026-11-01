@@ -77,6 +77,8 @@ DEFAULT_CONFIG = {
     "ai_base_url": "https://api.deepseek.com",  # 仅 openai_compatible 使用
     # ---------- 图片 ----------
     "image_size": 1200,
+    "random_badge": True,                # v2.54.1 随机颜色变体的商品图右下角加「随机颜色」角标
+    "random_badge_lang": "thai",         # 角标文字：thai / chinese / bilingual
     "image_fill_ratio": 0.85,            # 去背景后产品占画面比例（Lazada 要求 70% 以上）
     "filament_lead_days": 10,            # 耗材从下单到收货大约几天
     "filament_safety_days": 5,           # 安全库存（多备几天）

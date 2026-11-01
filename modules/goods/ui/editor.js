@@ -345,7 +345,7 @@ function colorKeyFrom(text) {
 function swatch(name, cls = "") {
   if (!name || !String(name).trim()) return `<span class="sw ${cls}" style="background:transparent;border-style:dashed"></span>`;
   const ci = colorInfo(String(name).trim());
-  const extra = (ci.code === "RB" || ci.code === "RND") ? " rb" : ci.code === "CL" ? " cl" : "";
+  const extra = ci.code === "RB" ? " rb" : ci.code === "CL" ? " cl" : "";
   return `<span class="sw ${cls}${extra}" style="background:${esc(ci.hex || "#ccc")}"></span>`;
 }
 function colorLabel(zh) {
@@ -411,6 +411,7 @@ function addColorRows(zh) {
   }
 }
 function randomColorName() { return Object.keys(COLORS).find((z) => COLORS[z].code === "RND") || ""; }
+function isNoFixedColor(zh) { const c = COLORS[String(zh || "").trim()]; return !!(c && (c.random || c.code === "RND" || c.code === "MC")); }   // 随机颜色 / 多色：没有固定的真实颜色
 function isRandomColor(zh) { const c = COLORS[String(zh || "").trim()]; return !!(c && c.code === "RND"); }
 
 $("#ed-source").addEventListener("click", async (e) => {

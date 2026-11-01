@@ -33,7 +33,7 @@
     return `<div class="orients">${os.map((o) => `<label class="orient ${o.key === R.recipe.orientation ? "on" : ""}">
       <input type="radio" name="rc-orient" value="${o.key}" ${o.key === R.recipe.orientation ? "checked" : ""} hidden>
       <b>${esc(R.orient_zh[o.key] || o.key)}</b>
-      <span class="small">尺寸 ${o.size_mm.map((x) => Math.round(x)).join("×")} mm</span>
+      <span class="small">尺寸 ${UX.sizeText(o.size_mm, "×")}</span>
       <span class="small">贴平台 ${o.contact_cm2} cm² · 悬空 ${o.overhang_cm2} cm²</span>
       <span class="small">${o.key === best ? '<span class="pill ok-pill">程序推荐</span>' : ""} ${o.key === ai ? '<span class="pill tag-pill">AI 建议</span>' : ""}</span>
     </label>`).join("")}</div>`;
@@ -184,7 +184,7 @@
         if (s.supports === "none" && i.overhang_cm2 > 2) warn.push(`<span class="bad">红色是悬空面（约 ${i.overhang_cm2.toFixed(1)} cm²），不加支撑可能会塌</span>`);
         if (i.contact_cm2 < 1 && !s.brim) warn.push('<span class="warn">贴热床的面积很小，建议开帽檐</span>');
         if (+s.per_plate > i.capacity) warn.push(`<span class="bad">一盘放不下 ${s.per_plate} 个，这台打印机估计最多 ${i.capacity} 个</span>`);
-        el.innerHTML = `尺寸 ${i.size.map((x) => x.toFixed(0)).join("×")} mm · 贴热床 ${i.contact_cm2.toFixed(1)} cm² · 悬空 ${i.overhang_cm2.toFixed(1)} cm²（按 ${+s.support_angle || 30}°）
+        el.innerHTML = `尺寸 ${UX.sizeText(i.size, "×")} · 贴热床 ${i.contact_cm2.toFixed(1)} cm² · 悬空 ${i.overhang_cm2.toFixed(1)} cm²（按 ${+s.support_angle || 30}°）
           · 这台打印机一盘估计最多 <b>${i.capacity}</b> 个 · 预览 ${i.count} 个${warn.length ? "<br>" + warn.join("<br>") : ""}`;
       },
     });
@@ -292,7 +292,7 @@
         <button class="primary-lite" data-rc="lib">📚 模型库 / 摆盘</button></div>`;
     }
     const z = m.metrics && m.metrics.size;
-    const dims = z ? (Array.isArray(z) ? z : [z.x, z.y, z.z]).map((v) => Math.round(+v)).join("×") + " mm" : "";
+    const dims = z ? (Array.isArray(z) ? z : [z.x, z.y, z.z]).map((v) => UX.num(v)).join("×") + " mm" : "";
     return `<div class="fcard rc-mfile"><div class="row gap wrap">
         <b>📦 <span data-notr>${esc(m.orig_name || m.file)}</span></b>
         <span class="small muted">${size(m.size)}${dims ? " · " + dims : ""} · ${fmtTime(m.uploaded_at)}${m.uploaded_by ? " · " + esc(m.uploaded_by) : ""}${m.history ? ` · 旧版本 ${m.history} 个（在「生产 → 文件管理」里）` : ""}</span>

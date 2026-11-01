@@ -56,6 +56,7 @@ window.addEventListener("model-changed", async (e) => {
 });
 async function renderModel() {
   const m = P.model;
+  const rb = $("#r-badge"); if (rb && !rb.dataset.init) { rb.dataset.init = "1"; rb.checked = !CFG || CFG.random_badge !== false; }     // 「随机颜色加标识」默认跟设置
   $("#model-body").classList.toggle("hidden", !m);
   $("#model-empty").classList.toggle("hidden", !!m);
   $("#printer-select").innerHTML = (CFG.printers || []).map((p, i) => `<option value="${i}" ${i === (CFG.default_printer || 0) ? "selected" : ""}>${esc((p.code ? p.code + " · " : "") + p.name)}</option>`).join("");
@@ -111,7 +112,7 @@ async function renderModel() {
 function renderEstimate() {
   const m = P.model || {}, e = m.estimate, s = (m.metrics || {}).size;
   $("#model-info").innerHTML = s ? `<div data-notr><b>${esc(m.orig_name || m.file)}</b></div>
-    <div>尺寸（宽×深×高）：<b>${s[0]} × ${s[1]} × ${s[2]} mm</b>　体积：${e ? e.volume_cm3 : "-"} cm³</div>
+    <div>尺寸（宽×深×高）：<b data-notr>${UX.sizeText(s)}</b>　体积：<span data-notr>${e ? UX.num(e.volume_cm3) : "-"} cm³</span></div>
     <div class="row gap"><button class="mini" id="btn-size-fill">填入产品尺寸和包裹尺寸</button></div>` : "";
   let h = "";
   if (e) {
@@ -143,8 +144,8 @@ $("#est-box").addEventListener("click", (e) => {
 });
 $("#model-info").addEventListener("click", (e) => {
   if (e.target.id !== "btn-size-fill") return;
-  const s = P.model.metrics.size, cm = (mm) => +(mm / 10).toFixed(1);
-  P.size_text = `${cm(s[0])} × ${cm(s[1])} × ${cm(s[2])} cm`;
+  const s = P.model.metrics.size, cm = (mm) => +(Number(mm) / 10).toFixed(1);       // 厘米，1 位小数（不带浮点噪声）
+  P.size_text = `${UX.num(cm(s[0]))} × ${UX.num(cm(s[1]))} × ${UX.num(cm(s[2]))} cm`;
   P.package = { length: +(cm(s[0]) + 3).toFixed(1), width: +(cm(s[1]) + 3).toFixed(1), height: +(cm(s[2]) + 3).toFixed(1) };
   P.package_status = "manual";
   $('[data-f="size_text"]').value = P.size_text;
@@ -189,27 +190,6 @@ $("#sliced-input").addEventListener("change", async (e) => {
   } catch (err) { toast(err.message, true); }
   e.target.value = "";
 });
-// 「随机颜色」变体的图：几种颜色的渲染图拼成一张，角上标「สีสุ่ม」
-async function colorCollage(urls, size) {
-  const imgs = await Promise.all(urls.map((u) => new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = u; })));
-  const n = imgs.length, cols = n <= 2 ? 2 : n <= 4 ? 2 : 3, rows = Math.ceil(n / cols);
-  const cv = document.createElement("canvas"); cv.width = cv.height = size;
-  const g = cv.getContext("2d");
-  g.fillStyle = "#ffffff"; g.fillRect(0, 0, size, size);
-  const pad = Math.round(size * 0.02), cw = (size - pad * (cols + 1)) / cols, ch = (size - pad * (rows + 1) - size * 0.08) / rows;
-  imgs.forEach((im, i) => {
-    const r = Math.floor(i / cols), c = i % cols, s = Math.min(cw, ch);
-    const rowN = Math.min(cols, n - r * cols), off = (cols - rowN) * (cw + pad) / 2;     // 最后一行不满时居中
-    g.drawImage(im, off + pad + c * (cw + pad) + (cw - s) / 2, size * 0.08 + pad + r * (ch + pad) + (ch - s) / 2, s, s);
-  });
-  const h = Math.round(size * 0.065);
-  g.fillStyle = "#ff6b6b"; g.beginPath();
-  if (g.roundRect) g.roundRect(pad, pad, size * 0.42, h, h / 2); else g.rect(pad, pad, size * 0.42, h);
-  g.fill();
-  g.fillStyle = "#fff"; g.font = `bold ${Math.round(h * 0.55)}px sans-serif`; g.textBaseline = "middle";
-  g.fillText("สีสุ่ม · Random", pad + h * 0.45, pad + h / 2);
-  return cv.toDataURL("image/jpeg", 0.92);
-}
 async function postRenders(images, opts = {}) {
   const r = await api(`/api/products/${P.id}/images/rendered`, { json: { images, ...opts } });
   P = r.product; dirty = false; $("#ed-dirty").textContent = "";
@@ -224,18 +204,13 @@ $("#btn-render").addEventListener("click", async (e) => {
     const shots = [];
     const prog = (t) => ($("#render-progress").textContent = t);
     prog("正在读取完整模型…"); await VIEWER.ensureFull();      // 商品图用完整模型出
-    const real = list.filter((c) => !isRandomColor(c));
-    const wantColors = $("#r-colors").checked ? real : [real[0] || list[0]];
+    // v2.54.1 随机颜色 / 多色没有固定颜色：用中性浅灰渲染；随机颜色的图右下角由服务器加「随机颜色」角标（可在这里关）
+    const real = list.filter((c) => !isNoFixedColor(c));
+    const wantColors = $("#r-colors").checked ? list : [real[0] || list[0]];
     for (const c of wantColors) {
       const ci = colorInfo(c); VIEWER.setColor(ci.hex, ci.code); VIEWER.view(35, 22);
       prog(`正在渲染：${c || "主图"}`); await new Promise((r) => setTimeout(r, 30));
-      shots.push({ data: VIEWER.shot({ size: RS(), fill: FILL() }), kind: "main", color: c });
-    }
-    // 随机颜色：用各颜色的图拼一张「多色合集」
-    const rnd = list.find((c) => isRandomColor(c));
-    if (rnd && $("#r-colors").checked && shots.length >= 2) {
-      prog("正在合成：随机颜色");
-      shots.push({ data: await colorCollage(shots.map((x) => x.data).slice(0, 6), RS()), kind: "main", color: rnd });
+      shots.push({ data: VIEWER.shot({ size: RS(), fill: FILL() }), kind: "main", color: c, random: isRandomColor(c) });
     }
     const c0 = colorInfo(real[0] || list[0]); VIEWER.setColor(c0.hex, c0.code);
     if ($("#r-angles").checked) {
@@ -251,7 +226,7 @@ $("#btn-render").addEventListener("click", async (e) => {
     VIEWER.view(35, 22);
     if (shots.length > 8) toast("Lazada/Shopee 主图最多 8 张，多出的不会导出。可以少选几项，或在图片区删掉不需要的", true);
     prog("正在保存…");
-    const n = await postRenders(shots, { white_bg: $("#r-white").checked, replace_renders: true });
+    const n = await postRenders(shots, { white_bg: $("#r-white").checked, replace_renders: true, random_badge: $("#r-badge").checked });
     prog(`已生成 ${n} 张商品图（替换了之前渲染的图，实拍图保留）。记得点「上传图床」。`);
   });
 });
@@ -261,7 +236,7 @@ $("#btn-snap").addEventListener("click", async (e) => {
     const c = $("#view-chips").dataset.cur || colorList()[0] || "", ci = colorInfo(c);
     await VIEWER.ensureFull();
     VIEWER.setColor(ci.hex, ci.code);
-    const n = await postRenders([{ data: VIEWER.shot({ size: RS(), fill: FILL() }), kind: "angle", color: colorList().includes(c) ? c : "" }], { replace_renders: false });
+    const n = await postRenders([{ data: VIEWER.shot({ size: RS(), fill: FILL() }), kind: "angle", color: colorList().includes(c) ? c : "", random: isRandomColor(c) }], { replace_renders: false, random_badge: $("#r-badge").checked });
     toast(`已添加 ${n} 张`);
   });
 });

@@ -347,7 +347,7 @@ def kit_ai(cfg, p, plate, fps):
     desc = " ".join(str(x or "") for x in (p.get("name_zh"), p.get("features_zh"), src.get("title_original"),
                                             str(src.get("description_original") or "")[:2500], src.get("tags")))
     items = [{"uid": it["uid"], "name": (fps.get(it["uid"]) or {}).get("label", ""),
-              "size_mm": [(fps.get(it["uid"]) or {}).get(k) for k in ("w", "d", "h")]} for it in plate.get("items") or []]
+              "size_mm": [round(float((fps.get(it["uid"]) or {}).get(k) or 0), 1) for k in ("w", "d", "h")]} for it in plate.get("items") or []]
     user = ("产品说明（原站描述 / 标签 / 卖点）：\n" + desc.strip()[:3000] + "\n\n这一盘的零件（uid、名字、平放后的外框 宽×深×高 毫米）：\n" +
             json.dumps(items, ensure_ascii=False) +
             '\n\n输出 JSON：{"groups": [{"name_zh": "组名（例如 底座组件）", "uids": ["按摆放顺序的 uid"], "rot": {"uid": 绕竖直轴角度 0/90/180/270}}], '
