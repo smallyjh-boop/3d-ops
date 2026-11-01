@@ -1,7 +1,7 @@
 # 开发计划（由 /plan 生成，/go 逐条执行）
 
 ## 目标
-v2.52.0、v2.53.0 已发布；正在做 v2.54.0
+v2.52.0、v2.53.0 已发布；v2.54.0 已发布
 
 ## 任务清单
 - [x] T1：仓库 / 货位管理（WMS）｜modules/inv｜已合并
@@ -27,7 +27,7 @@ v2.52.0、v2.53.0 已发布；正在做 v2.54.0
 - [x] T21：打印机管理重做（机群）：按厂商表单、列表 + 抽屉、机型模板、局域网发现 / 表格导入、分组位置角色、批量操作、机群总览、可扩展连接架构、稳定编号（v2.54.0）｜core/printers.py、core/fleet.py、modules/prod、static/app.js
 - [x] T22：成品备货重做 + 生产单（专用机器、角色、暂停）（v2.54.0）｜modules/inv、core/production.py、modules/prod、modules/pur
 - [x] T23：删除旧的外部 3D选品工具对接（v2.54.0）｜modules/link、web/integrations.py、modules/goods
-- [ ] T24：发 v2.54.0：reviewer 审查 → test-runner 全量 → 发版
+- [x] T24：发 v2.54.0：reviewer 审查 → test-runner 全量 → 发版
 
 ## 不做的事
 - 不迁移旧选品工具的数据
