@@ -50,6 +50,19 @@ def compute(cfg, c, ai, real=None):
     return pp, ex, cat, rules.score(pp, cfg)
 
 
+def ovr(r, sc, ex, cat):
+    """用户手动改过的优先（重新打分也不覆盖）：分数、类目、「恢复」过的规则排除。返回 (显示分, 排除原因, 类目, 系统算的原分数)。"""
+    auto = sc
+    if r is not None:
+        if (r["score_ovr"] if r["score_ovr"] is not None else -1) >= 0:
+            sc = r["score_ovr"]
+        if r["cat_ovr"]:
+            cat = r["category"]
+        if r["ex_ok"]:
+            ex = ""
+    return sc, ex, cat, auto
+
+
 def badge(row, cfg=None):
     """扩展角标 / 页面显示用的一条。"""
     ai = db.jl(row["ai"])
@@ -69,7 +82,16 @@ def badge(row, cfg=None):
             "single": ai.get("single_color"), "flags": rules.flags(ai), "reason": str(ai.get("reason") or "")[:160], "reason_th": str(ai.get("reason_th") or "")[:200], "keywords": ai.get("thai_keywords") or [],
             "price": f"฿{rules.tf(ai.get('price_low')):.0f}–{rules.tf(ai.get('price_high')):.0f}" if ai.get("price_low") else "",
             "ai": bool(ai), "ai_error": row["ai_error"], "status": row["status"], "product_id": row["product_id"],
-            "capture_bad": row["capture_bad"], "capture_bad_th": BAD_TH.get(row["capture_bad"], ""), "refreshing": bool(row["refresh_at"])}
+            "capture_bad": row["capture_bad"], "capture_bad_th": BAD_TH.get(row["capture_bad"], ""), "refreshing": bool(row["refresh_at"]),
+            "score_manual": (row["score_ovr"] if row["score_ovr"] is not None else -1) >= 0,
+            "score_auto": row["score_auto"] if (row["score_auto"] is not None and row["score_auto"] >= 0) else row["score"],
+            "cat_manual": bool(row["cat_ovr"]), "ex_ok": bool(row["ex_ok"]), "note": row["note"] or "", "tags": _tags(row["tags"]),
+            "title_manual": bool(row["title_ovr"]), "title_raw": row["title"]}
+
+
+def _tags(v):
+    t = db.jl(v, [])
+    return [str(x) for x in t] if isinstance(t, list) else []
 
 
 BAD_TH = {"没读到模型标题": "ไม่ได้อ่านชื่อโมเดล", "标题是作者 / 店铺名": "ชื่อเป็นชื่อผู้ออกแบบ / ร้าน", "缩略图是头像 / 标志": "รูปย่อเป็นรูปโปรไฟล์ / โลโก้",
@@ -141,19 +163,21 @@ def upsert(items, who="", watch_id=0):
             reset_ai = True                                                       # 原来读错了，现在对了：重新让 AI 判断
         ai = {} if reset_ai else (db.jl(row["ai"]) if row else {})
         pp, ex, cat, sc = compute(cfg, {"title": title, "author": author, "metrics": metrics}, ai, db.jl(row["real"]) if row else None)
+        sc, ex, cat, sc_auto = ovr(row, sc, ex, cat)
         if not row and (ex or sc < pool.settings()["junk_score"]):
             thumb, author, metrics, pp = "", "", {}, {}              # v2.53：新插入的（已有的不动，免得稍后看的候选被清掉作者 / 数据）规则排除 / 分数很低的只留指纹 + 标题，不存图片和细节
         if row:
             c.execute("UPDATE cur_candidates SET url=?, title=?, thumb=CASE WHEN ?<>'' THEN ? ELSE thumb END, author=?, metrics=?, score=?, parts=?, "
-                      "excluded=?, category=?, last_seen=?, watch_id=CASE WHEN watch_id=0 THEN ? ELSE watch_id END, capture_bad=? WHERE skey=?",
-                      (url, title, thumb, thumb, author, json.dumps(metrics, ensure_ascii=False), sc, json.dumps(pp), ex, cat, now, watch_id, bad, k))
+                      "excluded=?, category=?, last_seen=?, watch_id=CASE WHEN watch_id=0 THEN ? ELSE watch_id END, capture_bad=?, score_auto=? WHERE skey=?",
+                      (url, title, thumb, thumb, author, json.dumps(metrics, ensure_ascii=False), sc, json.dumps(pp), ex, cat, now, watch_id, bad, sc_auto, k))
             if reset_ai:
                 c.execute("UPDATE cur_candidates SET ai='', ai_at=0, ai_error='' WHERE skey=?", (k,))
         else:
             c.execute("INSERT INTO cur_candidates(skey, platform, url, title, thumb, author, metrics, score, parts, excluded, category, seen_by, "
-                      "first_seen, last_seen, watch_id, capture_bad) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "first_seen, last_seen, watch_id, capture_bad, score_auto) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (k, sites.platform(url), url, title, thumb, author, json.dumps(metrics, ensure_ascii=False), sc, json.dumps(pp), ex, cat,
-                       who[:60], now, now, watch_id, bad))
+                       who[:60], now, now, watch_id, bad, sc_auto))
+            c.execute("DELETE FROM cur_trash WHERE skey=? AND reason='deleted'", (k,))       # v2.54.1：删除过的又采到了 = 重新出现，回收站里旧的不要了
         r2 = c.execute("SELECT * FROM cur_candidates WHERE skey=?", (k,)).fetchone()
         out[str(it.get("url"))] = badge(r2, cfg)
     c.commit()
@@ -193,8 +217,9 @@ def refresh_from_detail(skey, data):
         thumb, bad = "", capture_check(r["url"], title, author, "")
     cfg = load_config()
     pp, ex, cat, sc = compute(cfg, {"title": title, "author": author, "metrics": db.jl(r["metrics"])}, {}, db.jl(r["real"]))
+    sc, ex, cat, sc_auto = ovr(r, sc, ex, cat)
     c.execute("UPDATE cur_candidates SET title=?, author=?, thumb=?, capture_bad=?, ai='', ai_at=0, ai_error='', score=?, parts=?, excluded=?, category=?, "
-              "refresh_at=0 WHERE id=?", (title, author, thumb, bad, sc, json.dumps(pp), ex, cat, r["id"]))
+              "refresh_at=0, score_auto=? WHERE id=?", (title, author, thumb, bad, sc, json.dumps(pp), ex, cat, sc_auto, r["id"]))
     c.commit()
     from . import pipeline
     pipeline.kick()
@@ -202,15 +227,13 @@ def refresh_from_detail(skey, data):
 
 
 def delete_bad(ids=None):
-    """删掉「采集可能出错」的候选（没采用过的）。ids 空 = 全部。返回删了几个。"""
+    """删掉「采集可能出错」的候选（没采用过的），进回收站（7 天内能恢复）。ids 空 = 全部。返回删了几个。"""
     c = db.conn()
-    q, a = "DELETE FROM cur_candidates WHERE capture_bad<>'' AND product_id=''", []
+    q, a = "SELECT id FROM cur_candidates WHERE capture_bad<>'' AND product_id=''", []
     if ids:
         q += f" AND id IN ({','.join('?' for _ in ids)})"
-        a = [int(i) for i in ids]
-    n = c.execute(q, a).rowcount
-    c.commit()
-    return n
+        a = [pool._ids([i])[0] for i in ids]
+    return pool.delete_rows([r[0] for r in c.execute(q, a)])
 
 
 AI_PROMPT = (
@@ -252,8 +275,9 @@ def ai_batch(cfg=None, limit=20):
             continue
         a = {k: a.get(k) for k in AI_KEYS}
         pp, ex, cat, sc = compute(cfg, {"title": r["title"], "author": r["author"], "metrics": db.jl(r["metrics"])}, a, db.jl(r["real"]))
-        c.execute("UPDATE cur_candidates SET ai=?, ai_at=?, score=?, parts=?, excluded=?, category=? WHERE id=?",
-                  (json.dumps(a, ensure_ascii=False), time.time(), sc, json.dumps(pp), ex, cat, r["id"]))
+        sc, ex, cat, sc_auto = ovr(r, sc, ex, cat)
+        c.execute("UPDATE cur_candidates SET ai=?, ai_at=?, score=?, parts=?, excluded=?, category=?, score_auto=? WHERE id=?",
+                  (json.dumps(a, ensure_ascii=False), time.time(), sc, json.dumps(pp), ex, cat, sc_auto, r["id"]))
     c.commit()
     return len(rows)
 
@@ -264,12 +288,22 @@ def rescore_all(cfg=None):
     c = db.conn()
     for r in c.execute("SELECT * FROM cur_candidates").fetchall():
         pp, ex, cat, sc = compute(cfg, {"title": r["title"], "author": r["author"], "metrics": db.jl(r["metrics"])}, db.jl(r["ai"]), db.jl(r["real"]))
-        c.execute("UPDATE cur_candidates SET score=?, parts=?, excluded=?, category=? WHERE id=?", (sc, json.dumps(pp), ex, cat, r["id"]))
+        sc, ex, cat, sc_auto = ovr(r, sc, ex, cat)
+        c.execute("UPDATE cur_candidates SET score=?, parts=?, excluded=?, category=?, score_auto=? WHERE id=?", (sc, json.dumps(pp), ex, cat, sc_auto, r["id"]))
     c.commit()
 
 
+# 候选池的三个页签（回收站另算）：采用了的不在池子里（在采集箱 / 产品库），只在「已采用」里；和 pool._key 的分法一致
+INPOOL = "product_id='' AND status<>'adopted'"
+TAB_SQL = {"pending": "product_id='' AND status<>'adopted' AND status<>'ignored' AND (status='later' OR excluded='')",
+           "done": "product_id='' AND status<>'adopted' AND (status='ignored' OR (status<>'later' AND excluded<>''))",
+           "adopted": "(product_id<>'' OR status='adopted')",
+           "all": INPOOL}                                  # 池子里的全部（不含已采用）：「看这个巡逻的全部 / 采集可能出错的」用
+
+
 def listing(args, owner=True):
-    """候选池列表 + 数字卡片。args：min, platform, cat, ex(显示排除的), new(今日新品), watch, q, status"""
+    """候选池列表 + 数字卡片。args：tab(pending 待处理（默认）/ done 已处理 / adopted 已采用 / trash 回收站), min, platform, cat, new(今日新品), watch, q, bad, gk(自动分组)。
+    老参数 status / ex 还认（没传 tab 时按 v2.53 的老规矩）。"""
     c = db.conn()
     if not db.get("sanity_v"):
         sanity_sweep()
@@ -278,8 +312,6 @@ def listing(args, owner=True):
         where.append("platform=?"); a.append(args["platform"])
     if args.get("cat"):
         where.append("category=?"); a.append(args["cat"])
-    if str(args.get("ex")) != "1" and not args.get("gk"):
-        where.append("excluded=''")
     if str(args.get("new")) == "1":
         where.append("new_at>=?"); a.append(db.day_start())
     if args.get("watch"):
@@ -287,47 +319,67 @@ def listing(args, owner=True):
     if str(args.get("bad")) == "1":
         where.append("capture_bad<>''")
     if args.get("q"):
-        where.append("(title LIKE ? OR author LIKE ?)"); a += [f"%{args['q']}%"] * 2
+        where.append("(title LIKE ? OR title_ovr LIKE ? OR author LIKE ? OR note LIKE ? OR tags LIKE ?)"); a += [f"%{args['q']}%"] * 5
     gk = [x for x in str(args.get("gk") or "").split(",") if x]
     alert = rules.tf(load_config().get("cur_alert_score"), 70)
     idx, gn = pool.group_index(alert)
-    if gk:                                        # v2.53 自动分组：几个并起来；这时状态由分组决定
+    if gk:                                        # v2.53 自动分组：几个并起来
         ok_ids = [i for i, g in idx.items() if all(x in g for x in gk)]
         where.append(f"id IN ({','.join(str(int(i)) for i in ok_ids) or '0'})")
-    st = "all" if gk else (args.get("status") or "open")
-    if st == "open":
-        where.append("status=''")
-    elif st != "all":
-        where.append("status=?"); a.append(st)
-    rows = c.execute(f"SELECT * FROM cur_candidates WHERE {' AND '.join(where)} ORDER BY score DESC, last_seen DESC LIMIT 300", a).fetchall()
+    tab = args.get("tab") if args.get("tab") in ("pending", "done", "adopted", "trash", "all") else ""
+    by_group = any(x.startswith(("pg:", "top:")) for x in gk)          # 选了进度 / 顶部分组：状态由分组定
+    legacy = not tab and not gk and ("status" in args or "ex" in args)
+    if legacy:                                    # v2.53 老参数
+        if str(args.get("ex")) != "1":
+            where.append("excluded=''")
+        st = args.get("status") or "open"
+        if st == "open":
+            where.append("status=''")
+        elif st != "all":
+            where.append("status=?"); a.append(st)
+    elif not by_group:
+        tab = tab or "pending"
+        if tab != "trash":
+            where.append(TAB_SQL[tab])
+    rows = c.execute(f"SELECT * FROM cur_candidates WHERE {' AND '.join(where)} ORDER BY score DESC, last_seen DESC LIMIT 300", a).fetchall() if tab != "trash" else []
     cfg = load_config()
     from . import demand
     dem = demand.matcher()
     out = []
     for r in rows:
         b = badge(r, cfg)
-        b.update(id=r["id"], url=r["url"], title=r["title"], thumb=r["thumb"], author=r["author"], platform=r["platform"],
+        b.update(id=r["id"], url=r["url"], title=r["title_ovr"] or r["title"], thumb=r["thumb"], author=r["author"], platform=r["platform"],
                  platform_name=sites.name_of(r["platform"]), metrics=db.jl(r["metrics"]), new=r["new_at"] >= db.day_start(),
                  watch_id=r["watch_id"], last_seen=r["last_seen"], market=dem(r["title"], (db.jl(r["ai"]).get("thai_keywords") or []), r["category"]))
         out.append(b)
     t0 = db.day_start()
-    k = {"total": c.execute("SELECT COUNT(*) FROM cur_candidates").fetchone()[0],
-         "good": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE excluded='' AND score>=? AND status=''",
+    k = {"total": c.execute(f"SELECT COUNT(*) FROM cur_candidates WHERE {INPOOL}").fetchone()[0],
+         "good": c.execute(f"SELECT COUNT(*) FROM cur_candidates WHERE {INPOOL} AND excluded='' AND score>=? AND status=''",
                            (rules.tf(cfg.get("cur_alert_score"), 70),)).fetchone()[0],
-         "new_today": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE new_at>=? AND excluded=''", (t0,)).fetchone()[0],
-         "excluded": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE excluded<>''").fetchone()[0],
+         "new_today": c.execute(f"SELECT COUNT(*) FROM cur_candidates WHERE {INPOOL} AND new_at>=? AND excluded=''", (t0,)).fetchone()[0],
+         "excluded": c.execute(f"SELECT COUNT(*) FROM cur_candidates WHERE {INPOOL} AND excluded<>''").fetchone()[0],
          "bad": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE capture_bad<>'' AND product_id=''").fetchone()[0],
          "wait_ai": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE ai_at=0 AND ai_error='' AND capture_bad=''").fetchone()[0] if ai_on(cfg) else 0}
     hist = [0] * 10
-    for r in c.execute("SELECT score FROM cur_candidates WHERE excluded=''"):
+    for r in c.execute(f"SELECT score FROM cur_candidates WHERE {INPOOL} AND excluded=''"):
         hist[min(9, int(r[0] // 10))] += 1
     reasons = [{"reason": r[0], "reason_th": rules.REASON_TH.get(r[0], ""), "n": r[1]}
                for r in c.execute("SELECT excluded, COUNT(*) FROM cur_candidates WHERE excluded<>'' GROUP BY excluded ORDER BY 2 DESC LIMIT 6")]
-    cats = [{"name": r[0], "th": rules.CATEGORY_TH.get(r[0], r[0])} for r in c.execute("SELECT DISTINCT category FROM cur_candidates WHERE category<>'' ORDER BY category")]
-    res = {"rows": out, "kpi": k, "radar": demand.has_radar(), "hist": hist, "reasons": reasons, "cats": cats, "ai": ai_on(cfg), "calib": calib(),
+    cats = [{"name": r[0], "th": rules.CATEGORY_TH.get(r[0], r[0])} for r in c.execute(f"SELECT DISTINCT category FROM cur_candidates WHERE {INPOOL} AND category<>'' ORDER BY category")]
+    have = {x["name"] for x in cats}
+    all_cats = cats + [{"name": k, "th": v} for k, v in rules.CATEGORY_TH.items() if k not in have]      # 编辑类目时可选的（用过的 + AI 的固定分类）
+    res = {"rows": out, "kpi": k, "radar": demand.has_radar(), "hist": hist, "reasons": reasons, "cats": cats, "all_cats": all_cats, "ai": ai_on(cfg), "calib": calib(),
            "alert_score": rules.tf(cfg.get("cur_alert_score"), 70)}
-    res["groups"] = pool.summary(gn)
+    res["groups"] = pool.summary(pool.tab_counts_of(idx, tab) if tab in ("pending", "done") and not by_group else gn)
+    res["groups"]["n"] = gn                      # n = 全部（v2.53 的老样子）；tn = 当前页签里各分组的个数（页面上画这个）
+    res["groups"]["total"] = gn.get("all", 0)
+    res["groups"]["tn"] = pool.tab_counts_of(idx, tab) if tab in ("pending", "done", "all") and not by_group else gn
     res["pool"] = pool.kpis()
+    res["tab"] = tab if not (legacy or by_group) else ""
+    res["tabs"] = {"pending": gn.get("tab:pending", 0), "done": gn.get("tab:done", 0), "adopted": gn.get("tab:adopted", 0),
+                   "trash": c.execute("SELECT COUNT(*) FROM cur_trash").fetchone()[0]}
+    if tab == "trash" and not (legacy or by_group):
+        res["trash"] = pool.trash_list()
     if not owner:
         for r in res["rows"]:
             r["parts"].pop("profit", None)
@@ -336,11 +388,67 @@ def listing(args, owner=True):
 
 
 def set_status(ids, status):
+    """"" 回到待处理 · later 稍后看 · seen 标为已看 · ignored 忽略（不再出现）。已采用的不动。"""
     if status not in ("", "ignored", "later", "seen"):
         raise ValueError("状态不对")
+    ids = pool._ids(ids)
     if status == "seen":
         return pool.set_seen(ids)
     c = db.conn()
-    c.executemany("UPDATE cur_candidates SET status=?, seen_at=CASE WHEN ?<>'' THEN ? ELSE seen_at END WHERE id=? AND status<>'adopted'",
-                  [(status, status, time.time(), int(i)) for i in ids])
+    c.executemany("UPDATE cur_candidates SET status=?, seen_at=CASE WHEN ?<>'' THEN ? ELSE seen_at END WHERE id=? AND status<>'adopted' AND product_id=''",
+                  [(status, status, time.time(), i) for i in ids])
     c.commit()
+
+
+def _clean_tags(v):
+    if isinstance(v, str):
+        v = re.split(r"[,，;；\n]+", v)
+    if not isinstance(v, (list, tuple)):
+        raise ValueError("标签格式不对")
+    out = []
+    for t in v:
+        t = str(t).strip()[:20]
+        if t and t not in out:
+            out.append(t)
+    return out[:10]
+
+
+def edit_row(cid, d):
+    """编辑一条：category 类目 · score 手动分数（0–100，留空 = 回到系统算的）· note 备注 · tags 标签 · title 标题（留空 = 用原标题）。
+    手动改的类目 / 分数重新打分、AI 判断后也不会被覆盖；原来系统算的分数一直留着（score_auto），页面上同时显示。"""
+    c = db.conn()
+    r = c.execute("SELECT * FROM cur_candidates WHERE id=?", (pool._ids([cid])[0],)).fetchone()
+    if not r:
+        raise ValueError("没有这个候选")
+    d = d or {}
+    sets, args, redo = [], [], False
+    if "category" in d:
+        cat = str(d["category"] or "").strip()[:40]
+        if cat:
+            sets += ["category=?", "cat_ovr=1"]; args.append(cat)
+        else:
+            sets.append("cat_ovr=0"); redo = True
+    if "score" in d:
+        if d["score"] is None or (isinstance(d["score"], str) and not d["score"].strip()):
+            sets.append("score_ovr=-1"); redo = True
+        else:
+            f = pool.fnum(d["score"], 0, 100)
+            sets += ["score_ovr=?", "score=?"]; args += [f, f]
+            if (r["score_auto"] if r["score_auto"] is not None else -1) < 0 and (r["score_ovr"] if r["score_ovr"] is not None else -1) < 0:
+                sets.append("score_auto=?"); args.append(r["score"])          # 老数据没存原分数：改之前的分数就是系统算的
+    if "note" in d:
+        sets.append("note=?"); args.append(str(d["note"] or "").strip()[:500])
+    if "tags" in d:
+        sets.append("tags=?"); args.append(json.dumps(_clean_tags(d["tags"] or []), ensure_ascii=False))
+    if "title" in d:
+        sets.append("title_ovr=?"); args.append(str(d["title"] or "").strip()[:200])
+    if sets:
+        c.execute(f"UPDATE cur_candidates SET {', '.join(sets)} WHERE id=?", [*args, r["id"]])
+        c.commit()
+    if redo:                                       # 去掉手动值：按系统算的重新打分
+        r = c.execute("SELECT * FROM cur_candidates WHERE id=?", (r["id"],)).fetchone()
+        pp, ex, cat, sc = compute(load_config(), {"title": r["title"], "author": r["author"], "metrics": db.jl(r["metrics"])}, db.jl(r["ai"]), db.jl(r["real"]))
+        sc, ex, cat, sc_auto = ovr(r, sc, ex, cat)
+        c.execute("UPDATE cur_candidates SET score=?, parts=?, excluded=?, category=?, score_auto=? WHERE id=?", (sc, json.dumps(pp), ex, cat, sc_auto, r["id"]))
+        c.commit()
+    return {"id": r["id"]}

@@ -10,6 +10,12 @@
   excl 规则排除超过 N 天 · low 低分（< N）且 N 天没再看到 · ignored 已忽略超过 N 天 · adopted 已采用（已经在采集箱 / 产品库）·
   dup 重复（同作者同标题 → 合并成一个，留数据最好的）· watchdel 来自已删除的关注巡逻
 每天自动清理一次（同样的规则，天数 / 分数可改）；池子上限（默认 5000）超了先清低分、旧的。
+
+v2.54.1 候选池操作重做：
+  视图    待处理（新发现 + 已看未处理 + 稍后看，默认）· 已采用（进了采集箱 / 产品库，不算进池子的个数）· 已处理（已忽略 + 规则排除）· 回收站
+  每条    采用 / 稍后看 / 已看 / 忽略 / 恢复 / 删除 / 编辑（类目、手动分数、备注、标签、标题）/ 重新读取
+  删除    进回收站 7 天（能恢复），不写指纹，以后再采到会重新出现；忽略 = 以后不再出现（清掉后也留指纹）
+  建议    不再弹清理对话框：一行列出能清的东西（个数 + 受影响的候选），每项一个按钮；天数 / 分数在设置里
 """
 import json
 import os
@@ -51,21 +57,57 @@ def settings():
     return cur
 
 
+RANGES = {"excl_days": (0, 3650), "low_score": (0, 100), "low_days": (0, 3650), "ignored_days": (0, 3650), "cap": (0, 1000000),
+          "trash_days": (0, 365), "junk_score": (0, 100)}
+NUM_MSG = "请填数字"                  # 前端 / th.json 有对应的泰文
+
+
+def num(v, key=""):
+    """表单来的数字（可能是 "30" 这样的字符串、带空格、带逗号）→ int；不是数字 / 超出范围抛 ValueError（请填数字）。"""
+    if isinstance(v, bool):
+        raise ValueError(NUM_MSG)
+    if isinstance(v, str):
+        v = v.strip().replace(",", "")
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(NUM_MSG)
+    if f != f or f in (float("inf"), float("-inf")):
+        raise ValueError(NUM_MSG)
+    lo, hi = RANGES.get(key, (0, 1000000))
+    if f < lo or f > hi:
+        raise ValueError(NUM_MSG)
+    return int(f)
+
+
+def fnum(v, lo=0.0, hi=100.0):
+    """小数也行（手动分数）：不是数字 / 超出范围抛 ValueError（请填数字）。"""
+    if isinstance(v, bool):
+        raise ValueError(NUM_MSG)
+    if isinstance(v, str):
+        v = v.strip().replace(",", "")
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(NUM_MSG)
+    if f != f or f < lo or f > hi:
+        raise ValueError(NUM_MSG)
+    return round(f, 1)
+
+
 def save_settings(d):
     cur = settings()
+    new = {}
     for k, v in (d or {}).items():
         if k == "auto":
-            cur[k] = bool(v)
+            new[k] = bool(v)
         elif k == "auto_classes":
-            cur[k] = [x for x in v if x in CLASSES]
+            new[k] = [x for x in (v or []) if x in CLASSES]
         elif k in DEFAULTS:
-            try:
-                f = float(v)
-            except (TypeError, ValueError):
-                raise ValueError("请填数字")
-            if f < 0 or f > 1000000:
-                raise ValueError("数字范围不对")
-            cur[k] = int(f)
+            if v is None or (isinstance(v, str) and not v.strip()):
+                continue                      # 空着 = 不改
+            new[k] = num(v, k)
+    cur.update(new)
     db.put("pool", cur)
     return cur
 
@@ -117,11 +159,31 @@ def group_index(alert=70):
     idx, n = {}, {}
     for r in _light(c):
         gk = _key(r, now, alert)
+        if "pg:adopted" in gk:                # v2.54.1：采用了的不算候选池里的（在采集箱 / 产品库），只在「已采用」页签里数
+            n["tab:adopted"] = n.get("tab:adopted", 0) + 1
+            continue
         idx[r["id"]] = gk
+        n["tab:done" if ("pg:ignored" in gk or "pg:excluded" in gk) else "tab:pending"] = n.get("tab:done" if ("pg:ignored" in gk or "pg:excluded" in gk) else "tab:pending", 0) + 1
         for k in gk:
             n[k] = n.get(k, 0) + 1
     n["all"] = len(idx)
     return idx, n
+
+
+_TAB_PG = {"pending": {"pg:new", "pg:seen", "pg:later"}, "done": {"pg:ignored", "pg:excluded"}}
+
+
+def tab_counts_of(idx, tab):
+    """某个页签里各分组的个数（页面上分组的数字要和当前列表对得上）。"""
+    n = {}
+    pgs = _TAB_PG.get(tab)
+    for g in idx.values():
+        if pgs and not (g & pgs):
+            continue
+        for k in g:
+            n[k] = n.get(k, 0) + 1
+        n["all"] = n.get("all", 0) + 1
+    return n
 
 
 def summary(n, rate_rows=None):
@@ -146,9 +208,10 @@ def kpis():
     now = time.time()
     rows = c.execute("SELECT platform, watch_id, product_id, status, excluded, first_seen, seen_at FROM cur_candidates").fetchall()
     gone = c.execute("SELECT platform, watch_id, reason FROM cur_gone").fetchall()
-    total = len(rows)
-    review = sum(1 for r in rows if not r["product_id"] and r["status"] in ("", None) and not r["excluded"])
-    newweek = sum(1 for r in rows if (r["first_seen"] or 0) >= now - 7 * 86400)
+    inpool = [r for r in rows if not r["product_id"] and r["status"] != "adopted"]          # v2.54.1：采用了的不算池子里的
+    total = len(inpool)
+    review = sum(1 for r in inpool if r["status"] in ("", None) and not r["excluded"])
+    newweek = sum(1 for r in inpool if (r["first_seen"] or 0) >= now - 7 * 86400)
     watches = {r["id"]: (r["label"] or r["value"] or "") for r in c.execute("SELECT id, label, value FROM cur_watches")}
     by_site, by_watch = {}, {}
     adopted = seen = 0
@@ -182,7 +245,9 @@ def _select(opts):
     """每一类选中的候选：{类: {id: 字节}}（dup 的另给合并信息）。"""
     c = ensure()
     s = settings()
-    s.update({k: opts[k] for k in opts if k in DEFAULTS and k not in ("auto", "auto_classes")})
+    for k in opts or {}:
+        if k in RANGES and opts[k] is not None and not (isinstance(opts[k], str) and not opts[k].strip()):
+            s[k] = num(opts[k], k)            # 表单来的是字符串（"30"），先转成数字再比较
     now = time.time()
     rows = c.execute("SELECT * FROM cur_candidates").fetchall()
     wids = {r[0] for r in c.execute("SELECT id FROM cur_watches")}
@@ -299,7 +364,7 @@ def enforce_cap(cap=None):
     从没看过的新发现（分数不低）、稍后看、已采用的一律不动（宁可超一点上限）。因为放不下被清掉的不写指纹，以后再采到还能回来（忽略过的除外）。"""
     c = ensure()
     cap = int(cap or settings()["cap"])
-    total = c.execute("SELECT COUNT(*) FROM cur_candidates").fetchone()[0]
+    total = c.execute("SELECT COUNT(*) FROM cur_candidates WHERE product_id='' AND status<>'adopted'").fetchone()[0]
     if cap <= 0 or total <= cap:
         return 0
     low = settings()["low_score"]
@@ -312,13 +377,112 @@ def enforce_cap(cap=None):
     return len(rows)
 
 
+# ---------------- 每条的操作：删除 / 恢复 / 回收站（v2.54.1）----------------
+def _ids(ids):
+    out = []
+    for i in ids or []:
+        try:
+            out.append(int(i))
+        except (TypeError, ValueError):
+            raise ValueError(NUM_MSG)
+    return out
+
+
+def delete_rows(ids):
+    """🗑 删除：进回收站 7 天（能恢复）。不写指纹，以后在模型网站上再采到会重新出现；忽略过的行例外（指纹本来就有，仍然留着）。已采用的不能删（产品在采集箱 / 产品库）。"""
+    c = ensure()
+    ids = _ids(ids)
+    if not ids:
+        return 0
+    rows = [r for r in c.execute(f"SELECT * FROM cur_candidates WHERE id IN ({','.join('?' for _ in ids)})", ids)
+            if not (r["product_id"] or r["status"] == "adopted")]
+    _trash(c, rows, "deleted", gone=False)
+    c.commit()
+    return len(rows)
+
+
+def restore_rows(ids):
+    """恢复：已忽略的回到待处理；规则排除的变成「我说它可以」（以后重新打分也不再排除）。"""
+    c = ensure()
+    n = 0
+    for i in _ids(ids):
+        n += c.execute("UPDATE cur_candidates SET status=CASE WHEN status='ignored' THEN '' ELSE status END, "
+                       "ex_ok=CASE WHEN excluded<>'' THEN 1 ELSE ex_ok END, excluded='' "
+                       "WHERE id=? AND product_id='' AND status<>'adopted' AND (status='ignored' OR excluded<>'')", (i,)).rowcount
+    c.commit()
+    return n
+
+
+def purge_trash(skeys=None):
+    """彻底删除：指定的（skeys）或回收站全部。指纹不动（清理时写过的还在；用户删除的本来就没写）。"""
+    c = ensure()
+    if skeys is None:
+        n = c.execute("DELETE FROM cur_trash").rowcount
+    else:
+        ks = [str(k) for k in skeys][:2000]
+        n = c.execute(f"DELETE FROM cur_trash WHERE skey IN ({','.join('?' for _ in ks) or 'NULL'})", ks).rowcount
+    c.commit()
+    return n
+
+
+def tab_counts():
+    c = ensure()
+    purge_expired()
+    _idx, n = group_index()
+    return {"pending": n.get("tab:pending", 0), "done": n.get("tab:done", 0), "adopted": n.get("tab:adopted", 0),
+            "trash": c.execute("SELECT COUNT(*) FROM cur_trash").fetchone()[0]}
+
+
+SUGGEST_ORDER = ("ignored", "excl", "low", "watchdel", "dup")
+
+
+def suggestions(limit=50):
+    """能清的东西，一类一条：{id, n, mb, groups(重复才有), items:[受影响的候选]}。阈值用设置里的，不在这里问。"""
+    c = ensure()
+    sel, merge = _select({})
+    rows = {r["id"]: r for r in c.execute("SELECT id, title, title_ovr, platform, score, last_seen, status, excluded, author, thumb, watch_id FROM cur_candidates")}
+    from . import sites
+    now = time.time()
+
+    def item(i, extra=None):
+        r = rows.get(i)
+        d = {"id": i, "title": (r["title_ovr"] or r["title"] or "")[:100] if r else "", "platform_name": sites.name_of(r["platform"]) if r else "",
+             "score": round(r["score"] or 0) if r else 0, "days": int((now - (r["last_seen"] or 0)) / 86400) if r else 0}
+        if extra:
+            d.update(extra)
+        return d
+    out = []
+    for k in SUGGEST_ORDER:
+        ids = sorted(sel[k], key=lambda i: (rows[i]["last_seen"] or 0) if i in rows else 0)
+        if not ids:
+            continue
+        d = {"id": k, "n": len(ids), "mb": round(sum(sel[k].values()) / 1048576, 4)}
+        if k == "dup":
+            d["groups"] = len({merge[i] for i in ids})
+            d["items"] = [item(i, {"keep": (rows[merge[i]]["title_ovr"] or rows[merge[i]]["title"] or "")[:60] if merge[i] in rows else ""}) for i in ids[:limit]]
+        else:
+            d["items"] = [item(i) for i in ids[:limit]]
+        out.append(d)
+    bad = [r["id"] for r in c.execute("SELECT id FROM cur_candidates WHERE capture_bad<>'' AND product_id='' AND status<>'adopted' ORDER BY last_seen")]
+    if bad:
+        out.append({"id": "bad", "n": len(bad), "mb": 0, "items": [item(i) for i in bad[:limit]]})
+    s = settings()
+    return {"items": out, "thresholds": {k: s[k] for k in ("excl_days", "low_score", "low_days", "ignored_days")}, "storage": storage(), "auto": s["auto"], "cap": s["cap"]}
+
+
 # ---------------- 回收站 ----------------
 def trash_list():
     c = ensure()
     purge_expired()
-    return [{"skey": r["skey"], "reason": r["reason"], "at": r["trashed_at"], "bytes": r["bytes"], "title": db.jl(r["data"]).get("title", ""),
-             "platform": db.jl(r["data"]).get("platform", ""), "score": db.jl(r["data"]).get("score"), "id": db.jl(r["data"]).get("id")}
-            for r in c.execute("SELECT * FROM cur_trash ORDER BY trashed_at DESC LIMIT 500")]
+    from . import sites
+    out = []
+    for r in c.execute("SELECT * FROM cur_trash ORDER BY trashed_at DESC LIMIT 500"):
+        d = db.jl(r["data"])
+        out.append({"skey": r["skey"], "reason": r["reason"], "at": r["trashed_at"], "bytes": r["bytes"], "title": d.get("title_ovr") or d.get("title", ""),
+                    "platform": d.get("platform", ""), "platform_name": sites.name_of(d.get("platform", "")), "score": d.get("score"), "id": d.get("id"),
+                    "url": d.get("url", ""), "thumb": d.get("thumb", ""), "author": d.get("author", ""), "status": d.get("status", ""),
+                    "days_left": max(0, int(settings()["trash_days"] - (time.time() - (r["trashed_at"] or 0)) / 86400))})
+    return out
 
 
 def restore(skeys):

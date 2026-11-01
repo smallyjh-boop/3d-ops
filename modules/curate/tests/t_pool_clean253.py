@@ -1,4 +1,4 @@
-# 候选池（v2.53）：自动分组（新发现 / 已看未处理 / 稍后看 / 已采用 / 已忽略 / 规则排除，分数段、来源网站、关注巡逻、类目）、采用 / 稍后看 / 忽略（忽略的不会回来）、
+# 候选池（v2.53；v2.54.1：采用了的不算池子里的，只在 tab:adopted 里数）：自动分组（新发现 / 已看未处理 / 稍后看 / 已采用 / 已忽略 / 规则排除，分数段、来源网站、关注巡逻、类目）、采用 / 稍后看 / 忽略（忽略的不会回来）、
 # 清理（预览个数 + MB、每一类、回收站恢复 / 到期删除、指纹挡住重新存）、自动清理 + 上限、重复合并、KPI、排除 / 低分只留指纹。
 import os as _os
 T = _os.environ["T3D_TMP"]; APP = _os.environ["T3D_APP"]
@@ -50,8 +50,8 @@ add(8, score=30, cat="")                         # 低分 + 未分类
 d = C.get("/api/cur/candidates?gk=top:todo").get_json()
 ok(len(d["rows"]) == 4, f"待看 = 新发现 + 已看未处理 (rows {len(d['rows'])})")
 g = d["groups"]["n"]
-ok(g["pg:new"] == 3 and g["pg:seen"] == 1 and g["pg:later"] == 1 and g["pg:adopted"] == 1 and g["pg:ignored"] == 1 and g["pg:excluded"] == 1, f"progress counts {g}")
-ok(g["top:todo"] == 4 and g["top:hi"] == 1 and g["top:done"] == 2, f"top chips todo/hi/done {g['top:todo']}/{g['top:hi']}/{g['top:done']}")
+ok(g["pg:new"] == 3 and g["pg:seen"] == 1 and g["pg:later"] == 1 and "pg:adopted" not in g and g["tab:adopted"] == 1 and g["pg:ignored"] == 1 and g["pg:excluded"] == 1, f"progress counts {g}")
+ok(g["top:todo"] == 4 and g["top:hi"] == 1 and g["top:done"] == 1, f"top chips todo/hi/done {g['top:todo']}/{g['top:hi']}/{g['top:done']}")
 ok(g["sc:high"] == 1 and g["sc:low"] == 1 and g["site:printables"] == 1 and g["wt:7"] == 1 and g["ct:none"] == 1, "score bands / site / watch / category")
 ok(d["groups"]["watches"][0]["name"] == "猫类巡逻" and d["groups"]["sites"], "watch + site names in groups payload")
 ok(len(C.get("/api/cur/candidates?gk=top:hi").get_json()["rows"]) == 1, "高分待看")
@@ -172,7 +172,7 @@ add(304, platform="printables", excluded="宗教")
 cc.execute("INSERT INTO cur_gone(skey, reason, at, platform, watch_id) VALUES('g1', 'adopted', ?, 'makerworld', 7)", (NOW,)); cc.commit()
 kp = C.get("/api/cur/candidates").get_json()["pool"]
 bs = {x["site"]: x for x in kp["by_site"]}
-ok(kp["total"] == 4 and kp["new_week"] == 3 and kp["review"] == 2, f"KPI total / new this week / to review {kp['total']}/{kp['new_week']}/{kp['review']}")
+ok(kp["total"] == 3 and kp["new_week"] == 2 and kp["review"] == 2, f"KPI total / new this week / to review {kp['total']}/{kp['new_week']}/{kp['review']}")
 ok(kp["adopted"] == 2 and kp["rate"] == round(100 * 2 / 4, 1), f"adoption rate {kp['rate']}")
 ok(bs["makerworld"]["rate"] == round(100 * 2 / 3, 1) and bs["printables"]["rate"] == 0.0, "adoption rate per site")
 ok(kp["by_watch"][0]["watch_id"] == 7 and kp["by_watch"][0]["name"] == "猫类巡逻" and kp["by_watch"][0]["adopted"] == 2, "adoption rate per watch")
