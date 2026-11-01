@@ -56,6 +56,12 @@ if [ "$INSTALL_ORCA" = "1" ] && [ ! -f /opt/.orca_deps_ok ] && [ ! -f /opt/.orca
     touch /opt/.orca_deps_failed
   fi
 fi
+if [ ! -f /opt/.fonts_ok ] && [ ! -f /opt/.fonts_failed ]; then
+  # v2.54.1：商品图上的「随机颜色」角标等要画泰文 / 中文（没有字体会显示成方块）；装不上不影响别的功能
+  log "安装泰文 / 中文字体…"
+  [ -d /var/lib/apt/lists/partial ] || apt-get update
+  if apt_install fonts-thai-tlwg fonts-wqy-microhei; then touch /opt/.fonts_ok; else log "字体安装失败：图片上的泰文 / 中文可能显示成方块，其他功能正常"; touch /opt/.fonts_failed; fi
+fi
 rm -rf /var/lib/apt/lists/* 2>/dev/null || true
 [ -f /opt/.orca_deps_ok ] || INSTALL_ORCA=0
 
