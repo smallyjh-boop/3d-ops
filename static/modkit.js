@@ -114,7 +114,9 @@
       const p2 = $(`#tab-${pid}`);
       if (typeof CUR_TAB !== "undefined" && CUR_TAB === name) p2.classList.remove("hidden");
       const M = window.MODS[mid];
-      if (M && M.show) await M.show(name, p2);
+      if (window.NAV) NAV.applyPending(name);     // v2.53：浏览器后退回到这个页面：先把当时的筛选 / 状态放回去，页面按它们加载
+      // show() 里同步又换页面（旧页面 id → 新页面）= 跳转，不新记一条历史
+      if (M && M.show) await (window.NAV ? NAV.showing(() => M.show(name, p2)) : M.show(name, p2));
     } catch (e) {
       const m = byId(mid);
       $(`#tab-${pid}`).innerHTML = `<div class="card"><p class="bad">「<span data-notr>${esc(m ? nm(m) : mid)}</span>」这个模块加载失败：<span data-notr>${esc(e.message || e)}</span></p>

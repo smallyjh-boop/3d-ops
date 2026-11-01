@@ -360,4 +360,6 @@
   window.PURK = { ensureMeta: async () => META || loadMeta(), Z, TH, num, thb, cny, money, itName, uLab, qtyText, daysTo, ST, ST_TONE, CAT, ISS, pop, can, hasMoney, meta: () => META,
     render, renderTab, receiveDialog, PO_FILTER, setTab: (t) => { TAB = t; } };
   window.PURCHASE = { show, load: render };
+  // v2.53：离开采购页再回来（返回 / 浏览器后退）：页签、状态 / 供应商筛选和离开时一样（刷新后也记得）
+  if (window.NAV) NAV.keep("purchase", { get: () => ({ TAB, f: { ...PO_FILTER } }), set: (s) => { if (s) { if (s.TAB) TAB = s.TAB; if (s.f) Object.assign(PO_FILTER, s.f); } } });
 })();

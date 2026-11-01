@@ -997,4 +997,13 @@
   const filterBuyer = (key) => { OF.buyer_key = key; OF.tab = "all"; OF.page = 1; showTab("orders"); };
   window.OPS = { show, loadOrders, orderFromChat, loadMaterials: () => window.MATERIALS && MATERIALS.load(), loadProfit, openOrder, loadSkus, filterBuyer,
     loadIntegrations: () => window.INTG_UI && INTG_UI.load() };
+  // v2.53：订单详情抽屉 = 一条浏览器历史（返回手势先关抽屉，关掉后这一单闪一下）；
+  // 离开订单页再回来：队列、第几页、批量搜索和离开时一样（筛选框由 NAV 按 id 自动记）
+  if (window.NAV) {
+    NAV.overlay($("#ord-detail"), { key: "order", hl: () => OD_CUR });
+    NAV.keep("orders", {
+      get: () => ({ tab: OF.tab, page: OF.page, nos: OF.nos, match: OF.match, buyer_key: OF.buyer_key || "" }),
+      set: (s) => { if (s) Object.assign(OF, s); },
+    });
+  }
 })();

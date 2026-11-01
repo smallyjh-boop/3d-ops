@@ -57,8 +57,14 @@
     }
   }
 
+  // v2.53：盘点单 = 一条浏览器历史：「← 返回列表」、浏览器后退、安卓返回手势都回到列表（滚动位置不变，刚才那张单闪一下）
+  const close = () => { DOC = null; return page(); };
+  const back = () => { if (window.NAV) NAV.leave("st"); else close(); };
+  if (window.NAV) NAV.view("st", { open: (id) => open(+id), close });
+
   async function open(id) {
     DOC = id;
+    if (window.NAV) NAV.enter("st", id);
     const box = BOX(); if (!box) return;
     const d = (await api(`/api/inv/stocktake/${id}`)).doc;
     const draft = d.status === "draft";
@@ -85,7 +91,7 @@
           <td>${draft ? `<input type="number" min="0" step="any" data-c value="${x.counted ?? ""}" class="loc-mq" placeholder="—">` : num(x.counted)}</td>
           <td class="${x.diff ? (x.diff < 0 ? "bad" : "ok") : ""}">${x.diff == null || !x.diff ? "" : sign(x.diff)}</td></tr>`).join("") || `<tr><td class="muted">${esc(Z("空货位", "ช่องว่าง"))}</td></tr>`}</tbody></table>
         ${draft ? `<div class="row gap" style="margin-top:6px"><input data-add placeholder="${esc(Z("多出来的物品编码", "รหัสสินค้าที่เจอเพิ่ม"))}" class="st-add" data-notr><button class="mini primary" data-save>${esc(Z("这个货位数完了", "ช่องนี้นับเสร็จ"))}</button></div>` : ""}</div>`).join("")}</div>`;
-    $("#st-back").onclick = () => { DOC = null; page(); };
+    $("#st-back").onclick = back;
     const ok = $("#st-ok");
     if (ok) ok.onclick = () => {
       if (!confirm(Z("确认盘点？数过的货位按实盘数调整库存。", "ยืนยันตรวจนับ? ช่องที่นับแล้วจะปรับสต็อกตามจำนวนจริง"))) return;
@@ -112,7 +118,7 @@
         <td>${draft ? `<input type="number" step="any" data-line="${l.id}" value="${l.counted ?? ""}" class="loc-mq">` : num(l.counted)}</td>
         <td class="${l.diff ? (l.diff < 0 ? "bad" : "ok") : ""}">${l.diff == null ? (draft ? "" : num(l.qty)) : sign(l.diff)}</td><td class="mono" data-notr>${esc(l.location || "")}</td></tr>`).join("") + "</tbody></table></div>";
     const counts = () => { const o = {}; $$("#st-tbl [data-line]").forEach((el) => { o[el.dataset.line] = el.value === "" ? null : el.value; }); return o; };
-    $("#st-back").onclick = () => { DOC = null; page(); };
+    $("#st-back").onclick = back;
     const sv = $("#st-save");
     if (sv) sv.onclick = () => busy(sv, async () => { await api(`/api/inv/stocktake/${d.id}/save`, { json: { counts: counts() } }); toast(Z("已保存", "บันทึกแล้ว")); open(d.id); });
     const okb = $("#st-ok");

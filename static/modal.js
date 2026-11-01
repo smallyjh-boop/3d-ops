@@ -17,4 +17,6 @@
   $("#modal").addEventListener("click", (e) => { if (e.target.id === "modal" || e.target.closest("[data-mclose]")) close(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#modal").classList.contains("hidden")) close(); });
   window.MODAL = { open, close, onClose: (f) => hooks.push(f) };
+  // v2.53：弹窗 = 一条浏览器历史：浏览器后退 / 安卓返回手势先关弹窗（不离开页面），关掉后刚才那一行闪一下
+  if (window.NAV) NAV.overlay($("#modal"), { key: "modal" });
 })();

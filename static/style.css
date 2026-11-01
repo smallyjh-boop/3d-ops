@@ -807,3 +807,7 @@ html.in-app .m-app-chip{display:inline-flex}
 .img-card .tag.src-img-tag{background:#fef3c7;color:#92400e}
 .lib-inbox{font-size:13px;padding:3px 10px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;text-decoration:none;white-space:nowrap}
 #img-src-warn .warnbox{margin:6px 0;padding:7px 10px;border-radius:6px;background:#fffbeb;border:1px solid #fcd34d;color:#92400e}
+/* v2.53：返回原来的页面时，刚才编辑 / 打开的那一行闪一下（static/nav.js） */
+.nav-hl{animation:navhl 2.4s ease-out}
+tr.nav-hl>td{animation:navhl 2.4s ease-out}
+@keyframes navhl{0%,35%{background-color:#fde68a;box-shadow:0 0 0 2px #f59e0b}100%{background-color:transparent;box-shadow:0 0 0 0 transparent}}

@@ -47,6 +47,8 @@
         <div class="p360-body"></div>
       </aside>`;
     document.body.appendChild(ROOT);
+    // v2.53：抽屉 = 一条浏览器历史，返回手势先关抽屉
+    if (window.NAV) NAV.overlay(ROOT, { key: "p360", open: (x) => x.classList.contains("on"), close: () => close() });
     ROOT.addEventListener("click", onDrawerClick);
     return ROOT;
   }
@@ -347,7 +349,14 @@
     try {
       if (a) {
         const id = a.dataset.id;
-        if (a.dataset.p360Act === "edit") { close(); if (typeof openProduct === "function") await openProduct(id); return; }
+        if (a.dataset.p360Act === "edit") {
+          // v2.53：编辑页「← 返回」回到原来的页面，并重新打开这个商品 360
+          if (window.NAV) NAV.mark({ hl: id, p360: HIST[POS] || id });
+          close();
+          if (typeof openProduct !== "function" && window.MODKIT) await MODKIT.load("goods").catch(() => {});
+          if (typeof openProduct === "function") await openProduct(id);
+          return;
+        }
         if (a.dataset.p360Act === "license") {        // v2.50：许可核验（原站许可允许商用才点）
           if (!confirm(Z("确认已经打开原站看过许可证，可以商用？", "ยืนยันว่าเปิดดูสัญญาอนุญาตที่เว็บต้นทางแล้ว และใช้เชิงพาณิชย์ได้?"))) return;
           await api(`/api/products/${encodeURIComponent(id)}/license`, { json: { verified: true } });

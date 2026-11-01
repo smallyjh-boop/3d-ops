@@ -13,7 +13,7 @@
 - [x] T7：发 v2.52.0｜app.py、static/app.js、static/api-docs.html、README.txt｜验收：分组全量测试通过 + 多语言检查通过
 - [ ] T8：AI 接口统一管理（v2.53.0）
 - [ ] T9：场景图改进（v2.53.0）
-- [ ] T10：「返回」回到原来的地方（v2.53.0）
+- [x] T10：「返回」回到原来的地方（v2.53.0）｜static/nav.js + 各入口｜测试 tests/cases/t_nav253.py
 
 ## 不做的事
 - 不迁移旧选品工具的数据

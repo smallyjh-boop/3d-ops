@@ -114,4 +114,6 @@
   const prev = window.MODS.listing || {};
   window.MODS.listing = { ...prev, show(tab, p) { if (prev.show) prev.show(tab, p); if (tab === "online") load(); } };
   window.ONLINE = { load };
+  // v2.53：在线商品 → 编辑产品 → 「← 返回」：平台、状态筛选和离开时一样
+  if (window.NAV) NAV.keep("online", { get: () => ({ plat: OL.plat, status: OL.status }), set: (s) => { if (s) { OL.plat = s.plat || OL.plat; OL.status = s.status || ""; } } });
 })();

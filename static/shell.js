@@ -45,6 +45,7 @@
       <div class="sh-head"><h3></h3><button class="mini" data-sh-close>✕</button></div>
       <div class="sh-filter"></div><div class="sh-body"></div><div class="sh-foot"></div></aside>`;
     document.body.appendChild(drawer);
+    if (window.NAV) NAV.overlay(drawer, { key: "todo" });     // v2.53：返回手势先关抽屉
     drawer.addEventListener("click", drawerClick);
     drawer.addEventListener("change", (e) => {
       if (e.target.matches("[data-sh-done]")) { SHOW_DONE = e.target.checked; loadTodo(); }
@@ -155,6 +156,7 @@
       <div class="gs-in"><span>🔍</span><input id="gs-q" autocomplete="off" spellcheck="false"><kbd>Esc</kbd></div>
       <div class="gs-res"></div></div>`;
     document.body.appendChild(gs);
+    if (window.NAV) NAV.overlay(gs, { key: "search" });
     const inp = q1("#gs-q", gs);
     inp.placeholder = Z("订单号 / 快递单号 / SKU / 产品名 / 买家 / 客服会话", "เลขออเดอร์ / เลขพัสดุ / SKU / ชื่อสินค้า / ผู้ซื้อ / แชท");
     inp.addEventListener("input", () => { clearTimeout(gsT); gsT = setTimeout(runSearch, 220); });
@@ -226,8 +228,10 @@
       } else if (x.type === "product") {
         // 有「商品 360」抽屉就直接打开它（结果行是链接，抽屉不会自己接管链接的点击）
         if (window.P360 && P360.open) { P360.open(it.sku || it.id); return; }
-        await goTab("library");
-        if (await waitFor(() => typeof openProduct === "function")) await openProduct(it.id);
+        // v2.53：直接打开编辑页（不先经过产品库），「← 返回」回到搜索之前的页面
+        if (typeof openProduct !== "function" && window.MODKIT) await MODKIT.load("goods").catch(() => {});
+        if (typeof openProduct === "function") await openProduct(it.id);
+        else await goTab("library");
       } else if (x.type === "conv") {
         await goTab("cs");
         if (await waitFor(() => window.CS && CS.openConv)) await CS.openConv(+it.id);

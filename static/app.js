@@ -204,11 +204,16 @@ function visibleTabs(mod) {
 }
 // v2.27：搬进设置的旧页面
 const TAB_ALIAS = { users: "accounts", csext: "accounts" };
-function showTab(name) {
+// v2.53：opt.nav = "push"（新记一条历史，默认）/ "replace"（换掉这一条）/ "none"（浏览器后退恢复时，不动历史）——见 static/nav.js
+function showTab(name, opt = {}) {
   if (name === "edit" && !P) name = "library";
   if (TAB_ALIAS[name]) { CFG_MOD = TAB_ALIAS[name]; name = "settings"; }
   // v2.49：「今日待办」页面没有了，改成右上角 🔔（旧链接打开工作台 + 待办抽屉）
   if (name === "ops_todo") { name = "dashboard"; setTimeout(() => window.SHELL && SHELL.openTodo(), 0); }
+  const navMode = window.NAV ? NAV.before(name, opt) : null;      // v2.53：离开前记下原来页面的样子
+  try { return showTab2(name); } finally { if (window.NAV) NAV.after(name, navMode); else { try { history.replaceState(null, "", "#" + name); } catch { /* 忽略 */ } } }
+}
+function showTab2(name) {
   const btn = $(`#subnav .tab[data-tab="${name}"]`);
   const hl = (btn && btn.dataset.parent) || name;          // v2.49：页面里的页签（ghost）高亮它所在的菜单
   const mod = btn ? btn.dataset.mod : "goods";
@@ -229,18 +234,19 @@ function showTab(name) {
   // 各页面脚本自己处理「打开了哪个页面」（v2.34：原来写在 ops.js 里，现在内核统一通知）
   ["OPS", "PROD", "HOME", "FILES", "SYS", "AS", "SHIP", "PACK", "INV", "SHELL"].forEach((k) => { if (window[k] && window[k].show) window[k].show(name); });
   if (name === "materials" && window.MATERIALS) MATERIALS.load();   // v2.31：耗材料卷在生产模块
-  if (window.MODKIT) window.MODKIT.show(name);       // v2.29：模块的页面（第一次打开时才加载）
-  try { history.replaceState(null, "", "#" + name); } catch { /* 忽略 */ }
+  return window.MODKIT ? window.MODKIT.show(name) : Promise.resolve();       // v2.29：模块的页面（第一次打开时才加载）；v2.53 返回「页面显示好了」
 }
-async function goTab(name) {
-  if (unsavedEdits() && !confirm("有修改还没保存（点「保存」才会生效），确定离开？")) return;
+// 返回 false = 有没保存的修改、用户选了留下
+async function goTab(name, opt = {}) {
+  if (unsavedEdits() && !confirm("有修改还没保存（点「保存」才会生效），确定离开？")) return false;
   Object.values(LOCKS).forEach((x) => { if (x.editing && !(x.box && x.box.isConnected && name === CUR_TAB)) x.editing = false; });
   if (dirty && P && name !== "edit") {
     if (confirm(`「${P.id}」有修改还没保存，要保存吗？（取消 = 不保存）`)) await saveProduct(true);
     else { dirty = false; try { P = await api(`/api/products/${P.id}`); } catch { /* 已删除 */ } }
     ED_EDIT = false;
   } else if (name !== "edit") ED_EDIT = false;
-  showTab(name);
+  await showTab(name, opt);
+  return true;
 }
 $$("#subnav .tab").forEach((b) => b.addEventListener("click", () => goTab(b.dataset.tab)));
 $$("#modnav .mod").forEach((b) => b.addEventListener("click", () => {
@@ -731,7 +737,8 @@ $("#btn-nu").addEventListener("click", async (e) => {
   await renderEditor();
   const want = (location.hash || "").slice(1);
   const ok = want && $(`#subnav .tab[data-tab="${want}"]`) && !$(`#subnav .tab[data-tab="${want}"]`).classList.contains("role-hidden");
-  showTab(ok ? want : (ME && ME.role === "production" ? "production" : "dashboard"));
+  const first = ok ? want : (ME && ME.role === "production" ? "production" : "dashboard");
+  if (window.NAV) await NAV.start(first); else showTab(first);   // v2.53：刷新后接上原来的历史（返回还能回去）
 })();
 
 

@@ -665,6 +665,21 @@
     if (iq) { clearTimeout(iT); iT = setTimeout(() => { IQ = iq.value; render().then(refocus("[data-i-q]")); }, 350); }
   });
 
+  // v2.53：从采集箱 / 候选池 / 队列打开产品编辑，「← 返回」回到这里：文件夹、搜索、筛选和离开时一样（刷新页面后也记得）
+  if (window.NAV) {
+    NAV.keep(SUBS.map(([k]) => k).concat("curate"), {
+      form: false,
+      get: () => ({ IF, IQ, FC: { ...FC }, QF: { ...QF } }),
+      set: (s) => {
+        if (!s) return;
+        if (s.IF != null) { IF = s.IF; LSset("ifolder", IF); }
+        if (s.IQ != null) IQ = s.IQ;
+        if (s.FC) FC = Object.assign(FC, s.FC);
+        if (s.QF) QF = Object.assign(QF, s.QF);
+      },
+    });
+  }
+
   window.MODS = window.MODS || {};
   window.MODS.curate = { show };
   window.CURATE = { show };

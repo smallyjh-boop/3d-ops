@@ -60,3 +60,4 @@
   - 商品列显示产品缩略图（和面单商品清单同一个取图方法 labeltext.Texts.image），点 SKU / 图片打开产品 360；老板多一列估算利润（core.finance.order_profit）和「只看亏本单」，员工永远看不到成本 / 利润。
   - 客服聊天右边「从聊天建单」（OPS.orderFromChat，客服模块的 make_order 动作）。
   测试 modules/orders/tests/t_orders250.py。
+- （系统 v2.53.0）：订单详情抽屉是一条浏览器历史：浏览器后退 / 安卓返回手势先关抽屉（还在订单页，那一单闪一下）；离开订单页再回来，队列、第几页、批量搜索、筛选和离开时一样（NAV.overlay / NAV.keep，static/nav.js）。

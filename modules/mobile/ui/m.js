@@ -269,7 +269,16 @@
     const h = "#/" + name + (arg ? "/" + encodeURIComponent(arg) : "");
     if (location.hash !== h) location.hash = h; else route();
   }
-  function route() {
+  // v2.53「返回」回到原来的地方：每个画面在浏览器历史里是一条（history.state.md = 第几层）。
+  // ‹ 返回 / 安卓返回手势 = 浏览器后退，回到上一个画面并滚回原来的位置；没有上一层（直接打开链接）才回首页。
+  // 每层的滚动位置记在 sessionStorage（刷新后也在）。
+  let MD = 0;
+  const mss = (k, v) => { try { if (v === undefined) return JSON.parse(sessionStorage.getItem("m_nav:" + k)); sessionStorage.setItem("m_nav:" + k, JSON.stringify(v)); } catch { return null; } return v; };
+  try {
+    if (history.state && typeof history.state.md === "number") MD = history.state.md;
+    else history.replaceState({ md: 0 }, "", location.href);
+  } catch { /* 忽略 */ }
+  function route(isBack) {
     if (!ME) return;
     const parts = (location.hash || "#/home").slice(2).split("/");
     const name = SCREENS[parts[0]] ? parts[0] : "home";
@@ -278,12 +287,26 @@
     CUR = SCREENS[name];
     $("#title").textContent = name === "home" ? T("app") : T("t." + name);
     $("#back").classList.toggle("hidden", name === "home");
+    const y = isBack === true ? (mss("y" + MD) || 0) : 0;
     view().scrollTop = 0;
     SCAN.on((code, src) => CUR.scan && CUR.scan(code, src));
-    CUR.show(arg);
+    Promise.resolve(CUR.show(arg)).catch(() => {}).then(() => {
+      if (!y) return;
+      let n = 0;
+      const tick = () => { view().scrollTop = y; if (Math.abs(view().scrollTop - y) > 2 && n++ < 20) setTimeout(tick, 100); };
+      tick();
+    });
   }
-  window.addEventListener("hashchange", route);
-  $("#back").addEventListener("click", () => { if (history.length > 1) history.back(); else go("home"); });
+  window.addEventListener("hashchange", () => {
+    mss("y" + MD, view().scrollTop);                      // 离开的画面滚到哪里了
+    const s = history.state;
+    let back = false;
+    if (s && typeof s.md === "number") { back = true; MD = s.md; }      // 后退 / 前进到记过的一条
+    else { MD += 1; try { history.replaceState({ md: MD }, "", location.href); } catch { /* 忽略 */ } }
+    route(back);
+  });
+  window.addEventListener("pagehide", () => mss("y" + MD, view().scrollTop));
+  $("#back").addEventListener("click", () => { if (MD > 0) history.back(); else go("home"); });
   $("#lang").addEventListener("click", () => {
     const nl = TH() ? "zh" : "th";
     try { localStorage.setItem("ui_lang", nl); } catch { /* 忽略 */ }

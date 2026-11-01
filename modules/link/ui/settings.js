@@ -55,7 +55,7 @@
         if (window.OPS) await OPS.loadIntegrations();
         return;
       }
-      if (t.dataset.curp) { showTab("library"); openProduct(t.dataset.curp); }
+      if (t.dataset.curp) openProduct(t.dataset.curp);     // v2.53：直接打开编辑页，「← 返回」回到这里
     } catch (err) { toast(err.message, true); }
   });
   function renderShops() {

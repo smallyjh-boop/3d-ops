@@ -90,3 +90,4 @@ Kotlin + Gradle Kotlin DSL，minSdk 24 / targetSdk 34，AGP 8.7.3、Kotlin 2.0.2
 - （系统 v2.52.0，配合拍照识别模块 recog）：扫码输入框旁边「📷 识别」（拍照找产品 / 拍照读文字，认出来的码像扫码一样送给当前页面，脚本在 `modules/recog/ui/`）；
   App 摄像头认出的文字 `onNativeScan(文字, "text")` 先经 `/api/recog/text` 容错认成系统里的码（`scan.js` 显示「文字」小标）；
   `GET /api/mobile/resolve?…&fuzzy=1` 认不出时按文字容错（O/0、I/1、少横杠）找最像的码；新接口 `GET /api/mobile/code-patterns`（App 挑「像码的文字」的正则）。
+- （系统 v2.53.0）：手机页「‹」返回 = 上一个画面（自己记层数 history.state.md，不再用 history.length，直接打开的画面返回到首页而不会退出 App），回到上一个画面时滚回原来的位置（sessionStorage）。

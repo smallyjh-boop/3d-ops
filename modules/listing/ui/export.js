@@ -356,3 +356,10 @@ async function lzPush(el) {
     await loadExport();
   });
 }
+// v2.53：从上架工作台打开产品编辑，「← 返回」回到这里：平台、阶段、分组、第几页和离开时一样（搜索框等由 NAV 按 id 自动记）
+if (window.NAV) {
+  NAV.keep("export", {
+    get: () => ({ plat: LW.plat, stage: LW.stage, group: LW.group, page: LW.page, view: LW.view, autoStage: LW.autoStage }),
+    set: (s) => { if (s) Object.assign(LW, s); },
+  });
+}

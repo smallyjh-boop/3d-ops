@@ -128,7 +128,8 @@ $("#btn-lib-del").addEventListener("click", async (e) => {
     LIB_SEL.clear(); toast(`已删除 ${n} 个产品`); await loadLibrary();
   });
 });
-$("#btn-ed-back").addEventListener("click", () => goTab("library"));
+// 「← 返回」（v2.53）：按钮带 data-nav-back="library"，static/nav.js 处理——回到打开这个产品之前的页面（采集箱、上架、订单…），
+// 筛选、滚动位置都和原来一样；没有上一页（直接打开链接）才回产品库
 $("#btn-grp-rm").addEventListener("click", () => grpAssign(false).catch((e) => toast(e.message, true)));
 $("#lib-table").addEventListener("click", async (e) => {
   const cb = e.target.closest("[data-lsel]");
@@ -157,16 +158,21 @@ $("#btn-new").addEventListener("click", async () => {
   dirty = false; ED_EDIT = true; await renderEditor(); showTab("edit");
 });
 
-async function openProduct(id, edit = false) {
+// opt.nav：浏览器后退恢复时 "none"（v2.53，见 static/nav.js）。返回 true = 打开了
+async function openProduct(id, edit = false, opt = {}) {
   if (P && dirty && ED_EDIT) {
     if (confirm(`「${P.id}」有修改还没保存，要保存吗？（取消 = 不保存）`)) await saveProduct(true);
   }
-  P = await api(`/api/products/${id}`);
+  P = await api(`/api/products/${encodeURIComponent(id)}`);
   dirty = false;
   ED_EDIT = !!edit;
-  showTab("edit");          // 先切过去（显示得快），再填内容
+  if (window.NAV && !opt.nav) NAV.mark({ hl: id });   // 返回时这一行闪一下
+  showTab("edit", opt);          // 先切过去（显示得快），再填内容
   await renderEditor();
+  return true;
 }
+// v2.53：返回产品库时记得当时选的分组（筛选框、排序由 NAV 按 id 自动记）
+if (window.NAV) NAV.keep("library", { get: () => ({ g: LIB_GROUP }), set: (s) => { LIB_GROUP = (s && s.g) || ""; } });
 // v2.42：SKU 多的产品（颜色 × 规格几十个）只显示前 3 个 + 颜色 / 个数，其余点开看，不把整行撑得很高
 function skuCell(p) {
   const skus = (p.skus || []).filter(Boolean);
