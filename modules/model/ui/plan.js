@@ -361,7 +361,6 @@
         <button class="mini" data-pp="3d" title="${Z("3D 预览这一盘（按摆好的位置）", "ดูตัวอย่าง 3D ของถาดนี้")}">👁 3D</button>
         <details class="pe-keys"><summary>⌨ ${Z("快捷键", "คีย์ลัด")}</summary>${keysHtml()}</details>
       </div>
-      ${ctxHtml(pl)}
       <div class="pp-grid">
         <div>
           <canvas class="pp-cv" tabindex="0" data-cv="${pl.id}" aria-label="${Z("热床俯视图：点选 / 框选零件，拖动摆位置", "มุมมองจากด้านบนของฐาน: คลิก / ลากกรอบเลือกชิ้นงาน ลากเพื่อย้าย")}"></canvas>
@@ -373,6 +372,7 @@
           <div class="pp-3d hidden" data-3d="${pl.id}"></div>
         </div>
         <div>
+          ${ctxHtml(pl)}
           ${oriBoxHtml(pl)}
           <div class="small"><b>${Z("AMS 耗材槽", "ช่องเส้นพลาสติก AMS")}</b> <span class="muted">${Z("（单色只用槽 1；多色每种颜色一个槽，最多 4 个）", "(สีเดียวใช้ช่อง 1; หลายสีใช้ช่องละสี สูงสุด 4)")}</span></div>
           <table class="pp-slots"><thead><tr><th>${Z("槽", "ช่อง")}</th><th>${Z("材料", "วัสดุ")}</th><th>${Z("颜色", "สี")}</th><th>${Z("这个款式装", "แบบนี้ใส่")}</th><th></th></tr></thead><tbody>
