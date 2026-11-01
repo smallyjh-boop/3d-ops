@@ -873,6 +873,13 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
         except OSError:
             pass
     fil = res.get("filaments") or []
+    # 切片软件给的每个耗材克数里已经含冲刷 / 擦料塔的料；成本和扣库存会再加 purge_g，所以这里记「净」克数（v2.52 实测修正）
+    purge = float(res.get("purge_g") or 0)
+    pbs = {int(k): float(v) for k, v in (res.get("purge_by_slot") or {}).items()}
+    tot = sum(float(f.get("grams") or 0) for f in fil)
+    if purge and not pbs and tot:
+        pbs = {i + 1: purge * float(f.get("grams") or 0) / tot for i, f in enumerate(fil)}
+    fil = [dict(f, grams=max(0.0, float(f.get("grams") or 0) - pbs.get(i + 1, 0.0))) for i, f in enumerate(fil)]
     sliced = {"filaments": [{"slot": i + 1, "grams": round(float(f.get("grams") or 0), 2)} for i, f in enumerate(fil)] or
               [{"slot": 1, "grams": res.get("grams") or 0}],
               "purge_g": round(float(res.get("purge_g") or 0), 2), "changes": int(res.get("changes") or 0),

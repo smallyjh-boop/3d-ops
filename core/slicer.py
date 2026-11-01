@@ -196,6 +196,73 @@ def gcode_filaments(text, material="PLA"):
     return out
 
 
+def gcode_purge_scan(data):
+    """v2.52：G-code 头里没写换色次数 / 冲刷量时（OrcaSlicer 2.3 就不写），扫一遍整个 G-code 自己算：
+    换色次数 = 「; toolchange #N」的最大 N（没有时数 T0/T1… 切换）；
+    冲刷废料 = 换色段（; CP TOOLCHANGE START … END）和擦料塔（; FEATURE: Prime tower）里挤出的料，按耗材直径 / 密度换成克。
+    data 可以是 bytes 或 str。返回 {changes, purge_g, purge_by_slot: {槽: 克}}（算不出来返回 {}）。"""
+    if isinstance(data, bytes):
+        data = data.decode("utf-8", "ignore")
+    if not data:
+        return {}
+    diam, dens = 1.75, 1.24
+    m = re.search(r";\s*filament_diameter\s*[:=]\s*([\d.]+)", data)
+    if m:
+        diam = float(m.group(1)) or diam
+    m = re.search(r";\s*filament_density\s*[:=]\s*([\d.]+)", data)
+    if m:
+        dens = float(m.group(1)) or dens
+    changes = 0
+    last_t, t_changes = None, 0
+    rel, in_change, feature = True, False, ""
+    e_mm, by_t = 0.0, {}
+    e_re = re.compile(r"\bE(-?[\d.]+)")
+    for line in data.splitlines():
+        if not line:
+            continue
+        c = line[0]
+        if c == ";":
+            if line.startswith("; FEATURE:"):
+                feature = line[10:].strip().lower()
+            elif line.startswith("; CP TOOLCHANGE START"):
+                in_change = True
+            elif line.startswith("; CP TOOLCHANGE END"):
+                in_change = False
+            elif line.startswith("; toolchange #"):
+                try:
+                    changes = max(changes, int(line[14:].split()[0]))
+                except ValueError:
+                    pass
+            continue
+        if c == "T" and line[1:2].isdigit():
+            try:
+                t = int(line[1:].split()[0])
+            except ValueError:
+                continue
+            if t < 64:
+                if last_t is not None and t != last_t:
+                    t_changes += 1
+                last_t = t
+            continue
+        if line.startswith("M83"):
+            rel = True
+        elif line.startswith("M82"):
+            rel = False
+        elif rel and (in_change or feature == "prime tower") and line.startswith(("G1 ", "G0 ", "G2 ", "G3 ")):
+            m = e_re.search(line.split(";", 1)[0])
+            if m:
+                v = float(m.group(1))
+                if v > 0:
+                    e_mm += v
+                    by_t[last_t or 0] = by_t.get(last_t or 0, 0.0) + v
+    changes = changes or t_changes
+    if not changes:
+        return {}
+    k = 3.141592653589793 * (diam / 2) ** 2 / 1000.0 * dens
+    return {"changes": changes, "purge_g": round(e_mm * k, 2),
+            "purge_by_slot": {t + 1: round(v * k, 2) for t, v in sorted(by_t.items())}}
+
+
 def _scan_text(data):
     """G-code 的统计信息一般在开头或结尾，只读头尾即可（文件可能很大）。"""
     head = data[:400_000]
@@ -225,8 +292,12 @@ def parse_sliced_file(path, material="PLA"):
                             out["grams"] = round(sum(f["grams"] for f in fil), 1)
                     gc = [n for n in names if n.lower().endswith(".gcode")]
                     if gc:
-                        mc = gcode_filaments(_scan_text(z.read(gc[0])))
-                        for k in ("purge_g", "changes"):
+                        raw = z.read(gc[0])
+                        mc = gcode_filaments(_scan_text(raw))
+                        if len(fil or []) > 1 and (mc.get("purge_g") is None or mc.get("changes") is None):
+                            for k, v in gcode_purge_scan(raw).items():
+                                mc.setdefault(k, v)
+                        for k in ("purge_g", "changes", "purge_by_slot"):
                             if mc.get(k) is not None:
                                 out[k] = mc[k]
                     return out
@@ -589,8 +660,10 @@ def resolve_profiles(cfg, printer_index=0, material="PLA", filament_name=None):
     return exe, idx, machine, process, filament
 
 
-def _clean_model(model_path, out_dir):
-    """3MF：去掉 Metadata 里的切片软件参数（project_settings / model_settings / 切片信息），只留模型。STL 原样用。"""
+def _clean_model(model_path, out_dir, keep_slots=False):
+    """3MF：去掉 Metadata 里的切片软件参数（project_settings / model_settings / 切片信息），只留模型。STL 原样用。
+    v2.52：keep_slots=True（按打印方案切多色盘）时保留 model_settings.config —— 里面是每个零件用哪个耗材槽，
+    去掉的话 OrcaSlicer 会全部用 1 号槽（实测 OrcaSlicer 2.3.1：普通 3MF + 这个文件 → 按槽分色切）。"""
     if not model_path.lower().endswith(".3mf"):
         return model_path
     import zipfile
@@ -603,7 +676,9 @@ def _clean_model(model_path, out_dir):
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             for n in names:
                 low = n.lower()
-                if low.startswith("metadata/") and (low.endswith((".config", ".json", ".gcode", ".md5", ".xml")) or "plate" in low):
+                if keep_slots and low == "metadata/model_settings.config":
+                    pass
+                elif low.startswith("metadata/") and (low.endswith((".config", ".json", ".gcode", ".md5", ".xml")) or "plate" in low):
                     continue
                 z.writestr(src.getinfo(n), src.read(n))
         return out
@@ -748,7 +823,8 @@ def orca_slice(cfg, model_path, printer_index=0, material="PLA", timeout=600, ov
         size_mb = os.path.getsize(model_path) / 1048576
         timeout = max(timeout, min(3600, int(600 + size_mb * 30)))
         params = {"orient": bool(orient), "copies": int(copies or 1), "timeout": timeout, "material": material, "used": used,
-                  "keep": bool(keep_to), "model_name": os.path.basename(model_path), "arrange": bool(arrange)}
+                  "keep": bool(keep_to), "model_name": os.path.basename(model_path), "arrange": bool(arrange),
+                  "keep_slots": bool(filaments and len(filaments) > 1)}
         name = params["model_name"]
         if ";" in f_path:          # 多色：几份耗材配置，只在本机切
             result = run_cli(exe, m_path, p_path, f_path, model_path, os.path.join(out_dir, "work"), params, keep_to, model_name=name)
@@ -812,7 +888,7 @@ def run_cli(exe, m_path, p_path, f_path, model_path, out_dir, params, keep_to=No
 
     # 拓竹 / Orca 的项目 3MF 里带着它自己的参数（有些值 Orca 命令行不认，例如 wall_filament=0），
     # 先去掉这些参数只留模型；还不行再转成 STL 切（v2.18）
-    model_in = _clean_model(model_path, out_dir)
+    model_in = _clean_model(model_path, out_dir, keep_slots=bool(params.get("keep_slots")))
     # 大文件（v2.19）：面数特别多的模型先合并极近的顶点（< 0.1 mm，喷嘴 0.4 mm 打不出来的细节），再切
     small, note = _reduce_large(model_in, out_dir)
     if small:
