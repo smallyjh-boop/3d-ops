@@ -7,6 +7,7 @@
 
 文件位置：data/products/<编号>/models/（自己上传的、合并出来的）和 data/products/<编号>/source_files/（选品工具推过来的）。
 索引：产品资料里的 model_lib 列表（文件信息 + 分析结果）。
+v2.53：合并出来的模型（origin = merged）只管打印，记着 parts_of（原来的零件）；展示（modules/model/assembly.py）用到它时自动拆回零件。
 """
 import io
 import os
@@ -649,14 +650,19 @@ def _pieces(pid, p, sel):
             raise ValueError(f"「{e['orig_name']}」不能合并（要 STL、3MF 或 OBJ）")
         parts = load_parts(fp)
         qty = max(1, int(s.get("qty") or 1))
+        try:                                   # v2.53：按主模型缩放的规格（打印方案里每个零件带 scale）
+            k = float(s.get("scale") or 1)
+        except (TypeError, ValueError):
+            k = 1.0
+        k = k if 0.01 <= k <= 20 else 1.0
         if s.get("part") not in (None, ""):
             i = int(s["part"])
             if not 0 <= i < len(parts):
                 raise ValueError(f"「{e['orig_name']}」没有第 {i + 1} 个组件")
-            pieces.append((mesh.rotate(parts[i][1], s["orient"]), qty, _pos(s)))
+            pieces.append((mesh.rotate(np.asarray(parts[i][1]) * k, s["orient"]), qty, _pos(s)))
             desc.append({"id": e["id"], "part": i, "qty": qty, "orient": s["orient"], "label": f"{e['orig_name']} / {parts[i][0]}", **_posd(s)})
         else:
-            pieces.append((mesh.rotate(np.concatenate([t for _n, t in parts]), s["orient"]), qty, _pos(s)))
+            pieces.append((mesh.rotate(np.concatenate([t for _n, t in parts]) * k, s["orient"]), qty, _pos(s)))
             desc.append({"id": e["id"], "part": None, "qty": qty, "orient": s["orient"], "label": e["orig_name"], **_posd(s)})
     return pieces, desc
 
@@ -678,7 +684,7 @@ def layout_preview(pid, selection, bed_w=None):
     return _layout(pieces, width=_width(bed_w))
 
 
-def make_entry(pid, selection, user="", name="", bed_w=None, variant=""):
+def make_entry(pid, selection, user="", name="", bed_w=None, variant="", sets=1):
     """v2.23：把勾选的文件 / 组件（按数量）摆在一起存成模型库里的一个组合模型，不改主模型。返回库条目。
     给「规格只用 3MF 里的某几个组件」用。"""
     p = store.load(pid)
@@ -690,14 +696,15 @@ def make_entry(pid, selection, user="", name="", bed_w=None, variant=""):
     fname = _free_name(pid, re.sub(r"[^\w一-鿿\-+x×]+", "_", nm)[:60] + ".stl")
     mesh.write_stl(tris, os.path.join(_dir(pid), fname))
     e = {"id": "m" + uuid.uuid4().hex[:8], "file": fname, "dir": "models", "orig_name": fname, "bytes": os.path.getsize(os.path.join(_dir(pid), fname)),
-         "ext": "stl", "origin": "merged", "variant": variant, "added_at": time.time(), "added_by": user, "parts_of": desc}
+         "ext": "stl", "origin": "merged", "variant": variant, "added_at": time.time(), "added_by": user, "parts_of": desc,
+         **({"parts_sets": int(sets)} if int(sets or 1) > 1 else {})}       # v2.53：一盘出几套（展示拆回零件时只要一套）
     p.setdefault("model_lib", []).append(e)
     e["info"] = analyze(pid, e)
     store.save(p)
     return e
 
 
-def make_current(pid, selection, user="", name="", bed_w=None):
+def make_current(pid, selection, user="", name="", bed_w=None, sets=1):
     """selection: [{"id": 库文件 id, "part": 组件序号或 null, "qty": 数量}]
     只选一个文件、没选组件、数量 1：直接把这个文件设为 3D 模型；
     其他情况：把选中的文件 / 组件按数量摆在一起，存成一个组合模型（也进模型库），再设为 3D 模型。"""
@@ -732,7 +739,8 @@ def make_current(pid, selection, user="", name="", bed_w=None):
     fname = _free_name(pid, re.sub(r"[^\w一-鿿\-+x]+", "_", nm)[:60] + ".stl")
     mesh.write_stl(tris, os.path.join(_dir(pid), fname))
     e = {"id": "m" + uuid.uuid4().hex[:8], "file": fname, "dir": "models", "orig_name": fname, "bytes": os.path.getsize(os.path.join(_dir(pid), fname)),
-         "ext": "stl", "origin": "merged", "variant": "", "added_at": time.time(), "added_by": user, "parts_of": desc}
+         "ext": "stl", "origin": "merged", "variant": "", "added_at": time.time(), "added_by": user, "parts_of": desc,
+         **({"parts_sets": int(sets)} if int(sets or 1) > 1 else {})}
     p.setdefault("model_lib", []).append(e)
     e["info"] = analyze(pid, e)
     store.save(p)

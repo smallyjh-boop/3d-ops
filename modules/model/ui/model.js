@@ -38,19 +38,7 @@ function colorInfo(name) {
 }
 const TH3 = () => window.I18N && I18N.lang === "th";
 // v2.52 展示模型：组装视图（three.js + TransformControls，modules/model/ui/assemble.js 按需加载）
-document.addEventListener("click", async (e) => {
-  if (e.target.id !== "btn-asm" || !P) return;
-  const box = $("#asm-box");
-  if (!box.classList.contains("hidden") && window.ASM) { window.ASM.close(); return; }
-  try {
-    if (!window.ASM) await import("/m/model/assemble.js");
-    box.classList.remove("hidden");
-    await window.ASM.open(box, P.id, { onSaved: async () => {
-      const fresh = await api(`/api/products/${encodeURIComponent(P.id)}`); P.display = fresh.display; VIEWER_PID = null; await renderModel();
-    } });
-    box.scrollIntoView({ behavior: "smooth", block: "start" });
-  } catch (err) { toast(err.message || String(err), true); if (window.reportError3D) window.reportError3D(err, "组装视图"); }
-});
+// v2.53：「查看 / 编辑组装」按钮在 ③ 的一行摘要里（m3.js），按当前规格打开
 document.addEventListener("click", (e) => {
   if (e.target.id !== "btn-model-lib" || !P) return;
   if (window.FILES && FILES.openLib) FILES.openLib(P.id);
@@ -61,6 +49,8 @@ window.addEventListener("model-changed", async (e) => {
   try {
     const fresh = await api(`/api/products/${encodeURIComponent(P.id)}`);
     P.model = fresh.model; P.model_lib = fresh.model_lib; P.edit_rev = fresh.edit_rev;
+    if (window.M3) await M3.refresh();         // v2.53：展示可能变了（合并的主模型自动拆回零件）
+    VIEWER_PID = null;
     await renderModel();
   } catch (err) { if (window.reportError3D) window.reportError3D(err, "编辑页刷新模型"); }
 });
@@ -84,15 +74,19 @@ async function renderModel() {
   if (!m) return;
   await model3dReady();
   if (!VIEWER) VIEWER = new window.Model3D.Viewer($("#viewer"));
-  const asm = P.display && (P.display.parts || []).length ? P.display : null;      // v2.52 展示模型：有组装姿势就按组装好的样子显示
-  const key = `${P.id}/${m.file}/${m.uploaded_at}/${asm ? asm.updated_at : ""}`;
-  if ($("#asm-badge")) $("#asm-badge").innerHTML = asm ? ` · <span class="pill ok-pill">${TH3() ? "แสดงแบบประกอบแล้ว" : "按组装好的样子显示"}</span>` : "";
+  // v2.53 展示模型（按 ③ 选的规格）：展示不是主模型文件本身（选了零件 / 摆过 / 合并的拆回零件 / 缩放）就按组装好的样子显示
+  const ds = window.M3 ? await M3.ensure(P.id).then(() => M3.disp()).catch(() => null) : null;
+  const dspec = window.M3 ? M3.spec : "";
+  const asm = ds && !ds.plain && ds.mode !== "none" && ds.parts ? ds : null;
+  const key = `${P.id}/${m.file}/${m.uploaded_at}/${asm ? dspec + "/" + asm.token : ""}`;
+  if ($("#asm-badge")) $("#asm-badge").innerHTML = (asm ? ` · <span class="pill ok-pill">${TH3() ? "แสดงแบบประกอบแล้ว" : "按组装好的样子显示"}</span>` : "") +
+    (dspec ? ` · <span class="pill" data-notr>${esc(dspec)}</span>` : "");
   if (VIEWER_PID === key) { if (VIEWER.model) { const c = colorInfo(cols[0] || ""); VIEWER.setColor(c.hex, c.code); } return; }
   VIEWER_PID = key;
   $("#model-info").innerHTML = '<span class="muted">正在加载模型…</span>';
   try {
     // 先显示服务器精简过的预览模型（大模型几乎马上出来），放大看细节 / 出商品图时再换完整模型
-    let metrics = asm ? await VIEWER.load(`/api/products/${encodeURIComponent(P.id)}/display/stl?t=${asm.updated_at}`, "stl").catch(() => null) : null;
+    let metrics = asm ? await VIEWER.load(`/api/products/${encodeURIComponent(P.id)}/display/stl?spec=${encodeURIComponent(dspec)}&t=${asm.token}`, "stl").catch(() => null) : null;
     const assembled = !!metrics;
     if (!metrics) metrics = await VIEWER.loadFast(`/api/products/${encodeURIComponent(P.id)}/model/preview?t=${m.uploaded_at}`,
       { url: `/files/${P.id}/model/${encodeURIComponent(m.file)}?t=${m.uploaded_at}`, ext: m.ext, fallback: `/api/products/${encodeURIComponent(P.id)}/model/stl?t=${m.uploaded_at}` });
