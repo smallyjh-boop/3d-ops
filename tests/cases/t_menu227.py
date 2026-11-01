@@ -32,5 +32,5 @@ ok('data-tab="users"' not in html and 'data-tab="csext"' not in html, "old menu 
 ok(all(f'data-cfgext="{x}"' in html for x in ("accounts", "goods", "production", "ai", "addons")), "moved blocks in settings")
 ok('id="users-table"' in html and 'id="intg-keys"' in html and 'id="tpl-list"' in html, "moved elements present")
 # v2.30：客服设置、选品工具对接在模块的页面文件里
-ok('id="cskb-settings"' in C.get("/m/cs/page.js").get_data(as_text=True) and 'id="cur-url"' in C.get("/m/link/settings.html").get_data(as_text=True), "module settings cards")
+ok('id="cskb-settings"' in C.get("/m/cs/page.js").get_data(as_text=True) and 'id="intg-shops"' in C.get("/m/link/settings.html").get_data(as_text=True), "module settings cards")
 print("ERRORS", E_)
