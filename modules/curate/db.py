@@ -57,6 +57,14 @@ _inited = set()
 COLUMNS = [("cur_candidates", "seen_at", "REAL DEFAULT 0"),             # v2.53：用户看过的时间（0 = 新发现）
            ("cur_candidates", "capture_bad", "TEXT DEFAULT ''"),      # 「采集可能出错」的原因（标题 = 作者名、缩略图是头像……）：不交给 AI
            ("cur_candidates", "refresh_at", "REAL DEFAULT 0"),         # 排队重新从详情页读的时间
+           # v2.54.1：每条候选可以手动调整（分数 / 类目 / 备注 / 标签 / 标题）；改过的重新打分时不被覆盖
+           ("cur_candidates", "score_ovr", "REAL DEFAULT -1"),         # 手动分数（-1 = 没改）
+           ("cur_candidates", "score_auto", "REAL DEFAULT -1"),        # 系统（规则 + AI）算的原分数（-1 = 老数据，原分数就是 score）
+           ("cur_candidates", "cat_ovr", "INTEGER DEFAULT 0"),         # 1 = 类目是手动改的
+           ("cur_candidates", "ex_ok", "INTEGER DEFAULT 0"),           # 1 = 被规则排除的，用户「恢复」了：重新打分也不再排除
+           ("cur_candidates", "title_ovr", "TEXT DEFAULT ''"),         # 手动改的标题（原标题还在 title）
+           ("cur_candidates", "note", "TEXT DEFAULT ''"),
+           ("cur_candidates", "tags", "TEXT DEFAULT ''"),              # JSON 数组
            ("cur_collect", "copy", "INTEGER DEFAULT 0"),               # 0 = 采用后要写 AI 文案；1 = 写过了 / 不用写
            ("cur_collect", "kind", "TEXT DEFAULT ''"),                 # '' = 采用的产品草稿；refresh = 只重新读候选的标题 / 图（不建产品）
            # v2.51.x（扩展 3.1.2）：采集队列管理 + 两条线并行

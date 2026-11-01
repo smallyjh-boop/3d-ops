@@ -127,3 +127,54 @@ button.mini.ghost:hover, button.ghost:hover { color: #b91c1c; border-color: #fec
 .cur-pool{display:grid;grid-template-columns:230px 1fr;gap:14px;align-items:start}
 .cur-pool-main{min-width:0}
 @media (max-width:900px){.cur-pool{grid-template-columns:1fr}}
+
+/* 候选池操作（v2.54.1）：页签、清理建议、每条的 ⋯ 菜单、手机上一条一张卡 */
+.cur-ptabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; border-bottom: 1px solid var(--line); padding-bottom: 8px }
+.cur-ptab { background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 12px; color: #4b5563; font-size: 14px }
+.cur-ptab b { margin-left: 4px; font-weight: 700 }
+.cur-ptab.on { background: var(--accent); color: #fff }
+.cur-sg { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: flex-start; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 13px }
+.cur-sg-ok { background: #f8fafc; border-color: var(--line) }
+.cur-sg-h { font-weight: 600; padding-top: 2px }
+.cur-sg-i { flex: 0 1 auto }
+.cur-sg-i > summary { cursor: pointer; display: inline-flex; align-items: center; gap: 8px; list-style: none }
+.cur-sg-i > summary::-webkit-details-marker { display: none }
+.cur-sg-i > summary::before { content: "▸"; color: #92400e }
+.cur-sg-i[open] > summary::before { content: "▾" }
+.cur-sg-l { max-height: 220px; overflow: auto; margin-top: 6px; padding: 6px 8px; background: #fff; border: 1px solid var(--line); border-radius: 8px; max-width: 520px }
+.cur-sg-r { padding: 2px 0; border-bottom: 1px dashed #eee }
+.cur-more { font-weight: 700; letter-spacing: 1px; padding: 1px 8px }
+.cur-rmenu { position: fixed; z-index: 60; min-width: 230px; max-width: 320px; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.18); padding: 6px }
+.cur-rmenu hr { margin: 4px 0; border: 0; border-top: 1px solid var(--line) }
+.cur-mh { padding: 2px 8px 4px; border-bottom: 1px solid var(--line); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.cur-mi { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 6px; padding: 7px 8px; color: #1f2937; font-size: 14px; text-decoration: none; cursor: pointer }
+.cur-mi:hover { background: #f1f5f9 }
+.cur-mi.bad { color: #b91c1c }
+.cur-mi > span { width: 18px; text-align: center }
+.cur-mnote { padding: 4px 8px 2px; max-width: 280px }
+.cur-note-l { color: #4b5563 }
+.cur-tags { margin-top: 2px }
+#tab-curate .cur-tbl tr.cur-ign { opacity: .75 }
+.cur-set label { display: flex; flex-direction: row; align-items: center; gap: 6px; flex-wrap: wrap; margin: 8px 0; text-align: left }
+.cur-set input[type=checkbox] { margin: 0 }
+.cur-set input[type=number] { width: auto }
+@media (max-width: 760px) {
+  #tab-curate table.cur-tbl { min-width: 0 }
+  #tab-curate .cur-tbl thead { display: none }
+  #tab-curate .cur-tbl, #tab-curate .cur-tbl tbody { display: block }
+  #tab-curate .cur-tbl tr[data-c-row] { display: grid; grid-template-columns: 28px 1fr; gap: 4px 8px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin-bottom: 8px; background: #fff }
+  #tab-curate .cur-tbl tr[data-c-row] td { display: block; border: 0; padding: 0 }
+  #tab-curate .cur-tbl .cur-c-sel { grid-row: 1 / span 5 }
+  #tab-curate .cur-tbl .cur-c-sc { grid-column: 2; display: flex; gap: 8px; align-items: center }
+  #tab-curate .cur-tbl .cur-c-main, #tab-curate .cur-tbl .cur-c-est, #tab-curate .cur-tbl .cur-c-mk, #tab-curate .cur-tbl .cur-c-ai, #tab-curate .cur-tbl .cur-c-act { grid-column: 2 }
+  #tab-curate .cur-tbl .cur-c-act { display: flex; gap: 8px; margin-top: 4px }
+  #tab-curate .cur-tbl .cur-c-act .mini { padding: 8px 14px; font-size: 14px }
+  #tab-curate .cur-pic { min-width: 0 }
+  .cur-rmenu { left: 8px !important; right: 8px; bottom: 8px; top: auto !important; max-width: none; min-width: 0; border-radius: 14px }
+  .cur-mi { padding: 12px 10px }
+  .cur-sg-l { max-width: 100% }
+}
+.cur-more { white-space: nowrap }
+.cur-folders .grp3-foot a { white-space: nowrap; display: inline-block }
+.cur-set label, .cur-set label.chk { flex-direction: row !important; justify-content: flex-start !important }
+.cur-set input[type=checkbox] { width: auto !important }

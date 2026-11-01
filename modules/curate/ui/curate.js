@@ -22,11 +22,16 @@
   const catTxt = (r) => (TH() && r.category_th ? r.category_th : r.category);
   const LS = (k, d) => { try { return JSON.parse(localStorage.getItem("cur_" + k)) ?? d; } catch { return d; } };
   const LSset = (k, v) => { try { localStorage.setItem("cur_" + k, JSON.stringify(v)); } catch { /* 忽略 */ } };
+  const IGN_TIP = () => Z("忽略 = 以后不再出现：这个模型再被采到也不会回来（清理后只留指纹）。放进「已处理」，随时能恢复。", "ข้าม = ไม่ให้กลับมาอีก: เก็บได้อีกก็ไม่กลับมา (ล้างแล้วเหลือแค่ลายนิ้วมือ) อยู่ในแท็บ「จัดการแล้ว」 กู้คืนได้");
+  const DEL_TIP = () => Z("删除 = 进回收站（7 天内可恢复）。不记「忽略」：以后在模型网站上再采到，还会作为新发现出现。", "ลบ = ย้ายเข้าถังขยะ (กู้คืนได้ใน 7 วัน) ไม่ถือว่า「ข้าม」: ถ้าเก็บได้อีกจะกลับมาเป็นของใหม่");
   const EXT_TIP = () => Z("要有一台装了扩展、登录了原站的 Chrome 开着", "ต้องมี Chrome ที่ติดตั้งส่วนขยายและล็อกอินเว็บต้นทางเปิดอยู่");
   let CUR = "cur_cand", OV = null, IN = null, IN_SPEC = null;
-  let FC = Object.assign({ min: "0", platform: "", cat: "", ex: "", new: "", q: "", status: "open", bad: "" }, LS("fc", {}));
+  let FC = Object.assign({ min: "0", platform: "", cat: "", new: "", q: "", bad: "", tab: "pending" }, LS("fc", {}));
+  delete FC.status; delete FC.ex;                  // v2.54.1：状态由页签决定（待处理 / 已采用 / 已处理 / 回收站）
+  if (!["pending", "adopted", "done", "trash", "all"].includes(FC.tab)) FC.tab = "pending";
+  let CROWS = {}, CALLCATS = [], TSEL = new Set();   // CROWS：当前列表的行（菜单 / 编辑用）；TSEL：回收站里勾选的 skey
   let CSPEC = null, CVIEWS = [], CAT_TH = {}, CVLOADED = false;
-  let CGS = { top: "top:todo" }, CV = 0;          // 候选池自动分组 / 视图
+  let CGS = {}, CV = 0;          // 候选池自动分组 / 视图（v2.54.1：默认不选，页签决定看哪些）
   let IF = LS("ifolder", "all"), IQ = "", IGS = {}, IV = 0;   // IGS：自动分组选中的 {段落: 分组键}；IV：用的视图
   const SEL = new Set(), ISEL = new Set();
 
@@ -80,12 +85,22 @@
     let bar = s.querySelector(".cur-float");
     if (!bar) { bar = document.createElement("div"); bar.className = "cur-float hidden"; s.appendChild(bar); }
     let h = "";
-    if (CUR === "cur_cand" && SEL.size) {
+    if (CUR === "cur_cand" && FC.tab === "trash" && TSEL.size) {
+      h = `<span class="fb-n">${Z("已选", "เลือก")} <b>${TSEL.size}</b></span>
+        <button class="primary-lite" data-t-bulk="restore">↩ ${Z("恢复所选", "กู้คืนที่เลือก")}</button>
+        ${_owner0() ? `<button data-t-bulk="purge" class="fb-del">${Z("彻底删除所选", "ลบถาวรที่เลือก")}</button>` : ""}
+        <button class="mini" data-t-bulk="clear">✕ ${Z("清除", "ล้าง")}</button>`;
+    } else if (CUR === "cur_cand" && SEL.size) {
+      const sel = [...SEL].map((i) => CROWS[i]).filter(Boolean);
+      const canAdopt = sel.some((r) => !r.product_id), canRestore = sel.some((r) => r.status === "ignored" || r.excluded);
       h = `<span class="fb-n">${Z("已选", "เลือก")} <b>${SEL.size}</b></span>
-        <button class="primary-lite" data-c-bulk="collect">✓ ${Z("采用所选", "ใช้ที่เลือก")}</button>
+        ${canAdopt ? `<button class="primary-lite" data-c-bulk="collect">✓ ${Z("采用所选", "ใช้ที่เลือก")}</button>` : ""}
         <button data-c-bulk="later">👀 ${Z("稍后看", "ดูทีหลัง")}</button><button data-c-bulk="seen">${Z("标为已看", "ทำเครื่องหมายว่าดูแล้ว")}</button>
-        <button data-c-bulk="ignore">${Z("忽略所选", "ข้ามที่เลือก")}</button>
+        <button data-c-bulk="ignore" title="${esc(IGN_TIP())}">${Z("忽略所选", "ข้ามที่เลือก")}</button>
+        ${canRestore ? `<button data-c-bulk="restore">↩ ${Z("恢复", "กู้คืน")}</button>` : ""}
+        <button data-c-bulk="cat">🏷 ${Z("改类目", "เปลี่ยนหมวด")}</button>
         <button data-c-bulk="reread" title="${esc(Z("让扩展重新读这些模型的详情页，改正标题、作者、图片", "ให้ส่วนขยายอ่านหน้ารายละเอียดใหม่ แก้ชื่อ ผู้ออกแบบ รูป"))}">↻ ${Z("重新读取", "อ่านใหม่")}</button>
+        <button data-c-bulk="delete" class="fb-del" title="${esc(DEL_TIP())}">🗑 ${Z("删除所选", "ลบที่เลือก")}</button>
         <button class="mini" data-c-bulk="clear">✕ ${Z("清除", "ล้าง")}</button>`;
     } else if (CUR === "cur_queue" && QSEL.size) {
       const B = QBULK();
@@ -113,39 +128,70 @@
   // ======================= 候选池 =======================
   const _owner0 = () => !!(OV && OV.owner);
   async function candPage(box) {
-    const gks = GRP.sels(CGS).join(",");
-    const qp = new URLSearchParams(Object.entries(FC).filter(([k, v]) => v !== "" && v != null && !(gks && (k === "status" || k === "ex"))));
+    const tab = FC.tab, trashTab = tab === "trash";
+    const gks = tab === "pending" || tab === "done" || tab === "all" ? GRP.sels(CGS).join(",") : "";
+    const qp = new URLSearchParams(Object.entries(FC).filter(([k, v]) => v !== "" && v != null && !(tab === "trash" && !["tab", "q"].includes(k)) && !(tab === "adopted" && !["tab", "q"].includes(k))));
     if (gks) qp.set("gk", gks);
-    const d = await api("/api/cur/candidates?" + qp.toString());
-    const gs = d.groups, gn = gs.n, pk = d.pool;
+    const [d, sg] = await Promise.all([api("/api/cur/candidates?" + qp.toString()),
+      _owner0() && (tab === "pending" || tab === "done") ? api("/api/cur/pool/suggestions").catch(() => null) : null]);
+    const gs = d.groups, gn = gs.tn || gs.n, pk = d.pool, tb = d.tabs;
+    CALLCATS = d.all_cats || [];
+    CALLCATS.forEach((c) => { CAT_TH[c.name] = c.th; });
+    CROWS = {}; d.rows.forEach((r) => { CROWS[r.id] = r; });
+    const pgItems = { pending: [["new", "新发现", "ค้นพบใหม่"], ["seen", "已看未处理", "ดูแล้วยังไม่จัดการ"], ["later", "稍后看", "ดูทีหลัง"]],
+      done: [["ignored", "已忽略", "ข้ามแล้ว"], ["excluded", "规则排除", "ถูกคัดออกตามกฎ"]],
+      all: [["new", "新发现", "ค้นพบใหม่"], ["seen", "已看未处理", "ดูแล้วยังไม่จัดการ"], ["later", "稍后看", "ดูทีหลัง"], ["ignored", "已忽略", "ข้ามแล้ว"], ["excluded", "规则排除", "ถูกคัดออกตามกฎ"]] }[tab] || [];
     const cspec = CSPEC = {
       sel: CGS, views: CVIEWS, viewOn: CV,
-      top: [{ key: "", label: Z("全部", "ทั้งหมด"), n: gs.total }, { key: "top:todo", label: Z("待看", "รอดู"), n: gn["top:todo"] || 0, tone: "warn" }, { key: "top:hi", label: Z("高分待看", "คะแนนสูงรอดู"), n: gn["top:hi"] || 0, tone: "ok" }, { key: "top:done", label: Z("已处理", "จัดการแล้ว"), n: gn["top:done"] || 0 }],
+      top: [{ key: "", label: Z("全部", "ทั้งหมด"), n: gn.all || 0 }, { key: "top:hi", label: Z("高分待看", "คะแนนสูงรอดู"), n: gn["top:hi"] || 0, tone: "ok" }],
       sections: [
-        { id: "pg", title: Z("1. 进度", "1. ความคืบหน้า"), items: [["new", "新发现", "ค้นพบใหม่"], ["seen", "已看未处理", "ดูแล้วยังไม่จัดการ"], ["later", "稍后看", "ดูทีหลัง"], ["adopted", "已采用（进了采集箱）", "ใช้แล้ว (เข้ากล่องเก็บ)"], ["ignored", "已忽略", "ข้ามแล้ว"], ["excluded", "规则排除", "ถูกคัดออกตามกฎ"]].map(([k, zh, th]) => ({ key: "pg:" + k, label: Z(zh, th), n: gn["pg:" + k] || 0 })) },
+        { id: "pg", title: Z("1. 进度", "1. ความคืบหน้า"), items: pgItems.map(([k, zh, th]) => ({ key: "pg:" + k, label: Z(zh, th), n: gn["pg:" + k] || 0 })) },
         { id: "sc", title: Z("2. 分数", "2. คะแนน"), items: [["high", "高分（≥70）", "สูง (≥70)"], ["mid", "中（50–69）", "กลาง (50–69)"], ["low", "低（<50）", "ต่ำ (<50)"]].map(([k, zh, th]) => ({ key: "sc:" + k, label: Z(zh, th), n: gn["sc:" + k] || 0 })) },
         { id: "site", title: Z("3. 来源网站", "3. เว็บต้นทาง"), items: gs.sites.map((x) => ({ key: x.key, label: x.name, n: x.n, raw: true })) },
         { id: "wt", title: Z("4. 关注巡逻", "4. ตระเวนติดตาม"), items: gs.watches.map((x) => ({ key: x.key, label: x.name, n: x.n, raw: true })).concat(gn["wt:none"] ? [{ key: "wt:none", label: Z("手动 / 其他", "ด้วยตนเอง / อื่น ๆ"), n: gn["wt:none"] }] : []) },
         { id: "cat", title: Z("5. 类目", "5. หมวดหมู่"), items: gs.cats.map((x) => ({ key: x.key, label: TH() ? (CAT_TH[x.name] || x.name) : x.name, n: x.n, raw: true })) },
       ],
-      foot: `<a class="small" data-c-gclear>${Z("清除选择", "ล้างการเลือก")}</a> · <a class="small" data-c-saveview>⭐ ${Z("保存为视图", "บันทึกเป็นมุมมอง")}</a>${_owner0() ? ` · <a class="small" data-c-clean>🧹 ${Z("清理", "ทำความสะอาด")}</a>` : ""}`,
+      foot: `<a class="small" data-c-gclear>${Z("清除选择", "ล้างการเลือก")}</a> · <a class="small" data-c-saveview>⭐ ${Z("保存为视图", "บันทึกเป็นมุมมอง")}</a>${_owner0() ? ` · <a class="small" data-c-settings>⚙ ${Z("清理设置", "ตั้งค่าการล้าง")}</a>` : ""}`,
     };
     const k = d.kpi;
     const hist = d.hist.map((v, i) => ({ label: `${i * 10}–${i * 10 + 9}`, value: v, tone: i >= 7 ? "ok" : "" }));
     const plats = [...new Set(d.rows.map((r) => r.platform))];
     for (const id of [...SEL]) if (!d.rows.some((r) => r.id === id)) SEL.delete(id);
+    for (const id of [...TSEL]) if (!(d.trash || []).some((r) => r.skey === id)) TSEL.delete(id);
     const opt = (v, cur, t) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${t}</option>`;
+    const nTab = { pending: tb.pending, adopted: tb.adopted, done: tb.done, trash: tb.trash };
+    const tabBar = `<div class="cur-ptabs" role="tablist">${[["pending", Z("待处理", "รอดำเนินการ"), Z("新发现 + 已看未处理 + 稍后看", "ใหม่ + ดูแล้วยังไม่จัดการ + ดูทีหลัง")],
+      ["adopted", Z("已采用", "ใช้แล้ว"), Z("已经进了采集箱 / 产品库的（这里只留记录，不算候选池里的）", "เข้ากล่องเก็บ / คลังสินค้าแล้ว (เก็บเป็นประวัติ ไม่นับในคลัง)")],
+      ["done", Z("已处理", "จัดการแล้ว"), Z("已忽略 + 规则排除（都能恢复）", "ข้ามแล้ว + ถูกคัดออกตามกฎ (กู้คืนได้)")],
+      ["trash", "🗑 " + Z("回收站", "ถังขยะ"), Z("删除的 / 清理掉的，7 天内可恢复", "ที่ลบ / ล้างแล้ว กู้คืนได้ใน 7 วัน")]]
+      .map(([id, l, tip]) => `<button class="cur-ptab ${tab === id ? "on" : ""}" data-c-tab="${id}" title="${esc(tip)}">${l} <b>${n0(nTab[id])}</b></button>`).join("")}</div>`;
+    const sgBar = sg ? sugBar(sg) : "";
+    const filt = tab === "pending" || tab === "done" || tab === "all" ? `
+          <select data-fc="min" title="${esc(Z("最低分", "คะแนนขั้นต่ำ"))}">${["0", "40", "50", "60", "70", "80"].map((v) => opt(v, FC.min, v === "0" ? Z("全部分数", "ทุกคะแนน") : `≥ ${v}`)).join("")}</select>
+          <select data-fc="platform"><option value="">${Z("全部网站", "ทุกเว็บ")}</option>${plats.concat(FC.platform && !plats.includes(FC.platform) ? [FC.platform] : []).map((p) => `<option value="${esc(p)}" ${p === FC.platform ? "selected" : ""} data-notr>${esc((d.rows.find((r) => r.platform === p) || {}).platform_name || p)}</option>`).join("")}</select>
+          <select data-fc="cat"><option value="">${Z("全部类目", "ทุกหมวด")}</option>${d.cats.map((c) => `<option value="${esc(c.name)}" ${c.name === FC.cat ? "selected" : ""}>${esc(TH() ? c.th : c.name)}</option>`).join("")}</select>
+          <label class="chk"><input type="checkbox" data-fc="new" ${FC.new ? "checked" : ""}> ${Z("今日新品", "ใหม่วันนี้")}</label>` : "";
+    const search = `<input type="search" data-fc="q" value="${esc(FC.q)}" placeholder="${Z("搜索标题 / 作者 / 备注 / 标签", "ค้นหาชื่อ / ผู้ออกแบบ / โน้ต / แท็ก")}">`;
+    const emptyTxt = { pending: Z("没有待处理的候选。点上面的「🧩 打开模型站去采集」，装好浏览器扩展（3.1 以上）后打开 MakerWorld / Printables / Thingiverse 的搜索页、分类页，系统会自动给每个模型打分并记到这里；也可以在「关注巡逻」里添加关注让扩展每天自动找。",
+      "ไม่มีรายการรอดำเนินการ กด「🧩 เปิดเว็บโมเดลเพื่อเก็บ」ด้านบน ติดตั้งส่วนขยาย (3.1 ขึ้นไป) แล้วเปิดหน้าค้นหา / หมวดหมู่ของ MakerWorld / Printables / Thingiverse ระบบจะให้คะแนนอัตโนมัติ หรือเพิ่มการติดตามใน「ตระเวนติดตาม」"),
+      adopted: Z("还没有采用过的。采用后的模型在「采集箱」→「产品库」里处理，这里只留记录。", "ยังไม่มีที่ใช้แล้ว โมเดลที่ใช้แล้วจัดการใน「กล่องเก็บสินค้า」→「คลังสินค้า」 ที่นี่เก็บเป็นประวัติ"),
+      done: Z("没有已忽略 / 被规则排除的。", "ไม่มีที่ข้ามแล้ว / ถูกคัดออก"), all: Z("没有符合的候选。", "ไม่มีรายการที่ตรงกัน") }[tab] || "";
+    const table = trashTab ? trashTable(d.trash || [])
+      : d.rows.length ? `<div class="cur-wrap"><table class="grid cur-tbl"><thead><tr><th><input type="checkbox" data-c-all ${d.rows.length && d.rows.every((r) => SEL.has(r.id)) ? "checked" : ""}></th><th>${Z("分", "คะแนน")}</th><th>${Z("模型", "โมเดล")}</th>
+          <th>${Z("估算", "ประมาณ")}</th><th>${Z("泰国市场", "ตลาดไทย")}</th><th>${Z("AI 判断", "AI ประเมิน")}</th><th></th></tr></thead><tbody>${d.rows.map((r) => candRow(r, d.radar)).join("")}</tbody></table></div>`
+        : UX.empty(emptyTxt);
+    const withPanel = tab === "pending" || tab === "done" || tab === "all";
     box.innerHTML = UX.kpis([
-      { label: Z("候选模型", "โมเดลผู้สมัคร"), value: n0(k.total), help: Z("扩展在模型网站列表页上看到、打过分的模型", "โมเดลที่ส่วนขยายเห็นในหน้ารายการและให้คะแนนแล้ว") },
+      { label: Z("候选模型", "โมเดลผู้สมัคร"), value: n0(k.total), help: Z("在候选池里的模型（采用了的在采集箱 / 产品库，不算）", "โมเดลในคลังผู้สมัคร (ที่ใช้แล้วอยู่ในกล่องเก็บ / คลังสินค้า ไม่นับ)") },
       { label: Z(`高分（≥ ${d.alert_score}）`, `คะแนนสูง (≥ ${d.alert_score})`), value: n0(k.good), tone: k.good ? "ok" : "", go: "cand:hi" },
       { label: Z("今日新品", "ใหม่วันนี้"), value: n0(k.new_today), tone: k.new_today ? "info" : "", go: "cand:new", help: Z("关注巡逻今天新找到的", "ที่ตระเวนเจอใหม่วันนี้") },
-      { label: Z("被排除", "ถูกคัดออก"), value: n0(k.excluded), go: "cand:ex", help: Z("儿童玩具（TISI）、宗教、武器、接触食物、成人、品牌 / 动漫角色、打印太久（多色不排除，只扣分）", "ของเล่นเด็ก (มอก.) ศาสนา อาวุธ สัมผัสอาหาร ผู้ใหญ่ แบรนด์ / ตัวการ์ตูน พิมพ์นานเกิน (หลายสีไม่คัดออก แค่หักคะแนน)") },
+      { label: Z("被排除", "ถูกคัดออก"), value: n0(k.excluded), go: "cand:ex", help: Z("儿童玩具（TISI）、宗教、武器、接触食物、成人、品牌 / 动漫角色、打印太久（多色不排除，只扣分）。在「已处理」里，认为可以的点「恢复」", "ของเล่นเด็ก (มอก.) ศาสนา อาวุธ สัมผัสอาหาร ผู้ใหญ่ แบรนด์ / ตัวการ์ตูน พิมพ์นานเกิน (หลายสีไม่คัดออก แค่หักคะแนน) อยู่ในแท็บ「จัดการแล้ว」 ถ้าเห็นว่าใช้ได้กด「กู้คืน」") },
       k.bad ? { label: Z("采集可能出错", "อาจเก็บข้อมูลผิด"), value: n0(k.bad), tone: "bad", go: "cand:bad", help: Z("列表页读成了作者那一块（标题是作者名、图是头像），不交给 AI 打分", "อ่านส่วนผู้ออกแบบแทนโมเดล (ชื่อเป็นชื่อผู้ออกแบบ รูปเป็นรูปโปรไฟล์) จึงไม่ส่งให้ AI") } : null,
       d.ai ? { label: Z("等 AI 判断", "รอ AI ประเมิน"), value: n0(k.wait_ai), tone: k.wait_ai ? "warn" : "" } : null,
     ]) + (k.bad ? `<div class="warn-box small cur-note cur-badnote">⚠ ${Z(`有 ${k.bad} 个候选采集可能出错（标题是作者 / 店铺名，或缩略图是头像），多半是 Printables 列表页读错了（扩展 3.1.1 已修好）。`, `มี ${k.bad} รายการที่อาจเก็บข้อมูลผิด (ชื่อเป็นชื่อผู้ออกแบบ / ร้าน หรือรูปย่อเป็นรูปโปรไฟล์) ส่วนใหญ่มาจากหน้ารายการ Printables (ส่วนขยาย 3.1.1 แก้แล้ว)`)}
         <button class="mini" data-c-badonly>${FC.bad ? Z("看全部", "ดูทั้งหมด") : Z("只看这些", "ดูเฉพาะรายการนี้")}</button>
         <button class="mini" data-c-rereadbad>↻ ${Z("全部重新读取", "อ่านใหม่ทั้งหมด")}</button>
-        <button class="mini" data-c-delbad>✕ ${Z("删除采集错误的", "ลบที่เก็บผิด")}</button></div>` : "")
+        <button class="mini" data-c-delbad title="${esc(DEL_TIP())}">🗑 ${Z("删除采集错误的", "ลบที่เก็บผิด")}</button></div>` : "")
       + `<div class="cur-grid2">${UX.card({ title: Z("分数分布", "การกระจายคะแนน"), help: Z("不含被排除的。分数 = 六项加权：泰国需求、生产效率、利润、竞争少、原站热度、上架难度（权重在设置 → 商品）", "ไม่รวมที่ถูกคัดออก คะแนน = 6 ด้านถ่วงน้ำหนัก (ตั้งค่า → สินค้า)"),
         body: UX.columns(hist, { h: 90, from: "0", to: "100" }) })}
       ${UX.card({ title: Z("排除原因", "เหตุผลที่คัดออก"), body: UX.bars(d.reasons.map((r) => ({ label: TH() && r.reason_th ? r.reason_th : r.reason, value: r.n, tone: "bad" })), { empty: Z("没有被排除的", "ไม่มีที่ถูกคัดออก") }) })}</div>
@@ -155,77 +201,153 @@
           + `<div class="cur-grid2">${UX.bars(pk.by_site.map((x) => ({ label: x.name, value: x.rate, text: `${x.rate}%（${x.adopted}/${x.seen}）`, raw: true })), { empty: Z("还没有数据", "ยังไม่มีข้อมูล") })}
           ${UX.bars(pk.by_watch.map((x) => ({ label: x.name, value: x.rate, text: `${x.rate}%（${x.adopted}/${x.seen}）`, raw: true })), { empty: Z("还没有关注巡逻的数据", "ยังไม่มีข้อมูลการตระเวน") })}</div>` })}
       ${UX.card({ title: Z("候选模型", "โมเดลผู้สมัคร"),
-        body: `<div class="cur-pool"><aside class="card cur-folders" data-c-panel>${GRP.html(cspec)}</aside><div class="cur-pool-main"><div class="cur-fbar cur-frow">
-          <select data-fc="min" title="${esc(Z("最低分", "คะแนนขั้นต่ำ"))}">${["0", "40", "50", "60", "70", "80"].map((v) => opt(v, FC.min, v === "0" ? Z("全部分数", "ทุกคะแนน") : `≥ ${v}`)).join("")}</select>
-          <select data-fc="platform"><option value="">${Z("全部网站", "ทุกเว็บ")}</option>${plats.concat(FC.platform && !plats.includes(FC.platform) ? [FC.platform] : []).map((p) => `<option value="${esc(p)}" ${p === FC.platform ? "selected" : ""} data-notr>${esc((d.rows.find((r) => r.platform === p) || {}).platform_name || p)}</option>`).join("")}</select>
-          <select data-fc="cat"><option value="">${Z("全部类目", "ทุกหมวด")}</option>${d.cats.map((c) => `<option value="${esc(c.name)}" ${c.name === FC.cat ? "selected" : ""}>${esc(TH() ? c.th : c.name)}</option>`).join("")}</select>
-          <select data-fc="status">${opt("open", FC.status, Z("待处理", "รอดำเนินการ"))}${opt("ignored", FC.status, Z("已忽略", "ข้ามแล้ว"))}${opt("adopted", FC.status, Z("已采用", "ใช้แล้ว"))}${opt("all", FC.status, Z("全部", "ทั้งหมด"))}</select>
-          <label class="chk"><input type="checkbox" data-fc="ex" ${FC.ex ? "checked" : ""}> ${Z("含被排除的", "รวมที่ถูกคัดออก")}</label>
-          <label class="chk"><input type="checkbox" data-fc="new" ${FC.new ? "checked" : ""}> ${Z("今日新品", "ใหม่วันนี้")}</label>
-          <input type="search" data-fc="q" value="${esc(FC.q)}" placeholder="${Z("搜索标题 / 作者", "ค้นหาชื่อ / ผู้ออกแบบ")}">
-          <span class="cur-sp"></span><span class="small muted">${Z(`${d.rows.length} 个`, `${d.rows.length} รายการ`)}</span></div>
-        ${d.rows.length ? `<div class="cur-wrap"><table class="grid cur-tbl"><thead><tr><th><input type="checkbox" data-c-all ${d.rows.length && d.rows.every((r) => SEL.has(r.id)) ? "checked" : ""}></th><th>${Z("分", "คะแนน")}</th><th>${Z("模型", "โมเดล")}</th>
-          <th>${Z("估算", "ประมาณ")}</th><th>${Z("泰国市场", "ตลาดไทย")}</th><th>${Z("AI 判断", "AI ประเมิน")}</th><th></th></tr></thead><tbody>${d.rows.map((r) => candRow(r, d.radar)).join("")}</tbody></table></div>`
-          : UX.empty(Z("还没有候选。点上面的「🧩 打开模型站去采集」，装好浏览器扩展（3.1 以上）后打开 MakerWorld / Printables / Thingiverse 的搜索页、分类页，系统会自动给每个模型打分并记到这里；也可以在「关注巡逻」里添加关注让扩展每天自动找。",
-            "ยังไม่มีผู้สมัคร กด「🧩 เปิดเว็บโมเดลเพื่อเก็บ」ด้านบน ติดตั้งส่วนขยาย (3.1 ขึ้นไป) แล้วเปิดหน้าค้นหา / หมวดหมู่ของ MakerWorld / Printables / Thingiverse ระบบจะให้คะแนนแต่ละโมเดลอัตโนมัติ หรือเพิ่มการติดตามใน「ตระเวนติดตาม」"))}</div></div>` })}
+        body: `${tabBar}${sgBar}<div class="${withPanel ? "cur-pool" : ""}">${withPanel ? `<aside class="card cur-folders" data-c-panel>${GRP.html(cspec)}</aside>` : ""}<div class="cur-pool-main"><div class="cur-fbar cur-frow">${filt}${search}
+          <span class="cur-sp"></span>${trashTab && _owner0() && tb.trash ? `<button class="mini ghost" data-t-empty>${Z("清空回收站", "ล้างถังขยะ")}</button>` : ""}<span class="small muted">${trashTab ? Z(`${(d.trash || []).length} 个`, `${(d.trash || []).length} รายการ`) : Z(`${d.rows.length} 个`, `${d.rows.length} รายการ`)}</span></div>
+        ${table}</div></div>` })}
       <p class="small muted">${Z("校准：", "การปรับเทียบ: ")}${d.calib.n >= 5 ? Z(`实测时长约是 AI 估算的 ${d.calib.m} 倍、克数 ${d.calib.g} 倍（${d.calib.n} 个样本，其中 ${d.calib.production || 0} 个来自 ERP 生产记录）`, `เวลาจริงประมาณ ${d.calib.m} เท่าของที่ AI ประมาณ กรัม ${d.calib.g} เท่า (${d.calib.n} ตัวอย่าง)`)
         : Z(`要至少 5 个「估算过、又有实测」的模型才开始校准（现在 ${d.calib.n || 0} 个）`, `ต้องมีอย่างน้อย 5 โมเดลที่มีทั้งค่าประมาณและค่าจริงจึงจะปรับเทียบ (ตอนนี้ ${d.calib.n || 0})`)}</p>`;
-    GRP.bind(box.querySelector("[data-c-panel]"), cspec, () => { CV = 0; SEL.clear(); render(); });
+    if (withPanel) GRP.bind(box.querySelector("[data-c-panel]"), cspec, () => { CV = 0; SEL.clear(); render(); });
     if (!CVLOADED) { CVLOADED = true; api("/api/goods/views?scope=cand").then((r) => { CVIEWS = r.views || []; if (CVIEWS.length) render(); }).catch(() => {}); }
   }
-  // ---- 清理（预览 → 勾选 → 执行）、回收站、自动清理设置（v2.53）----
-  const CLS = () => ({ excl: Z("规则排除，超过 N 天没再看到", "ถูกคัดออกตามกฎ และไม่พบอีกเกิน N วัน"), low: Z("低分（< N 分）且 N 天没再看到", "คะแนนต่ำ (< N) และไม่พบอีก N วัน"),
-    ignored: Z("已忽略，超过 N 天", "ข้ามแล้ว เกิน N วัน"), adopted: Z("已采用（已经在采集箱 / 产品库里）", "ใช้แล้ว (อยู่ในกล่องเก็บ / คลังสินค้า)"),
-    dup: Z("重复（同作者同标题，合并成一个，留数据最好的）", "ซ้ำ (ผู้ออกแบบ+ชื่อเดียวกัน รวมเป็นหนึ่ง เก็บอันที่ดีที่สุด)"), watchdel: Z("来自已删除的关注巡逻", "มาจากการตระเวนที่ลบแล้ว") });
-  async function cleanDialog() {
+
+  // ---- 清理建议（v2.54.1）：一行列出能清的，每项一个按钮 + 受影响的候选；天数 / 分数在 ⚙ 设置里 ----
+  const MB1 = (mb) => (mb >= 1 ? ` · ${mb.toFixed(1)} MB` : "");           // 不到 1 MB 不显示
+  function sugText(x, t) {
+    const n = x.n;
+    return ({
+      ignored: Z(`${n} 个已忽略超过 ${t.ignored_days} 天`, `${n} รายการที่ข้ามไว้เกิน ${t.ignored_days} วัน`),
+      excl: Z(`${n} 个被规则排除、${t.excl_days} 天没再出现`, `${n} รายการที่ถูกคัดออกตามกฎ และไม่พบอีกเกิน ${t.excl_days} วัน`),
+      low: Z(`${n} 个低分（< ${t.low_score}）、${t.low_days} 天没再出现`, `${n} รายการคะแนนต่ำ (< ${t.low_score}) และไม่พบอีกเกิน ${t.low_days} วัน`),
+      watchdel: Z(`${n} 个来自已删除的关注巡逻`, `${n} รายการจากการตระเวนที่ลบแล้ว`),
+      dup: Z(`${x.groups} 组重复（多出 ${n} 个）`, `ซ้ำ ${x.groups} กลุ่ม (เกินมา ${n} รายการ)`),
+      bad: Z(`${n} 个采集可能出错`, `${n} รายการที่อาจเก็บข้อมูลผิด`),
+    })[x.id] || "";
+  }
+  const SG_BTN = () => ({ dup: Z("合并", "รวม"), bad: Z("删除", "ลบ") });
+  const SG_TIP = () => ({
+    ignored: Z("清掉后进回收站 7 天（能恢复），之后只留指纹，这些模型不会再出现", "ล้างแล้วอยู่ในถังขยะ 7 วัน (กู้คืนได้) หลังจากนั้นเหลือแค่ลายนิ้วมือ ไม่กลับมาอีก"),
+    excl: Z("清掉后进回收站 7 天（能恢复），之后只留指纹", "ล้างแล้วอยู่ในถังขยะ 7 วัน (กู้คืนได้) หลังจากนั้นเหลือแค่ลายนิ้วมือ"),
+    low: Z("清掉后进回收站 7 天（能恢复），之后只留指纹", "ล้างแล้วอยู่ในถังขยะ 7 วัน (กู้คืนได้) หลังจากนั้นเหลือแค่ลายนิ้วมือ"),
+    watchdel: Z("清掉后进回收站 7 天（能恢复）", "ล้างแล้วอยู่ในถังขยะ 7 วัน (กู้คืนได้)"),
+    dup: Z("同作者同标题的合并成一个，留数据最好的，指标取大的", "ผู้ออกแบบ+ชื่อเดียวกันรวมเป็นหนึ่ง เก็บอันที่ดีที่สุด"),
+    bad: DEL_TIP(),
+  });
+  function sugBar(sg) {
+    if (!sg || !sg.items.length) return `<div class="cur-sg cur-sg-ok small muted">✓ ${Z("没有要清理的。", "ไม่มีอะไรต้องล้าง")}${_owner0() ? ` <a data-c-settings>⚙ ${Z("清理设置", "ตั้งค่าการล้าง")}</a>` : ""}</div>`;
+    return `<div class="cur-sg"><span class="cur-sg-h">🧹 ${Z("可以清理", "ล้างได้")}</span>${sg.items.map((x) => `<details class="cur-sg-i" data-sg="${x.id}">
+      <summary><span data-sg-t>${sugText(x, sg.thresholds)}${MB1(x.mb)}</span><button class="mini" data-cl-sg="${x.id}" title="${esc(SG_TIP()[x.id] || "")}">${SG_BTN()[x.id] || Z("清掉", "ล้าง")}</button></summary>
+      <div class="cur-sg-l">${x.items.map((i) => `<div class="cur-sg-r"><span class="muted small" data-notr>${esc(i.platform_name)}</span> <span data-notr>${esc(i.title || "—")}</span> <span class="muted small">${Z(`${i.score} 分 · ${i.days} 天前`, `${i.score} คะแนน · ${i.days} วันก่อน`)}</span>${i.keep ? ` <span class="muted small">→ ${Z("合并到", "รวมเข้ากับ")} <span data-notr>${esc(i.keep)}</span></span>` : ""}</div>`).join("")}
+        ${x.n > x.items.length ? `<div class="small muted">${Z(`…还有 ${x.n - x.items.length} 个`, `…และอีก ${x.n - x.items.length} รายการ`)}</div>` : ""}</div></details>`).join("")}
+      ${_owner0() ? `<a class="small" data-c-settings>⚙</a>` : ""}</div>`;
+  }
+
+  // ---- 回收站页签 ----
+  const TR_WHY = () => ({ deleted: Z("手动删除", "ลบเอง"), cap: Z("超过池子上限", "เกินเพดานคลัง"), excl: Z("规则排除太久", "ถูกคัดออกนานเกิน"), low: Z("低分太久", "คะแนนต่ำนานเกิน"),
+    ignored: Z("已忽略太久", "ข้ามไว้นานเกิน"), adopted: Z("已采用", "ใช้แล้ว"), dup: Z("重复合并", "ซ้ำ รวมแล้ว"), watchdel: Z("关注巡逻已删除", "ตระเวนถูกลบ") });
+  function trashTable(rows) {
+    if (!rows.length) return UX.empty(Z("回收站是空的。删除 / 清理的候选会先放在这里 7 天，能恢复。", "ถังขยะว่าง ที่ลบ / ล้างจะอยู่ที่นี่ 7 วัน กู้คืนได้"));
+    return `<p class="small muted">${Z("删除的不记「忽略」：以后再采到会作为新发现回来。清理掉的（忽略 / 排除太久）恢复后回到原来的状态。", "ที่ลบเองไม่ถือว่า「ข้าม」: ถ้าเก็บได้อีกจะกลับมาเป็นของใหม่ ที่ระบบล้างให้ กู้คืนแล้วกลับสถานะเดิม")}</p>
+      <div class="cur-wrap"><table class="grid cur-tbl cur-trt"><thead><tr><th><input type="checkbox" data-t-all ${rows.every((r) => TSEL.has(r.skey)) ? "checked" : ""}></th><th>${Z("分", "คะแนน")}</th><th>${Z("模型", "โมเดล")}</th><th>${Z("原因", "สาเหตุ")}</th><th>${Z("删除时间", "เวลา")}</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr>
+        <td><input type="checkbox" data-t-sel="${esc(r.skey)}" ${TSEL.has(r.skey) ? "checked" : ""}></td><td><span class="cur-sc">${r.score == null ? "—" : Math.round(r.score)}</span></td>
+        <td><div class="cur-pic">${img(r.thumb)}<div>${r.url ? link(r.url, (r.title || r.url).slice(0, 80)) : `<span data-notr>${esc((r.title || r.skey).slice(0, 80))}</span>`}
+          <div class="small muted" data-notr>${esc(r.platform_name || "")}${r.author ? " · " + esc(r.author) : ""}</div></div></div></td>
+        <td class="small">${esc(TR_WHY()[r.reason] || r.reason)}</td><td class="small muted nowrap">${fmtTime(r.at).slice(5, 16)}<div>${Z(`${r.days_left} 天后彻底删除`, `ลบถาวรใน ${r.days_left} วัน`)}</div></td>
+        <td class="nowrap"><button class="mini primary-lite" data-t-restore="${esc(r.skey)}">↩ ${Z("恢复", "กู้คืน")}</button>${_owner0() ? ` <button class="mini ghost" data-t-purge="${esc(r.skey)}">${Z("彻底删除", "ลบถาวร")}</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+  }
+
+  // ---- ⚙ 清理设置（天数 / 分数 / 自动清理 / 池子上限）----
+  async function settingsDialog() {
     const info = await api("/api/cur/pool/info");
-    const S = info.settings;
-    const box = MODAL.open(`<h3>🧹 ${Z("清理候选池", "ทำความสะอาดคลังผู้สมัคร")}</h3><div data-cl-body></div>`);
-    const draw = async () => {
-      const opts = {}; box.querySelectorAll("[data-cl-o]").forEach((i) => (opts[i.dataset.clO] = i.value));
-      const pv = await api("/api/cur/pool/preview", { json: { opts } });
-      const st = pv.storage, cls = CLS();
-      box.querySelector("[data-cl-body]").innerHTML = `<p class="small muted">${Z("清理掉的先进回收站 7 天（能恢复），之后只留指纹，不会再存。", "ที่ล้างจะอยู่ในถังขยะ 7 วัน (กู้คืนได้) หลังจากนั้นเหลือเพียงลายนิ้วมือ จะไม่ถูกเก็บอีก")}</p>
-        <div class="small">${Z("候选池", "คลัง")} <b>${st.candidates}</b> · ${st.cand_mb} MB · ${Z("回收站", "ถังขยะ")} <b>${st.trash}</b> (${st.trash_mb} MB) · ${Z("缩略图缓存", "แคชรูปย่อ")} ${st.thumbs_mb} MB · ${Z("指纹", "ลายนิ้วมือ")} ${st.gone}</div>
-        <table class="grid" style="margin:8px 0"><tbody>${pv.classes.map((c) => `<tr><td><input type="checkbox" data-cl-c="${c.id}" ${c.n ? "checked" : "disabled"}></td><td>${cls[c.id]}</td><td class="nowrap"><b>${c.n}</b> ${Z("个", "รายการ")}</td><td class="nowrap muted">${c.mb} MB</td></tr>`).join("")}</tbody></table>
-        <div class="row gap wrap small">${[["excl_days", Z("排除 N 天", "คัดออก N วัน")], ["low_score", Z("低分 <", "คะแนนต่ำ <")], ["low_days", Z("低分 N 天", "ต่ำ N วัน")], ["ignored_days", Z("忽略 N 天", "ข้าม N วัน")]].map(([k, l]) => `<label>${l} <input type="number" min="0" data-cl-o="${k}" value="${opts[k] != null && opts[k] !== "" ? esc(opts[k]) : S[k]}" style="width:70px"></label>`).join("")}</div>
-        <div class="row gap" style="margin-top:10px"><button class="primary" data-cl-go>${Z(`清理所选（共 ${pv.total} 个，约 ${pv.mb} MB）`, `ล้างที่เลือก (${pv.total} รายการ ~${pv.mb} MB)`)}</button><button data-cl-trash>🗑 ${Z("回收站", "ถังขยะ")} (${st.trash})</button><button data-mclose>${Z("关闭", "ปิด")}</button></div>
-        <hr><b>${Z("自动清理", "ล้างอัตโนมัติ")}</b>
-        <div class="row gap wrap small" style="margin-top:6px"><label class="chk"><input type="checkbox" data-cl-auto ${S.auto ? "checked" : ""}> ${Z("每天自动清理一次（排除 / 低分 / 忽略 / 重复 / 已删除巡逻）", "ล้างอัตโนมัติวันละครั้ง")}</label>
-          <label>${Z("池子上限", "เพดานคลัง")} <input type="number" min="0" data-cl-cap value="${S.cap}" style="width:80px"></label>
-          <button class="mini" data-cl-save>${Z("保存设置", "บันทึกการตั้งค่า")}</button><button class="mini" data-cl-now>${Z("现在自动清一次", "ล้างอัตโนมัติตอนนี้")}</button></div>`;
-    };
-    await draw();
-    box.onchange = (e) => { if (e.target.closest("[data-cl-o]")) draw().catch((er) => toast(er.message, true)); };
+    const S = info.settings, st = info.storage;
+    const num = (k, w = 70) => `<input type="number" min="0" data-cs="${k}" value="${esc(S[k])}" style="width:${w}px">`;
+    const box = MODAL.open(`<h3>⚙ ${Z("候选池清理设置", "ตั้งค่าการล้างคลังผู้สมัคร")}</h3>
+      <p class="small muted">${Z("清理建议（候选池页面上那一行）按这里的天数 / 分数来数。清掉的先进回收站 7 天（能恢复）。", "ข้อเสนอแนะการล้างในหน้าคลังนับตามจำนวนวัน / คะแนนที่ตั้งไว้ ที่ล้างจะอยู่ในถังขยะ 7 วัน (กู้คืนได้)")}</p>
+      <div class="cur-set">
+        <label>${Z("已忽略超过", "ข้ามไว้เกิน")} ${num("ignored_days")} ${Z("天", "วัน")}</label>
+        <label>${Z("被规则排除、没再出现超过", "ถูกคัดออกตามกฎ และไม่พบอีกเกิน")} ${num("excl_days")} ${Z("天", "วัน")}</label>
+        <label>${Z("低分：低于", "คะแนนต่ำ: ต่ำกว่า")} ${num("low_score")} ${Z("分，且没再出现超过", "และไม่พบอีกเกิน")} ${num("low_days")} ${Z("天", "วัน")}</label>
+        <label class="chk"><input type="checkbox" data-cs-auto ${S.auto ? "checked" : ""}> ${Z("每天自动清理一次", "ล้างอัตโนมัติวันละครั้ง")}</label>
+        <div class="small muted">${Z("自动清理 = 每天把上面这些都清进回收站（已采用、稍后看、没看过的新发现不动）。", "ล้างอัตโนมัติ = วันละครั้ง ล้างตามเงื่อนไขข้างบนเข้าถังขยะ (ที่ใช้แล้ว ดูทีหลัง และของใหม่ที่ยังไม่ได้ดูไม่แตะ)")}</div>
+        <label>${Z("候选池上限", "เพดานคลังผู้สมัคร")} ${num("cap", 90)} ${Z("个", "รายการ")}</label>
+        <div class="small muted">${Z("超过上限时，先清已忽略 / 规则排除 / 看过没处理 / 低分的；没看过的新发现（分数不低）和稍后看的不会被清（宁可超一点）。因为放不下被清的，以后再采到还会回来。", "เมื่อเกินเพดาน จะล้างที่ข้าม / ถูกคัดออก / ดูแล้วไม่จัดการ / คะแนนต่ำก่อน ของใหม่ที่ยังไม่ได้ดู (คะแนนไม่ต่ำ) และดูทีหลังจะไม่ถูกล้าง ที่ล้างเพราะที่เต็มเก็บได้อีกจะกลับมา")}</div>
+      </div>
+      <div class="small muted" style="margin-top:6px">${Z("候选池", "คลัง")} <b>${st.candidates}</b>${MB1(st.cand_mb)} · ${Z("回收站", "ถังขยะ")} <b>${st.trash}</b>${MB1(st.trash_mb)}${st.thumbs_mb >= 1 ? ` · ${Z("缩略图缓存", "แคชรูปย่อ")} ${st.thumbs_mb.toFixed(1)} MB` : ""} · ${Z("指纹", "ลายนิ้วมือ")} ${st.gone}</div>
+      <div class="row gap" style="margin-top:12px"><button class="primary" data-cs-save>${Z("保存", "บันทึก")}</button><button data-cs-now>${Z("现在自动清一次", "ล้างอัตโนมัติตอนนี้")}</button><button data-mclose>${Z("关闭", "ปิด")}</button></div>`);
+    const read = () => ({ ...Object.fromEntries([...box.querySelectorAll("[data-cs]")].map((i) => [i.dataset.cs, i.value])), auto: box.querySelector("[data-cs-auto]").checked });
     box.onclick = async (e) => {
-      const t = (q) => e.target.closest(q);
       try {
-        if (t("[data-cl-go]")) {
-          const classes = [...box.querySelectorAll("[data-cl-c]:checked")].map((i) => i.dataset.clC);
-          if (!classes.length) return toast(Z("先勾选要清理的类", "เลือกประเภทที่จะล้างก่อน"), true);
-          const opts = {}; box.querySelectorAll("[data-cl-o]").forEach((i) => (opts[i.dataset.clO] = i.value));
-          const r = await api("/api/cur/pool/clean", { json: { opts, classes } });
-          toast(Z(`已清理 ${r.removed} 个（约 ${r.mb} MB），在回收站里 7 天内可以恢复`, `ล้างแล้ว ${r.removed} รายการ (~${r.mb} MB) กู้คืนได้ใน 7 วัน`)); await draw(); return render();
+        if (e.target.closest("[data-cs-save]")) { await api("/api/cur/pool/settings", { json: read() }); toast(Z("已保存", "บันทึกแล้ว")); MODAL.close(); return render(); }
+        if (e.target.closest("[data-cs-now]")) {
+          await api("/api/cur/pool/settings", { json: read() });
+          const r = await api("/api/cur/pool/auto", { json: {} });
+          toast(Z(`自动清理：清了 ${r ? r.removed : 0} 个`, `ล้างอัตโนมัติ: ${r ? r.removed : 0} รายการ`)); MODAL.close(); return render();
         }
-        if (t("[data-cl-save]")) {
-          await api("/api/cur/pool/settings", { json: { auto: box.querySelector("[data-cl-auto]").checked, cap: box.querySelector("[data-cl-cap]").value, ...Object.fromEntries([...box.querySelectorAll("[data-cl-o]")].map((i) => [i.dataset.clO, i.value])) } });
-          return toast(Z("已保存", "บันทึกแล้ว"));
-        }
-        if (t("[data-cl-now]")) { const r = await api("/api/cur/pool/auto", { json: {} }); toast(Z(`自动清理：清了 ${r ? r.removed : 0} 个`, `ล้างอัตโนมัติ: ${r ? r.removed : 0} รายการ`)); await draw(); return render(); }
-        if (t("[data-cl-trash]")) return trashDialog();
       } catch (er) { toast(er.message, true); }
     };
   }
-  async function trashDialog() {
-    const info = await api("/api/cur/pool/info");
-    const box = MODAL.open(`<h3>🗑 ${Z("回收站（7 天后彻底删除，只留指纹）", "ถังขยะ (ลบถาวรใน 7 วัน เหลือเพียงลายนิ้วมือ)")}</h3>
-      ${info.trash.length ? `<div style="max-height:50vh;overflow:auto"><table class="grid"><tbody>${info.trash.map((r) => `<tr><td><input type="checkbox" data-tr-c="${esc(r.skey)}"></td><td data-notr>${esc((r.title || r.skey).slice(0, 70))}</td><td class="muted small" data-notr>${esc(r.reason)}</td><td class="muted small">${fmtTime(r.at).slice(5, 10)}</td></tr>`).join("")}</tbody></table></div>` : UX.empty(Z("回收站是空的", "ถังขยะว่าง"))}
-      <div class="row gap" style="margin-top:10px"><button class="primary" data-tr-go>${Z("恢复所选", "กู้คืนที่เลือก")}</button><button class="danger" data-tr-purge>${Z("立刻清空", "ล้างทันที")}</button><button data-mclose>${Z("关闭", "ปิด")}</button></div>`);
+
+  // ---- 每条的「⋯」菜单 + 编辑 ----
+  const OPEN_TIP = () => Z("打开模型原站页面", "เปิดหน้าเว็บต้นทางของโมเดล");
+  function menuHtml(r) {
+    const adopted = !!r.product_id || r.status === "adopted";
+    const restorable = r.status === "ignored" || !!r.excluded;
+    const it = (attr, ic, zh, th, tip, cls = "") => `<button class="cur-mi ${cls}" ${attr}="${r.id}"${tip ? ` title="${esc(tip)}"` : ""}><span>${ic}</span>${Z(zh, th)}</button>`;
+    return `<div class="cur-mh small muted" data-notr>${esc((r.title || "").slice(0, 40))}</div>
+      ${adopted ? "" : it("data-c-collect", "✓", "采用", "ใช้", Z("建产品草稿放进采集箱", "สร้างสินค้าฉบับร่างเข้ากล่องเก็บ"))}
+      ${adopted ? "" : it("data-c-later", "👀", "稍后看", "ดูทีหลัง", "")}
+      ${adopted ? "" : it("data-c-seen", "👁", "标为已看", "ทำเครื่องหมายว่าดูแล้ว", "")}
+      ${adopted || r.status === "ignored" ? "" : it("data-c-ignore", "🚫", "忽略（不再出现）", "ข้าม (ไม่กลับมาอีก)", IGN_TIP())}
+      ${restorable ? it("data-c-restore", "↩", "恢复", "กู้คืน", Z("回到待处理；被规则排除的以后重新打分也不再排除", "กลับไปรอดำเนินการ ที่ถูกคัดออกตามกฎจะไม่ถูกคัดอีกเมื่อคิดคะแนนใหม่")) : ""}
+      ${it("data-c-edit", "✎", "编辑（类目 / 分数 / 备注 / 标签 / 标题）", "แก้ไข (หมวด / คะแนน / โน้ต / แท็ก / ชื่อ)", "")}
+      ${adopted ? "" : it("data-c-reread", "↻", "重新读取", "อ่านใหม่", Z("让扩展重新读详情页，改正标题、作者、图片", "ให้ส่วนขยายอ่านหน้ารายละเอียดใหม่ แก้ชื่อ ผู้ออกแบบ รูป"))}
+      <a class="cur-mi" href="${esc(r.url)}" target="_blank" rel="noopener" title="${esc(OPEN_TIP())}"><span>↗</span>${Z("打开原站", "เปิดเว็บต้นทาง")}</a>
+      ${adopted ? "" : `<hr>${it("data-c-del", "🗑", "删除（进回收站，可恢复）", "ลบ (เข้าถังขยะ กู้คืนได้)", DEL_TIP(), "bad")}`}
+      ${adopted ? "" : `<div class="cur-mnote small muted">${Z("删除 ≠ 忽略：删除后再采到还会出现；忽略则不再出现。", "ลบ ≠ ข้าม: ลบแล้วเก็บได้อีกจะกลับมา ข้ามแล้วจะไม่กลับมา")}</div>`}`;
+  }
+  function openMenu(btn, id) {
+    const r = CROWS[id];
+    if (!r) return;
+    closeMenu();
+    const m = document.createElement("div");
+    m.className = "cur-rmenu";
+    m.innerHTML = menuHtml(r);
+    document.body.appendChild(m);                 // 放在 body 上（外壳里有带 transform 的容器时 fixed 会错位）
+    const b = btn.getBoundingClientRect(), mh = m.offsetHeight, mw = m.offsetWidth;
+    m.style.left = Math.max(8, Math.min(window.innerWidth - mw - 8, b.right - mw)) + "px";
+    m.style.top = Math.max(8, b.bottom + mh + 8 > window.innerHeight ? b.top - mh - 4 : b.bottom + 4) + "px";
+  }
+  function closeMenu() { document.querySelectorAll(".cur-rmenu").forEach((m) => m.remove()); }
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+  window.addEventListener("scroll", closeMenu, true);
+
+  function editDialog(r) {
+    const cats = CALLCATS.map((c) => `<option value="${esc(c.name)}">${esc(TH() ? c.th : c.name)}</option>`).join("");
+    const box = MODAL.open(`<h3>✎ ${Z("编辑候选", "แก้ไขผู้สมัคร")}</h3>
+      <div class="cur-form" style="grid-template-columns:1fr">
+        <label>${Z("标题", "ชื่อ")}<input data-e="title" value="${esc(r.title)}" data-notr></label>
+        <label>${Z("类目", "หมวดหมู่")}<input data-e="category" list="cur-e-cats" value="${esc(r.category || "")}" placeholder="${esc(Z("留空 = 按 AI / 规则", "ว่าง = ตาม AI / กฎ"))}"><datalist id="cur-e-cats">${cats}</datalist></label>
+        <label>${Z("分数（0–100）", "คะแนน (0–100)")}<input type="number" min="0" max="100" step="1" data-e="score" value="${r.score_manual ? esc(Math.round(r.score)) : ""}" placeholder="${esc(Math.round(r.score_auto))}">
+          <span class="small muted">${Z(`系统算的原分数：${Math.round(r.score_auto)}。填了就用你填的（重新打分也不会改）；留空 = 用系统算的。`, `คะแนนเดิมที่ระบบคิด: ${Math.round(r.score_auto)} ถ้ากรอกจะใช้ค่าที่กรอก (คิดคะแนนใหม่ก็ไม่เปลี่ยน) เว้นว่าง = ใช้ที่ระบบคิด`)}</span></label>
+        <label>${Z("备注", "โน้ต")}<textarea rows="2" data-e="note" maxlength="500">${esc(r.note || "")}</textarea></label>
+        <label>${Z("标签（用逗号分开）", "แท็ก (คั่นด้วยจุลภาค)")}<input data-e="tags" value="${esc((r.tags || []).join(", "))}"></label>
+      </div>
+      <div class="row gap" style="margin-top:12px"><button class="primary" data-e-save>${Z("保存", "บันทึก")}</button><button data-mclose>${Z("取消", "ยกเลิก")}</button></div>`);
     box.onclick = async (e) => {
-      try {
-        if (e.target.closest("[data-tr-go]")) { const sk = [...box.querySelectorAll("[data-tr-c]:checked")].map((i) => i.dataset.trC); if (!sk.length) return; const r = await api("/api/cur/pool/restore", { json: { skeys: sk } }); toast(Z(`已恢复 ${r.restored} 个`, `กู้คืน ${r.restored} รายการ`)); MODAL.close(); return render(); }
-        if (e.target.closest("[data-tr-purge]")) { if (!confirm(Z("彻底删除回收站里的全部内容？（指纹还在，不会再存）", "ลบถาวร?"))) return; await api("/api/cur/pool/purge", { json: {} }); MODAL.close(); return toast(Z("已清空", "ล้างแล้ว")); }
-      } catch (er) { toast(er.message, true); }
+      if (!e.target.closest("[data-e-save]")) return;
+      const g = (k) => box.querySelector(`[data-e="${k}"]`).value;
+      const body = { id: r.id, title: g("title").trim() === (r.title_raw || "") ? "" : g("title").trim(), category: g("category").trim(), score: g("score").trim(), note: g("note"), tags: g("tags") };
+      try { await api("/api/cur/candidates/edit", { json: body }); MODAL.close(); toast(Z("已保存", "บันทึกแล้ว")); render(); } catch (er) { toast(er.message, true); }
+    };
+  }
+  function catDialog(ids) {
+    const box = MODAL.open(`<h3>🏷 ${Z(`改类目（${ids.length} 个）`, `เปลี่ยนหมวด (${ids.length} รายการ)`)}</h3>
+      <label>${Z("类目", "หมวดหมู่")}<input data-e="category" list="cur-e-cats" style="width:100%"><datalist id="cur-e-cats">${CALLCATS.map((c) => `<option value="${esc(c.name)}">${esc(TH() ? c.th : c.name)}</option>`).join("")}</datalist></label>
+      <div class="row gap" style="margin-top:12px"><button class="primary" data-e-save>${Z("保存", "บันทึก")}</button><button data-mclose>${Z("取消", "ยกเลิก")}</button></div>`);
+    box.onclick = async (e) => {
+      if (!e.target.closest("[data-e-save]")) return;
+      const cat = box.querySelector("[data-e=category]").value.trim();
+      if (!cat) return toast(Z("先填类目", "กรอกหมวดหมู่ก่อน"), true);
+      try { for (const id of ids) await api("/api/cur/candidates/edit", { json: { id, category: cat } }); MODAL.close(); SEL.clear(); toast(Z("已保存", "บันทึกแล้ว")); render(); } catch (er) { toast(er.message, true); }
     };
   }
   function marketCell(mk, radar) {
@@ -237,22 +359,30 @@
   }
   function candRow(r, radar) {
     const tone = scTone(r.score, r.excluded);
-    const act = r.product_id ? `<span class="mono" data-p360="${esc(r.product_id)}" data-notr>${esc(r.product_id)}</span> <button class="mini" data-c-prod="${esc(r.product_id)}">${Z("编辑产品", "แก้ไขสินค้า")}</button>`
-        : `<button class="mini primary-lite" data-c-collect="${r.id}" title="${esc(Z("马上建产品草稿放进采集箱（许可待核验），扩展在后台读详情页、下载模型文件", "สร้างสินค้าฉบับร่างเข้ากล่องเก็บทันที ส่วนขยายจะอ่านหน้ารายละเอียดและดาวน์โหลดไฟล์เบื้องหลัง"))}">✓ ${Z("采用", "ใช้")}</button> ${r.status === "ignored" ? `<button class="mini" data-c-unignore="${r.id}">${Z("恢复", "คืน")}</button>` : `<button class="mini ghost" data-c-ignore="${r.id}">${Z("忽略", "ข้าม")}</button>`}`;
+    const adopted = !!r.product_id || r.status === "adopted";
+    const restorable = r.status === "ignored" || !!r.excluded;
+    const menu = `<button class="mini cur-more" data-c-menu="${r.id}" title="${esc(Z("更多操作：稍后看 / 忽略 / 编辑 / 删除……", "การทำงานเพิ่มเติม: ดูทีหลัง / ข้าม / แก้ไข / ลบ…"))}" aria-label="${esc(Z("更多操作", "การทำงานเพิ่มเติม"))}">${Z("更多", "เพิ่มเติม")} ▾</button>`;
+    const primary = adopted ? `<span class="mono" data-p360="${esc(r.product_id)}" data-notr>${esc(r.product_id)}</span> <button class="mini" data-c-prod="${esc(r.product_id)}">${Z("编辑产品", "แก้ไขสินค้า")}</button>`
+      : restorable ? `<button class="mini primary-lite" data-c-restore="${r.id}" title="${esc(Z("回到待处理", "กลับไปรอดำเนินการ"))}">↩ ${Z("恢复", "กู้คืน")}</button>`
+      : `<button class="mini primary-lite" data-c-collect="${r.id}" title="${esc(Z("马上建产品草稿放进采集箱（许可待核验），扩展在后台读详情页、下载模型文件", "สร้างสินค้าฉบับร่างเข้ากล่องเก็บทันที ส่วนขยายจะอ่านหน้ารายละเอียดและดาวน์โหลดไฟล์เบื้องหลัง"))}">✓ ${Z("采用", "ใช้")}</button>`;
+    const act = `${primary} ${menu}`;
     const bad = r.capture_bad ? `<div class="small bad">⚠ ${Z("采集可能出错", "อาจเก็บข้อมูลผิด")}：${esc(TH() && r.capture_bad_th ? r.capture_bad_th : r.capture_bad)}
       ${r.refreshing ? pill(Z("正在重新读取", "กำลังอ่านใหม่"), "info") : `<button class="mini" data-c-reread="${r.id}">↻ ${Z("重新读取", "อ่านใหม่")}</button>`}</div>` : "";
     const ai = r.capture_bad ? `<span class="muted">${Z("先改正采集，再让 AI 判断", "แก้ข้อมูลก่อน แล้ว AI จะประเมิน")}</span>`
       : r.ai_error ? `<span class="warn-t"${TH() ? "" : ` title="${esc(r.ai_error)}"`}>${Z("AI 判断出错，只按规则打分", "AI ประเมินผิดพลาด ใช้คะแนนตามกฎ")}</span>`
       : r.ai ? `<span data-notr>${esc(TH() && r.reason_th ? r.reason_th : r.reason || "")}</span>${(r.keywords || []).length ? `<div class="muted" data-notr>${esc(r.keywords.slice(0, 4).join(", "))}</div>` : ""}` : `<span class="muted">${Z("等 AI 判断", "รอ AI")}</span>`;
-    return `<tr class="${r.excluded ? "cur-ex" : ""}${r.capture_bad ? " cur-badrow" : ""}"><td><input type="checkbox" data-c-sel="${r.id}" ${SEL.has(r.id) ? "checked" : ""}></td>
-      <td><span class="cur-sc ${tone}" title="${esc(partTip(r.parts))}">${Math.round(r.score)}</span></td>
-      <td><div class="cur-pic">${img(r.thumb)}<div>${link(r.url, (r.title || r.url).slice(0, 80))}${r.new ? " " + pill(Z("新品", "ใหม่"), "info") : ""}
-        <div class="small muted"><span data-notr>${esc(r.platform_name)}${r.author ? " · " + esc(r.author) : ""}</span>${r.category ? ` · <span data-notr>${esc(catTxt(r))}</span>` : ""}</div>
-        ${r.excluded ? `<div class="small bad" data-notr>✕ ${esc(reasonTxt(r))}</div>` : ""}${bad}</div></div></td>
-      <td class="small nowrap">${r.est ? `<span data-notr>${esc(r.est)}</span> ${r.measured ? pill(Z("实测", "วัดจริง"), "ok") : pill(Z("估", "ประมาณ"), "")}` : "—"}${r.single === false ? `<div title="${Z("多色：能打（P1S + AMS），生产效率和利润分扣一些", "หลายสี: พิมพ์ได้ (P1S + AMS) หักคะแนนประสิทธิภาพและกำไรเล็กน้อย")}">${pill(Z("多色（需要 AMS）", "หลายสี (ต้องมี AMS)"), "warn")}</div>` : ""}${r.price ? `<div class="muted" data-notr>${esc(r.price)}</div>` : ""}</td>
-      <td class="small">${marketCell(r.market, radar)}</td>
-      <td class="small cur-reason">${ai}</td>
-      <td class="nowrap">${act}</td></tr>`;
+    const st = r.status === "later" ? " " + pill("👀 " + Z("稍后看", "ดูทีหลัง"), "warn") : r.status === "ignored" ? " " + pill(Z("已忽略", "ข้ามแล้ว"), "") : "";
+    const meta = (r.note ? `<div class="small cur-note-l" data-notr>📝 ${esc(r.note.slice(0, 90))}</div>` : "") + ((r.tags || []).length ? `<div class="cur-tags">${r.tags.map((t) => `<span class="cur-pill info" data-notr>#${esc(t)}</span>`).join(" ")}</div>` : "");
+    const manual = r.score_manual ? `<div class="small muted nowrap" title="${esc(Z("手动改过的分数；系统算的原分数是 " + Math.round(r.score_auto), "คะแนนที่แก้เอง คะแนนเดิมที่ระบบคิดคือ " + Math.round(r.score_auto)))}">✎ ${Z("原", "เดิม")} ${Math.round(r.score_auto)}</div>` : "";
+    return `<tr class="${r.excluded ? "cur-ex" : ""}${r.capture_bad ? " cur-badrow" : ""}${r.status === "ignored" ? " cur-ign" : ""}" data-c-row="${r.id}"><td class="cur-c-sel"><input type="checkbox" data-c-sel="${r.id}" ${SEL.has(r.id) ? "checked" : ""}></td>
+      <td class="cur-c-sc"><span class="cur-sc ${tone}" title="${esc(partTip(r.parts))}">${Math.round(r.score)}</span>${manual}</td>
+      <td class="cur-c-main"><div class="cur-pic">${img(r.thumb)}<div>${link(r.url, (r.title || r.url).slice(0, 80))}${r.new ? " " + pill(Z("新品", "ใหม่"), "info") : ""}${st}
+        <div class="small muted"><span data-notr>${esc(r.platform_name)}${r.author ? " · " + esc(r.author) : ""}</span>${r.category ? ` · <span data-notr>${esc(catTxt(r))}</span>${r.cat_manual ? " ✎" : ""}` : ""}</div>
+        ${r.excluded ? `<div class="small bad" data-notr>✕ ${esc(reasonTxt(r))}</div>` : r.ex_ok ? `<div class="small muted">${Z("规则排除过，已恢复", "เคยถูกคัดออกตามกฎ กู้คืนแล้ว")}</div>` : ""}${meta}${bad}</div></div></td>
+      <td class="small nowrap cur-c-est">${r.est ? `<span data-notr>${esc(r.est)}</span> ${r.measured ? pill(Z("实测", "วัดจริง"), "ok") : pill(Z("估", "ประมาณ"), "")}` : "—"}${r.single === false ? `<div title="${Z("多色：能打（P1S + AMS），生产效率和利润分扣一些", "หลายสี: พิมพ์ได้ (P1S + AMS) หักคะแนนประสิทธิภาพและกำไรเล็กน้อย")}">${pill(Z("多色（需要 AMS）", "หลายสี (ต้องมี AMS)"), "warn")}</div>` : ""}${r.price ? `<div class="muted" data-notr>${esc(r.price)}</div>` : ""}</td>
+      <td class="small cur-c-mk">${marketCell(r.market, radar)}</td>
+      <td class="small cur-reason cur-c-ai">${ai}</td>
+      <td class="nowrap cur-c-act">${act}</td></tr>`;
   }
 
   // ======================= 采集箱 =======================
@@ -588,7 +718,7 @@
   }
   document.addEventListener("click", async (e) => {
     const s = sec();
-    if (!s || !s.contains(e.target)) return;
+    if (!s || !(s.contains(e.target) || e.target.closest(".cur-rmenu"))) return;
     const t = (q) => e.target.closest(q);
     let b;
     if ((b = t(".ux-tabs[data-ux-group='curate'] [data-ux-tab]"))) return goTab(b.dataset.uxTab);
@@ -596,10 +726,10 @@
       const g = b.dataset.uxGo;
       if (g.startsWith("tab:")) return;
       CGS = {}; CV = 0;
-      if (g === "cand:hi") Object.assign(FC, { min: String(OV.alert_score || 70), ex: "", new: "", bad: "" });
-      else if (g === "cand:new") Object.assign(FC, { new: "1", min: "0", bad: "" });
-      else if (g === "cand:ex") Object.assign(FC, { ex: "1", status: "all", min: "0", bad: "" });
-      else if (g === "cand:bad") Object.assign(FC, { bad: "1", ex: "1", status: "all", min: "0", new: "" });
+      if (g === "cand:hi") Object.assign(FC, { min: String(OV.alert_score || 70), tab: "pending", new: "", bad: "" });
+      else if (g === "cand:new") Object.assign(FC, { new: "1", min: "0", tab: "pending", bad: "" });
+      else if (g === "cand:ex") Object.assign(FC, { tab: "done", min: "0", new: "", bad: "" });
+      else if (g === "cand:bad") Object.assign(FC, { bad: "1", tab: "all", min: "0", new: "" });
       LSset("fc", FC);
       return goTab("cur_cand");
     }
@@ -607,14 +737,58 @@
     if ((b = t("[data-c-radar]"))) { e.preventDefault(); return goTab("ops_radar"); }
     if ((b = t("[data-c-collect]"))) return busy(b, async () => { const r = await api("/api/cur/candidates/adopt", { json: { ids: [+b.dataset.cCollect] } }); toast(collectMsg(r)); await show(CUR); });
     if ((b = t("[data-c-dl]"))) return dlOne(b.dataset.cDl, b);
-    if ((b = t("[data-c-ignore],[data-c-unignore]"))) { await api("/api/cur/candidates/status", { json: { ids: [+(b.dataset.cIgnore || b.dataset.cUnignore)], status: b.dataset.cIgnore ? "ignored" : "" } }); return render(); }
+    if ((b = t("[data-c-menu]"))) { e.stopPropagation(); const had = document.querySelector(".cur-rmenu"); closeMenu(); if (had && had.dataset.for === b.dataset.cMenu) return; openMenu(b, +b.dataset.cMenu); const m = document.querySelector(".cur-rmenu"); if (m) m.dataset.for = b.dataset.cMenu; return; }
+    if (!t(".cur-rmenu") ) closeMenu(); else if (t(".cur-mi")) setTimeout(closeMenu, 0);
+    const one = (a) => [+a];
+    const done = async (p, msg) => { await p; if (msg) toast(msg); await show(CUR); };
+    if ((b = t("[data-c-ignore]"))) return done(api("/api/cur/candidates/status", { json: { ids: one(b.dataset.cIgnore), status: "ignored" } }), Z("已忽略：以后不再出现，在「已处理」里可恢复", "ข้ามแล้ว: ไม่กลับมาอีก กู้คืนได้ในแท็บ「จัดการแล้ว」"));
+    if ((b = t("[data-c-later]"))) return done(api("/api/cur/candidates/status", { json: { ids: one(b.dataset.cLater), status: "later" } }), Z("已放进稍后看", "ย้ายไปดูทีหลังแล้ว"));
+    if ((b = t("[data-c-seen]"))) return done(api("/api/cur/candidates/status", { json: { ids: one(b.dataset.cSeen), status: "seen" } }));
+    if ((b = t("[data-c-restore]"))) return done(api("/api/cur/candidates/restore", { json: { ids: one(b.dataset.cRestore) } }), Z("已恢复到待处理", "กู้คืนไปรอดำเนินการแล้ว"));
+    if ((b = t("[data-c-del]"))) return done(api("/api/cur/candidates/delete", { json: { ids: one(b.dataset.cDel) } }), Z("已删除：在「回收站」里 7 天内可恢复（以后再采到还会出现）", "ลบแล้ว: กู้คืนได้ในถังขยะ 7 วัน (เก็บได้อีกจะกลับมา)"));
+    if ((b = t("[data-c-edit]"))) { const r = CROWS[+b.dataset.cEdit]; if (r) editDialog(r); return; }
+    if ((b = t("[data-c-tab]"))) { FC.tab = b.dataset.cTab; FC.bad = ""; if (FC.tab !== "pending" && FC.tab !== "done") FC.new = ""; CGS = {}; CV = 0; SEL.clear(); TSEL.clear(); LSset("fc", FC); return render(); }
+    if ((b = t("[data-c-settings]"))) { e.preventDefault(); return settingsDialog(); }
+    if ((b = t("[data-cl-sg]"))) {
+      e.preventDefault(); e.stopPropagation();
+      const id = b.dataset.clSg;
+      return busy(b, async () => {
+        const r = id === "bad" ? await api("/api/cur/candidates/delete-bad", { json: {} }) : await api("/api/cur/pool/clean", { json: { classes: [id] } });
+        const n = id === "bad" ? r.deleted : r.removed;
+        toast(id === "dup" ? Z(`已合并，清掉 ${n} 个重复，在回收站 7 天内可恢复`, `รวมแล้ว ล้างที่ซ้ำ ${n} รายการ กู้คืนได้ใน 7 วัน`) : Z(`已清掉 ${n} 个，在回收站里 7 天内可以恢复`, `ล้างแล้ว ${n} รายการ กู้คืนได้ในถังขยะ 7 วัน`));
+        await show(CUR);
+      });
+    }
+    // 回收站页签
+    if ((b = t("[data-t-all]"))) { s.querySelectorAll("[data-t-sel]").forEach((x) => { x.checked = b.checked; (b.checked ? TSEL.add(x.dataset.tSel) : TSEL.delete(x.dataset.tSel)); }); return floatBar(); }
+    if ((b = t("[data-t-sel]"))) { (b.checked ? TSEL.add(b.dataset.tSel) : TSEL.delete(b.dataset.tSel)); return floatBar(); }
+    if ((b = t("[data-t-restore]"))) return busy(b, async () => { const r = await api("/api/cur/pool/restore", { json: { skeys: [b.dataset.tRestore] } }); toast(Z(`已恢复 ${r.restored} 个`, `กู้คืน ${r.restored} รายการ`)); await show(CUR); });
+    if ((b = t("[data-t-purge]"))) {
+      if (!confirm(Z("彻底删除这一个？（不能再恢复）", "ลบถาวรรายการนี้? (กู้คืนไม่ได้)"))) return;
+      return busy(b, async () => { await api("/api/cur/pool/purge", { json: { skeys: [b.dataset.tPurge] } }); TSEL.delete(b.dataset.tPurge); await show(CUR); });
+    }
+    if ((b = t("[data-t-empty]"))) {
+      if (!confirm(Z("清空回收站？里面的全部彻底删除，不能再恢复。", "ล้างถังขยะ? ลบถาวรทั้งหมด กู้คืนไม่ได้"))) return;
+      return busy(b, async () => { await api("/api/cur/pool/purge", { json: {} }); TSEL.clear(); toast(Z("已清空", "ล้างแล้ว")); await show(CUR); });
+    }
+    if ((b = t("[data-t-bulk]"))) {
+      const sk = [...TSEL], a = b.dataset.tBulk;
+      if (a === "clear") { TSEL.clear(); return render(); }
+      if (!sk.length) return;
+      if (a === "purge" && !confirm(Z(`彻底删除选中的 ${sk.length} 个？不能再恢复。`, `ลบถาวร ${sk.length} รายการที่เลือก? กู้คืนไม่ได้`))) return;
+      return busy(b, async () => {
+        if (a === "restore") { const r = await api("/api/cur/pool/restore", { json: { skeys: sk } }); toast(Z(`已恢复 ${r.restored} 个`, `กู้คืน ${r.restored} รายการ`)); }
+        else await api("/api/cur/pool/purge", { json: { skeys: sk } });
+        TSEL.clear(); await show(CUR);
+      });
+    }
     if ((b = t("[data-c-reread]"))) return busy(b, async () => { const r = await api("/api/cur/candidates/recollect", { json: { ids: [+b.dataset.cReread] } }); toast(rereadMsg(r)); render(); });
     if ((b = t("[data-c-rereadbad]"))) return busy(b, async () => { const r = await api("/api/cur/candidates/recollect", { json: {} }); toast(rereadMsg(r)); render(); });
     if ((b = t("[data-c-delbad]"))) {
-      if (!confirm(Z("删掉所有「采集可能出错」的候选？（采用过的不删；以后在模型网站上再看到会重新记下来）", "ลบผู้สมัครที่「อาจเก็บข้อมูลผิด」ทั้งหมด? (ที่ใช้แล้วไม่ลบ)"))) return;
-      return busy(b, async () => { const r = await api("/api/cur/candidates/delete-bad", { json: {} }); toast(Z(`删了 ${r.deleted} 个`, `ลบแล้ว ${r.deleted} รายการ`)); FC.bad = ""; LSset("fc", FC); await show(CUR); });
+      if (!confirm(Z("删掉所有「采集可能出错」的候选？（进回收站，7 天内能恢复；采用过的不删；以后在模型网站上再看到会重新记下来）", "ลบผู้สมัครที่「อาจเก็บข้อมูลผิด」ทั้งหมด? (เข้าถังขยะ กู้คืนได้ใน 7 วัน ที่ใช้แล้วไม่ลบ)"))) return;
+      return busy(b, async () => { const r = await api("/api/cur/candidates/delete-bad", { json: {} }); toast(Z(`删了 ${r.deleted} 个`, `ลบแล้ว ${r.deleted} รายการ`)); FC.bad = ""; FC.tab = "pending"; LSset("fc", FC); await show(CUR); });
     }
-    if ((b = t("[data-c-badonly]"))) { FC.bad = FC.bad ? "" : "1"; if (FC.bad) Object.assign(FC, { ex: "1", status: "all", min: "0" }); LSset("fc", FC); return render(); }
+    if ((b = t("[data-c-badonly]"))) { FC.bad = FC.bad ? "" : "1"; FC.tab = FC.bad ? "all" : "pending"; if (FC.bad) FC.min = "0"; LSset("fc", FC); return render(); }
     if ((b = t("[data-c-all]"))) { s.querySelectorAll("[data-c-sel]").forEach((x) => { x.checked = b.checked; (b.checked ? SEL.add(+x.dataset.cSel) : SEL.delete(+x.dataset.cSel)); }); return floatBar(); }
     if ((b = t("[data-c-sel]"))) { (b.checked ? SEL.add(+b.dataset.cSel) : SEL.delete(+b.dataset.cSel)); return floatBar(); }
     if ((b = t("[data-c-gclear]"))) { CGS = {}; CV = 0; return render(); }
@@ -625,15 +799,18 @@
     }
     if (CUR === "cur_cand" && (b = t("[data-grp-vdel]"))) { e.stopPropagation(); const r = await api(`/api/goods/views/${b.dataset.grpVdel}?scope=cand`, { method: "DELETE" }); CVIEWS = r.views; if (CV === +b.dataset.grpVdel) CV = 0; return render(); }
     if (CUR === "cur_cand" && (b = t("[data-grp-view]"))) { const v = CVIEWS.find((x) => x.id === +b.dataset.grpView); if (v) { CGS = { ...((v.state || {}).sel || {}) }; Object.assign(FC, (v.state || {}).fc || {}); CV = v.id; SEL.clear(); } return render(); }
-    if ((b = t("[data-c-clean]"))) return cleanDialog();
     if ((b = t("[data-c-bulk]"))) {
-      const ids = [...SEL];
-      if (b.dataset.cBulk === "clear") { SEL.clear(); return render(); }
+      const ids = [...SEL], a = b.dataset.cBulk;
+      if (a === "clear") { SEL.clear(); return render(); }
       if (!ids.length) return toast(Z("先勾选", "เลือกก่อน"), true);
+      if (a === "cat") return catDialog(ids);
+      if (a === "delete" && !confirm(Z(`删除选中的 ${ids.length} 个？进回收站，7 天内可恢复；以后再采到还会出现。`, `ลบ ${ids.length} รายการที่เลือก? เข้าถังขยะ กู้คืนได้ใน 7 วัน เก็บได้อีกจะกลับมา`))) return;
       return busy(b, async () => {
-        if (b.dataset.cBulk === "collect") toast(collectMsg(await api("/api/cur/candidates/adopt", { json: { ids } })));
-        else if (b.dataset.cBulk === "reread") toast(rereadMsg(await api("/api/cur/candidates/recollect", { json: { ids } })));
-        else await api("/api/cur/candidates/status", { json: { ids, status: b.dataset.cBulk === "later" ? "later" : b.dataset.cBulk === "seen" ? "seen" : "ignored" } });
+        if (a === "collect") toast(collectMsg(await api("/api/cur/candidates/adopt", { json: { ids: ids.filter((i) => CROWS[i] && !CROWS[i].product_id) } })));
+        else if (a === "reread") toast(rereadMsg(await api("/api/cur/candidates/recollect", { json: { ids } })));
+        else if (a === "restore") { const r = await api("/api/cur/candidates/restore", { json: { ids } }); toast(Z(`已恢复 ${r.restored} 个`, `กู้คืน ${r.restored} รายการ`)); }
+        else if (a === "delete") { const r = await api("/api/cur/candidates/delete", { json: { ids } }); toast(Z(`已删除 ${r.deleted} 个，在回收站里 7 天内可恢复`, `ลบแล้ว ${r.deleted} รายการ กู้คืนได้ในถังขยะ 7 วัน`)); }
+        else await api("/api/cur/candidates/status", { json: { ids, status: a === "later" ? "later" : a === "seen" ? "seen" : "ignored" } });
         SEL.clear();
         await show(CUR);
       });
@@ -685,7 +862,7 @@
     if ((b = t("[data-w-run]"))) return busy(b, async () => { await api(`/api/cur/watches/${b.dataset.wRun}`, { json: { run: true } }); toast(Z("排到最前了，扩展下次轮到时就去看", "จัดคิวแรกแล้ว")); render(); });
     if ((b = t("[data-w-tog]"))) { await api(`/api/cur/watches/${b.dataset.wTog}`, { json: { enabled: b.dataset.on !== "1" } }); return render(); }
     if ((b = t("[data-w-del]"))) { if (!confirm(Z("删掉这个关注？已经进候选池的模型会保留。", "ลบการติดตามนี้? โมเดลในคลังผู้สมัครยังอยู่"))) return; await api(`/api/cur/watches/${b.dataset.wDel}`, { json: { delete: true } }); return render(); }
-    if ((b = t("[data-w-cand]"))) { Object.assign(FC, { min: "0", ex: "1", status: "all", new: "", bad: "" }); FC.watch = b.dataset.wCand; LSset("fc", { ...FC, watch: "" }); return goTab("cur_cand"); }
+    if ((b = t("[data-w-cand]"))) { Object.assign(FC, { min: "0", tab: "all", new: "", bad: "" }); FC.watch = b.dataset.wCand; LSset("fc", { ...FC, watch: "" }); return goTab("cur_cand"); }
     if ((b = t("[data-w-reset]"))) return busy(b, async () => { await api("/api/cur/pace/reset", { json: { platform: b.dataset.wReset } }); render(); });
     if ((b = t("[data-q-act]"))) return busy(b, async () => { await api("/api/cur/collect/action", { json: { id: +(b.dataset.q || 0), action: b.dataset.qAct } }); render(); });
     // 采集队列：网站暂停 / 继续、清理、筛选、勾选、单个任务和批量操作
@@ -802,7 +979,7 @@
         if (s.IV != null) IV = s.IV;
         if (s.CGS) CGS = { ...s.CGS };
         if (s.CV != null) CV = s.CV;
-        if (s.FC) FC = Object.assign(FC, s.FC);
+        if (s.FC) { FC = Object.assign(FC, s.FC); delete FC.status; delete FC.ex; if (!["pending", "adopted", "done", "trash", "all"].includes(FC.tab)) FC.tab = "pending"; }
         if (s.QF) QF = Object.assign(QF, s.QF);
       },
     });

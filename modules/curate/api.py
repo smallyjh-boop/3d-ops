@@ -38,6 +38,14 @@ def _go(fn):
         return _e(e)
 
 
+def _int(v):
+    """接口里的编号（可能是字符串）→ int；不是数字 = 请填数字。"""
+    try:
+        return int(float(v)) if v not in (None, "") else 0
+    except (TypeError, ValueError):
+        raise ValueError(pool.NUM_MSG)
+
+
 def _owner():
     return auth.is_owner()
 
@@ -59,7 +67,7 @@ def cur_overview():
     def go():
         inbox.migrate()
         c = db.conn()
-        return {"cand": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE excluded='' AND status=''").fetchone()[0],
+        return {"cand": c.execute(f"SELECT COUNT(*) FROM cur_candidates WHERE {cand.TAB_SQL['pending']}").fetchone()[0],
                 "queue": c.execute("SELECT COUNT(*) FROM cur_collect WHERE state IN ('waiting','running')").fetchone()[0]
                 + c.execute("SELECT COUNT(*) FROM cur_files WHERE state IN ('queued','downloading')").fetchone()[0],
                 "watch": c.execute("SELECT COUNT(*) FROM cur_watches WHERE enabled=1").fetchone()[0], "ai": cand.ai_on(),
@@ -80,6 +88,33 @@ def cur_candidates():
 def cur_cand_status():
     b = _b()
     return _go(lambda: cand.set_status(b.get("ids") or [], b.get("status") or "") or {})
+
+
+@bp.post("/api/cur/candidates/delete")
+def cur_cand_delete():
+    """🗑 删除：进回收站（7 天内能恢复）。不写指纹：以后在模型网站上再采到还会出现。要「再也不出现」用忽略。已采用的不删。"""
+    b = _b()
+    return _go(lambda: {"deleted": pool.delete_rows(b.get("ids") or [])})
+
+
+@bp.post("/api/cur/candidates/restore")
+def cur_cand_restore():
+    """恢复已忽略 / 被规则排除的候选（回到待处理）。"""
+    b = _b()
+    return _go(lambda: {"restored": pool.restore_rows(b.get("ids") or [])})
+
+
+@bp.post("/api/cur/candidates/edit")
+def cur_cand_edit():
+    """编辑一条：类目、手动分数（原分数留着）、备注、标签、标题。"""
+    b = _b()
+    return _go(lambda: cand.edit_row(b.get("id"), b))
+
+
+@bp.get("/api/cur/pool/suggestions")
+def cur_pool_suggestions():
+    """能清理的东西（一行一类，带受影响的候选）；阈值用设置里的。"""
+    return _go(lambda: pool.suggestions())
 
 
 @bp.get("/api/cur/pool/info")
@@ -148,11 +183,13 @@ def cur_pool_restore():
 
 @bp.post("/api/cur/pool/purge")
 def cur_pool_purge():
-    """立刻清空回收站（只留指纹）。"""
+    """彻底删除回收站里的：skeys 指定的，不传 = 全部清空（指纹不动）。"""
+    b = _b()
+
     def go():
         if not _owner():
             raise PermissionError
-        return {"purged": pool.purge_expired(force=True)}
+        return {"purged": pool.purge_trash(b["skeys"] if isinstance(b.get("skeys"), list) else None)}
     try:
         return _go(go)
     except PermissionError:
@@ -187,7 +224,7 @@ def cur_cand_adopt():
         items = []
         if b.get("ids"):
             mk = ",".join("?" for _ in b["ids"])
-            items = [dict(r) for r in db.conn().execute(f"SELECT url, title, thumb FROM cur_candidates WHERE id IN ({mk})", [int(i) for i in b["ids"]])]
+            items = [dict(r) for r in db.conn().execute(f"SELECT url, COALESCE(NULLIF(title_ovr,''), title) title, thumb FROM cur_candidates WHERE id IN ({mk})", pool._ids(b["ids"]))]
         for u in re.split(r"[\s,]+", str(b.get("urls") or "")):
             if u.strip():
                 items.append({"url": u.strip()})
@@ -400,7 +437,7 @@ def cur_pace_reset():
 @bp.post("/api/cur/collect/action")
 def cur_collect_action():
     b = _b()
-    return _go(lambda: watch.collect_action(int(b.get("id") or 0), b.get("action") or ""))
+    return _go(lambda: watch.collect_action(_int(b.get("id")), b.get("action") or ""))
 
 
 @bp.post("/api/cur/from-radar")
@@ -476,7 +513,7 @@ def ext_queue():
 @bp.post("/api/v1/curate/ext/queue/action")
 def ext_queue_action():
     b = _b()
-    return _go(lambda: watch.collect_action(int(b.get("id") or 0), b.get("action") or ""))
+    return _go(lambda: watch.collect_action(_int(b.get("id")), b.get("action") or ""))
 
 
 @bp.get("/api/v1/curate/ext/next")
@@ -525,5 +562,5 @@ def ext_watch_next():
 @bp.post("/api/v1/curate/ext/watch/result")
 def ext_watch_result():
     b = _b()
-    return _go(lambda: watch.watch_result(int(b.get("id") or 0), b.get("items") or [], b.get("error") or "",
+    return _go(lambda: watch.watch_result(_int(b.get("id")), b.get("items") or [], b.get("error") or "",
                                           {"snippet": b.get("snippet"), "url": b.get("url"), "status": b.get("status")}))
