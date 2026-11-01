@@ -51,7 +51,7 @@ def adopt(items, who=""):
         prefix = (cfg.get("sku_prefix") or "3DP").strip().upper() or "3DP"
         pid = store.new_id(prefix)
         p = store.blank_product(pid)
-        p.update(name_zh=title, draft=True)
+        p.update(name_zh=title, draft=True, inbox=True)           # 先进「选品 → 采集箱」，「转入产品库」以后才出现在产品库
         ai = db.jl(row["ai"])
         p["source"] = {"source": "curate", "source_id": k, "source_url": url, "platform": sites.name_of(sites.platform(url)),
                        "title_original": title, "author": row["author"], "license_verified": False, "imported_at": time.time(), "key_name": who,
@@ -126,8 +126,78 @@ def enrich(pid, data, who=""):
         c.execute("INSERT INTO cur_files(product_id, platform, name, url, size_text, kind, folder, state, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
                   (pid, plat, name, f["url"][:1000], str(f.get("size") or "")[:20], kind, str(f.get("folder") or "")[:100], "queued" if auto_dl else "", now, now))
     c.execute("UPDATE cur_collect SET post=1 WHERE product_id=?", (pid,))
+    if copy_untouched(p) and s.get("ai_copy_from") == "title" and (desc or data.get("tags")):
+        # 采用时只按标题写的 AI 文案，没人改过：详情页到了以后按原站描述 / 标签重写一次
+        p = _product(pid)
+        cp = p.setdefault("copy", {})
+        for k in p["source"].get("ai_copy_keys") or []:
+            cp.pop(k, None)
+        p["source"]["ai_copy_from"] = "rewrite"
+        store.save(p)
+        c.execute("UPDATE cur_collect SET copy=0 WHERE id=(SELECT MAX(id) FROM cur_collect WHERE product_id=?)", (pid,))
     c.commit()
     return True
+
+
+def _copy_sig(p):
+    import hashlib
+    import json
+    from core import ai_copy
+    cp = p.get("copy") or {}
+    return hashlib.md5(json.dumps({k: cp.get(k) for k in ai_copy.COPY_KEYS}, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def copy_untouched(p):
+    """AI 写完以后有没有人改过文案（改过就再也不自动改）。"""
+    s = p.get("source") or {}
+    return bool(s.get("ai_copy_sig")) and s["ai_copy_sig"] == _copy_sig(p)
+
+
+COPY_WAIT_DETAIL = 90          # 采用后最多等详情页多少秒再写文案（扩展一般一两分钟内读完；没开扩展就只按标题写）
+
+
+def write_copy(pid, cfg=None):
+    """「采用」后马上（后台）用 ERP 的 AI 文案按原站标题 / 描述 / 标签写泰文文案，不等模型文件。
+    只填空着的字段（core/ai_copy.complete_copy），人改过的不动。返回写了哪些字段（没设 AI / 不用写 = []）。"""
+    cfg = cfg or load_config()
+    p = _product(pid)
+    if not p or not cand.ai_on(cfg):
+        return []
+    from core import ai_copy, copyfacts
+    s = p.setdefault("source", {})
+    first = not s.get("ai_copy_tried")
+    desc = s.get("description_original") or ""
+    if not p.get("features_zh") and desc:
+        p["features_zh"] = copyfacts.clean_source(desc)[:5000]
+    if not p.get("keywords") and s.get("tags"):
+        p["keywords"] = str(s["tags"])[:2000]
+    s["ai_copy_tried"] = time.time()
+    store.save(p)
+    try:
+        out = ai_copy.complete_copy(cfg, p, p.get("keyword_plan"))
+    except Exception as e:  # noqa: BLE001
+        p = _product(pid)
+        p.setdefault("source", {})["post_error"] = f"AI 文案：{str(e)[:150]}"
+        store.save(p)
+        return []
+    p = _product(pid)
+    s = p.setdefault("source", {})
+    ai_copy.apply_completion(p, out)
+    cp = p.get("copy") or {}
+    if first and p.get("name_zh") == s.get("title_original") and cp.get("title_th"):
+        try:
+            zh = cp.get("title_zh") or ai_copy.back_translate(cfg, cp["title_th"], cp.get("description_th") or "", with_en=False).get("title_zh")
+        except Exception:  # noqa: BLE001
+            zh = ""
+        if zh:                     # 中文品名：泰文标题回译（ERP 的 AI 回译）
+            p["name_zh"] = str(zh)[:200]
+    if out:
+        s["ai_copy_keys"] = sorted(set(s.get("ai_copy_keys") or []) | {k for k in out if k != "options_th"})
+        s["ai_copy_from"] = "detail" if (s.get("description_original") or s.get("tags")) else "title"
+        s["ai_copy_at"] = time.time()
+    s["ai_copy_sig"] = _copy_sig(p)
+    store.save(p)
+    return sorted(out)
 
 
 def _mb(t):
@@ -226,28 +296,11 @@ def post_process(pid, cfg=None):
                     p = _product(pid)
                     p.setdefault("source", {})["post_error"] = f"3D 模型读不了：{str(e)[:120]}"
                     store.save(p)
-    # 文案：ERP 的 AI 文案（补全空着的字段），只做一次
-    p = _product(pid)
-    s = p.setdefault("source", {})
-    if cand.ai_on(cfg) and not s.get("ai_copy_tried"):
-        s["ai_copy_tried"] = time.time()
-        store.save(p)
-        try:
-            from core import ai_copy
-            out = ai_copy.complete_copy(cfg, p, p.get("keyword_plan"))
-            p = _product(pid)
-            ai_copy.apply_completion(p, out)
-            cp = p.get("copy") or {}
-            if p.get("name_zh") == p["source"].get("title_original") and cp.get("title_th"):
-                zh = cp.get("title_zh") or ai_copy.back_translate(cfg, cp["title_th"], cp.get("description_th") or "", with_en=False).get("title_zh")
-                if zh:                     # 中文品名：泰文标题回译（ERP 的 AI 回译）
-                    p["name_zh"] = str(zh)[:200]
-            store.save(p)
+    # 文案在「采用」后就写了（write_copy）；文件分析只补克数 / 时长 / 规格，文案这里只补新规格要的泰文选项名（空着的才补）
+    p = _product(pid) or {}
+    if cand.ai_on(cfg) and ("specs" in done or not (p.get("source") or {}).get("ai_copy_tried")):
+        if write_copy(pid, cfg):
             done.append("copy")
-        except Exception as e:  # noqa: BLE001
-            p = _product(pid)
-            p.setdefault("source", {})["post_error"] = f"AI 文案：{str(e)[:150]}"
-            store.save(p)
     return done
 
 
@@ -288,7 +341,8 @@ def pull_images(pid, limit=6):
             name = f"{uuid.uuid4().hex[:10]}.jpg"
             im.convert("RGB").save(os.path.join(raw, name), "JPEG", quality=92)
             p = _product(pid)
-            p.setdefault("images", []).append({"file": name, "raw": name, "processed": False, "url": "", "from": "source"})
+            p.setdefault("images", []).append({"file": name, "raw": name, "processed": False, "url": "", "from": "source",
+                                               "source_url": r["url"][:500], "source_site": sites.name_of(sites.platform(r["url"]))})
             store.save(p)
             c.execute("UPDATE cur_files SET state='ok', stored=?, error='', updated_at=? WHERE id=?", (name, time.time(), r["id"]))
         except Exception as e:  # noqa: BLE001

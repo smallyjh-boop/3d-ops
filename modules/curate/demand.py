@@ -26,20 +26,75 @@ def keywords():
         return []
 
 
+# AI 类目 → 雷达里常见的泰文 / 英文词（没有完全对上的雷达关键词时，用来找「相近」的）
+CATEGORY_HINTS = {
+    "车和摩托配件": ["รถยนต์", "มอเตอร์ไซค์", "ในรถ", "car", "motorcycle", "honda", "wave", "click"],
+    "替换件适配件": ["อะไหล่", "ตัวแปลง", "ข้อต่อ", "adapter", "replacement"],
+    "收纳整理": ["จัดเก็บ", "กล่อง", "ที่เก็บ", "ชั้นวาง", "ที่แขวน", "organizer", "storage"],
+    "宠物": ["แมว", "สุนัข", "หมา", "สัตว์เลี้ยง", "cat", "dog", "pet"],
+    "植物园艺": ["กระถาง", "ต้นไม้", "แคคตัส", "สวน", "planter", "plant", "pot"],
+    "桌面办公": ["โต๊ะ", "ปากกา", "สำนักงาน", "desk", "pen"],
+    "手机电脑配件": ["มือถือ", "โทรศัพท์", "คอม", "สายชาร์จ", "phone", "laptop", "cable"],
+    "厨房卫浴": ["ห้องครัว", "ห้องน้ำ", "kitchen", "bathroom"],
+    "装饰摆件": ["ของตกแต่ง", "ตกแต่ง", "decor", "ornament"],
+    "玩具手办": ["ฟิกเกอร์", "โมเดล", "figure", "toy"],
+}
+
+
+def _grams(t):
+    t = re.sub(r"\s+", "", str(t or "").lower())
+    return {t[i:i + 2] for i in range(len(t) - 1)} or ({t} if t else set())
+
+
+def similarity(a, b):
+    """两个词有多像（0–1）：一个包含另一个 = 0.9；否则按两个字一组的重合（泰文没有空格，按词切不准）。"""
+    a, b = str(a or "").strip().lower(), str(b or "").strip().lower()
+    if not a or not b:
+        return 0.0
+    if len(min(a, b, key=len)) >= 2 and (a in b or b in a):
+        return 0.9
+    ga, gb = _grams(a), _grams(b)
+    return 2 * len(ga & gb) / (len(ga) + len(gb)) if ga and gb else 0.0
+
+
+def has_radar():
+    """ERP 里有没有爆款雷达的关键词（没有时候选池显示「去雷达查」）。运营模块关着 = None。"""
+    if _ops() is None:
+        return None
+    return bool(keywords())
+
+
+KEYS = ("id", "keyword", "platform", "score", "daily_top10", "total_results", "price_median", "ip_risk", "comps")
+
+
 def matcher(kws=None):
-    """返回 f(标题, 泰文搜索词列表) → 对上的雷达关键词（分最高的一个）或 None。"""
+    """返回 f(标题, 泰文搜索词列表, AI 类目) → 雷达关键词（分最高的一个）或 None。
+    完全对上：{…, near: False}；没对上时按 AI 给的泰文搜索词 / 类目找最像的雷达关键词：{…, near: True, via: 用哪个词找到的}。"""
     kws = keywords() if kws is None else kws
     kws = [k for k in kws if (k.get("keyword") or "").strip()]
 
-    def f(title, thai=()):
+    def f(title, thai=(), category=""):
         if not kws:
             return None
         hay = " ".join([str(title or "")] + [str(x) for x in thai or []]).lower()
         hits = [k for k in kws if k["keyword"].lower() in hay or any(k["keyword"].lower() == str(x).lower() for x in thai or [])]
-        if not hits:
+        if hits:
+            k = max(hits, key=lambda x: x.get("score") or 0)
+            return {**{key: k.get(key) for key in KEYS}, "near": False}
+        terms = [str(x) for x in thai or [] if str(x).strip()]
+        if category and category != "其他":
+            from .rules import CATEGORY_TH
+            terms += [CATEGORY_TH.get(category, "")] + CATEGORY_HINTS.get(category, [])
+        best, best_s, via = None, 0.0, ""
+        for k in kws:
+            kw = k["keyword"]
+            for t in terms:
+                sim = similarity(kw, t)
+                if sim > best_s or (sim == best_s and best is not None and (k.get("score") or 0) > (best.get("score") or 0)):
+                    best, best_s, via = k, sim, t
+        if not best or best_s < 0.4:
             return None
-        k = max(hits, key=lambda x: x.get("score") or 0)
-        return {key: k.get(key) for key in ("id", "keyword", "platform", "score", "daily_top10", "total_results", "price_median", "ip_risk", "comps")}
+        return {**{key: best.get(key) for key in KEYS}, "near": True, "via": via, "sim": round(best_s, 2)}
     return f
 
 

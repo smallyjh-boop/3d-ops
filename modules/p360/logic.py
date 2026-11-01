@@ -356,6 +356,13 @@ def view(target, user=None):
                                     "first_listed_at": v.get("first_listed_at"), "note": v.get("note")} for k, v in lst_view.items()}},
         "variants": variants,
     }
+    # v2.50.1 选品采用的产品：模型文件数量 / 下载状态（「⬇ 下载模型文件」按钮）
+    src = p.get("source") or {}
+    if src.get("source") == "curate":
+        cur = modules.public("curate")
+        fs = _safe(cur.product_files, p["id"]) if cur is not None and hasattr(cur, "product_files") else None
+        out["product"]["model_files"] = {"n": len(p.get("source_files") or []), "model": bool(p.get("model")), "status": fs or {},
+                                         "inbox": bool(p.get("inbox")), "can": cur is not None}
     # 平台在售（上架模块）
     lst = modules.public("listing")
     online = []

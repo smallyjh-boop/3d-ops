@@ -240,6 +240,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       if (msg.type === "cur-score") data = await callApi("/api/v1/curate/ext/score", { items: msg.items || [] });
       else if (msg.type === "cur-status") data = await callApi("/api/v1/curate/ext/status", { urls: msg.urls || [] });
       else if (msg.type === "cur-collect") { data = await callApi("/api/v1/curate/ext/collect", { items: [msg.item] }); curTick(); }
+      else if (msg.type === "cur-download") { data = await callApi("/api/v1/curate/ext/download", { url: msg.url || "" }); curTick(); }
       else if (msg.type === "cur-queue") data = await callApi("/api/v1/curate/ext/queue");
       else if (msg.type === "cur-action") { data = await callApi("/api/v1/curate/ext/queue/action", { id: msg.id || 0, action: msg.action }); if (msg.action === "resume") curTick(); }
       else if (msg.type === "cur-ping") data = await callApi("/api/v1/curate/ext/ping");

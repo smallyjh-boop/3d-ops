@@ -177,5 +177,102 @@
     return url;
   }
 
-  globalThis.CuratorSites = {load, siteForHost, detailRegex, detailMatch, hostIn, resolve, mapFields, extract, resolveDownload, template, clean, cleanBlock, htmlToText};
+  // ---- 列表页 / 搜索页的模型卡片（扩展 3.1.1）：卡片 = 包住一个模型链接的最大的块；标题 / 图 / 作者按站点包的 list 规则读，
+  // 作者那一块（头像、作者名、店铺 logo）不算。以前取「卡片里第一行字 + 第一张图」，Printables 的卡片作者在最上面，就读成了作者名 + 头像。
+  const DEF_AUTHOR = '/@[^/]+|/users?/|/designers?/|/profile/|/social/';
+  const DEF_AVATAR = 'avatar|/users?/|/profiles?/|/logos?/|gravatar|/badges?/|/icons?/';
+  const AUTHOR_AREA = '[class*="avatar" i],[class*="author" i],[class*="user-" i],[class*="userinfo" i],[class*="designer" i],[class*="creator" i],[class*="profile" i],[data-testid*="author" i],[data-testid*="user" i]';
+  function canonFn(site, base) {
+    const re = detailRegex(site);
+    return href => {
+      try {
+        const u = new URL(href, base);
+        if (!hostIn(u.hostname.toLowerCase(), site.domains)) return '';
+        const m = decodeURIComponent(u.pathname).match(re);
+        return m ? u.origin + m[1] : '';
+      } catch { return ''; }
+    };
+  }
+  function idFn(site, base) {
+    const re = detailRegex(site), g = site.detail.id_group || 2;
+    return url => { try { const m = decodeURIComponent(new URL(url, base).pathname).match(re); return m ? m[g] : url; } catch { return url; } };
+  }
+  // 一张卡片只算一个模型：从链接往上找「只包含这一个模型」的最大的块
+  function cardRoot(a, id, canon, idOf, doc) {
+    let el = a;
+    const body = (doc || document).body;
+    while (el.parentElement && el.parentElement !== body) {
+      const p = el.parentElement;
+      const ids = new Set([...p.querySelectorAll('a[href]')].map(x => canon(x.getAttribute('href'))).filter(Boolean).map(idOf));
+      if (ids.size > 1 || (ids.size === 1 && !ids.has(id))) break;
+      el = p;
+      if (el.offsetHeight > 700) break;
+    }
+    return el;
+  }
+  const txt = el => clean((el && (el.innerText || el.textContent)) || '', 300);
+  const imgSrc = img => img.currentSrc || img.src || img.getAttribute('data-src') || (img.getAttribute('srcset') || '').split(',')[0].trim().split(/\s+/)[0] || '';
+  function readCard(site, root, url, canon, base) {
+    const L = site.list || {};
+    const authorRe = new RegExp(L.author_link || DEF_AUTHOR, 'i');
+    const avatarRe = new RegExp(L.avatar || DEF_AVATAR, 'i');
+    const links = [...root.querySelectorAll('a[href]')];
+    const pathOf = a => { try { return new URL(a.getAttribute('href'), base).pathname; } catch { return ''; } };
+    const authorLinks = links.filter(a => !canon(a.getAttribute('href')) && authorRe.test(pathOf(a)));
+    const inAuthor = el => authorLinks.some(a => a.contains(el)) || !!(el.closest && el.closest(AUTHOR_AREA) && root.contains(el.closest(AUTHOR_AREA)) && el.closest(AUTHOR_AREA) !== root);
+    const modelLinks = links.filter(a => canon(a.getAttribute('href')) === url);
+    const author = txt(authorLinks.find(a => txt(a).length > 1));
+    const bad = t => !t || t.length < 2 || (author && t.toLowerCase() === author.toLowerCase()) || t.startsWith('@') || /^\d[\d.,]*\s*[kKmM]?$/.test(t);
+    let title = '';
+    for (const sel of L.title || []) {
+      for (const el of root.querySelectorAll(sel)) {
+        if (inAuthor(el)) continue;
+        const a = el.matches('a[href]') ? el : el.closest('a[href]') || el.querySelector('a[href]');
+        if (a && root.contains(a) && canon(a.getAttribute('href')) && canon(a.getAttribute('href')) !== url) continue;
+        const t = txt(el);
+        if (!bad(t)) { title = t; break; }
+      }
+      if (title) break;
+    }
+    if (!title) for (const a of modelLinks) { if (inAuthor(a) || a.querySelector('img')) continue; const t = txt(a); if (!bad(t)) { title = t; break; } }
+    if (!title) for (const a of modelLinks) { const t = clean(a.getAttribute('title') || a.getAttribute('aria-label') || '', 300); if (!bad(t)) { title = t; break; } }
+    if (!title) { const h = [...root.querySelectorAll('h1,h2,h3,h4,h5,h6,[class*="title" i]')].find(h => !inAuthor(h) && !bad(txt(h))); title = h ? txt(h) : ''; }
+    if (!title) { const im = modelLinks.map(a => a.querySelector('img')).find(Boolean); const t = clean(im?.alt || '', 300); title = bad(t) ? '' : t; }
+    // 图：模型链接里的图优先，再按站点包的 image 规则，最后卡片里任何一张；头像 / logo / 太小的不要，挑最大的
+    const imgOk = im => { const src = imgSrc(im); if (!/^https?:/i.test(src) || avatarRe.test(src) || inAuthor(im)) return false;
+      const w = im.naturalWidth || im.width || 0; return !(w && w < 64); };
+    const area = im => (im.width || im.naturalWidth || 1) * (im.height || im.naturalHeight || 1);
+    let pool = modelLinks.flatMap(a => [...a.querySelectorAll('img')]).filter(imgOk);
+    if (!pool.length) for (const sel of L.image || []) { pool = [...root.querySelectorAll(sel)].filter(imgOk); if (pool.length) break; }
+    if (!pool.length) pool = [...root.querySelectorAll('img')].filter(imgOk);
+    const im = pool.sort((a, b) => area(b) - area(a))[0];
+    return {title: title.slice(0, 200), thumb: im ? imgSrc(im) : '', thumb_w: im ? (im.naturalWidth || im.width || 0) : 0, author: author.slice(0, 80)};
+  }
+  // 整页的模型卡片：[{url, id, link, root, title, thumb, thumb_w, author}]
+  function listCards(site, doc, opts) {
+    doc = doc || document;
+    const base = doc.location ? doc.location.href : undefined;
+    const canon = canonFn(site, base), idOf = idFn(site, base);
+    const here = canon(base || '');
+    const out = [], seen = new Set();
+    for (const a of doc.querySelectorAll('a[href]')) {
+      if (opts && opts.skip && opts.skip(a)) continue;
+      const url = canon(a.getAttribute('href'));
+      if (!url) continue;
+      const id = idOf(url);
+      if (seen.has(id) || (here && idOf(here) === id)) continue;
+      // 卡片要有图（模型链接里或卡片里）：只有文字的链接（面包屑、评论里的链接）不算
+      const root = cardRoot(a, id, canon, idOf, doc);
+      if (!root.querySelector('img')) continue;
+      const info = readCard(site, root, url, canon, base);
+      if (!info.thumb && !a.querySelector('img')) continue;     // 只有作者头像、没有模型图的（导航栏、评论里的链接）不算卡片
+      seen.add(id);
+      out.push({url, id, link: a, root, ...info});
+      if (opts && opts.max && out.length >= opts.max) break;
+    }
+    return out;
+  }
+
+  globalThis.CuratorSites = {load, siteForHost, detailRegex, detailMatch, hostIn, resolve, mapFields, extract, resolveDownload, template, clean, cleanBlock, htmlToText,
+    canonFn, idFn, cardRoot, readCard, listCards};
 })();

@@ -96,3 +96,8 @@ html.p360-lock,html.p360-lock body{overflow:hidden}
   .p360-k5 .ux-kpis{grid-template-columns:repeat(6,minmax(0,1fr))}.p360-k5 .ux-kpi:nth-child(-n+3){grid-column:span 2}.p360-k5 .ux-kpi:nth-child(n+4){grid-column:span 3}
 }
 @media (prefers-reduced-motion:reduce){.p360-panel,.p360-mask{transition:none}}
+/* v2.50.1 选品采用的产品：模型文件 */
+.p360-mf{margin-top:6px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.p360-mf .p360-warn{color:#92400e}.p360-mf .p360-bad{color:#991b1b}
+.p360-mini{font-size:12px;padding:2px 8px;min-height:0}
+.p360-muted{flex-basis:100%;color:#6b7280;font-size:12px}

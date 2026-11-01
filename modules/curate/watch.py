@@ -252,6 +252,14 @@ def collect_result(body, who=""):
         c.execute("UPDATE cur_collect SET state=?, message=?, updated_at=? WHERE id=?", ("waiting" if kind == "risk" else "failed", msg, time.time(), iid))
         c.commit()
         return {"ok": True, "state": "failed", "kind": kind}
+    if q["kind"] == "refresh" or not q["product_id"]:
+        from . import cand
+        ok = cand.refresh_from_detail(q["skey"], data)
+        c.execute("UPDATE cur_collect SET state=?, message=?, updated_at=? WHERE id=?",
+                  ("done" if ok else "failed", "" if ok else "候选已经删掉了", time.time(), iid))
+        c.commit()
+        on_success(p)
+        return {"ok": True, "state": "done" if ok else "failed", "product_id": ""}
     ok = adopt.enrich(q["product_id"], data, who or q["who"])
     c.execute("UPDATE cur_collect SET state=?, message=?, updated_at=? WHERE id=?",
               ("done" if ok else "failed", "" if ok else "产品草稿已经删掉了", time.time(), iid))
@@ -347,8 +355,20 @@ def file_uploaded(fid, name, stream):
     return {"ok": True, "bytes": n, "name": stored}
 
 
-def queue_download(pid, ids=None):
-    """「重新下载」：失败的 / 还没下载的模型文件重新排队。"""
+def queue_download(pid, ids=None, who=""):
+    """「⬇ 下载模型文件」（采集队列、产品编辑页、产品 360、扩展的详情页按钮都用这个）：
+    · 还没下载的 / 失败的模型文件 → 重新排队，等扩展下载；
+    · 一个文件链接都还没有（详情页还没读到，或读的时候原站没给文件）→ 详情页重新进采集队列（扩展读到文件链接后自动排队下载）；
+    · 文件都下载好了 → 也重新读一次详情页（原站可能加了新文件；已经下载过的不会重复下载）。
+    返回 {queued: 排队的文件数, busy: 已经在排队 / 下载的, recollect: 是否重新读详情页, done: 已下载的文件数, state: queued|recollect|done}。"""
+    from core import store
+    try:
+        p = store.load(pid)
+    except (FileNotFoundError, ValueError):
+        raise ValueError("没有这个产品")
+    src = p.get("source") or {}
+    if src.get("source") != "curate" or not src.get("source_url"):
+        raise ValueError("这个产品不是从模型网站采用的，没有原站可以下载；请直接上传模型文件")
     c = db.conn()
     q = "UPDATE cur_files SET state='queued', error='', updated_at=? WHERE product_id=? AND kind<>'image' AND state IN ('', 'failed')"
     args = [time.time(), pid]
@@ -356,8 +376,121 @@ def queue_download(pid, ids=None):
         q += f" AND id IN ({','.join('?' for _ in ids)})"
         args += [int(x) for x in ids]
     n = c.execute(q, args).rowcount
+    busy = c.execute("SELECT COUNT(*) FROM cur_files WHERE product_id=? AND kind<>'image' AND state IN ('queued','downloading')", (pid,)).fetchone()[0]
+    ok = c.execute("SELECT COUNT(*) FROM cur_files WHERE product_id=? AND kind<>'image' AND state='ok'", (pid,)).fetchone()[0]
+    re_read = False
+    if not n and not busy and not ids:
+        re_read = recollect_product(pid, src["source_url"], p.get("name_zh") or "", c=c)
+    c.commit()
+    from . import pipeline
+    pipeline.kick()
+    return {"queued": n, "busy": busy, "recollect": re_read, "done": ok, "state": "queued" if n or busy else "recollect" if re_read else "done"}
+
+
+def recollect_product(pid, url, title="", c=None):
+    """产品的详情页重新进采集队列（已经在排队的不重复加）。返回有没有加。"""
+    c = c or db.conn()
+    if c.execute("SELECT 1 FROM cur_collect WHERE product_id=? AND state IN ('waiting','running')", (pid,)).fetchone():
+        return True
+    pos = (c.execute("SELECT MIN(pos) FROM cur_collect").fetchone()[0] or 1) - 1          # 人点的：排到最前
+    c.execute("INSERT INTO cur_collect(url, skey, title, who, product_id, pos, state, created_at, updated_at, copy) VALUES(?,?,?,?,?,?, 'waiting', ?, ?, 1)",
+              (url, sites.source_key(url), title[:200], "", pid, pos, time.time(), time.time()))
+    return True
+
+
+def recollect_candidates(ids):
+    """候选池「重新读取」：候选的详情页进采集队列（kind=refresh，不建产品），扩展读到后改正标题、作者、缩略图。返回排了几个。"""
+    c = db.conn()
+    n = 0
+    for i in ids or []:
+        r = c.execute("SELECT * FROM cur_candidates WHERE id=?", (int(i),)).fetchone()
+        if not r or not r["url"]:
+            continue
+        if c.execute("SELECT 1 FROM cur_collect WHERE skey=? AND state IN ('waiting','running')", (r["skey"],)).fetchone():
+            continue
+        pos = (c.execute("SELECT MAX(pos) FROM cur_collect").fetchone()[0] or 0) + 1
+        c.execute("INSERT INTO cur_collect(url, skey, title, thumb, who, product_id, pos, state, created_at, updated_at, copy, kind) "
+                  "VALUES(?,?,?,?, '', '', ?, 'waiting', ?, ?, 1, 'refresh')", (r["url"], r["skey"], r["title"], r["thumb"], pos, time.time(), time.time()))
+        c.execute("UPDATE cur_candidates SET refresh_at=? WHERE id=?", (time.time(), r["id"]))
+        n += 1
     c.commit()
     return n
+
+
+def manual_upload(pid, name, stream, who=""):
+    """「手动上传」模型文件（STL / 3MF / ZIP…）：存进产品的 source_files，和扩展上传的一样做 ERP 分析（模型库、3D 模型、规格、克数 / 时长）。"""
+    from core import store
+    from . import files, pipeline
+    try:
+        store.load(pid)
+    except (FileNotFoundError, ValueError):
+        raise ValueError("没有这个产品")
+    kind = files.kind_of(name)
+    if kind not in files.MODEL_KINDS:
+        raise ValueError("只能上传模型文件（STL / 3MF / OBJ / STEP / ZIP）")
+    stored, n = files.save_to_product(pid, name, stream)
+    p = store.load(pid)
+    p.setdefault("source_files", []).append({"name": stored, "bytes": n, "kind": files.kind_of(stored), "url": "", "orig_name": name,
+                                             "added_at": time.time(), "added_by": who or "手动上传"})
+    src = p.setdefault("source", {})
+    src["specs_done"] = False                          # 新文件：重新识别规格 / 克数（已经有人改过的变体不会被改）
+    store.save(p)
+    c = db.conn()
+    c.execute("INSERT INTO cur_files(product_id, platform, name, url, kind, state, stored, bytes, created_at, updated_at) VALUES(?,?,?,?,?, 'ok', ?, ?, ?, ?)",
+              (pid, sites.platform(src.get("source_url") or ""), stored, "", kind, stored, n, time.time(), time.time()))
+    # post=3：马上整理（不等还在排队的原站下载——没开扩展时它们可能一直在等）
+    if c.execute("UPDATE cur_collect SET post=3 WHERE id=(SELECT MAX(id) FROM cur_collect WHERE product_id=?)", (pid,)).rowcount == 0:
+        c.execute("INSERT INTO cur_collect(url, skey, title, who, product_id, pos, state, post, created_at, updated_at, copy) VALUES(?,?,?,?,?,0,'done',3,?,?,1)",
+                  (src.get("source_url") or "", src.get("source_id") or "", p.get("name_zh") or "", who[:60], pid, time.time(), time.time()))
+    c.commit()
+    pipeline.kick()
+    return {"name": stored, "bytes": n}
+
+
+def file_status(pid):
+    """一个产品的模型文件状态（采集队列、编辑页、产品 360、采集箱用）：
+    {ok, queued, downloading, failed, none(有链接没排队), links, collect(详情页状态), errors[], state, ext}"""
+    c = db.conn()
+    out = {"ok": 0, "queued": 0, "downloading": 0, "failed": 0, "none": 0}
+    for r in c.execute("SELECT state, COUNT(*) n FROM cur_files WHERE product_id=? AND kind<>'image' GROUP BY state", (pid,)):
+        out["none" if not r["state"] else r["state"]] = out.get(r["state"] or "none", 0) + r["n"]
+    out["links"] = sum(out[k] for k in ("ok", "queued", "downloading", "failed", "none"))
+    q = c.execute("SELECT state, message FROM cur_collect WHERE product_id=? ORDER BY id DESC LIMIT 1", (pid,)).fetchone()
+    out["collect"] = q["state"] if q else ""
+    out["collect_msg"] = q["message"] if q else ""
+    out["errors"] = [r[0] for r in c.execute("SELECT DISTINCT error FROM cur_files WHERE product_id=? AND kind<>'image' AND state='failed' AND error<>'' LIMIT 3", (pid,))]
+    out["state"] = ("downloading" if out["downloading"] else "queued" if out["queued"] else "failed" if out["failed"] and not out["ok"]
+                    else "ok" if out["ok"] else "collect" if out["collect"] in ("waiting", "running") else "none")
+    out["ext"] = ext_status()
+    return out
+
+
+# ---------------- 扩展在不在线 ----------------
+_seen_mem = {}
+
+
+def note_ext(who):
+    """扩展来领活（/ext/next、/files/next、/watch/next）就记一下：装了扩展的 Chrome 开着、后台自动采集开着。30 秒最多写一次库。"""
+    now = time.time()
+    who = (who or "?")[:60]
+    if now - _seen_mem.get(who, 0) < 30:
+        return
+    _seen_mem[who] = now
+    d = db.get("ext_seen") or {}
+    d = {k: v for k, v in d.items() if now - v < 7 * 86400}
+    d[who] = now
+    db.put("ext_seen", d)
+
+
+EXT_ONLINE_SEC = 180
+
+
+def ext_status():
+    """{online, last, who:[在线的密钥名]}：3 分钟内有扩展来领过活就算在线（扩展每分钟问一次）。"""
+    d = db.get("ext_seen") or {}
+    now = time.time()
+    on = sorted(k for k, v in d.items() if now - v < EXT_ONLINE_SEC)
+    return {"online": bool(on), "last": max(d.values()) if d else 0, "who": on}
 
 
 def product_files(pid):

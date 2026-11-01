@@ -51,9 +51,20 @@ TABLES = ("cur_candidates", "cur_collect", "cur_files", "cur_watches", "cur_watc
 _inited = set()
 
 
+# 后加的字段（v2.50.1）：(表, 字段, 定义)
+COLUMNS = [("cur_candidates", "capture_bad", "TEXT DEFAULT ''"),      # 「采集可能出错」的原因（标题 = 作者名、缩略图是头像……）：不交给 AI
+           ("cur_candidates", "refresh_at", "REAL DEFAULT 0"),         # 排队重新从详情页读的时间
+           ("cur_collect", "copy", "INTEGER DEFAULT 0"),               # 0 = 采用后要写 AI 文案；1 = 写过了 / 不用写
+           ("cur_collect", "kind", "TEXT DEFAULT ''")]                 # '' = 采用的产品草稿；refresh = 只重新读候选的标题 / 图（不建产品）
+
+
 def init():
     c = db.conn()
     c.executescript(SCHEMA)
+    for t, col, ddl in COLUMNS:
+        have = {r[1] for r in c.execute(f"PRAGMA table_info({t})")}
+        if col not in have:
+            c.execute(f"ALTER TABLE {t} ADD COLUMN {col} {ddl}")
     c.commit()
     _inited.add(db.DB_PATH)
 

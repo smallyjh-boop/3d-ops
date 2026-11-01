@@ -14,7 +14,7 @@ function markDirty() { dirty = true; $("#ed-dirty").textContent = "（未保存�
 // 选品工具推过来的产品：原站、许可、参考价、原始文件（v2.12）
 function renderSource() {
   const s = P && P.source;
-  if (!s) { $("#ed-source").innerHTML = ""; return; }
+  if (!s) { $("#ed-source").innerHTML = ""; if (window.CURSRC) CURSRC.render(); return; }
   const rp = s.reference_price || {};
   const files = (P.source_files || []).map((f) => `<a class="btn mini-btn" href="/files/${encodeURIComponent(P.id)}/source_files/${encodeURIComponent(f.name)}" data-notr>⬇ ${esc(f.name)}</a>`).join(" ");
   const specs = (P.variants || []).filter((v) => v.model_file !== undefined && v.opt2_zh);
@@ -32,8 +32,9 @@ function renderSource() {
       ${s.license_name ? `· 许可 <span data-notr>${esc(s.license_name)}</span>` : ""}${s.license_verified ? ' <span class="ok">✔ 已核验可商用</span>' : ""}
       ${rp.suggested || rp.target ? ` · 选品阶段参考价 <span data-notr>฿${esc(rp.target || rp.suggested)}</span>（只参考，售价按 ERP 成本算）` : ""}</div>
     ${s.title_original ? `<div class="small muted" data-notr>${esc(s.title_original)}</div>` : ""}
-    ${files ? `<div class="row gap wrap" style="margin-top:6px"><span class="small">原始文件：</span>${files}</div>` : ""}
+    ${s.source === "curate" ? '<div id="ed-curfiles" data-ed-free></div>' : files ? `<div class="row gap wrap" style="margin-top:6px"><span class="small">原始文件：</span>${files}</div>` : ""}
     ${specRows ? `<div style="margin-top:6px">${specRows}<div class="small muted">每个规格单独切片：在「打印方案 / 切片文件」上传切片文件时选对应的 SKU。</div></div>` : ""}</div>`;
+  if (window.CURSRC) CURSRC.render();       // v2.50.1 选品采用的：模型文件（下载 / 上传 / 列表）+ 没模型时的 3D 占位块
 }
 async function renderEditor() {
   if (!CFG) { try { await loadConfig(); } catch (e) { console.warn("设置读取失败", e); } }   // 页面刚打开、设置还没读到就进了编辑页
@@ -75,7 +76,9 @@ async function renderEditor() {
 let ED_EDIT = false;
 function applyEdLock() {
   const body = $("#ed-body"), rw = $("#recipe-wrap");
-  const walk = (el) => { for (const c of el.children) { if (rw && c === rw) continue; if (rw && c.contains(rw)) walk(c); else c.inert = !ED_EDIT; } };
+  // 打印方案、选品的模型文件下载 / 上传（data-ed-free）不算「修改产品」，只看模式下也能点
+  const free = [rw, ...document.querySelectorAll("#ed-body [data-ed-free]")].filter(Boolean);
+  const walk = (el) => { for (const c of el.children) { if (free.includes(c)) { c.inert = false; continue; } if (free.some((f) => c.contains(f))) { c.inert = false; walk(c); } else c.inert = !ED_EDIT; } };
   walk(body);
   body.classList.toggle("ed-view", !ED_EDIT);
   $("#btn-save").classList.toggle("hidden", !ED_EDIT);
@@ -680,6 +683,7 @@ function renderImages() {
       <div><span class="tag">白底图</span>${w.url ? '<span class="ok">有网址</span>' : ""}</div>
       <div class="acts"><button data-act="url">网址</button></div></div>` : "";
   if (window.sceneRefresh) window.sceneRefresh();
+  if (window.CURSRC) CURSRC.images();       // v2.50.1 原站图片（可能有水印）提醒
 }
 async function imageAction(e) {
   const act = e.target.dataset.act; if (!act) return;

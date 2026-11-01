@@ -42,6 +42,10 @@ def seed():
         ("https://www.thingiverse.com/thing:306", "Katana display sword", {"n1": "40"}),
     ]
     cand.upsert([{"url": u, "title": t, "metrics": m, "thumb": ""} for u, t, m in cards], "seed")
+    # v2.50.1：旧扩展在 Printables 列表页读成了作者名 + 头像 →「采集可能出错」
+    cand.upsert([{"url": "https://www.printables.com/model/207-cat-tree", "title": "Fluffy Tails", "author": "Fluffy Tails",
+                  "thumb": "https://media.printables.com/media/users/avatars/1/a.jpg"},
+                 {"url": "https://www.printables.com/model/208-bowl", "title": "GentleDesign", "thumb": "https://media.printables.com/media/users/avatars/2/b.png"}], "seed")
     c = db.conn()
     c.execute("UPDATE cur_candidates SET ai=?, ai_at=?, new_at=? WHERE skey IN ('mw:101','pr:203','mw:102')",
               (json.dumps({"category": "车和摩托配件", "demand": 85, "est_minutes": 70, "est_grams": 24, "single_color": True, "price_low": 129,

@@ -74,7 +74,7 @@ function renderAttrs() {
     } else {
       input = `<input data-attr="${esc(f.key)}" value="${esc(a.value || "")}">`;
     }
-    return `<div class="attr attr-${a.status}" title="${esc(f.tip)}">${lab}${input}${note}</div>`;
+    return `<div class="attr attr-${a.status}" title="${esc(f.tip)}" data-i18n-ok>${lab}${input}${note}</div>`;
   }).join("");
 }
 function setAttr(k, v) {

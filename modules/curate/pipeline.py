@@ -56,8 +56,18 @@ def run_once(cfg=None):
         r = c.execute("SELECT DISTINCT product_id FROM cur_files WHERE kind='image' AND state='img' LIMIT 1").fetchone()
         if r:
             return adopt.pull_images(r["product_id"]) > 0
-        for q in c.execute("SELECT id, product_id FROM cur_collect WHERE post=1 AND product_id<>''").fetchall():
-            if adopt.files_pending(q["product_id"]):
+        # 采用后马上写 AI 文案（不等模型文件）：详情页最多等 COPY_WAIT_DETAIL 秒（有描述 / 标签写得更好），扩展没开就只按标题写
+        for q in c.execute("SELECT id, product_id, state, created_at FROM cur_collect WHERE copy=0 AND product_id<>''").fetchall():
+            if q["state"] in ("waiting", "running") and time.time() - (q["created_at"] or 0) < adopt.COPY_WAIT_DETAIL:
+                continue
+            if not cand.ai_on(cfg):
+                break                                  # 没设 AI：等设好了再写
+            c.execute("UPDATE cur_collect SET copy=1 WHERE id=?", (q["id"],))
+            c.commit()
+            adopt.write_copy(q["product_id"], cfg)
+            return True
+        for q in c.execute("SELECT id, product_id, post FROM cur_collect WHERE post IN (1, 3) AND product_id<>''").fetchall():
+            if q["post"] == 1 and adopt.files_pending(q["product_id"]):
                 continue
             try:
                 adopt.post_process(q["product_id"], cfg)

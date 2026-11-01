@@ -23,6 +23,7 @@
         <select id="lib-print"><option value="">打印：全部</option><option value="nomodel">没有 3D 模型</option><option value="nofile">没有可用切片文件</option><option value="reviewed">未试打</option><option value="verified">已试打验证</option></select>
         <select id="lib-sort"><option value="updated">最近修改</option><option value="id">编号</option><option value="sold">近 30 天销量</option><option value="name">品名</option></select>
         <span id="lib-count" class="muted small"></span>
+        <a href="#" id="lib-inbox" class="lib-inbox hidden" data-needmod="curate" title="选品采用的模型先放在「选品 → 采集箱」，整理好「转入产品库」才出现在这里">📥 采集箱 <b id="lib-inbox-n"></b></a>
       </div>
       <div id="lib-bulk" class="ord-bulk">
         <span id="lib-selinfo" class="small muted">勾选产品后批量处理</span>
@@ -112,7 +113,7 @@
       <div class="row gap"><button class="mini primary-lite" id="btn-model-lib" title="全部模型文件：看尺寸、选哪个当 3D 模型、多个组件合并、每个零件单独选摆放方向、预览摆盘">📚 模型库 / 摆盘</button>
       <label class="filebtn">上传模型文件<input id="model-input" type="file" accept=".stl,.3mf" hidden></label></div>
     </div>
-    <div id="model-empty" class="muted small">上传 STL 或 3MF 后，可以 360° 预览、自动估算克数和打印时长、一键生成多颜色多角度商品图和尺寸图。没有模型也可以跳过这一步。</div>
+    <div id="model-empty" class="muted small" data-ed-free>上传 STL 或 3MF 后，可以 360° 预览、自动估算克数和打印时长、一键生成多颜色多角度商品图和尺寸图。没有模型也可以跳过这一步。</div>
     <div id="model-body" class="model-grid hidden">
       <div>
         <div id="viewer" class="viewer"></div>
@@ -175,6 +176,7 @@
       <button id="btn-adimg">✨ 做卖点图（加广告词）</button>
     </div>
     <p class="muted small">第 1 张是主图，最多 8 张。「设为白底图」生成搜索页用的纯白背景图。</p>
+    <div id="img-src-warn"></div>
     <div id="img-grid" class="img-grid"></div>
     <div id="white-box"></div>
     <details class="scene-box" id="scene-details">
@@ -250,7 +252,7 @@
         <label>详情中文回译<textarea data-f="copy.description_zh" rows="9" readonly></textarea></label>
         <label>泰文搜索关键词参考<textarea id="kw-th" rows="2" readonly></textarea></label>
         <div class="muted small">详情预览</div>
-        <div id="desc-preview" class="preview"></div>
+        <div id="desc-preview" class="preview" data-i18n-ok></div>
       </div>
     </div>
   </div>

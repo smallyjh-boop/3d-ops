@@ -20,8 +20,11 @@ def products():
     from core import modules as _mods
     pub = _mods.public("listing")
     online = pub.online_shops() if pub else {}         # v2.44：在哪些店铺在线（上架模块的在线商品）
+    want = request.args.get("inbox") or ""          # v2.50.1 选品的采集箱：默认不算（all = 都要，1 = 只要采集箱里的）
     for item in store.list_products():
         p = store.load(item["id"])
+        if (want == "1" and not p.get("inbox")) or (want not in ("1", "all") and p.get("inbox")):
+            continue
         errs, warns = _check(cfg, p)
         sp_e, sp_w = _check_shopee(cfg, p)
         item.update({
@@ -39,7 +42,7 @@ def products():
             "updated_at": p.get("updated_at") or 0,
             "groups": p.get("groups") or [], "material": p.get("material") or "",
             "has_model": bool(p.get("model")), "keywords": p.get("keywords") or "",
-            "draft": bool(p.get("draft")), "from_curator": bool(p.get("source")),
+            "draft": bool(p.get("draft")), "from_curator": bool(p.get("source")), "inbox": bool(p.get("inbox")),
             "lead_days": p.get("lead_days"), "has_recipe": bool(p.get("recipe")),
             "thumb": next((f"/files/{p['id']}/{'out' if im.get('processed') else 'raw'}/{im['file']}" for im in p.get("images", []) if im.get("file")), ""),
         })

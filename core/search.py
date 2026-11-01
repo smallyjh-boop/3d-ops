@@ -44,6 +44,7 @@ def _products():
             skus = [str(v.get("sku") or "").strip() for v in vs if v.get("sku")]
             rows.append({"id": p["id"], "name": p.get("name_zh") or "", "title_th": (p.get("copy") or {}).get("title_th") or "",
                          "skus": skus, "thumb": img, "draft": bool(p.get("draft")), "active": p.get("active", True) is not False,
+                         "inbox": bool(p.get("inbox")),
                          "exported": bool(p.get("exported_at") or p.get("shopee_exported_at") or (p.get("lazada_api") or {}).get("item_id")),
                          "hay": " ".join([p["id"], p.get("name_zh") or "", (p.get("copy") or {}).get("title_th") or "", p.get("keywords") or "",
                                           *skus]).lower()})
@@ -78,9 +79,11 @@ def _goods(q, limit):
     for p in _products():
         if ql not in p["hay"]:
             continue
+        if p.get("inbox") and ql != p["id"].lower():      # 选品采集箱里的：只有输完整编号才找出来
+            continue
         sku = next((s for s in p["skus"] if s.lower() == ql), None) or next((s for s in p["skus"] if ql in s.lower()), "")
         score = (0 if p["id"].lower() == ql or (sku and sku.lower() == ql) else 1, 0 if ql in p["name"].lower() else 1, p["id"])
-        hits.append((score, {k: p[k] for k in ("id", "name", "title_th", "thumb", "draft", "active")} | {"sku": sku, "n_skus": len(p["skus"])}))
+        hits.append((score, {k: p.get(k) for k in ("id", "name", "title_th", "thumb", "draft", "active", "inbox")} | {"sku": sku, "n_skus": len(p["skus"])}))
     hits.sort(key=lambda x: x[0])
     return [h[1] for h in hits[:limit]]
 

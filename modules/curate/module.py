@@ -6,7 +6,11 @@ AI 文案、类目属性、定价、上架检查（许可没核验不能导出 /
 
 
 def _start():
-    from . import pipeline
+    from . import inbox, pipeline
+    try:
+        inbox.migrate()          # v2.50.1：已经在产品库里的选品草稿（没导出 / 上架过）搬进采集箱，只做一次
+    except Exception:  # noqa: BLE001
+        pass
     pipeline.start()
 
 
@@ -23,12 +27,24 @@ class _Public:
         from . import demand
         return demand.from_radar(load_config(), keyword_id, keyword, who)
 
+    @staticmethod
+    def product_files(pid):
+        """产品 360 / 编辑页：选品采用的产品的模型文件状态 {ok, queued, downloading, failed, links, collect, state, ext:{online}}。"""
+        from . import watch
+        return watch.file_status(pid)
+
+    @staticmethod
+    def inbox_count():
+        """采集箱里有几个产品（产品库上的「采集箱 N」）。"""
+        from . import inbox
+        return inbox.count()
+
 
 MODULE = {
     "id": "curate",
     "name_zh": "选品",
     "name_th": "คัดเลือกสินค้า",
-    "version": "1.0",
+    "version": "1.1",
     "desc_zh": "在模型网站找能卖的模型：候选池打分（泰国市场排除规则 + AI）、「采用」直接建产品草稿（许可待核验）、采集队列、关注巡逻；"
                "浏览器扩展显示推荐分、采集详情页、用浏览器登录状态下载模型文件。",
     "desc_th": "หาโมเดลที่ขายได้จากเว็บโมเดล 3D: ให้คะแนนผู้สมัคร (กฎตลาดไทย + AI) 「ใช้」สร้างสินค้าฉบับร่างทันที (รอตรวจสัญญาอนุญาต) คิวเก็บข้อมูล ตระเวนติดตาม "
@@ -39,6 +55,7 @@ MODULE = {
     "menus": [
         {"tab": "curate", "mod": "goods", "zh": "选品", "th": "คัดเลือกสินค้า", "roles": "owner,listing", "before": "library"},
         {"tab": "cur_cand", "mod": "goods", "zh": "候选池", "th": "คลังผู้สมัคร", "roles": "owner,listing", "ghost": True, "panel": "curate"},
+        {"tab": "cur_inbox", "mod": "goods", "zh": "采集箱", "th": "กล่องเก็บสินค้า", "roles": "owner,listing", "ghost": True, "panel": "curate"},
         {"tab": "cur_queue", "mod": "goods", "zh": "采集队列", "th": "คิวเก็บข้อมูล", "roles": "owner,listing", "ghost": True, "panel": "curate"},
         {"tab": "cur_watch", "mod": "goods", "zh": "关注巡逻", "th": "ตระเวนติดตาม", "roles": "owner,listing", "ghost": True, "panel": "curate"},
     ],

@@ -579,7 +579,10 @@ def groups():
     from . import store
     counts = {}
     for item in store.list_products():
-        for g in store.load(item["id"]).get("groups") or []:
+        p = store.load(item["id"])
+        if p.get("inbox"):              # 选品采集箱里的不算（采集箱有自己的数）
+            continue
+        for g in p.get("groups") or []:
             counts[g] = counts.get(g, 0) + 1
     return [dict(r, count=counts.get(r["id"], 0)) for r in
             db.conn().execute("SELECT * FROM product_groups ORDER BY sort, name")]

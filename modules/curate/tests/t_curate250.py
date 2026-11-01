@@ -134,7 +134,7 @@ ok(C.get("/api/v1/curate/ext/ping", headers=HR).status_code == 403, "read-only k
 ok(C.post("/api/v1/curate/ext/score", json={"items": []}, headers=HR).status_code == 403, "read-only key refused (POST)")
 ok(C.get("/api/v1/curate/ext/ping", headers={"Authorization": "Bearer " + OKEY}).status_code == 403, "ops write-back key refused")
 r = C.get("/api/v1/curate/ext/ping", headers=H)
-ok(r.status_code == 200 and r.get_json()["ext_latest"] == "3.1.0" and r.get_json()["user"] == "Nok", f"ext ping with staff key {r.get_json()}")
+ok(r.status_code == 200 and r.get_json()["ext_latest"] == "3.1.1" and r.get_json()["user"] == "Nok", f"ext ping with staff key {r.get_json()}")
 ok(any(k["name"] == "Nok" and k.get("ext_version") == "3.1.0" for k in integrations.ext_versions()) if hasattr(integrations, "ext_versions") else True, "ext version noted")
 sp = C.get("/api/v1/curate/ext/sites", headers=H).get_json()
 ok(sp["version"] and {"makerworld", "printables", "thingiverse"} <= {s["id"] for s in sp["sites"]} and "_rx" not in json.dumps(sp), "site packs served as data")
@@ -166,7 +166,9 @@ p = store.load(PID)
 ok(p["draft"] and p["license_check"]["status"] == "pending" and p["source"]["source"] == "curate" and not p["source"]["license_verified"]
    and p["source"]["source_url"] == "https://makerworld.com/en/models/1001-cable-clip", "draft with licence pending + source link")
 _pl = C.get("/api/products").get_json()
-ok(any(x.get("id") == PID for x in (_pl if isinstance(_pl, list) else _pl.get("products") or _pl.get("items") or [])), "draft visible in 产品库")
+_pi = C.get("/api/products?inbox=1").get_json()
+ok(not any(x.get("id") == PID for x in _pl) and any(x.get("id") == PID and x["inbox"] for x in _pi) and p.get("inbox"),
+   "v2.50.1: draft goes to 采集箱, not into 产品库 (until 转入产品库)")
 r2 = C.post("/api/v1/curate/ext/collect", json={"items": [{"url": cards[0]["url"]}]}, headers=H).get_json()
 ok(r2["added"] == 0 and list(r2["skipped"].values()) == ["imported"], "no double adopt")
 ok(C.post("/api/v1/curate/ext/status", json={"urls": [cards[0]["url"]]}, headers=H).get_json()["states"][cards[0]["url"]]["product_id"] == PID, "status → product id")
@@ -344,8 +346,8 @@ ok(C.post("/api/cur/calibrate").status_code == 200 and CL.post("/api/cur/calibra
 def tabs(cl):
     return [(mn["tab"], mn["mod"], mn.get("before"), mn["ghost"]) for m in cl.get("/api/modules").get_json()["modules"] for mn in m["menus"]]
 tb = tabs(CL)
-ok(("curate", "goods", "library", False) in tb and {t[0] for t in tb if t[0].startswith("cur")} == {"curate", "cur_cand", "cur_queue", "cur_watch"},
-   f"选品 in 商品 menu before 产品库, tabs 候选池 · 采集队列 · 关注巡逻 {[t for t in tb if t[0].startswith('cur')]}")
+ok(("curate", "goods", "library", False) in tb and {t[0] for t in tb if t[0].startswith("cur")} == {"curate", "cur_cand", "cur_inbox", "cur_queue", "cur_watch"},
+   f"选品 in 商品 menu before 产品库, tabs 候选池 · 采集箱 · 采集队列 · 关注巡逻 {[t for t in tb if t[0].startswith('cur')]}")
 ok(not any(t[0].startswith("cur") for t in tabs(CP)), "production role: no 选品 menu")
 ok(C.get("/m/curate/curate.js").status_code == 200 and C.get("/m/curate/page.html").status_code == 200 and C.get("/m/curate/page.css").status_code == 200, "ui files")
 src = open(os.path.join(APP, "modules", "curate", "ui", "curate.js"), encoding="utf-8").read()
