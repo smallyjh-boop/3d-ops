@@ -19,7 +19,7 @@
 - [ ] T14：产品库 + 采集箱自动 / 动态分组（v2.53.0）：在线 / 未上线、进度、待处理、销售表现、类目来源、手动只做标记、保存视图｜modules/goods、modules/curate
 - [ ] T15：选品候选池整理 + 清理（v2.53.0）｜modules/curate
 - [ ] T16：上架工作台自动分类（v2.53.0）｜modules/listing
-- [ ] T17：库存同步重做（v2.53.0）：规则、对照总表、快速修改、预警、记录｜modules/listing、core/connectors/lazada.py
+- [x] T17：库存同步重做（v2.53.0）：规则、对照总表、快速修改、预警、记录｜modules/listing、core/connectors/lazada.py
 - [ ] T13：发 v2.53.0｜测试交给 test-runner、发版前 reviewer 审查、泰文缺口交给 translator
 
 ## 不做的事
