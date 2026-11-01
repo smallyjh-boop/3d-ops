@@ -564,7 +564,7 @@
           </div>
           <p class="muted small">拓竹：打印机屏幕 → 设置 → 网络（WLAN）里看 IP 和访问码，序列号在 设置 → 设备信息。新固件需要打开「局域网模式」和「开发者模式」才能由第三方软件发送打印。<br>
             Creality K1：屏幕 设置 → 网络 看 IP。原厂固件和 root 过的（Fluidd/Mainsail）都可以，选「自动识别」即可。</p>
-            <div class="row gap"><button class="mini" data-ctest>测试连接</button></div></div>`; }).join("") || '<p class="muted">还没有打印机（在上面「打印机与 OrcaSlicer 配置文件」里添加）</p>');
+            <div class="row gap"><button class="mini" data-ctest>测试连接</button><button class="mini" data-cdiag>网络诊断</button></div></div>`; }).join("") || '<p class="muted">还没有打印机（在上面「打印机与 OrcaSlicer 配置文件」里添加）</p>');
     $$(".pr-conn", box).forEach((card) => {
       const i = card.dataset.pi, f = card.querySelector(".pr-connform");
       const id = "cfg-prconn-" + i;
@@ -580,7 +580,9 @@
     if (!box.dataset.bound) {
       box.dataset.bound = "1";
       box.addEventListener("click", async (e) => {
-        const t = e.target; if (t.dataset.ctest === undefined) return;
+        const t = e.target;
+        if (t.dataset.cdiag !== undefined) { netDiag(t.closest("[data-pi]").dataset.pi, t); return; }
+        if (t.dataset.ctest === undefined) return;
         const card = t.closest("[data-pi]"), i = card.dataset.pi;
         const o = {}; card.querySelectorAll("[data-c]").forEach((x) => (o[x.dataset.c] = x.type === "checkbox" ? x.checked : x.value));
         try {
@@ -590,6 +592,33 @@
         } catch (err) { toast(err.message, true); }
       });
     }
+  }
+  // v2.53：网络诊断（结论 + 端口表 + 服务器网络信息）。结论的中 / 泰文由服务器给，这里按界面语言挑
+  const DIAG_KIND = { ok: ["通", "เชื่อมต่อได้"], refused: ["拒绝（主机在，端口没开）", "ปฏิเสธ (โฮสต์อยู่ แต่พอร์ตไม่เปิด)"], timeout: ["超时", "หมดเวลา"],
+    noroute: ["找不到主机", "หาโฮสต์ไม่พบ"], other: ["其他错误", "ข้อผิดพลาดอื่น"] };
+  async function netDiag(i, btn) {
+    let r;
+    try { r = await busy(btn, () => api(`/api/printers/${i}/netdiag`, { json: {} })); } catch (err) { toast(err.message, true); return; }
+    if (!r) return;
+    const lvl = { bad: "#c0392b", warn: "#d68910", ok: "#1e8449", info: "#566573" };
+    const concl = (r.conclusions || []).map((c) => `<div style="border-left:4px solid ${lvl[c.level] || "#566573"};padding:6px 10px;margin:6px 0;white-space:pre-wrap" data-notr>${esc(Z(c.zh, c.th))}</div>`).join("");
+    const rows = (r.ports || []).map((p) => `<tr><td class="mono" data-notr>${p.port}</td><td data-notr>${esc(p.name || "")}</td><td data-notr>${esc(Z(...(DIAG_KIND[p.kind] || DIAG_KIND.other)))}</td><td class="mono small" data-notr>${p.errno != null ? p.errno : ""}</td></tr>`).join("");
+    let netHtml = "";
+    const n = r.net;
+    if (n) {
+      const ifs = (n.ifaces || []).map((x) => `<tr><td class="mono" data-notr>${esc(x.name)}</td><td class="mono" data-notr>${esc((x.addrs || []).join(", "))}</td><td data-notr>${esc(x.state || "?")}</td></tr>`).join("");
+      const rt = n.route ? `${esc(n.route.dev)}${n.route.src ? " · src " + esc(n.route.src) : ""}${n.route.via ? " · via " + esc(n.route.via) : ""}${n.route.linkdown ? " · linkdown" : ""}` : "-";
+      const nb = n.neigh ? `${esc(n.neigh.dev)} · ${esc(n.neigh.state)}${n.neigh.mac ? " · " + esc(n.neigh.mac) : ""}` : "-";
+      netHtml = `<details style="margin-top:10px"><summary><b>${Z("服务器网络信息", "ข้อมูลเครือข่ายของเซิร์ฟเวอร์")}</b></summary>
+        ${n.available ? "" : `<p class="muted small">${Z("这台服务器读不到网卡信息（可能是 Windows / Mac 或没有 ip 命令）", "เซิร์ฟเวอร์นี้อ่านข้อมูลการ์ดเครือข่ายไม่ได้ (อาจเป็น Windows / Mac หรือไม่มีคำสั่ง ip)")}</p>`}
+        <table class="tbl"><thead><tr><th>${Z("网口", "พอร์ต")}</th><th>IPv4</th><th>${Z("状态", "สถานะ")}</th></tr></thead><tbody>${ifs}</tbody></table>
+        <p class="small">${Z("去这个 IP 走的网口", "พอร์ตที่ใช้ไปยัง IP นี้")}：<span class="mono" data-notr>${rt}</span><br>ARP：<span class="mono" data-notr>${nb}</span></p>
+        <pre class="small" style="white-space:pre-wrap;max-height:140px;overflow:auto" data-notr>${esc((n.routes || []).map((x) => x.raw).join("\n"))}</pre></details>`;
+    }
+    modal(`<div class="row between"><h3>${Z("网络诊断", "วินิจฉัยเครือข่าย")} · <span class="mono" data-notr>${esc(r.ip)}</span></h3><button class="mini" data-mclose>${Z("关闭", "ปิด")}</button></div>
+      ${concl}
+      <table class="tbl"><thead><tr><th>${Z("端口", "พอร์ต")}</th><th>${Z("用途", "การใช้งาน")}</th><th>${Z("结果", "ผลลัพธ์")}</th><th>errno</th></tr></thead><tbody>${rows}</tbody></table>
+      ${netHtml}`);
   }
   window.PROD = { show, loadBoard, startDialog, connSettings };
 })();

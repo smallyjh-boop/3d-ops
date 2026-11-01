@@ -274,7 +274,8 @@ def detect(c):
         return "creality"
     if net.port_open(host, 8883):
         raise ValueError("这是拓竹打印机：请填写序列号和访问码（打印机屏幕 设置 → 网络/WLAN）")
-    raise ValueError("连不上这个 IP。请确认打印机开机、和 NAS/电脑在同一个局域网，IP 没填错")
+    from . import netdiag
+    raise ValueError(netdiag.fail_message(host))
 
 
 def _human_err(e):
