@@ -452,6 +452,10 @@ class Manager:
         self._kick = None
         self.sem = None
         self.sets = 0
+        self.idmap, self.idxmap = {}, {}      # 稳定 id ↔ 序号（只在测试用自己的设置 cfg_loader 时用；平时读设置文件）
+        self.cfg_key = None
+        self.executed = 0                     # 执行过的 ERP 指令数（测试看有没有重复执行）
+        self._pool = None
 
     # ---- 线程 ----
     def start(self):
@@ -487,11 +491,24 @@ class Manager:
         except Exception:  # noqa: BLE001
             traceback.print_exc()
 
+    def _read_cfg(self):
+        """读设置（在单独的线程里跑，不卡事件循环；load_config 按文件版本缓存，没改过很快）。"""
+        from . import db
+        try:
+            return self.cfg_loader() if self.cfg_loader else _load_cfg()
+        finally:
+            try:
+                db.release()
+            except Exception:  # noqa: BLE001
+                pass
+
     async def _main(self):
         from . import db
+        from concurrent.futures import ThreadPoolExecutor
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="printer-cfg")
         while not self.stopping:
             try:
-                cfg = self.cfg_loader() if self.cfg_loader else _load_cfg()
+                cfg = await self.loop.run_in_executor(self._pool, self._read_cfg)
                 self._sync(cfg)
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
@@ -505,6 +522,7 @@ class Manager:
                 await asyncio.wait_for(self._kick.wait(), self.reload_s)
             except asyncio.TimeoutError:
                 pass
+        self._pool.shutdown(wait=False)
 
     def call(self, coro, timeout=15):
         """在别的线程（网页请求）里调连接上的协程，等结果。"""
@@ -546,6 +564,10 @@ class Manager:
     def _sync(self, cfg):
         from . import printers as pr
         seen = set()
+        idmap = {}
+        for i, p in enumerate(cfg.get("printers") or []):
+            idmap[p.get("id") or f"#{i}"] = i
+        self.idmap, self.idxmap = idmap, {i: k for k, i in idmap.items()}
         if self.stagger_fixed is None:
             self.stagger = min(SLOW_S, max(0.5, len(cfg.get("printers") or []) / 50))
         for i, p in enumerate(cfg.get("printers") or []):
@@ -560,14 +582,11 @@ class Manager:
                 if link:
                     link.stop()
                     self.links.pop(pid, None)
-                if t == "none" and (pr.get_status(i).get("state") != "none"):
-                    self._store(pid, i, {"state": "none", "conn": "none"})
+                if t == "none" and ((pr._status.get(pid) or {}).get("state") != "none"):
+                    self._store(pid, {"state": "none", "conn": "none"})
                 continue
             if link and link.key == Link.key_of(c) and link.kind == t:
-                if link.idx != i:              # 序号变了（前面删了一台）：状态跟着挪
-                    link.idx = i
-                    if link.last:
-                        self._store(pid, i, dict(link.last))
+                link.idx = i                   # 只是显示用：状态和通知都按稳定 id，通知时才换成现在的序号
                 continue
             if link:
                 link.stop()
@@ -584,16 +603,18 @@ class Manager:
         st = dict(st)
         link.last = st
         self.sets += 1
-        self._store(link.pid, link.idx, st)
+        self._store(link.pid, st)
 
-    def _store(self, pid, idx, st):
+    def _store(self, pid, st):
+        """v2.54 复审：按稳定 id 记状态、排队通知（以前按 link.idx：删了打印机后、下一次对设置前（最多 5 秒；
+        后台进程模式根本不知道）收到的状态会记到别的打印机上，生产模块可能把别的打印机的那一盘记成打完）。"""
         from . import printers as pr
-        old, changed = pr._store(idx, st)
+        old, changed = pr._store(pid, st)
         if changed:
-            self.events.put((idx, old, st))
+            self.events.put((pid, old, st))
         if self.persist:
             with self._dlock:
-                self.dirty[pid] = (idx, st)
+                self.dirty[pid] = st
 
     def _dispatch(self):
         """单独一个线程：状态变化通知生产模块；后台进程模式下把状态写进数据库、执行 ERP 发来的指令。"""
@@ -607,7 +628,7 @@ class Manager:
                 ev = None
             try:
                 if ev:
-                    pr._fire(*ev)
+                    pr.fire_pid(*ev)        # 通知时才把 id 换成现在的序号（设置文件改了马上认出来）
                 if self.persist and time.time() - last_flush >= 1:
                     last_flush = time.time()
                     self.flush()
@@ -628,28 +649,44 @@ class Manager:
         from . import db
         c = db.conn()
         ensure_tables(c)
+        from . import printers as pr
         now = time.time()
         c.executemany("INSERT INTO printer_state(pid, idx, data, updated, worker) VALUES(?,?,?,?,?) ON CONFLICT(pid) DO UPDATE SET "
                       "idx=excluded.idx, data=excluded.data, updated=excluded.updated, worker=excluded.worker",
-                      [(pid, idx, json.dumps(st, ensure_ascii=False), now, self.worker_id) for pid, (idx, st) in dirty.items()])
+                      [(pid, pr.index_of(pid), json.dumps(st, ensure_ascii=False), now, self.worker_id) for pid, st in dirty.items()])
         c.commit()
         return len(dirty)
 
     def run_commands(self):
-        """ERP（PRINTER_WORKER=external）发来的指令：只执行归这个进程管的打印机。"""
+        """ERP（PRINTER_WORKER=external）发来的指令：只执行归这个进程管的打印机。
+        v2.54 复审：先原子地「认领」（new → running，带上进程 id），认领不到（别的进程认领了 / ERP 已经放弃）就跳过；
+        同一个幂等键（同一次发送）已经在执行 / 执行过了 → 不再执行（标成 dup）。"""
         from . import db
         c = db.conn()
         ensure_tables(c)
         rows = c.execute("SELECT * FROM printer_cmds WHERE status='new' AND created > ? ORDER BY id", (time.time() - 60,)).fetchall()
+        me = f"{self.worker_id or '-'}@{os.getpid()}"
         for r in rows:
             link = self.links.get(r["pid"])
             if not link:
+                continue
+            key = r["ikey"] or ""
+            n = c.execute("UPDATE printer_cmds SET status='running', worker=? WHERE id=? AND status='new' AND (?='' OR NOT EXISTS("
+                          "SELECT 1 FROM printer_cmds x WHERE x.ikey=? AND x.id<>printer_cmds.id AND x.status IN ('running','done')))",
+                          (me, r["id"], key, key)).rowcount
+            c.commit()
+            if not n:
+                if key:
+                    n = c.execute("UPDATE printer_cmds SET status='dup', worker=?, result=?, done=? WHERE id=? AND status='new'",
+                                  (me, "同一次发送已经执行过，不重复执行", time.time(), r["id"])).rowcount
+                    c.commit()
                 continue
             try:
                 payload = json.loads(r["payload"] or "{}")
                 if r["op"] == "kick":
                     self.kick(r["pid"])
                 elif r["op"] == "publish":
+                    self.executed += 1
                     self.call(link.publish(payload), 10)
                 else:
                     raise ValueError("不支持的指令")
@@ -669,7 +706,23 @@ def _load_cfg():
     return load_config()
 
 
+_TABLES_OK = set()
+
+
 def ensure_tables(c):
+    from . import db
+    if db.DB_PATH in _TABLES_OK:
+        return
     c.execute("CREATE TABLE IF NOT EXISTS printer_state(pid TEXT PRIMARY KEY, idx INTEGER, data TEXT, updated REAL, worker TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS printer_cmds(id INTEGER PRIMARY KEY AUTOINCREMENT, pid TEXT, op TEXT, payload TEXT, "
-              "status TEXT DEFAULT 'new', result TEXT, created REAL, done REAL)")
+              "status TEXT DEFAULT 'new', result TEXT, created REAL, done REAL, worker TEXT, ikey TEXT DEFAULT '')")
+    cols = {r[1] for r in c.execute("PRAGMA table_info(printer_cmds)")}
+    for col, typ in (("worker", "TEXT"), ("ikey", "TEXT DEFAULT ''")):    # v2.54 复审：认领的进程、幂等键
+        if col not in cols:
+            try:
+                c.execute(f"ALTER TABLE printer_cmds ADD COLUMN {col} {typ}")
+            except Exception:  # noqa: BLE001  别的进程刚加过
+                pass
+    c.execute("CREATE INDEX IF NOT EXISTS printer_cmds_ikey ON printer_cmds(ikey)")
+    c.commit()
+    _TABLES_OK.add(db.DB_PATH)

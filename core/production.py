@@ -1297,6 +1297,7 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
         run_cols = [{"colour": x["colour"] or j["color"], "material": x["material"], "grams": round(x["grams"] * per * k, 1)} for x in cols]
     remote = ""
     warning = ""
+    unknown = ""
     if send:
         if not f:
             raise ValueError("没有切片文件，不能发送")
@@ -1321,7 +1322,18 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
             w for w in (materials.check_job_stock(x["grams"], x["material"], x["colour"], idx) for x in run_cols) if w)
         rname = f"R{_now():.0f}"[-7:] + "_" + os.path.splitext(f["filename"].replace(".gcode.3mf", ".3mf"))[0][:40]
         rname += ".gcode.3mf" if f["kind"] == "3mf" else ".gcode"
-        remote = pr.send_file(idx, print_files.path_of(f), rname, f["kind"], None if slot in (None, "", []) else (slot if isinstance(slot, list) else int(slot)))
+        # v2.54 复审：幂等键 = 这台打印机 + 任务 + 盘 + 文件 + 当时最新的批次号：同一次发送（重复点、请求重试）后台进程只执行一次
+        last_run = c.execute("SELECT COALESCE(MAX(id), 0) FROM print_runs").fetchone()[0]
+        ikey = f"start:{pr.pid_of(idx)}:{job_id}:{pv['plate_id'] if pv else ''}:{f['id']}:{last_run}"
+        try:
+            with pr.send_key(ikey):
+                remote = pr.send_file(idx, print_files.path_of(f), rname, f["kind"],
+                                      None if slot in (None, "", []) else (slot if isinstance(slot, list) else int(slot)))
+        except pr.UnknownResult as e:
+            # 后台进程已经在执行（或执行过了），只是 ERP 没等到结果：不能当失败（员工重发 → 打两盘）。
+            # 照样记成「打印中」（这台打印机就不能再发），提醒员工到打印机上确认
+            remote = rname
+            unknown = str(e)
         pr.mark_sent(idx, remote)
     now = _now()
     rid = c.execute("""INSERT INTO print_runs(printer, product_id, sku, name, color, material, file_id, count, grams, hours, status,
@@ -1332,6 +1344,9 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
                      json.dumps(run_cols, ensure_ascii=False) if run_cols else None,
                      pv["plate_id"] if pv else None, pv["no"] if pv else None, pv["total"] if pv else None,
                      pv["name"] if pv else None)).lastrowid
+    if unknown:
+        c.execute("UPDATE print_runs SET alert=? WHERE id=?", ("发送到打印机的" + pr.UNKNOWN_MSG, rid))
+        warning = "；".join(x for x in (pr.UNKNOWN_MSG, warning) if x)
     for jid in alloc:
         c.execute("UPDATE jobs SET status='printing', run_id=?, printer=?, started_at=COALESCE(started_at, ?), pin=1, alert='', "
                   "updated_at=?, updated_by=? WHERE id=?", (rid, idx, now, now, user, int(jid)))
@@ -1343,10 +1358,11 @@ def start_run(job_id, printer_idx=None, count=None, merge_ids=None, file_id=None
         n = alloc.get(str(x["id"]))
         if n:
             what = f"{plate_text(pv)}，一盘 {n} 套" if pv else f"这一盘 {n} 个"
-            _olog(x["order_id"], user, f"开始打印 {names[idx]}（{what}）", "已发送到打印机" if send else "手动开始")
+            _olog(x["order_id"], user, f"开始打印 {names[idx]}（{what}）",
+                  ("发送结果未知，请到打印机上确认" if unknown else "已发送到打印机") if send else "手动开始")
     schedule()
     return {"run_id": rid, "count": count, "alloc": alloc, "extra": extra, "warning": warning, "file": f, "colours": run_cols,
-            "plate": _plate_out(pv) if pv else None}
+            "plate": _plate_out(pv) if pv else None, "unknown": bool(unknown)}
 
 
 def _consume(r, frac, reason, user, failed=False):

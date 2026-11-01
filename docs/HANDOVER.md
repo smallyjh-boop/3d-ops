@@ -13,6 +13,9 @@
 - 下一步：等老板反馈；用户需要：核对库存同步对照表后再开自动推送、真机打印测试、真实照片测识别
 
 - 开发中（v2.54，未发版、版本号没改）：删除旧的「3D选品工具」对接（link/curator.py、/api/curator*、/api/v1/catalog/*、catalog 密钥权限、规格同步和规格锁）；旧产品数据全留着；测试 tests/cases/t_v254.py
+- v2.54 发版前复审（打印机机群 10 条）已修：后台进程认领 + 结果未知不重发 + 幂等键、后台进程不跑模块启动任务、状态 / 通知按稳定 id、
+  抽屉指令带 printer_id 核对、job_plates / trials 跟着 remap、喷嘴热床板每台单独、导入不回传访问码、/api/config 不截断、load_config 缓存；
+  见 modules/prod/README.md 1.14「发版前复审修复」，测试 t_fleet254 第 12 节
 - v2.54（开发中，未发版）：成品备货页重做 + 生产单（core/po.py、core/inventory/goodsstock.py）；打印机字段 paused/role/dedicated_po/group/location 由舰队页维护，排单只读
 
 ## 已知问题 / 坑
@@ -25,6 +28,8 @@
 
 ## 重要决定（以及原因）
 - v2.54 打印机身份：稳定 id + 只往后加；数据库仍存序号，删除时 fleet.remap 按 id 重映射（全改成 id 要动几十处 SQL，风险大）
+- v2.54 复审：load_config 按文件版本缓存并返回拷贝（pickle）；本进程保存后 config.invalidate()，别的进程写按 inode / mtime / 大小认出来
+- v2.54 复审：printers._status 按稳定 id 存（外面按序号读写照旧）；后台进程 ERP 等不到结果但已认领 = UnknownResult（不当失败，start_run 记成打印中）
 - v2.54 打印机设置只存单台覆盖 ovr，模板在 printer_models；所有读取用 fleet.effective（load_config 已经算好）
 - v2.54 排单（另一个任务）只读 group / location / role / dedicated_po / paused，不要在这边改 production.schedule()
 - v2.53：展示（product["display"] = {"v": 2, "specs": {规格: …}}）和打印方案（print_plans[规格]）各管各的；「按主模型缩放」的规格 = print_plans[规格] = {"follow": True, "scale": N}

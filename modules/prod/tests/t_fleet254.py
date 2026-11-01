@@ -38,13 +38,18 @@ cfg = config.load_config()
 rr = raw()
 tp = rr.get("printer_models") or {}
 ok(rr.get("_fleet254") is True, "migration flag persisted")
-ok(tp.get("Bambu Lab P1S", {}).get("plate") == "Textured PEI Plate" and tp["Bambu Lab P1S"].get("orca_machine") == "Bambu Lab P1S 0.4 nozzle"
+ok(tp.get("Bambu Lab P1S", {}).get("orca_machine") == "Bambu Lab P1S 0.4 nozzle"
    and tp["Bambu Lab P1S"].get("ams") is True, f"identical P1S values -> template {tp.get('Bambu Lab P1S')}")
 ok("nozzle" not in tp["Bambu Lab P1S"], "P1S nozzle differs -> not in template")
+# v2.54 复审：喷嘴 / 热床板是每台自己的，迁移永远不放进模板（就算同机型都一样 / 只有一台）
+ok("plate" not in tp["Bambu Lab P1S"], "identical P1S plate stays per printer (not templated)")
 sp = rr["printers"]
-ok(sp[0]["ovr"] == {"nozzle": 0.4} and sp[1]["ovr"] == {"nozzle": 0.6}, f"different nozzle kept per printer {sp[0]['ovr']} {sp[1]['ovr']}")
+ok(sp[0]["ovr"] == {"nozzle": 0.4, "plate": "Textured PEI Plate"} and sp[1]["ovr"] == {"nozzle": 0.6, "plate": "Textured PEI Plate"},
+   f"nozzle + plate kept per printer {sp[0]['ovr']} {sp[1]['ovr']}")
 ok(all(f not in sp[i] for i in range(4) for f in fleet.TPL_FIELDS), "stored form has no template fields (only ovr)")
-ok(tp.get("Creality K1 Max", {}).get("nozzle") == 0.4 and tp["Creality K1 Max"].get("g_per_h") == 20.0, "single printer model -> all values template")
+ok(tp.get("Creality K1 Max", {}).get("g_per_h") == 20.0 and "nozzle" not in tp["Creality K1 Max"] and sp[2]["ovr"].get("nozzle") == 0.4,
+   "single printer model -> template, but nozzle stays per printer")
+ok(fleet.template_of("Creality K1 Max", config.load_config()).get("nozzle") is None, "new K1 Max would not inherit a nozzle from migration")
 eff = cfg["printers"]
 for i, lp in enumerate(legacy):
     same = all(fleet.clean_value(f, lp.get(f)) == eff[i].get(f) for f in fleet.TPL_FIELDS if fleet.clean_value(f, lp.get(f)) is not None)
@@ -71,8 +76,8 @@ ok(not slicecheck.check({"id": 2, "kind": "3mf", "report": {"params": {"nozzle_m
 C = A.app.test_client()
 r = C.post("/api/fleet/templates", json={"templates": {"Bambu Lab P1S": {"nozzle": "0.4", "plate": "Smooth PEI Plate", "ams": "false"}}})
 ok(r.status_code == 200, f"save template {r.status_code} {r.get_json() if r.status_code != 200 else ''}")
-ok(not slicecheck.check(F(0.4), 0)["ok"] and slicecheck.check(F(0.4, bed="Smooth PEI Plate"), 0)["ok"], "template plate change applies to P1S-01")
-ok(slicecheck.check(F(0.6, bed="Smooth PEI Plate"), 1)["ok"], "P1S-02 still uses its 0.6 override after template change")
+ok(slicecheck.check(F(0.4), 0)["ok"] and not slicecheck.check(F(0.4, bed="Smooth PEI Plate"), 0)["ok"], "P1S-01 keeps its own plate after template change")
+ok(slicecheck.check(F(0.6), 1)["ok"], "P1S-02 still uses its 0.6 override after template change")
 ok(fleet.is_multicolor(config.load_config()["printers"][0]) is False, "is_multicolor follows template ams=false")
 ok(fleet.is_multicolor({"name": "Bambu Lab P1S"}) is False, "is_multicolor on raw dict also resolves template")
 ok(fleet.is_multicolor({"name": "Bambu Lab P1S", "ams": True}) is True, "explicit ams on dict wins")
@@ -80,9 +85,9 @@ r = C.post("/api/fleet/templates", json={"templates": {"Bambu Lab P1S": {"nozzle
 ok(r.status_code == 400, "bad template value rejected")
 # 单台覆盖接口：P1S-01 设 0.6 → 核对跟着变；清空 → 跟模板
 r = C.post("/api/fleet/printers/" + ids[0], json={"ovr": {"nozzle": "0.6"}})
-ok(r.status_code == 200 and slicecheck.check(F(0.6, bed="Smooth PEI Plate"), 0)["ok"], "override via API used by slicecheck")
+ok(r.status_code == 200 and slicecheck.check(F(0.6), 0)["ok"], "override via API used by slicecheck")
 r = C.post("/api/fleet/printers/" + ids[0], json={"ovr": {"nozzle": ""}})
-ok(slicecheck.check(F(0.4, bed="Smooth PEI Plate"), 0)["ok"] and not slicecheck.check(F(0.6, bed="Smooth PEI Plate"), 0)["ok"], "cleared override -> template 0.4")
+ok(slicecheck.check(F(0.4), 0)["ok"] and not slicecheck.check(F(0.6), 0)["ok"], "cleared override -> template 0.4")
 d = r.get_json()
 ok({f["key"]: f["template"] for f in d["fields"]}["plate"] == "Smooth PEI Plate", "detail shows template values")
 # 旧代码直接改 p["nozzle"] 再保存 → 也算覆盖
@@ -113,18 +118,18 @@ r = C.post("/api/fleet/printers", json={"name": "Bambu Lab P1S", "vendor": "bamb
 ok(r.status_code == 400 and "序列号" in r.get_json()["error"], "add bambu without serial -> 400")
 r = C.post("/api/fleet/printers?lang=th", json={"name": "Bambu Lab P1S", "vendor": "bambu", "conn": {"host": "192.168.1.80"}})
 ok(r.status_code == 400 and "ซีเรียล" in r.get_json()["error"], "error in Thai with lang=th")
-r = C.post("/api/fleet/printers", json={"name": "Bambu Lab P1S", "vendor": "bambu", "group": "A 区", "location": "A-01-1", "role": "orders",
+r = C.post("/api/fleet/printers", json={"name": "Bambu Lab P1S", "vendor": "bambu", "group": "A 区", "location": "A-01-1", "role": "orders", "nozzle": "0.4",
                                         "conn": {"host": "192.168.1.80", "serial": "01P00A000000080", "access_code": "11112222"}})
 ok(r.status_code == 200 and r.get_json()["codes"] == ["P1S-003"], f"add with auto code (P1S-01/02 taken) {r.get_json()}")
 new_id = r.get_json()["added"][0]
 d = C.get("/api/fleet/printers/" + new_id).get_json()
 ok(d["printer"]["conn"]["access_code"] == "******" and d["vendor"] == "bambu" and d["printer"]["group"] == "A 区" and d["printer"]["role"] == "orders", "detail masks code + new fields")
 ok(d["row"]["index"] == 4, "new printer appended (existing indices unchanged)")
-r = C.post("/api/fleet/printers", json={"name": "Creality K1C", "vendor": "creality", "conn": {"host": "192.168.1.80"}})
+r = C.post("/api/fleet/printers", json={"name": "Creality K1C", "vendor": "creality", "nozzle": 0.4, "conn": {"host": "192.168.1.80"}})
 ok(r.status_code == 400 and "192.168.1.80" in r.get_json()["error"], "duplicate IP rejected")
 r = C.post("/api/fleet/printers", json={"name": "Nonexistent 3000"})
 ok(r.status_code == 400, "unknown model rejected")
-r = C.post("/api/fleet/printers", json={"name": "Creality K1C", "n": 3, "group": "B 区"})
+r = C.post("/api/fleet/printers", json={"name": "Creality K1C", "n": 3, "group": "B 区", "nozzle": "0.4"})
 ok(r.status_code == 200 and r.get_json()["codes"] == ["K1C-002", "K1C-003", "K1C-004"], f"bulk add 3 {r.get_json().get('codes')}")
 r = C.post("/api/fleet/printers/" + new_id, json={"vendor": "bambu", "conn": {"host": "192.168.1.81", "serial": "01P00A000000080", "access_code": "******"}})
 ok(r.status_code == 200 and config.load_config()["printers"][4]["conn"]["access_code"] == "11112222" and r.get_json()["printer"]["conn"]["host"] == "192.168.1.81",
@@ -173,7 +178,9 @@ r = C.post("/api/config", json={"printers": legacy_rows})
 after = config.load_config()["printers"]
 ok(r.status_code == 200 and [p["id"] for p in after] == [p["id"] for p in before], "legacy settings save keeps ids")
 ok(after[0]["group"] == "A 区" and after[0]["paused"] is True and after[0]["dedicated_po"] == "PO-7" and after[0]["nozzle"] == 0.6, "legacy save keeps new fields + override")
-ok(raw()["printers"][1]["ovr"].get("nozzle") == 0.6 and "plate" not in raw()["printers"][1]["ovr"], "legacy save does not turn template values into overrides")
+o1 = raw()["printers"][1]["ovr"]
+ok(o1.get("nozzle") == 0.6 and o1.get("plate") == "Textured PEI Plate" and not ({"g_per_h", "orca_machine", "ams"} & set(o1)),
+   f"legacy save does not turn template values into overrides {o1}")
 
 # ================= 5 批量操作 =================
 prs = config.load_config()["printers"]
@@ -473,6 +480,278 @@ while True:
         ok("打印机连接后台进程开始运行" in (out or ""), "python -m core.printer_worker starts")
 finally:
     fk.kill()
+
+# =====================================================================================================
+# 12 v2.54 发版前复审的修复
+# =====================================================================================================
+import traceback
+pr._remote["on"] = False; pr._mgr = None
+CONF = {"bed_clear": True, "material": True}
+
+# ---------- 12.1（🟡10）load_config 按文件版本缓存：2000 台反复读要快；拿到的是拷贝；保存 / 别的进程写都能认出来 ----------
+bigp = [{"id": f"q{i:04d}", "code": f"Q-{i:04d}", "name": ["Bambu Lab P1S", "Creality K1C"][i % 2], "enabled": True,
+         "conn": {"type": "none"}, "ovr": {"nozzle": 0.4}} for i in range(2000)]
+config.save_config({"printers": bigp, "printer_workers": {}})
+config.invalidate()
+t0 = time.time(); a2k = config.load_config(); t_first = time.time() - t0
+t0 = time.time()
+for _ in range(20):
+    config.load_config()
+t_rep = (time.time() - t0) / 20
+ok(len(a2k["printers"]) == 2000 and t_rep < 0.06 and t_rep * 3 < t_first,
+   f"load_config cached for 2000 printers: first {t_first * 1000:.0f} ms, repeated {t_rep * 1000:.1f} ms")
+a2k["printers"][0]["code"] = "MUT"; a2k["printers"].pop(); a2k["printers"][1]["ovr"]["nozzle"] = 0.8
+b2k = config.load_config()
+ok(b2k["printers"][0]["code"] == "Q-0000" and len(b2k["printers"]) == 2000 and b2k["printers"][1]["nozzle"] == 0.4,
+   "callers get their own copy (mutating it leaves the cache alone)")
+config.save_config({"printers": bigp[:1999]})
+ok(len(config.load_config()["printers"]) == 1999, "save_config invalidates the cache")
+rr2 = raw(); rr2["printers"] = rr2["printers"][:5]
+json.dump(rr2, open(CFGP + ".x", "w", encoding="utf-8"), ensure_ascii=False); os.replace(CFGP + ".x", CFGP)
+ok(len(config.load_config()["printers"]) == 5, "config written by another process is picked up (file version)")
+src_pm = open(APP + "/core/printer_manager.py", encoding="utf-8").read()
+ok("run_in_executor(self._pool, self._read_cfg)" in src_pm, "manager reloads config off the event-loop thread")
+
+# ---------- 12.2（🟡5）job_plates / trials 里的打印机序号也跟着删除 / 挪动 ----------
+cfg5 = [{"id": f"r{i}", "code": f"R-{i}", "name": "Bambu Lab P1S", "enabled": True, "conn": {"type": "none"}, "ovr": {"nozzle": 0.4}} for i in range(4)]
+config.save_config({"printers": cfg5})
+dbc = db.conn()
+dbc.execute("INSERT INTO job_plates(job_id, plate_id, printer, pin) VALUES(999001, 'p1', 2, 1)")
+dbc.execute("INSERT INTO job_plates(job_id, plate_id, printer, pin) VALUES(999001, 'p2', 1, 1)")
+dbc.execute("INSERT INTO trials(job_id, printer, status) VALUES(999001, 3, 'done')")
+dbc.commit()
+old5 = config.load_config()["printers"]           # 和删除接口一样：保存 → remap（不重新排单，免得排单把测试用的盘清掉）
+new5 = config.save_config({"printers": [p_ for p_ in old5 if p_["id"] != "r1"]})["printers"]
+ok(fleet.remap(old5, new5) == {1: None, 2: 1, 3: 2}, "delete R-1 -> remap")
+pl = {x["plate_id"]: dict(x) for x in dbc.execute("SELECT plate_id, printer, pin FROM job_plates WHERE job_id=999001")}
+prs5 = config.load_config()["printers"]
+ok(pl["p1"]["printer"] is not None and prs5[pl["p1"]["printer"]]["code"] == "R-2" and pl["p1"]["pin"] == 1, f"pinned plate follows its printer after delete {pl['p1']}")
+ok(pl["p2"]["printer"] is None and pl["p2"]["pin"] == 0, f"plate pinned to the deleted printer is unpinned (rescheduled) {pl['p2']}")
+tr = dbc.execute("SELECT printer FROM trials WHERE job_id=999001").fetchone()
+ok(prs5[tr["printer"]]["code"] == "R-3", "trial record follows its printer")
+ok(set(fleet.PRINTER_TABLES) >= {"jobs", "print_runs", "failures", "maintenance", "job_plates", "trials"}, "all printer-index tables remapped")
+dbc.execute("DELETE FROM job_plates WHERE job_id=999001"); dbc.execute("DELETE FROM trials WHERE job_id=999001"); dbc.commit()
+
+# ---------- 12.3（🟡3）状态 / 通知按稳定 id：删了打印机、连接管理还没对设置时，打完的消息不会记到别的打印机上 ----------
+cfg3 = [{"id": f"s{k}", "code": f"S-{k}", "name": "Bambu Lab P1S", "enabled": True, "ovr": {"nozzle": 0.4},
+         "conn": {"type": "bambu", "host": f"10.8.0.{n + 1}", "serial": f"SNS000000{n}", "access_code": "12345678"}} for n, k in enumerate("WYZQ")]
+config.save_config({"printers": cfg3})
+pr._status.clear()
+def mkrun(idx):
+    j = production.create_job("3DP0001", "3DP0001-WH", 1, "stock")
+    jid = j["id"] if isinstance(j, dict) else j
+    return production.start_run(jid, idx, 1, [], None, False, "t", CONF)["run_id"]
+runZ, runQ = mkrun(2), mkrun(3)
+mgr3 = pm.Manager()                      # 没启动：只用它记状态、排队通知（和真的一样，读设置文件）
+lZ = pm.Link(mgr3, "sZ", 2, cfg3[2]["conn"]); lQ = pm.Link(mgr3, "sQ", 3, cfg3[3]["conn"])
+def drain():
+    while not mgr3.events.empty():
+        pr.fire_pid(*mgr3.events.get())
+mgr3.set(lZ, {"state": "printing", "file": "z"}); mgr3.set(lQ, {"state": "printing", "file": "q"}); drain()
+ok(pr.get_status(2).get("file") == "z" and pr.get_status(3).get("file") == "q", "status stored by id, read by index")
+mgr3.set(lZ, {"state": "finished", "file": "z"})          # 「打完」的通知还在排队
+r = B.delete("/api/fleet/printers/sW")                    # 这时删了最前面的一台：Z 2→1，Q 3→2
+ok(r.status_code == 200 and lZ.idx == 2, "printer deleted while the manager has not re-synced (link keeps old index)")
+drain()
+st_run = lambda rid: dbc.execute("SELECT status FROM print_runs WHERE id=?", (rid,)).fetchone()["status"]
+ok(st_run(runZ) == "done" and st_run(runQ) == "printing", f"only the right run finishes (Z {st_run(runZ)}, Q {st_run(runQ)})")
+mgr3.set(lQ, {"state": "paused", "file": "q"}); drain()     # Q 的连接还拿着旧序号 3
+ok(pr.get_status(1).get("state") == "finished" and pr.get_status(2).get("state") == "paused" and pr.get_status(3) == {},
+   f"status follows printer id after delete {[pr.get_status(i).get('state') for i in range(4)]}")
+ok(pr.fire_pid("sW", {"state": "printing"}, {"state": "finished"}) is False, "event for a deleted printer is dropped")
+dbc.execute("UPDATE print_runs SET status='done' WHERE id=?", (runQ,)); dbc.execute("UPDATE jobs SET status='done' WHERE run_id=?", (runQ,)); dbc.commit()
+pr._status.clear()
+
+# ---------- 12.4（🟡4）抽屉的指令带稳定 id：打印机列表变了 → 服务器拒绝，不发错打印机 ----------
+prs4 = config.load_config()["printers"]          # S-Y, S-Z, S-Q
+drawer = {"index": 1, "id": prs4[1]["id"]}       # 打开了 S-Z 的抽屉
+r = B.delete("/api/fleet/printers/" + prs4[0]["id"])   # 别人删了 S-Y：序号 1 现在是 S-Q
+for path, body in ((f"/api/printers/{drawer['index']}/command", {"cmd": "pause"}), (f"/api/printers/{drawer['index']}/loaded", {"loaded": "白"}),
+                   (f"/api/printers/{drawer['index']}/netdiag", {}), ("/api/maintenance", {"printer": drawer["index"], "item": "clean"})):
+    r = B.post(path, json=dict(body, printer_id=drawer["id"]))
+    ok(r.status_code == 409 and "刷新" in (r.get_json() or {}).get("error", ""), f"stale drawer refused: {path} {r.status_code}")
+ok(config.load_config()["printers"][1]["conn"].get("loaded", "") == "", "refused 'loaded' did not touch the other printer")
+ok(dbc.execute("SELECT COUNT(*) FROM maintenance WHERE printer=1 AND item='clean' AND ts>?", (time.time() - 60,)).fetchone()[0] == 0, "refused maintenance not recorded")
+r = B.post("/api/printers/0/loaded", json={"loaded": "白", "printer_id": drawer["id"]})
+ok(r.status_code == 200 and config.load_config()["printers"][0]["conn"].get("loaded") == "白", "matching id + index accepted")
+fjs = open(APP + "/modules/prod/ui/fleet.js", encoding="utf-8").read()
+ok(fjs.count("printer_id: id") >= 3 and "PROD.netDiag(idx, t, id)" in fjs and "PROD.maintDialog(idx, t.dataset.flmaint, done, id)" in fjs,
+   "drawer sends the stable id with every index-based command")
+
+# ---------- 12.5（🔴1）后台进程模式：先认领再执行；ERP 超时但后台在执行 → 结果未知（不是失败）、不重发；两个同 id 的后台进程只执行一次 ----------
+config.save_config({"printers": [{"id": "kA", "code": "KA-1", "name": "Bambu Lab P1S", "enabled": True, "ovr": {"nozzle": 0.4},
+                                  "conn": {"type": "bambu", "host": "10.9.9.1", "serial": "SNK0000001", "access_code": "12345678"}}],
+                    "printer_workers": {}})
+loop = asyncio.new_event_loop(); threading.Thread(target=loop.run_forever, daemon=True).start()
+class SlowLink:
+    def __init__(self, delay):
+        self.n, self.delay, self.connected = 0, delay, True
+    async def publish(self, payload):
+        self.n += 1
+        await asyncio.sleep(self.delay)
+slow = SlowLink(2.5)
+def fake_worker():
+    m = pm.Manager(worker_id="", persist=True); m.loop = loop; m.links = {"kA": slow}; return m
+wa, wb = fake_worker(), fake_worker()            # 两个后台进程，PRINTER_WORKER_ID 一样
+stop = threading.Event()
+def pump(m):
+    while not stop.is_set():
+        try:
+            m.run_commands()
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+        finally:
+            db.release()
+        time.sleep(0.05)
+pumps = [threading.Thread(target=pump, args=(m,), daemon=True) for m in (wa, wb)]
+for t_ in pumps:
+    t_.start()
+pr._remote["on"] = True; pr._mgr = None
+old_wait = pr.REMOTE_WAIT; pr.REMOTE_WAIT = 1.0
+pA = config.load_config()["printers"][0]
+def call(key):
+    try:
+        pr._remote_call(pA, "publish", {"print": {"command": "pause"}}, key=key); return "ok", ""
+    except pr.UnknownResult as e:
+        return "unknown", str(e)
+    except ConnectionError as e:
+        return "fail", str(e)
+try:
+    res, msg = call("t-1")
+    ok(res == "unknown" and pr.UNKNOWN_MSG in msg, f"slow worker + ERP timeout -> result unknown, not failure ({res}: {msg})")
+    time.sleep(2.0)
+    rows = [dict(x) for x in dbc.execute("SELECT status, worker FROM printer_cmds WHERE ikey='t-1'")]
+    ok(len(rows) == 1 and rows[0]["status"] == "done" and rows[0]["worker"] and slow.n == 1, f"worker finished it once {rows} n={slow.n}")
+    res, msg = call("t-1")                              # 重试同一次发送
+    time.sleep(0.3)
+    ok(res == "unknown" and slow.n == 1, f"retry with the same idempotency key is refused by the worker ({res}: {msg}) n={slow.n}")
+    ok(dbc.execute("SELECT status FROM printer_cmds WHERE ikey='t-1' ORDER BY id DESC").fetchone()["status"] == "dup", "duplicate marked dup")
+    # 两个同 id 的后台进程：每条指令只执行一次
+    slow.delay = 0.02; n0 = slow.n
+    for k in range(8):
+        pr._remote_call(pA, "publish", {"print": {"command": "pause"}}, wait=0)
+    t0 = time.time()
+    while time.time() - t0 < 10 and dbc.execute("SELECT COUNT(*) FROM printer_cmds WHERE status IN ('new','running')").fetchone()[0]:
+        time.sleep(0.1)
+    ok(slow.n - n0 == 8 and wa.executed + wb.executed == slow.n, f"two workers with the same id: 8 commands executed exactly once ({slow.n - n0})")
+    # start_run：结果未知 → 记成打印中 + 提醒，不当失败；不能再发第二次
+    slow.delay = 2.5
+    def send_via_worker(idx, path, name, kind, slot=None):
+        p = config.load_config()["printers"][idx]
+        pr._remote_call(p, "publish", pr.bambu_start_payload(name, 1, None), key=getattr(pr._SEND, "key", ""))
+        return name
+    real_send = pr.send_file; pr.send_file = send_via_worker
+    gp = D + "/rv.gcode"
+    open(gp, "w").write("; generated by test\n; filament used [g] = 10\nM83\nG28\n;LAYER_CHANGE\nG1 X10 Y10 E1\n")
+    from core import print_files
+    fz = print_files.add(gp, "rv.gcode", "3DP0001", "Bambu Lab P1S", "", 1, "", "t", "boss", "PLA", 10, 1, source="plan")
+    slicecheck.confirm(fz["id"], "Bambu Lab P1S", "boss"); print_files.verify(fz["id"], True, "boss")
+    jz = production.create_job("3DP0001", "3DP0001-WH", 1, "stock"); jz = jz["id"] if isinstance(jz, dict) else jz
+    n0 = slow.n
+    try:
+        out = production.start_run(jz, 0, 1, [], fz["id"], True, "boss", CONF)
+        err_ = ""
+    except Exception as e:  # noqa: BLE001
+        out, err_ = {}, str(e)
+    rrow = dbc.execute("SELECT status, sent, alert FROM print_runs WHERE id=?", (out.get("run_id"),)).fetchone() if out else None
+    ok(bool(out.get("unknown")) and rrow is not None and rrow["status"] == "printing" and pr.UNKNOWN_MSG in (rrow["alert"] or "")
+       and pr.UNKNOWN_MSG in out.get("warning", ""), f"start_run with unknown result: run kept as printing + warning, not a failure ({err_ or dict(rrow or {})})")
+    try:
+        production.start_run(jz, 0, 1, [], fz["id"], True, "boss", CONF); again = "sent again"
+    except ValueError as e:
+        again = str(e)
+    time.sleep(2.8)
+    ok(again != "sent again" and slow.n - n0 == 1, f"no second send ({again}); printer got it once ({slow.n - n0})")
+    ok(pr.get_status(0).get("state") == "printing", "printer shown as printing after unknown send")
+    ikeys = [x["ikey"] for x in dbc.execute("SELECT ikey FROM printer_cmds WHERE ikey LIKE 'start:%'")]
+    ok(len(ikeys) == 1 and ikeys[0].startswith(f"start:kA:{jz}:"), f"start_run passes a per-send idempotency key {ikeys}")
+    pr.send_file = real_send
+    # 后台进程没在运行：ERP 超时 → 失败，指令作废，之后后台进程起来也不会再执行
+    stop.set()
+    for t_ in pumps:
+        t_.join(5)
+    n0 = slow.n
+    res, msg = call("t-9")
+    st9 = dbc.execute("SELECT status FROM printer_cmds WHERE ikey='t-9'").fetchone()["status"]
+    wa.run_commands()
+    ok(res == "fail" and st9 == "timeout" and slow.n == n0, f"no worker -> failure, command voided ({res}, {st9})")
+finally:
+    stop.set()
+    pr.REMOTE_WAIT = old_wait
+    pr._remote["on"] = False
+    loop.call_soon_threadsafe(loop.stop)
+pr._status.clear()
+
+# ---------- 12.6（🔴2）后台进程不跑模块的启动任务（拉订单、Lazada、迁移…），生产模块的状态回调照样注册 ----------
+probe = f"""import sys, threading, json, os
+sys.path.insert(0, {APP!r})
+started = []
+_orig = threading.Thread.start
+def _st(self):
+    started.append(self.name); return _orig(self)
+threading.Thread.start = _st
+from core import printer_worker
+printers = printer_worker.boot()
+from core import modules, production
+print("RESULT " + json.dumps({{"mods": [n for n in started if n.startswith("mod-")], "env": os.environ.get("LH_NO_MODULE_STARTUP"),
+      "tpl": os.environ.get("LH_NO_TPL_SYNC"), "cb": production.on_printer_change in printers._events, "n": len(modules._started)}}))
+"""
+env = dict(os.environ, LH_DATA_DIR=D, PYTHONPATH=APP)
+for k in ("LH_NO_MODULE_STARTUP", "LH_NO_TPL_SYNC", "PRINTER_WORKER"):
+    env.pop(k, None)
+pp = subprocess.run([sys.executable, "-c", probe], env=env, cwd=APP, capture_output=True, text=True, timeout=180)
+line = next((l for l in pp.stdout.splitlines() if l.startswith("RESULT ")), "")
+j = json.loads(line[7:]) if line else {}
+ok(j.get("mods") == [] and j.get("n", 0) > 0, f"worker import starts no module background jobs {j or pp.stderr[-500:]}")
+ok(j.get("env") == "1" and j.get("tpl") == "1" and j.get("cb") is True, "worker sets LH_NO_MODULE_STARTUP / LH_NO_TPL_SYNC and keeps the prod status callback")
+
+# ---------- 12.7（🟡6）喷嘴是每台自己的：添加时要明确填；新打印机不继承同机型别的打印机的 0.6 ----------
+config.save_config({"printers": [{"id": "n1", "code": "N-01", "name": "Bambu Lab P1S", "enabled": True, "conn": {"type": "none"}, "ovr": {"nozzle": 0.6}}]})
+r = B.post("/api/fleet/printers", json={"name": "Bambu Lab P1S"})
+ok(r.status_code == 400 and "喷嘴" in r.get_json()["error"], f"add without nozzle refused {r.get_json()}")
+r = B.post("/api/fleet/printers?lang=th", json={"name": "Bambu Lab P1S"})
+ok(r.status_code == 400 and "หัวฉีด" in r.get_json()["error"], "nozzle error in Thai")
+r = B.post("/api/fleet/printers", json={"name": "Bambu Lab P1S", "nozzle": "0.4"})
+ok(r.status_code == 200, f"add with confirmed nozzle {r.get_json()}")
+pn = config.load_config()["printers"]
+ok(pn[1]["nozzle"] == 0.4 and raw()["printers"][1]["ovr"].get("nozzle") == 0.4, "new printer stores its own nozzle")
+SM = "Smooth PEI Plate"          # 第 2 节把 P1S 模板的热床板设成了这个
+ok(slicecheck.check(F(0.4, bed=SM), 1)["ok"] and not slicecheck.check(F(0.6, bed=SM), 1)["ok"] and slicecheck.check(F(0.6, bed=SM), 0)["ok"],
+   "new printer checks its own 0.4 nozzle (0.6 file rejected), the 0.6 printer still takes 0.6")
+r = B.post("/api/fleet/printers", json={"name": "Anycubic Photon Mono M5s"})
+ok(r.status_code == 200, f"resin printer needs no nozzle {r.get_json()}")
+res6 = fleet.validate_import([{"model": "Bambu Lab P1S"}, {"model": "Bambu Lab P1S", "nozzle": "0.6"}, {"model": "Bambu Lab P1S", "nozzle": "abc"}], config.load_config())
+ok(res6[0]["printer"]["ovr"] == {"nozzle": 0.4} and res6[0]["warnings"] and res6[1]["printer"]["ovr"] == {"nozzle": 0.6} and not res6[2]["ok"],
+   "import: nozzle per row (missing -> 0.4 + warning, bad -> error)")
+
+# ---------- 12.8（🟡8）导入预览 / 提交失败都不回传明文访问码；提交按 token 取服务器上的原始行 ----------
+csv8 = ("model,ip,serial,access code,nozzle\n"
+        "Bambu Lab P1S,192.168.7.10,01P00A000000710,SECRET71,0.4\n"
+        "Bambu Lab P1S,192.168.7.11,01P00A000000711,SECRET72,0.6\n")
+r = B.post("/api/fleet/import", data={"file": (io.BytesIO(csv8.encode()), "p.csv")}, content_type="multipart/form-data")
+body = r.get_data(as_text=True); j = r.get_json()
+ok(r.status_code == 200 and "SECRET7" not in body and "data" not in j and j.get("token"), "import preview: no plaintext access codes, server-side token")
+devs = [{"row": x["row"], "model": x["printer"]["name"], "vendor": x["printer"]["conn"]["type"], "host": x["printer"]["conn"]["host"],
+         "serial": x["printer"]["conn"]["serial"], "access_code": "******", "nozzle": x["printer"]["ovr"].get("nozzle")} for x in j["rows"]]
+r = B.post("/api/fleet/add-many", json={"devices": [dict(devs[0], host="192.168.7.999"), devs[1]], "token": j["token"]})
+ok(r.status_code == 400 and "SECRET7" not in r.get_data(as_text=True), "failed commit does not return access codes")
+r = B.post("/api/fleet/add-many", json={"devices": devs, "token": j["token"]})
+ok(r.status_code == 200 and len(r.get_json()["added"]) == 2, f"commit with token {r.get_json()}")
+last2 = config.load_config()["printers"][-2:]
+ok([x["conn"]["access_code"] for x in last2] == ["SECRET71", "SECRET72"] and [x["nozzle"] for x in last2] == [0.4, 0.6], "access codes taken from the server-side rows")
+ok(B.post("/api/fleet/add-many", json={"devices": devs, "token": "nope"}).status_code == 400, "unknown / expired token refused")
+csv9 = csv8.replace("192.168.7.1", "192.168.6.1").replace("00000071", "00000061") + "Bambu Lab P1S,192.168.6.300,,,\n"
+r = B.post("/api/fleet/import?commit=1", data={"file": (io.BytesIO(csv9.encode()), "p.csv")}, content_type="multipart/form-data")
+ok(r.status_code == 400 and "SECRET7" not in r.get_data(as_text=True), "file commit with bad rows: codes masked")
+
+# ---------- 12.9（🟡9）/api/config 不再把 200 台以后的打印机截掉 ----------
+p201 = [{"code": f"V-{i:03d}", "name": "Bambu Lab P1S", "g_per_h": 22, "enabled": True} for i in range(201)]
+r = B.post("/api/config", json={"printers": p201})
+ok(r.status_code == 200 and len(config.load_config()["printers"]) == 201, f"/api/config keeps all 201 printers ({len(config.load_config()['printers'])})")
+r = B.post("/api/config", json={"printers": p201 * 25})
+ok(r.status_code == 400 and len(config.load_config()["printers"]) == 201, "/api/config over the limit -> error, nothing truncated")
+ajs = open(APP + "/static/app.js", encoding="utf-8").read()
+ok('data-c="printers"' not in ajs and "body.printers" not in ajs, "settings page no longer posts printers to /api/config")
 
 print("DONE", "FAIL" if E_ else "PASS")
 sys.exit(1 if E_ else 0)

@@ -308,18 +308,18 @@
         const body = connBody();
         const r = await busy(t, () => api(U("/api/fleet/printers/" + encodeURIComponent(id) + "/test"), { json: body }));
         testRes(r);
-      } else if (t.dataset.fldiag !== undefined) { if (window.PROD && PROD.netDiag) PROD.netDiag(idx, t); }
+      } else if (t.dataset.fldiag !== undefined) { if (window.PROD && PROD.netDiag) PROD.netDiag(idx, t, id); }
       else if (t.dataset.flcmd !== undefined) {
         if (t.dataset.flcmd === "stop" && !confirm(Z("确定取消这台打印机正在打的任务？", "ยืนยันยกเลิกงานที่เครื่องนี้กำลังพิมพ์?"))) return;
-        await busy(t, () => api(`/api/printers/${idx}/command`, { json: { cmd: t.dataset.flcmd } }));
+        await busy(t, () => api(`/api/printers/${idx}/command`, { json: { cmd: t.dataset.flcmd, printer_id: id } }));   // 带稳定 id：列表变了服务器会拒绝
         toast(Z("指令已发送", "ส่งคำสั่งแล้ว")); setTimeout(() => refreshDrawer().catch(() => {}), 2500);
       } else if (t.dataset.flsaveloaded !== undefined) {
-        await api(`/api/printers/${idx}/loaded`, { json: { loaded: drawerEl().querySelector("[data-flloaded]").value } });
+        await api(`/api/printers/${idx}/loaded`, { json: { loaded: drawerEl().querySelector("[data-flloaded]").value, printer_id: id } });
         toast(Z("已保存，排单会优先用这台打印机打这些颜色", "บันทึกแล้ว ระบบจัดคิวจะใช้เครื่องนี้พิมพ์สีเหล่านี้ก่อน"));
       } else if (t.dataset.flmaint) {
         const done = () => { refreshDrawer().catch(() => {}); load(true).catch(() => {}); };
-        if (window.PROD && PROD.maintDialog) await busy(t, () => PROD.maintDialog(idx, t.dataset.flmaint, done));   // 可以选用掉的备件
-        else { await busy(t, () => api("/api/maintenance", { json: { printer: idx, item: t.dataset.flmaint } })); toast(Z("已记录保养", "บันทึกการบำรุงรักษาแล้ว")); done(); }
+        if (window.PROD && PROD.maintDialog) await busy(t, () => PROD.maintDialog(idx, t.dataset.flmaint, done, id));   // 可以选用掉的备件
+        else { await busy(t, () => api("/api/maintenance", { json: { printer: idx, item: t.dataset.flmaint, printer_id: id } })); toast(Z("已记录保养", "บันทึกการบำรุงรักษาแล้ว")); done(); }
       } else if (t.dataset.flremove !== undefined) {
         if (!confirm(Z(`移除打印机 ${D.printer.code}？\n排给它的任务会自动转到其他机器；打印记录保留。`, `นำเครื่อง ${D.printer.code} ออก?\nงานที่จัดให้เครื่องนี้จะย้ายไปเครื่องอื่นอัตโนมัติ ประวัติการพิมพ์ยังเก็บไว้`))) return;
         await busy(t, () => api(U("/api/fleet/printers/" + encodeURIComponent(id)), { method: "DELETE" }));
@@ -340,6 +340,7 @@
         <label>${esc(Z("机器编码（空 = 自动，例如 P1S-001）", "รหัสเครื่อง (ว่าง = อัตโนมัติ เช่น P1S-001)"))}<input id="fa-code" data-notr></label>
         <label>${esc(Z("分组", "กลุ่ม"))}<input id="fa-group" list="fa-groups" data-notr><datalist id="fa-groups">${(META.groups || []).map((g) => `<option value="${esc(g)}">`).join("")}</datalist></label>
         <label>${esc(Z("位置", "ตำแหน่ง"))}<input id="fa-loc" placeholder="A-03-2" data-notr></label>
+        <label id="fa-nzl">${esc(Z("喷嘴直径 mm（请确认，每台单独记）", "ขนาดหัวฉีด มม. (กรุณายืนยัน บันทึกแยกแต่ละเครื่อง)"))}<input id="fa-nozzle" type="number" min="0.1" max="2" step="0.05" value="0.4"></label>
         <label>${esc(Z("厂家 / 连接方式", "ยี่ห้อ / การเชื่อมต่อ"))}<select id="fa-vendor"></select></label></div>
       <div id="fa-vform"></div>
       <p class="small muted" id="fa-many">${esc(Z("一次加多台时先不填连接（每台 IP 不一样）：加好后在列表里点每台填，或用「局域网发现」「导入」。", "ถ้าเพิ่มหลายเครื่องพร้อมกัน ยังไม่ต้องกรอกการเชื่อมต่อ (IP แต่ละเครื่องไม่เหมือนกัน) เพิ่มแล้วกดที่แต่ละเครื่องเพื่อกรอก หรือใช้ «ค้นหาในเครือข่าย» «นำเข้า»"))}</p>
@@ -354,6 +355,7 @@
       vs.disabled = n > 1;
       m.querySelector("#fa-code").disabled = n > 1;
       m.querySelector("#fa-many").classList.toggle("hidden", n <= 1);
+      m.querySelector("#fa-nzl").classList.toggle("hidden", mm.tech === "resin");
       m.querySelector("#fa-vform").innerHTML = n > 1 ? "" : vendorForm(vs.value, {}).replace(/data-flc=/g, "data-fac=");
     };
     m.querySelector("#fa-model").onchange = sync; m.querySelector("#fa-n").oninput = sync;
@@ -362,7 +364,8 @@
     m.querySelector("#fa-ok").onclick = (e) => busy(e.target, async () => {
       const conn = {}; m.querySelectorAll("[data-fac]").forEach((x) => (conn[x.dataset.fac] = x.type === "checkbox" ? x.checked : x.value));
       const n = +m.querySelector("#fa-n").value || 1;
-      const body = { name: m.querySelector("#fa-model").value, n, group: m.querySelector("#fa-group").value, location: m.querySelector("#fa-loc").value };
+      const body = { name: m.querySelector("#fa-model").value, n, group: m.querySelector("#fa-group").value, location: m.querySelector("#fa-loc").value,
+        nozzle: m.querySelector("#fa-nozzle").value };
       if (n === 1) Object.assign(body, { code: m.querySelector("#fa-code").value, vendor: m.querySelector("#fa-vendor").value, conn });
       try {
         const r = await api(U("/api/fleet/printers"), { json: body });
@@ -373,12 +376,13 @@
   }
   function devRows(list, kind) {
     return `<div class="tbl-scroll" style="max-height:50vh"><table class="grid small fl-dev"><thead><tr><th><input type="checkbox" data-fdall checked></th><th>IP</th><th>${esc(Z("序列号", "ซีเรียล"))}</th><th>${esc(Z("机型", "รุ่น"))}</th>
-      <th>${esc(Z("连接", "การเชื่อมต่อ"))}</th>${kind === "disc" ? `<th>${esc(Z("访问码", "รหัสเข้าถึง"))}</th>` : ""}<th>${esc(Z("编码", "รหัส"))}</th><th>${esc(Z("分组", "กลุ่ม"))}</th><th>${esc(Z("位置", "ตำแหน่ง"))}</th><th></th></tr></thead><tbody>
+      <th>${esc(Z("连接", "การเชื่อมต่อ"))}</th>${kind === "disc" ? `<th>${esc(Z("访问码", "รหัสเข้าถึง"))}</th>` : ""}<th>${esc(Z("喷嘴 mm", "หัวฉีด มม."))}</th><th>${esc(Z("编码", "รหัส"))}</th><th>${esc(Z("分组", "กลุ่ม"))}</th><th>${esc(Z("位置", "ตำแหน่ง"))}</th><th></th></tr></thead><tbody>
       ${list.map((d, i) => `<tr data-fd="${i}" class="${d.exists ? "muted" : ""}"><td><input type="checkbox" data-fdon ${d.exists || d.ok === false ? "" : "checked"} ${d.exists ? "disabled" : ""}></td>
         <td class="mono" data-notr>${esc(d.ip || d.host || "")}</td><td><input data-fdk="serial" value="${esc(d.serial || "")}" style="width:140px" data-notr></td>
         <td><select data-fdk="model" data-notr><option value="">—</option>${modelOpts(d.model)}</select>${d.guess ? ` <span class="small muted">${esc(Z("猜的", "เดา"))}</span>` : ""}</td>
         <td><select data-fdk="vendor">${Object.keys(META.vendors).map((k) => `<option value="${k}" ${k === d.vendor ? "selected" : ""}>${esc(Z(META.vendors[k].zh, META.vendors[k].th))}</option>`).join("")}</select></td>
         ${kind === "disc" ? `<td><input data-fdk="access_code" style="width:90px" placeholder="${d.vendor === "bambu" ? "12345678" : ""}" data-notr></td>` : ""}
+        <td><input data-fdk="nozzle" type="number" min="0.1" max="2" step="0.05" value="${esc(d.nozzle || "0.4")}" style="width:60px"></td>
         <td><input data-fdk="code" value="${esc(d.code || "")}" placeholder="${esc(Z("自动", "อัตโนมัติ"))}" style="width:90px" data-notr></td>
         <td><input data-fdk="group" value="${esc(d.group || "")}" style="width:70px" data-notr></td><td><input data-fdk="location" value="${esc(d.location || "")}" style="width:80px" data-notr></td>
         <td class="small">${d.exists ? esc(Z(`已有：${d.exists}`, `มีแล้ว: ${d.exists}`)) : ""}${d.lan_mode === false ? `<span class="bad">${esc(Z("没开局域网模式", "ยังไม่เปิดโหมด LAN"))}</span>` : ""}
@@ -389,7 +393,7 @@
       const d = list[+tr.dataset.fd], o = { host: d.ip || d.host || "" };
       tr.querySelectorAll("[data-fdk]").forEach((x) => (o[x.dataset.fdk] = x.value));
       if (!o.access_code && d.access_code && d.access_code !== "******") o.access_code = d.access_code;
-      if (d.raw) Object.assign(o, { access_code: o.access_code || d.raw.access_code || "", port: d.raw.port || "", role: d.raw.role || "" });
+      if (d.row) o.row = d.row;          // 导入：访问码等原始值留在服务器上，按行号取（v2.54 复审：不经过浏览器）
       return o;
     });
   }
@@ -397,7 +401,7 @@
     const devs = pickDevices(m, list);
     if (!devs.length) { toast(Z("先勾选要添加的设备", "เลือกอุปกรณ์ที่จะเพิ่มก่อน"), true); return; }
     try {
-      const r = await busy(btn, () => fetch(U("/api/fleet/add-many"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ devices: devs }) }).then((x) => x.json()));
+      const r = await busy(btn, () => fetch(U("/api/fleet/add-many"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ devices: devs, token: list.token || undefined }) }).then((x) => x.json()));
       if (!r.ok) {
         toast(r.error || Z("有问题，没有添加", "มีปัญหา ยังไม่ได้เพิ่ม"), true);
         (r.rows || []).forEach((row, k) => {
@@ -439,8 +443,10 @@
       try {
         const r = await fetch(U("/api/fleet/import"), { method: "POST", body: fd }).then((x) => x.json());
         if (r.error) { toast(r.error, true); return; }
-        list = r.rows.map((x, i) => ({ ip: x.printer.conn.host || "", serial: x.printer.conn.serial || "", model: x.printer.name, vendor: x.printer.conn.type,
-          code: x.printer.code, group: x.printer.group, location: x.printer.location, ok: x.ok, errors: x.errors, warnings: x.warnings, raw: r.data[i] }));
+        list = r.rows.map((x) => ({ ip: x.printer.conn.host || "", serial: x.printer.conn.serial || "", model: x.printer.name, vendor: x.printer.conn.type,
+          code: x.printer.code, group: x.printer.group, location: x.printer.location, ok: x.ok, errors: x.errors, warnings: x.warnings,
+          row: x.row, nozzle: (x.printer.ovr || {}).nozzle || "" }));
+        list.token = r.token;
         m.querySelector("#fi-res").innerHTML = `<p class="small">${esc(Z(`共 ${r.rows.length} 行：${r.ok} 行可以添加，${r.bad} 行有问题`, `ทั้งหมด ${r.rows.length} แถว: เพิ่มได้ ${r.ok} แถว มีปัญหา ${r.bad} แถว`))}</p>` + devRows(list, "imp");
         m.querySelector("#fi-add").classList.toggle("hidden", !r.ok);
       } catch (err) { toast(err.message, true); }

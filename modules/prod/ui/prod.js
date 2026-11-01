@@ -328,10 +328,10 @@
 
   // ---------------- 打印机 ----------------
   // v2.54：打印机页搬到 fleet.js（机群总览、列表、抽屉）。保养记录的「用了哪些备件」对话框还在这里，抽屉调用它。
-  async function maintDialog(i, item, done) {
+  async function maintDialog(i, item, done, pid) {     // pid：稳定 id（v2.54 复审：服务器核对序号还是不是这台）
     let parts = [];
     try { parts = (await api("/api/inv/items?category=part")).items; } catch { parts = []; }
-    if (!parts.length) { await api("/api/maintenance", { json: { printer: +i, item } }); toast("已记录保养"); if (done) done(); return; }
+    if (!parts.length) { await api("/api/maintenance", { json: { printer: +i, item, printer_id: pid || undefined } }); toast("已记录保养"); if (done) done(); return; }
     const m = modal(`<h3>记录保养：<span data-notr>${esc(item)}</span></h3>
       <p class="muted small">这次用了备件就选上（从库存领用出库，记到这台打印机的支出）；没用备件直接确认。</p>
       <div class="row gap wrap"><select id="mt-part" data-notr><option value="">没用备件</option>${parts.map((p) => `<option value="${p.id}">${esc(p.code)} · ${esc(p.name_zh)}（${p.qty} ${esc(p.unit)}）</option>`).join("")}</select>
@@ -339,7 +339,7 @@
       <div class="row gap" style="margin-top:8px"><button class="primary" id="mt-ok">确认</button><button data-mclose>取消</button></div>`);
     m.querySelector("#mt-ok").onclick = (e) => busy(e.target, async () => {
       const pid = m.querySelector("#mt-part").value;
-      await api("/api/maintenance", { json: { printer: +i, item, note: m.querySelector("#mt-note").value,
+      await api("/api/maintenance", { json: { printer: +i, item, printer_id: pid || undefined, note: m.querySelector("#mt-note").value,
         parts: pid ? [{ item_id: +pid, qty: +m.querySelector("#mt-qty").value || 1 }] : [] } });
       toast("已记录保养"); closeModal(); if (done) done();
     });
@@ -482,9 +482,9 @@
   // v2.53：网络诊断（结论 + 端口表 + 服务器网络信息）。结论的中 / 泰文由服务器给，这里按界面语言挑
   const DIAG_KIND = { ok: ["通", "เชื่อมต่อได้"], refused: ["拒绝（主机在，端口没开）", "ปฏิเสธ (โฮสต์อยู่ แต่พอร์ตไม่เปิด)"], timeout: ["超时", "หมดเวลา"],
     noroute: ["找不到主机", "หาโฮสต์ไม่พบ"], other: ["其他错误", "ข้อผิดพลาดอื่น"] };
-  async function netDiag(i, btn) {
+  async function netDiag(i, btn, pid) {
     let r;
-    try { r = await busy(btn, () => api(`/api/printers/${i}/netdiag`, { json: {} })); } catch (err) { toast(err.message, true); return; }
+    try { r = await busy(btn, () => api(`/api/printers/${i}/netdiag`, { json: pid ? { printer_id: pid } : {} })); } catch (err) { toast(err.message, true); return; }
     if (!r) return;
     const lvl = { bad: "#c0392b", warn: "#d68910", ok: "#1e8449", info: "#566573" };
     const concl = (r.conclusions || []).map((c) => `<div style="border-left:4px solid ${lvl[c.level] || "#566573"};padding:6px 10px;margin:6px 0;white-space:pre-wrap" data-notr>${esc(Z(c.zh, c.th))}</div>`).join("");

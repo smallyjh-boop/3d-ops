@@ -77,7 +77,10 @@ def is_multicolor(p):
 def job_tech(material):
     return "resin" if is_resin(material) else "fdm"
 CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_\-]{0,15}$")
-PRINTER_TABLES = ("jobs", "print_runs", "failures", "maintenance")
+# 存打印机序号的表（v2.54 复审：查过所有建表语句，printer INTEGER 只有这些；print_files.printer 是机型名，
+# inv_moves / inv_docs / spools 存的是机器编码，production_orders.printers 存编码，inv_printer_locs 按编码对）
+PRINTER_TABLES = ("jobs", "print_runs", "failures", "maintenance", "job_plates", "trials")
+PIN_TABLES = ("jobs", "job_plates")      # 删掉的打印机：固定（pin）在它上面的任务 / 盘取消固定，重新排单
 
 
 def _short(name):
@@ -190,8 +193,8 @@ def remap(old, new):
             c.execute(f"UPDATE {t} SET printer=? WHERE printer=?", (-1000 - i, i))
         for i, j in mapping.items():
             if j is None:
-                if t == "jobs":
-                    c.execute("UPDATE jobs SET printer=NULL, pin=0 WHERE printer=?", (-1000 - i,))
+                if t in PIN_TABLES:
+                    c.execute(f"UPDATE {t} SET printer=NULL, pin=0 WHERE printer=?", (-1000 - i,))
                 else:
                     c.execute(f"UPDATE {t} SET printer=NULL WHERE printer=?", (-1000 - i,))
             else:
@@ -227,6 +230,9 @@ import uuid
 
 # 机型模板里的字段：同机型的打印机默认都用模板的值，单台只在「单独设置」的地方覆盖（例如这台装了 0.6 喷嘴）
 TPL_FIELDS = ("nozzle", "plate", "g_per_h", "ams", "orca_machine", "orca_process", "orca_filament")
+# v2.54 复审：喷嘴和热床板是每台自己的（换过 0.6 喷嘴的那台不能让同机型的新打印机「继承」）——迁移不放进模板，
+# 添加打印机时要明确填喷嘴
+PER_PRINTER = ("nozzle", "plate")
 ROLES = ("any", "orders", "stock")          # 用途：都可以 / 只打订单 / 只打备货（排单那边读）
 ROLE_ZH = {"any": ("都可以", "ทั้งหมด"), "orders": ("只打订单", "เฉพาะออเดอร์"), "stock": ("只打备货", "เฉพาะสต็อก")}
 # 每台打印机 v2.54 新增的字段（排单那边只读这些）：分组、位置（货架-层-位）、用途、专门打的生产单、暂停接单（保养）
@@ -379,6 +385,7 @@ def looks_like_location(note):
 
 def migrate254(cfg):
     """v2.54 一次性迁移：同机型的打印机设置完全一样的值 → 变成机型模板；不一样的留作单台覆盖。
+    喷嘴、热床板（PER_PRINTER）永远留在每台自己身上，不放进模板。
     备注像位置（A-03-2、2 号货架）的抄到「位置」。原地修改 cfg。"""
     prs = cfg.get("printers") or []
     tpls = {k: dict(v) for k, v in (cfg.get("printer_models") or {}).items()}
@@ -390,7 +397,7 @@ def migrate254(cfg):
             continue
         t = dict(tpls.get(name) or {})
         for f in TPL_FIELDS:
-            if f in t:
+            if f in t or f in PER_PRINTER:
                 continue
             vals = [clean_value(f, (p.get("ovr") or {}).get(f, p.get(f))) for p in group]
             if vals and all(v is not None for v in vals) and all(v == vals[0] for v in vals):
@@ -560,7 +567,9 @@ IMPORT_COLS = {
     "location": ("location", "位置", "ตำแหน่ง"),
     "vendor": ("vendor", "连接方式", "การเชื่อมต่อ"),
     "role": ("role", "用途", "การใช้งาน"),
+    "nozzle": ("nozzle", "喷嘴", "喷嘴直径", "หัวฉีด", "ขนาดหัวฉีด"),
 }
+DEFAULT_NOZZLE = 0.4
 
 
 def _col_key(h):
@@ -663,8 +672,19 @@ def validate_import(rows, cfg):
             if ser:
                 used_serials.add(ser)
         m = model_info(model) or {}
+        ovr = {}
+        if m.get("tech", "fdm") != "resin":      # v2.54 复审：喷嘴是每台自己的，不从模板继承；没填按 0.4 并提醒确认
+            raw_n = str(r.get("nozzle") or "").strip()
+            nz = clean_value("nozzle", raw_n) if raw_n else None
+            if raw_n and nz is None:
+                errs.append((f"喷嘴直径「{raw_n}」不对（例如 0.4）", f"ขนาดหัวฉีด «{raw_n}» ไม่ถูกต้อง (เช่น 0.4)"))
+            elif nz is None:
+                nz = DEFAULT_NOZZLE
+                warns.append(("没填喷嘴直径，按 0.4 mm：不是 0.4 的请改", "ไม่ได้กรอกขนาดหัวฉีด ใช้ 0.4 มม. ถ้าไม่ใช่ 0.4 กรุณาแก้"))
+            if nz is not None:
+                ovr["nozzle"] = nz
         out.append({"row": n, "ok": not errs, "errors": errs, "warnings": warns,
                     "printer": {"code": code, "name": model, "enabled": True, "tech": m.get("tech", "fdm"),
                                 "group": str(r.get("group") or "")[:30], "location": str(r.get("location") or "")[:30],
-                                "role": role, "dedicated_po": "", "paused": False, "conn": conn or {"type": "none"}, "ovr": {}}})
+                                "role": role, "dedicated_po": "", "paused": False, "conn": conn or {"type": "none"}, "ovr": ovr}})
     return out

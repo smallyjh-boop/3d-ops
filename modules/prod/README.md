@@ -67,3 +67,17 @@
      线程固定 2 个。PRINTER_WORKER=external + `python -m core.printer_worker` 拆成单独进程（表 printer_state / printer_cmds），
      printer_workers = {进程 id: [分组]} 按分组分给多个进程。core/printers 的对外函数不变。
   ⑦ 迁移：同机型一样的值变成模板，不一样的留作单台覆盖；备注像位置的抄到 location；连接全部保留。测试 tests/t_fleet254.py（含 1000 台假打印机压力测试、TLS、后台进程模式）。
+- 1.14（系统 v2.54.0）发版前复审修复（测试 tests/t_fleet254.py 第 12 节）：
+  ① 后台进程模式：指令先原子认领（printer_cmds new → running + worker）再执行；ERP 等 12 秒没结果时，后台还没认领 → 作废（timeout）报失败，
+     已认领 / 已完成 → printers.UnknownResult「结果未知，请到打印机上确认，不要重发」：start_run 照样记成打印中（带提醒，不能再发）；
+     每次发送带幂等键（printers.send_key，start_run 用 打印机 id + 任务 + 盘 + 文件 + 最新批次号），同一个键后台只执行一次（重复的标 dup）；
+     两个 PRINTER_WORKER_ID 一样的后台进程也只执行一次。
+  ② `python -m core.printer_worker` 载入前设 LH_NO_MODULE_STARTUP / LH_NO_TPL_SYNC（不再在后台进程里拉订单、跑 Lazada 任务），生产模块的状态回调照样注册。
+  ③ 状态缓存、状态变化通知按稳定 id（printers._status 按 id 存，外面按序号读写照旧）；通知时才用设置文件现在的顺序把 id 换成序号
+     （printers.maps，按设置文件版本缓存，后台进程也一样）→ 删了打印机、连接管理还没对设置时，不会把别的打印机的那一盘记成打完。
+  ④ 抽屉里的 暂停 / 继续 / 取消、装的颜色、保养、网络诊断 都带 printer_id，服务器核对序号还是不是这台，不是就 409「请刷新」。
+  ⑤ fleet.PRINTER_TABLES 加上 job_plates、trials（固定在删掉的打印机上的盘取消固定）；查过其他表：print_files 存机型名，inv_moves / spools / 生产单存编码。
+  ⑥ 喷嘴、热床板永远是每台自己的值：迁移不放进机型模板；添加打印机要填喷嘴（界面默认 0.4 让人确认），导入有「喷嘴」列（没填按 0.4 并提醒）。
+  ⑦ 导入预览不回传原始行（明文访问码），存在服务器上给 token，提交按 token + 行号取；提交失败返回的行也遮住访问码。
+  ⑧ POST /api/config 不再把 200 台以后的打印机截掉：超过 5000 台报错。
+  ⑨ load_config 按设置文件版本（inode + 修改时间 + 大小）缓存，返回拷贝（2000 台反复读约 5 毫秒，原来每次 0.2 秒以上）；连接管理在单独线程里读设置。

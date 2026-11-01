@@ -1,5 +1,6 @@
 """配置读写：所有可调参数都在 data/config.json，界面「设置」页可改。"""
 import copy
+import pickle
 import re
 import json
 import os
@@ -158,7 +159,46 @@ def _fix_lists(cfg):
     return cfg
 
 
+_CACHE = {"key": None, "cfg": None, "gen": 0}
+
+
+def file_key():
+    """设置文件的「版本」：(路径, inode, 修改时间 ns, 大小)。保存都是写临时文件再替换（inode 会变），别的进程改了也能认出来。"""
+    try:
+        st = os.stat(CONFIG_PATH)
+        return (CONFIG_PATH, st.st_ino, st.st_mtime_ns, st.st_size)
+    except OSError:
+        return (CONFIG_PATH, None, None, None)
+
+
+def invalidate():
+    """本进程里改了设置文件（save_config 会自动调）：下次 load_config 重新读。"""
+    _CACHE.update(key=None, cfg=None, gen=_CACHE["gen"] + 1)
+
+
+def _copy(cfg):
+    """给调用的人一份自己的拷贝（很多地方读出来直接改再 save_config）。pickle 比 deepcopy 快好几倍。"""
+    try:
+        return pickle.loads(pickle.dumps(cfg, pickle.HIGHEST_PROTOCOL))
+    except Exception:  # noqa: BLE001
+        return copy.deepcopy(cfg)
+
+
 def load_config():
+    """v2.54 复审：按设置文件的版本缓存（2000 台打印机每次重算 to_stored / effective 要 0.2 秒以上，
+    切片核对、排单、连接管理每次都调）。返回的是拷贝，调用的人随便改不影响缓存。"""
+    key = file_key()
+    if _CACHE["cfg"] is not None and _CACHE["key"] == key:
+        return _copy(_CACHE["cfg"])
+    gen = _CACHE["gen"]
+    cfg = _load_config()
+    key2 = file_key()                      # 读的时候顺便迁移写了文件 → 用写完以后的版本
+    if gen == _CACHE["gen"]:
+        _CACHE.update(key=key2, cfg=cfg)
+    return _copy(cfg)
+
+
+def _load_config():
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     if os.path.exists(CONFIG_PATH):
         try:
@@ -227,6 +267,7 @@ def save_config(cfg):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
     os.replace(tmp, CONFIG_PATH)
+    invalidate()
     try:                                       # v2.40 复审：同一秒内改两次设置，缓存不能还用旧的
         from . import print_files
         print_files._CFG_MEMO["cfg"] = None
