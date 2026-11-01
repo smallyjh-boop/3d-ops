@@ -178,6 +178,9 @@
         <div class="small">· 这个任务 #${j.id}：${o.remaining} 个 ${j.custom_note ? `<span class="note-inline" data-notr>✎ ${esc(j.custom_note)}</span>` : ""}</div>
         ${o.merge.map((m) => `<label class="row small"><input type="checkbox" data-merge="${m.id}" checked> 任务 #${m.id} ${m.order_no ? `订单 <span class="mono" data-notr>${esc(m.order_no)}</span>` : esc(m.kind === "stock" ? "备货" : "")} × ${m.remaining}
           ${m.custom_note ? `<span class="note-inline" data-notr>✎ ${esc(m.custom_note)}</span>` : ""}</label>`).join("")}</div>` : ""}
+      ${(o.parts || []).length ? `<div class="sd-box"><b>🧩 ${Z("有可用的零件（以前订单取消时留下的，不算成品库存）", "มีชิ้นส่วนที่ใช้ได้ (เหลือจากออเดอร์ที่ยกเลิก ไม่นับเป็นสต็อกสินค้า)")}</b>
+        ${o.parts.map((q) => `<div class="small" data-notr>· ${esc(q.label)} × ${q.qty}${q.name ? " · " + esc(q.name) : ""}${q.same_plate ? " ✓" : ""}</div>`).join("")}
+        <div class="small muted">${Z("打这个任务时可以直接用这些零件，对应的盘不用重新打（✓ = 正好是这一盘）", "ใช้ชิ้นส่วนเหล่านี้กับงานนี้ได้ เพลทที่ตรงกันไม่ต้องพิมพ์ใหม่ (✓ = เพลทนี้)")}</div></div>` : ""}
       ${o.recipe_zh ? `<div class="small recipe-line">🧩 打印方案：${esc(o.recipe_zh)}${o.recipe && o.recipe.notes ? `<div class="warn" data-notr>⚠ ${esc(o.recipe.notes)}</div>` : ""}</div>` : ""}
       <div id="sd-mat" class="sd-box sd-mat"></div>
       <div id="sd-file" class="sd-box"></div>

@@ -244,10 +244,10 @@
     const conn = ow ? `<label>${esc(Z("厂家 / 连接方式", "ยี่ห้อ / การเชื่อมต่อ"))}<select data-flvendor>${vopts}</select></label>
       <div data-flvform>${vendorForm(vend, c)}</div>
       <div class="row gap wrap"><button class="primary mini" data-flsaveconn>${esc(Z("保存连接", "บันทึกการเชื่อมต่อ"))}</button><button class="mini" data-fltest>${esc(Z("测试连接", "ทดสอบการเชื่อมต่อ"))}</button>
-        ${window.TRIAL && TRIAL.can() ? `<button class="mini" data-tr-ptest="${r.index}">🧪 ${esc(Z("打印测试", "ทดสอบพิมพ์"))}</button>` : ""}
+        ${window.TRIAL && TRIAL.can() ? `<button class="mini" data-tr-ptest="${r.index}" data-tr-pid="${esc(p.id || "")}">🧪 ${esc(Z("打印测试", "ทดสอบพิมพ์"))}</button>` : ""}
         <button class="mini" data-fldiag>${esc(Z("网络诊断", "วินิจฉัยเครือข่าย"))}</button></div><div data-fltestres></div>`
       : `<p class="small">${esc(Z(META.vendors[vend].zh, META.vendors[vend].th))} · <span class="mono" data-notr>${esc(c.host || "")}</span></p>
-         <div class="row gap"><button class="mini" data-fldiag>${esc(Z("网络诊断", "วินิจฉัยเครือข่าย"))}</button>${window.TRIAL && TRIAL.can() ? `<button class="mini" data-tr-ptest="${r.index}">🧪 ${esc(Z("打印测试", "ทดสอบพิมพ์"))}</button>` : ""}</div>`;
+         <div class="row gap"><button class="mini" data-fldiag>${esc(Z("网络诊断", "วินิจฉัยเครือข่าย"))}</button>${window.TRIAL && TRIAL.can() ? `<button class="mini" data-tr-ptest="${r.index}" data-tr-pid="${esc(p.id || "")}">🧪 ${esc(Z("打印测试", "ทดสอบพิมพ์"))}</button>` : ""}</div>`;
     const fl = FIELD();
     const ovr = `<p class="small muted">${esc(Z("左边是机型模板的值（系统 → 设置 → 生产 → 机型模板）；这台不一样才填右边，例如这台换了 0.6 喷嘴。发送切片文件前按这里核对。", "ซ้ายคือค่าจากแม่แบบรุ่น (ระบบ → ตั้งค่า → การผลิต → แม่แบบรุ่น) กรอกด้านขวาเฉพาะเมื่อเครื่องนี้ต่างไป เช่น เปลี่ยนหัวฉีด 0.6 ระบบจะตรวจตามนี้ก่อนส่งไฟล์สไลซ์"))}</p>
       <table class="grid small fl-ovr"><thead><tr><th>${esc(Z("项目", "รายการ"))}</th><th>${esc(Z("机型模板", "แม่แบบรุ่น"))}</th><th>${esc(Z("这台单独设置", "ค่าเฉพาะเครื่องนี้"))}</th></tr></thead><tbody>

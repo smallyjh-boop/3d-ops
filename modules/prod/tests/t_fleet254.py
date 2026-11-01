@@ -567,9 +567,11 @@ prs4 = config.load_config()["printers"]          # S-Y, S-Z, S-Q
 drawer = {"index": 1, "id": prs4[1]["id"]}       # 打开了 S-Z 的抽屉
 r = B.delete("/api/fleet/printers/" + prs4[0]["id"])   # 别人删了 S-Y：序号 1 现在是 S-Q
 for path, body in ((f"/api/printers/{drawer['index']}/command", {"cmd": "pause"}), (f"/api/printers/{drawer['index']}/loaded", {"loaded": "白"}),
-                   (f"/api/printers/{drawer['index']}/netdiag", {}), ("/api/maintenance", {"printer": drawer["index"], "item": "clean"})):
+                   (f"/api/printers/{drawer['index']}/netdiag", {}), (f"/api/printers/{drawer['index']}/print-test", {"confirm": {"bed_clear": True, "material": True}}),
+                   ("/api/maintenance", {"printer": drawer["index"], "item": "clean"})):
     r = B.post(path, json=dict(body, printer_id=drawer["id"]))
     ok(r.status_code == 409 and "刷新" in (r.get_json() or {}).get("error", ""), f"stale drawer refused: {path} {r.status_code}")
+ok(dbc.execute("SELECT COUNT(*) FROM jobs WHERE sku='TEST-CUBE'").fetchone()[0] == 0, "refused print-test created no job / sent nothing")
 ok(config.load_config()["printers"][1]["conn"].get("loaded", "") == "", "refused 'loaded' did not touch the other printer")
 ok(dbc.execute("SELECT COUNT(*) FROM maintenance WHERE printer=1 AND item='clean' AND ts>?", (time.time() - 60,)).fetchone()[0] == 0, "refused maintenance not recorded")
 r = B.post("/api/printers/0/loaded", json={"loaded": "白", "printer_id": drawer["id"]})
@@ -577,6 +579,8 @@ ok(r.status_code == 200 and config.load_config()["printers"][0]["conn"].get("loa
 fjs = open(APP + "/modules/prod/ui/fleet.js", encoding="utf-8").read()
 ok(fjs.count("printer_id: id") >= 3 and "PROD.netDiag(idx, t, id)" in fjs and "PROD.maintDialog(idx, t.dataset.flmaint, done, id)" in fjs,
    "drawer sends the stable id with every index-based command")
+tjs = open(APP + "/modules/prod/ui/trial.js", encoding="utf-8").read()
+ok(fjs.count('data-tr-pid=') >= 2 and "d.trPid" in tjs and tjs.count("printer_id: pid") >= 2, "drawer print-test button sends printer_id")
 
 # ---------- 12.5（🔴1）后台进程模式：先认领再执行；ERP 超时但后台在执行 → 结果未知（不是失败）、不重发；两个同 id 的后台进程只执行一次 ----------
 config.save_config({"printers": [{"id": "kA", "code": "KA-1", "name": "Bambu Lab P1S", "enabled": True, "ovr": {"nozzle": 0.4},
