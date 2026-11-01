@@ -40,7 +40,8 @@ NEW_COLS = (("status", "TEXT DEFAULT 'draft'"), ("version", "INTEGER DEFAULT 1")
             ("reviewed_by", "TEXT"), ("reviewed_at", "REAL"), ("review_items", "TEXT"),
             ("verified_by", "TEXT"), ("verified_at", "REAL"), ("verify_note", "TEXT"),
             ("actual_grams", "REAL"), ("actual_hours", "REAL"), ("photo", "TEXT"),
-            ("spec", "TEXT DEFAULT ''"))          # v2.22：这个文件是哪个规格的（规格有自己的模型时；空 = 主模型）
+            ("spec", "TEXT DEFAULT ''"),          # v2.22：这个文件是哪个规格的（规格有自己的模型时；空 = 主模型）
+            ("plate_id", "TEXT DEFAULT ''"))      # v2.52：打印方案里的哪一盘（几盘的方案每盘一个文件；空 = 整件）
 
 
 def init():
@@ -105,7 +106,7 @@ def _report_for_upload(path, kind, bed):
 
 
 def add(src_path, filename, product_id, printer, sku="", per_plate=1, color="", note="", user="", material="PLA",
-        grams=None, hours=None, move=False, recipe=None, report=None, checks=None, source="upload", bed=None, spec=""):
+        grams=None, hours=None, move=False, recipe=None, report=None, checks=None, source="upload", bed=None, spec="", plate_id=""):
     kind = _kind(filename)
     if kind == "resin":
         # 光固化：从文件里读时间 / 树脂用量（读不到的由人手填）
@@ -157,7 +158,8 @@ def add(src_path, filename, product_id, printer, sku="", per_plate=1, color="", 
     stored = f"{fid}_{_safe(filename)}"
     dst = os.path.join(FILE_DIR, stored)
     (shutil.move if move else shutil.copyfile)(src_path, dst)
-    c.execute("UPDATE print_files SET stored=?, size=?, spec=? WHERE id=?", (stored, os.path.getsize(dst), spec, fid))
+    c.execute("UPDATE print_files SET stored=?, size=?, spec=?, plate_id=? WHERE id=?",
+              (stored, os.path.getsize(dst), spec, (plate_id or "").strip(), fid))
     c.commit()
     return get(fid)
 
@@ -319,13 +321,16 @@ def _cfg_cached():
     return _CFG_MEMO["cfg"]
 
 
-def candidates(product_id, sku, printer_name, color="", usable_only=True):
-    """这台打印机能用的文件，按合适程度排序：同 SKU > 同颜色 > 已验证 > 已复核 > 新版本。"""
+def candidates(product_id, sku, printer_name, color="", usable_only=True, plate_id=None):
+    """这台打印机能用的文件，按合适程度排序：同 SKU > 同颜色 > 已验证 > 已复核 > 新版本。
+    plate_id（v2.52）：几盘的打印方案里某一盘的任务只用这一盘的文件（None = 不按盘筛，整件打的任务）。"""
     if not product_id:
         return []
     rows = [_out(r, False) for r in db.conn().execute(
         "SELECT * FROM print_files WHERE product_id=? AND active=1 ORDER BY id DESC", (product_id,))]
     rows = [r for r in rows if _printer_ok(r["printer"], printer_name)]
+    if plate_id is not None:
+        rows = [r for r in rows if (r.get("plate_id") or "") == plate_id]
     # v2.22：规格有自己的模型时只用这个规格的文件；没有（用主模型）时只用主模型的文件
     try:
         from . import specmodel, store
@@ -374,8 +379,8 @@ def candidates(product_id, sku, printer_name, color="", usable_only=True):
     return rows
 
 
-def find(product_id, sku, printer_name, color="", per_plate=None):
-    rows = candidates(product_id, sku, printer_name, color)
+def find(product_id, sku, printer_name, color="", per_plate=None, plate_id=None):
+    rows = candidates(product_id, sku, printer_name, color, plate_id=plate_id)
     if per_plate:
         rows = [r for r in rows if int(r["per_plate"]) == int(per_plate)] or []
     return rows[0] if rows else None

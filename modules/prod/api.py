@@ -665,7 +665,7 @@ def print_files_download(fid):
 @bp.get("/api/jobs/<int:jid>/send-options")
 def job_send_options(jid):
     try:
-        return jsonify(production.send_options(jid, request.args.get("printer")))
+        return jsonify(production.send_options(jid, request.args.get("printer"), request.args.get("plate") or None))
     except ValueError as e:
         return err(str(e))
 
@@ -676,7 +676,7 @@ def job_start(jid):
     try:
         r = production.start_run(jid, b.get("printer"), b.get("count"), b.get("merge_ids") or [], b.get("file_id"),
                                  bool(b.get("send", True)), _uname(), b.get("confirm") or {}, b.get("tray"),
-                                 bool(b.get("force_color")))
+                                 bool(b.get("force_color")), b.get("plate") or None)
     except (ValueError, ConnectionError, OSError, slicer.SliceError) as e:
         return err(str(e))
     if r.get("file"):
