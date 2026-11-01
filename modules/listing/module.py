@@ -59,7 +59,7 @@ MODULE = {
             ("ss_cover_days", "快卖完：按近 30 天销量，够卖不到几天"),
             ("ss_mismatch_min", "对不上：平台显示和系统差几件以上才算"),
             ("ss_unsynced_hours", "超过多少小时没同步发待办")])],
-    "config_defaults": {"lazada_stock_sync_min": "30", "ss_interval_min": "15", "ss_safety": "0", "ss_auto_push": False, "ss_low_qty": "2",
+    "config_defaults": {"lazada_stock_sync_min": "30", "ss_interval_min": "15", "ss_safety": "0", "ss_cap": "", "ss_auto_push": False, "ss_low_qty": "2",
                         "ss_cover_days": "3", "ss_mismatch_min": "1", "ss_unsynced_hours": "24", "ss_retry_max": "3", "ss_event_sync": True,
                         "ss_source": "total", "ss_alloc": "share", "ss_printer_units": "0", "ss_virtual_min": "1"},
     "events": {"stock.changed": _on_stock, "order.status": _on_order},       # v2.53 库存同步：成品库存 / 订单变化时马上同步
