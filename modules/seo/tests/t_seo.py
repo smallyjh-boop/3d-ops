@@ -205,7 +205,7 @@ ok(me["colors"]["multicolor"] and "槽 1：白色" in me["color_guide"] and "→
 try:
     recipes.slice_product(store.load(pid4), 0, 1); ok(False, "multicolor auto slice blocked")
 except ValueError as e:
-    ok("多色" in str(e) and "Bambu Studio" in str(e), "multicolor auto slice blocked")
+    ok("多色" in str(e) and ("打印方案" in str(e) if not me["colors"].get("painted") else "Bambu Studio" in str(e)), "multicolor auto slice blocked (per-part → 打印方案, painted → Bambu Studio)")
 CK = {}
 def fake2(cfg, system, user, image_b64=None):
     CK["u"] = user

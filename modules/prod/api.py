@@ -824,6 +824,7 @@ def jobs_print():
 <div class="big">{h(j['color'] or '')} {h(th)}</div><div>{h((j['name'] or '')[:40])}</div>
 <div>{labels.code128_svg(j['sku'] or '', 26, 1)}</div>
 <div class="row"><span>{h(j.get('order_no') or ('备货' if j.get('kind') == 'stock' else ''))}</span><span><b>{h(j.get('printer_code') or '')}</b> #{j['id']}</span></div>
+{f'<div class="n">共 {int(j["multi_plate"])} 盘，凑齐一套再装袋 · ครบ {int(j["multi_plate"])} เพลทแล้วค่อยแพ็ค</div>' if int(j.get('multi_plate') or 0) > 1 else ''}
 {f'<div class="n">{h(j["custom_note"][:60])}</div>' if j.get('custom_note') else ''}</div>""")
     out.append("</body></html>")
     return app.response_class("".join(out), mimetype="text/html")
