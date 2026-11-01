@@ -11,8 +11,8 @@
 - [x] T5：多盘成品按盘排生产｜core/production.py、modules/prod｜验收：两盘都打完才加库存，失败只重打那一盘
 - [x] T6：识别补完（本机实测、学习照片管理、各扫码框拍照、难认产品提示）｜modules/recog、modules/inv、modules/mobile
 - [x] T7：发 v2.52.0｜app.py、static/app.js、static/api-docs.html、README.txt｜验收：分组全量测试通过 + 多语言检查通过
-- [ ] T8：AI 接口统一管理（v2.53.0）
-- [ ] T9：场景图改进（v2.53.0）
+- [x] T8：AI 接口统一管理（v2.53.0）
+- [x] T9：场景图改进（v2.53.0）
 - [x] T10：「返回」回到原来的地方（v2.53.0）｜static/nav.js + 各入口｜测试 tests/cases/t_nav253.py
 - [ ] T11：模型区改进（v2.53.0）：展示 / 打印分开、组装选零件 + 按接合位置自动组合、默认收起、按规格（不只尺寸）设置展示和打印方案、总览表、一键切片、组装生成打印方案、爆炸图、撤销｜modules/model、modules/goods、core/specmodel.py、core/modellib.py
 - [ ] T12：仓库全部物品进货位（v2.53.0）：料卷货位、生产区 / 待检区、采购 / 生产 / 发货 / 退货走货位、补货提醒、按库区算库存金额、手机操作、迁移｜modules/inv、core/materials.py、modules/pur、modules/mobile
