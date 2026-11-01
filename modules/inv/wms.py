@@ -37,9 +37,14 @@ def _now():
     return time.time()
 
 
+_LOC_MOD = []
+
+
 def _L():
-    from . import locations
-    return locations
+    if not _LOC_MOD:                  # v2.55：推荐时每个货位调用几次，别每次都 import
+        from . import locations
+        _LOC_MOD.append(locations)
+    return _LOC_MOD[0]
 
 
 # ---------------- 基础数据 ----------------
@@ -199,19 +204,23 @@ def _type_rank(ztype, cat):
     return order.index(ztype) if ztype in order else 9
 
 
-def candidates(c, item, kind=""):
-    """推荐顺序：[(货位, 理由)]，理由 same 同物品已在 / near 同分类附近的空位 / empty 其它空位"""
-    sk = _L().sort_key
+def _prep(c):
+    """推荐要用的全局数据（所有货位、库区设置、每个货位放了什么、主货位）。一次读好，给好几个物品推荐时共用（v2.55：待上架页 2 万货位时不用每个物品重读一遍）。"""
     locs = _locs(c)
-    gs = _L().groups()
-    rows = _qty_rows(c)
     used = {}
-    for r in rows:
+    for r in _qty_rows(c):
         used.setdefault(r["loc_id"], set()).add(r["item_id"])
     homes = {}
     for r in c.execute("SELECT id, location, category FROM inv_items WHERE active=1 AND location IS NOT NULL AND location!=''"):
         homes.setdefault(r["location"], set()).add(r["id"])
-    code2loc = {l["code"]: l for l in locs.values()}
+    return {"locs": locs, "gs": _L().groups(), "used": used, "homes": homes, "code2loc": {l["code"]: l for l in locs.values()}}
+
+
+def candidates(c, item, kind="", prep=None):
+    """推荐顺序：[(货位, 理由)]，理由 same 同物品已在 / near 同分类附近的空位 / empty 其它空位"""
+    sk = _L().sort_key
+    prep = prep or _prep(c)
+    locs, gs, used, homes, code2loc = prep["locs"], prep["gs"], prep["used"], prep["homes"], prep["code2loc"]
     out, seen = [], set()
     # 1. 同一个物品已经在的货位：固定货位 → 主货位 → 拣货区 → 走路顺序
     mine = [l for l in locs.values() if item["id"] in used.get(l["id"], ()) or l["code"] == item.get("location")
@@ -242,7 +251,7 @@ def candidates(c, item, kind=""):
     return out
 
 
-def recommend(item_id, qty=None, kind="", c=None, limit=5):
+def recommend(item_id, qty=None, kind="", c=None, limit=5, prep=None):
     """上架推荐：[{code, qty, reason, human_zh, human_th}]（qty 不给 = 待上架的数量；放不下的部分没有推荐）"""
     c = c or db.conn()
     it = _item(c, item_id)
@@ -250,7 +259,7 @@ def recommend(item_id, qty=None, kind="", c=None, limit=5):
         raise ValueError("没有这个物品")
     left = float(qty) if qty not in (None, "") else unplaced(c, it["id"])
     plan = []
-    for loc, why in candidates(c, it, kind):
+    for loc, why in candidates(c, it, kind, prep):
         reason, room = check(c, loc, it, 0)
         if reason:
             continue
@@ -526,11 +535,12 @@ def putaway(item_id, code, qty=None, user="", force=False, frm=""):
 def pending_count(c=None):
     c = c or db.conn()
     from . import flows
-    n = sum(1 for r in c.execute("SELECT id, qty FROM inv_items WHERE active=1 AND qty>0").fetchall()
-            if float(r["qty"] or 0) - located(c, r["id"]) > 1e-6 and not flows.spool_item(c, r["id"]))
-    stg = [l["id"] for l in _locs(c).values() if l["ztype"] == "staging"]
-    if stg:
-        n += c.execute(f"SELECT COUNT(*) FROM inv_loc_qty WHERE qty>0 AND loc_id IN ({','.join('?' * len(stg))})", stg).fetchone()[0]
+    # v2.55：一条 SQL 找出「总数 > 各货位加起来」的物品（以前一个物品查一次，1 万个物品很慢）
+    n = sum(1 for r in c.execute("SELECT i.id FROM inv_items i LEFT JOIN (SELECT item_id, SUM(qty) s FROM inv_loc_qty WHERE qty>0 GROUP BY item_id) p "
+                                 "ON p.item_id=i.id WHERE i.active=1 AND i.qty>0 AND i.qty-COALESCE(p.s,0)>1e-6").fetchall()
+            if not flows.spool_item(c, r["id"]))
+    n += c.execute("SELECT COUNT(*) FROM inv_loc_qty q JOIN inv_locations l ON l.id=q.loc_id LEFT JOIN inv_loc_groups g ON g.code=l.zone AND g.kind='zone' "
+                   "WHERE q.qty>0 AND l.active=1 AND g.ztype='staging'").fetchone()[0]
     return n
 
 
@@ -540,12 +550,14 @@ def pending(c=None):
     c = c or db.conn()
     out = []
     from . import flows
-    for r in c.execute("SELECT * FROM inv_items WHERE active=1 AND qty>0 ORDER BY category, code").fetchall():
-        if flows.spool_item(c, r["id"]):
+    prep = None
+    for r in c.execute("SELECT i.*, COALESCE(p.s,0) AS placed_s FROM inv_items i LEFT JOIN (SELECT item_id, SUM(qty) s FROM inv_loc_qty WHERE qty>0 GROUP BY item_id) p "
+                       "ON p.item_id=i.id WHERE i.active=1 AND i.qty>0 ORDER BY i.category, i.code").fetchall():
+        u = float(r["qty"] or 0) - float(r["placed_s"] or 0)
+        if u <= 1e-6 or flows.spool_item(c, r["id"]):
             continue                   # v2.53：按料卷管的耗材在「料卷」里上架（一卷一卷扫）
-        u = float(r["qty"] or 0) - located(c, r["id"])
-        if u > 1e-6:
-            out.append({"item": ledger.item_row(r), "qty": round(u, 6), "suggest": recommend(r["id"], u, "", c, limit=3), "from": ""})
+        prep = prep or _prep(c)
+        out.append({"item": ledger.item_row(r), "qty": round(u, 6), "suggest": recommend(r["id"], u, "", c, limit=3, prep=prep), "from": ""})
     # v2.53：暂存区里的（采购到货先放暂存区）也算待上架，上架 = 从暂存区搬到推荐的货位
     locs = _locs(c)
     for r in _qty_rows(c):

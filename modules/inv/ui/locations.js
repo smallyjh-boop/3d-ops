@@ -3,6 +3,8 @@
 // 页面：数字卡片（货位、占用率、空位、满 / 超容量、待上架、补货任务）→ 各库区利用率 → 页签：货位图 / 待上架 / 补货·移库 / 提醒。
 // 货位图按 库区 → 货架 画：一行一层、一格一位，颜色 = 空 / 有货 / 满 / 超容量；点格子看里面有什么、移库、上架、设置容量 / 固定物品。
 // 待上架、补货·移库、提醒三个页签在 wms.js。
+// v2.55：三种看法 列表 | 按商品 | 货位图（默认列表，记住上次选的）。列表 / 按商品在 locviews.js（服务端分页 / 筛选 / 排序 / 搜索）；
+// 货位图只画选中的库区 / 货架（货位多的时候），别的库区、货架只显示一行汇总；点一行 / 一格 → 右边抽屉（里面的商品、出入库记录、操作）。
 (function () {
   const TH = () => window.I18N && I18N.lang === "th";
   const Z = (zh, th) => (TH() ? th : zh);
@@ -12,13 +14,17 @@
   const U_TH = { "个": "ชิ้น", "卷": "ม้วน", "张": "แผ่น", "件": "ชิ้น", "米": "เมตร", "瓶": "ขวด", "盒": "กล่อง", "套": "ชุด" };
   const uLab = (u) => (TH() && U_TH[u]) || u || "";
   let LOCS = [], GROUPS = {}, CATS = [], BOTTOM = true, WHS = [], ZT = {}, SIZES = {}, PENDING = 0;
-  let MAP = null, SUB = "map", WH = "", ZONE = "";
-  try { SUB = localStorage.getItem("inv_loc_sub") || "map"; } catch { /* 忽略 */ }
+  let MAP = null, SUB = "list", WH = "", ZONE = "", SHELF = "";
+  let BIG = false, ZONES_ALL = [], MAXSHELF = {}, SHELVES_BIG = [];
+  const OPEN = new Set(), CACHE = {};            // 货位图：展开的货架、读过的货架格子
+  const VIEWS = ["list", "item", "map"];
+  try { const v = localStorage.getItem("inv_loc_view255"); if (VIEWS.includes(v)) SUB = v; } catch { /* 忽略 */ }
   const BOX = () => $("#loc-page");
 
   async function loadLocs() {
     const r = await api("/api/inv/locations");
     LOCS = r.locations; GROUPS = r.groups || {}; CATS = r.categories || []; BOTTOM = r.layer_bottom !== false;
+    BIG = !!r.big; ZONES_ALL = r.zones || []; MAXSHELF = r.max_shelf || {}; SHELVES_BIG = r.shelves || [];
     WHS = r.warehouses || []; ZT = r.ztypes || {}; SIZES = r.sizes || {}; PENDING = r.unassigned || 0;
     return r;
   }
@@ -43,22 +49,45 @@
     return (withNone ? `<option value="">${esc(withNone)}</option>` : "") + Object.entries(by).map(([sc, ls]) =>
       `<optgroup label="${esc(sc === "~" ? Z("其他货位", "ช่องอื่นๆ") : `${sc}${GROUPS[sc] && GROUPS[sc].name ? " · " + GROUPS[sc].name : ""}`)}">${ls.map(opt).join("")}</optgroup>`).join("");
   };
-  const nextShelf = (zone) => 1 + Math.max(0, ...LOCS.filter((l) => l.zone === zone && l.shelf != null).map((l) => l.shelf));
+  const nextShelf = (zone) => 1 + (MAXSHELF[zone] || Math.max(0, ...LOCS.filter((l) => l.zone === zone && l.shelf != null).map((l) => l.shelf)));
+  const allShelves = () => (BIG ? SHELVES_BIG : [...new Set(LOCS.map(shelfOf).filter(Boolean))]);
+  // 选货位：货位少 = 下拉框；货位多（2 万个）= 输入框边打边联想（/api/inv/loc/suggest）。attrs 是 id / class 等属性
+  const locPick = (attrs, sel = "", withNone = "", skip = "") => (BIG
+    ? `<input ${attrs} list="loc-dl-pick" value="${esc(sel)}" placeholder="${esc(withNone || Z("货位编号", "รหัสตำแหน่ง"))}" autocomplete="off" data-locpick><datalist id="loc-dl-pick" data-notr></datalist>`
+    : `<select ${attrs}>${locOpts(sel, withNone, skip)}</select>`);
+  let SUGT = null;
+  document.addEventListener("input", (e) => {
+    const t = e.target;
+    if (!BIG || !t || !t.matches || !t.matches("[data-locpick], input[list='loc-dl']")) return;
+    clearTimeout(SUGT);
+    SUGT = setTimeout(async () => {
+      try {
+        const r = await api(`/api/inv/loc/suggest?q=${encodeURIComponent(t.value.trim())}&limit=40`);
+        const dl = document.getElementById(t.getAttribute("list")); if (!dl) return;
+        dl.innerHTML = r.locations.map((l) => `<option value="${esc(l.code)}">${esc(l.code)}${l.empty ? Z(" ·空", " ·ว่าง") : ""}</option>`).join("");
+      } catch { /* 联想失败不影响输入 */ }
+    }, 200);
+  });
   const lang = () => (TH() ? "&lang=th" : "");
   const can = (k) => !window.INV || !INV.can || INV.can(k);
   const STATE = () => ({ empty: Z("空", "ว่าง"), partial: Z("有货", "มีของ"), full: Z("满", "เต็ม"), over: Z("超容量", "เกินความจุ") });
 
-  // 格子：颜色 = 空 / 有货 / 满 / 超容量；物品低于补货线加 ⚠
+  // 格子：颜色 = 空 / 有货 / 满 / 超容量；物品低于补货线加 ⚠。v2.55：格子里有第一个商品的小图 + 名称前几个字，鼠标放上去看全部
+  const nIt = (l) => (Array.isArray(l.items) ? l.items.length : l.items || 0);
+  const qtx = (x) => (TH() ? x.qty_text_th || x.qty_text : x.qty_text) || num(x.qty);
   function cell(l) {
-    const t = l.top || [];
+    const t = Array.isArray(l.items) ? l.items : [];
     const cap = l.capacity != null ? ` / ${num(l.capacity)}` : "";
     const tip = [l.code, human(l.code), `${STATE()[l.state] || ""}${l.capacity != null ? ` · ${Z("容量", "ความจุ")} ${num(l.capacity)}` : ""}`,
-      ...t.map((x) => `${x.code} ${itName(x)} ×${num(x.qty)} ${uLab(x.unit)}`), l.fixed_item ? Z("固定货位", "ตำแหน่งตายตัว") : "", l.note || ""].filter(Boolean).join("\n");
+      ...t.map((x) => `${x.code} ${itName(x)} × ${qtx(x)}`), l.fixed_item ? Z("固定货位", "ตำแหน่งตายตัว") : "", l.note || ""].filter(Boolean).join("\n");
     const first = t.find((x) => x.qty > 1e-9) || t[0];
+    const thumb = first && first.img ? `<img class="cell-img" src="${esc(first.img)}" alt="" loading="lazy">` : "";
+    const nm_ = first ? Array.from(itName(first) || first.code).slice(0, 5).join("") : "";
     return `<button class="loc-cell st-${esc(l.state || "empty")}${l.low ? " low" : ""}" data-loc="${l.id}" data-code="${esc(l.code)}" title="${esc(tip)}" data-notr>
       <span class="pn">${pad(l.pos)}${l.fixed_item ? " 📌" : ""}${l.mixed === 0 ? " ①" : ""}</span>
-      <span class="it">${first ? `${esc(first.code)} ×${num(first.qty)}${l.items > 1 ? ` +${l.items - 1}` : ""}` : esc(Z("空", "ว่าง"))}</span>
-      ${l.capacity != null ? `<span class="cap">${num(l.qty)}${cap}</span>` : ""}${l.low ? '<span class="lw">⚠</span>' : ""}</button>`;
+      ${thumb}<span class="it">${first ? `${esc(nm_)}${t.length > 1 ? ` +${t.length - 1}` : ""}` : esc(Z("空", "ว่าง"))}</span>
+      ${first ? `<span class="cq">${esc(qtx(first))}</span>` : ""}
+      ${l.capacity != null ? `<span class="cap">${num(l.total)}${cap}</span>` : ""}${l.low ? '<span class="lw">⚠</span>' : ""}</button>`;
   }
 
   function shelfCard(sc, ls) {
@@ -66,7 +95,7 @@
     const layers = [...new Set(ls.map((l) => l.layer))].sort((a, b) => (BOTTOM ? b - a : a - b));
     const maxPos = Math.max(...ls.map((l) => l.pos));
     const topLayer = Math.max(...ls.map((l) => l.layer));
-    const empty = ls.filter((l) => !l.items).length;
+    const empty = ls.filter((l) => !nIt(l)).length;
     return `<div class="loc-shelf" data-shelf="${esc(sc)}">
       <div class="loc-sh-head"><b class="mono" data-notr>${esc(sc)}</b> <span data-notr>${esc(g.name || "")}</span>
         <span class="small muted" data-notr>${esc(Z(`${layers.length} 层 · ${ls.length} 位 · 空 ${empty}`, `${layers.length} ชั้น · ${ls.length} ช่อง · ว่าง ${empty}`))}</span> ${catChips(g)}
@@ -76,7 +105,7 @@
           <button class="mini" data-addlayer="${esc(sc)}">${esc(Z("＋ 加一层", "＋ เพิ่มชั้น"))}</button>${empty === ls.length ? `<button class="mini danger" data-rmshelf="${esc(sc)}">${esc(Z("删除货架", "ลบแร็ค"))}</button>` : ""}</span></div>
       <div class="loc-rack-wrap"><table class="loc-rack"><tbody>${layers.map((ly) => {
         const row = ls.filter((l) => l.layer === ly).sort((a, b) => a.pos - b.pos);
-        const allEmpty = row.every((l) => !l.items);
+        const allEmpty = row.every((l) => !nIt(l));
         return `<tr><th class="nowrap" data-notr>${esc(Z(`第 ${ly} 层`, `ชั้น ${ly}`))}</th>
           <td><div class="loc-row" style="grid-template-columns:repeat(${Math.max(maxPos, row.length)},minmax(var(--cellw,78px),1fr))">${row.map(cell).join("")}</div></td>
           <td class="nowrap"><button class="mini" data-addpos="${esc(sc)}" data-layer="${ly}" title="${esc(Z("这一层加一位", "เพิ่มช่องในชั้นนี้"))}">＋</button>${allEmpty && layers.length > 1 && ly === topLayer ? `<button class="mini" data-rmlayer="${esc(sc)}" data-layer="${ly}" title="${esc(Z("删掉最上面这一层（空的才能删）", "ลบชั้นบนสุด (ว่างเท่านั้น)"))}">−</button>` : ""}</td></tr>`;
@@ -87,21 +116,21 @@
   // ---------------- 页面 ----------------
   async function page() {
     const box = BOX(); if (!box) return;
-    const [, m] = await Promise.all([loadLocs(), api("/api/inv/wms/map")]);
+    const [, m] = await Promise.all([loadLocs(), api("/api/inv/loc/summary")]);
     MAP = m;
     const st = m.stats, al = m.alerts;
-    const nAl = al.idle.length + al.spread.length;
+    const nAl = (al.idle || 0) + (al.spread || 0);
     const whOpts = WHS.length > 1 ? `<select id="loc-wh" data-notr><option value="">${esc(Z("全部仓库", "ทุกคลัง"))}</option>${WHS.map((w) => `<option value="${w.id}" ${String(w.id) === WH ? "selected" : ""}>${esc(whLabel(w.name))}</option>`).join("")}</select>` : "";
     box.innerHTML = UX.head(Z("货位", "ตำแหน่งจัดเก็บ"), `
         <input id="loc-scan" placeholder="${esc(Z("扫货位 / 货架 / 物品条码", "สแกนตำแหน่ง / แร็ค / สินค้า"))}" autocomplete="off" class="loc-scan">
         ${can("inv.in") ? `<button class="primary" id="loc-bulk">${esc(Z("＋ 新建货架", "＋ สร้างแร็ค"))}</button><button id="loc-wh-btn">${esc(Z("🏬 仓库", "🏬 คลัง"))}</button>
         <button id="loc-move">${esc(Z("↔ 移库", "↔ ย้ายตำแหน่ง"))}</button>` : ""}
         <button id="loc-print">${esc(Z("🏷 打印标签", "🏷 พิมพ์ป้าย"))}</button>`,
-      Z("仓库 → 库区 → 货架 → 层 → 位。一个物品可以放几个货位（拣货位 + 备货区），每个货位记自己的数量；入库按推荐自动上架（设置里可以改成扫货位确认），出库先扣待上架、再从拣货位扣。点格子：看里面有什么、移库、设容量 / 固定物品。",
-        "คลัง → โซน → แร็ค → ชั้น → ช่อง สินค้าหนึ่งอย่างวางได้หลายช่อง (ช่องหยิบ + โซนสำรอง) แต่ละช่องเก็บจำนวนของตัวเอง รับเข้าแล้ววางตามคำแนะนำอัตโนมัติ (ตั้งให้สแกนยืนยันได้) จ่ายออกหักจากที่รอจัดเก็บก่อนแล้วจึงหักจากช่องหยิบ กดที่ช่อง: ดูของ ย้าย ตั้งความจุ / สินค้าตายตัว")) +
+      Z("仓库 → 库区 → 货架 → 层 → 位。一个物品可以放几个货位（拣货位 + 备货区），每个货位记自己的数量；入库按推荐自动上架（设置里可以改成扫货位确认），出库先扣待上架、再从拣货位扣。三种看法：列表（一行一个货位）、按商品（一行一个商品）、货位图（看位置）；点一行看里面有什么、移库、设容量。",
+        "คลัง → โซน → แร็ค → ชั้น → ช่อง สินค้าหนึ่งอย่างวางได้หลายช่อง (ช่องหยิบ + โซนสำรอง) แต่ละช่องเก็บจำนวนของตัวเอง รับเข้าแล้ววางตามคำแนะนำอัตโนมัติ (ตั้งค่าให้สแกนยืนยันได้) จ่ายออกหักจากรอจัดเก็บก่อน แล้วหักจากช่องหยิบ สามมุมมอง: รายการ (หนึ่งแถวต่อช่อง) ตามสินค้า (หนึ่งแถวต่อสินค้า) แผนผัง (ดูตำแหน่ง) คลิกแถวเพื่อดูของในช่อง ย้าย ตั้งความจุ")) +
       UX.kpis([
-        { label: Z("货位", "ตำแหน่ง"), value: num(st.total, 0), sub: Z(`${m.zones.length} 个库区 · ${WHS.length} 个仓库`, `${m.zones.length} โซน · ${WHS.length} คลัง`), icon: "🗄" },
-        { label: Z("占用率", "อัตราใช้งาน"), value: `${num(st.util, 1)}%`, sub: Z(`有货 ${st.used} / ${st.total}`, `มีของ ${st.used} / ${st.total}`), tone: st.util >= 90 ? "warn" : "", icon: "📊",
+        { label: Z("货位", "ตำแหน่ง"), value: num(st.total, 0), sub: Z(`${st.zones} 个库区 · ${WHS.length} 个仓库`, `${st.zones} โซน · ${WHS.length} คลัง`), icon: "🗄" },
+        { label: Z("占用率", "อัตราใช้งาน"), value: `${num(st.util, 1)}%`, sub: Z(`有货 ${num(st.used, 0)} / ${num(st.total, 0)}`, `มีของ ${num(st.used, 0)} / ${num(st.total, 0)}`), tone: st.util >= 90 ? "warn" : "", icon: "📊",
           help: Z("有东西的货位 ÷ 全部货位", "ช่องที่มีของ ÷ ช่องทั้งหมด") },
         { label: Z("空货位", "ช่องว่าง"), value: num(st.empty, 0), tone: st.total && st.empty === 0 ? "bad" : "", icon: "⬜" },
         { label: Z("满 / 超容量", "เต็ม / เกินความจุ"), value: `${st.full} / ${st.over}`, tone: st.over ? "bad" : "", icon: "📦",
@@ -113,8 +142,8 @@
       ]) +
       UX.card({ title: Z("各库区利用率", "อัตราใช้งานแต่ละโซน"), help: Z("有货的货位占这个库区全部货位的比例；括号里是设了容量的货位装了多满", "สัดส่วนช่องที่มีของในโซน ในวงเล็บคือช่องที่ตั้งความจุไว้เต็มแค่ไหน"),
         body: utilBars(m.zones) }) +
-      `<div class="row between wrap gap loc-subbar">${UX.tabs([["map", Z("货位图", "แผนผัง")], ["pending", Z("待上架", "รอจัดเก็บ"), st.pending || ""],
-        ["tasks", Z("补货 · 移库", "เติม · ย้าย"), st.tasks || ""], ["alerts", Z("提醒", "แจ้งเตือน"), nAl || ""]], SUB, "loc")}${SUB === "map" ? whOpts : ""}</div>
+      `<div class="row between wrap gap loc-subbar">${UX.tabs([["list", Z("📋 列表", "📋 รายการ")], ["item", Z("📦 按商品", "📦 ตามสินค้า")], ["map", Z("🗺 货位图", "🗺 แผนผัง")],
+        ["pending", Z("待上架", "รอจัดเก็บ"), st.pending || ""], ["tasks", Z("补货 · 移库", "เติม · ย้าย"), st.tasks || ""], ["alerts", Z("提醒", "แจ้งเตือน"), nAl || ""]], SUB, "loc")}${SUB === "map" ? whOpts : ""}</div>
       <div id="loc-sub"></div>`;
     const sc = $("#loc-scan");
     sc.addEventListener("keydown", async (e) => {
@@ -139,43 +168,96 @@
   }
 
   function renderSub() {
-    try { localStorage.setItem("inv_loc_sub", SUB); } catch { /* 忽略 */ }
+    if (VIEWS.includes(SUB)) { try { localStorage.setItem("inv_loc_view255", SUB); } catch { /* 忽略 */ } }
     const box = $("#loc-sub"); if (!box) return;
+    if (SUB === "list" || SUB === "item") return window.INVLV.render(SUB, box, MAP).catch((e) => toast(e.message, true));
+    if (SUB === "alerts" && window.INVWMS) return api("/api/inv/wms/map").then((m) => INVWMS.render(SUB, box, m)).catch((e) => toast(e.message, true));
     if (SUB !== "map" && window.INVWMS) return INVWMS.render(SUB, box, MAP).catch((e) => toast(e.message, true));
-    renderMap(box);
+    return renderMap(box).catch((e) => toast(e.message, true));
   }
 
-  function renderMap(box) {
-    const zones = {}, other = [];
-    LOCS.forEach((l) => {
-      if (WH && String(zoneInfo(l.zone).warehouse) !== WH) return;
-      if (l.shelf == null) return other.push(l);
-      ((zones[l.zone] = zones[l.zone] || {})[shelfOf(l)] = zones[l.zone][shelfOf(l)] || []).push(l);
-    });
-    const zoneKeys = Object.keys(zones).sort();
-    if (ZONE && !zones[ZONE]) ZONE = "";
+  // 货位图：货位不多（≤ 400）一次画全部；货位多只画选中的库区，库区里的货架先是一行汇总，点开才画格子
+  async function renderMap(box) {
     const S = STATE();
-    box.innerHTML = `${zoneKeys.length > 1 ? `<div class="chips loc-zchips">${[["", Z("全部库区", "ทุกโซน")], ...zoneKeys.map((z) => [z, `${z} · ${ztName(zoneInfo(z).ztype)}`])].map(([k, t]) =>
-        `<span class="chip ${ZONE === k ? "on" : ""}" data-zf="${esc(k)}" data-notr>${esc(t)}</span>`).join("")}</div>` : ""}
-      <div class="row gap wrap small loc-legend" data-notr><span class="lg st-empty">${esc(S.empty)}</span><span class="lg st-partial">${esc(S.partial)}</span>
+    const zlist = (MAP.zones || []).filter((z) => !WH || String(z.wh) === WH);
+    const small = ((MAP.stats || {}).total || 0) <= 400;
+    const legend = `<div class="row gap wrap small loc-legend" data-notr><span class="lg st-empty">${esc(S.empty)}</span><span class="lg st-partial">${esc(S.partial)}</span>
         <span class="lg st-full">${esc(S.full)}</span><span class="lg st-over">${esc(S.over)}</span><span class="lg low">⚠ ${esc(Z("低于补货线", "ต่ำกว่าจุดสั่งซื้อ"))}</span>
-        <span class="muted">📌 ${esc(Z("固定货位", "ตำแหน่งตายตัว"))} · ① ${esc(Z("不混放", "ไม่ปนกัน"))}</span></div>
-      ${zoneKeys.filter((z) => !ZONE || z === ZONE).map((z) => {
-        const g = GROUPS[z] || {}, zi = zoneInfo(z);
-        const shelves = Object.keys(zones[z]).sort((a, b) => parseInt(a.slice(z.length), 10) - parseInt(b.slice(z.length), 10));
-        return `<div class="card loc-zone" data-zone="${esc(z)}"><div class="loc-zone-h"><h3 data-notr>${esc(Z(`${z} 区`, `โซน ${z}`))} <span class="loc-zt zt-${esc(zi.ztype)}">${esc(ztName(zi.ztype))}</span>
+        <span class="muted">📌 ${esc(Z("固定货位", "ตำแหน่งตายตัว"))} · ① ${esc(Z("不混放", "ไม่ปนกัน"))}</span></div>`;
+    if (!zlist.length) { box.innerHTML = `<div class="card">${UX.empty(Z("还没有货位。点「＋ 新建货架」：选库区（例如 A）、类型、从几号货架开始、建几个、几层、每层几位，一次建好，再打印标签贴上。",
+      "ยังไม่มีตำแหน่ง กด「＋ สร้างแร็ค」เลือกโซน (เช่น A) ประเภท เริ่มจากแร็คที่เท่าไร กี่แร็ค กี่ชั้น ชั้นละกี่ช่อง แล้วพิมพ์ป้ายไปติด"))}</div>`; return; }
+    const zchips = (withAll) => `<div class="chips loc-zchips">${[...(withAll ? [["", Z("全部库区", "ทุกโซน")]] : []), ...zlist.map((z) => [z.zone, `${z.zone} · ${ztName(z.ztype)}${small ? "" : ` · ${num(z.total, 0)}`}`])].map(([k, t]) =>
+      `<span class="chip ${ZONE === k ? "on" : ""}" data-zf="${esc(k)}" data-notr>${esc(t)}</span>`).join("")}</div>`;
+    const zoneHead = (z, extra) => {
+      const g = GROUPS[z] || {}, zi = zoneInfo(z);
+      return `<div class="loc-zone-h"><h3 data-notr>${esc(Z(`${z} 区`, `โซน ${z}`))} <span class="loc-zt zt-${esc(zi.ztype)}">${esc(ztName(zi.ztype))}</span>
             <span class="small" data-notr>${esc(g.name || "")}</span> ${catChips(g)}</h3>
-          <span class="small muted" data-notr>🏬 ${esc(whName(zi.warehouse))} · ${esc(Z(`${shelves.length} 个货架`, `${shelves.length} แร็ค`))}</span>
+          <span class="small muted" data-notr>🏬 ${esc(whName(zi.warehouse))} · ${esc(extra)}</span>
           <span class="loc-sh-tools">${can("inv.in") ? `<button class="mini" data-grp="${esc(z)}">${esc(Z("✎ 库区设置", "✎ ตั้งค่าโซน"))}</button>` : ""}
             <a class="btn mini" target="_blank" href="/print/inv-locations?zone=${encodeURIComponent(z)}${lang()}">🏷</a>
-            ${can("inv.out") ? `<button class="mini" data-stk="${esc(z)}">${esc(Z("🧮 盘点这个区", "🧮 ตรวจนับโซนนี้"))}</button>` : ""}</span></div>
-          <div class="loc-shelves">${shelves.map((sc) => shelfCard(sc, zones[z][sc])).join("")}</div></div>`;
-      }).join("")}
-      ${other.length && !ZONE ? `<div class="card"><h3>其他货位 <span class="small muted">（编号不是「区+货架号-层-位」写法的，空了可以删掉）</span></h3>
-        <div class="loc-row" style="grid-template-columns:repeat(auto-fill,minmax(92px,1fr))">${other.map((l) => `<button class="loc-cell st-${esc(l.state || "empty")}" data-loc="${l.id}" data-notr><span class="pn">${esc(l.code)}</span>
-          <span class="it">${esc(l.items ? Z(`${l.items} 种`, `${l.items} รายการ`) : Z("空", "ว่าง"))}</span></button>`).join("")}</div></div>` : ""}
-      ${LOCS.length ? "" : `<div class="card">${UX.empty(Z("还没有货位。点「＋ 新建货架」：选库区（例如 A）、类型、从几号货架开始、建几个、几层、每层几位，一次建好，再打印标签贴上。",
-        "ยังไม่มีตำแหน่ง กด「＋ สร้างแร็ค」เลือกโซน (เช่น A) ประเภท เริ่มจากแร็คที่เท่าไร กี่แร็ค กี่ชั้น ชั้นละกี่ช่อง แล้วพิมพ์ป้ายไปติด"))}</div>`}`;
+            ${can("inv.out") ? `<button class="mini" data-stk="${esc(z)}">${esc(Z("🧮 盘点这个区", "🧮 ตรวจนับโซนนี้"))}</button>` : ""}</span></div>`;
+    };
+    const byShelf = (locs) => {
+      const o = {};
+      locs.forEach((l) => { if (l.shelf != null) (o[shelfOf(l)] = o[shelfOf(l)] || []).push(l); });
+      return o;
+    };
+    const shelfNo = (sc, z) => parseInt(sc.slice(z.length), 10);
+    if (small) {
+      const r = await api("/api/inv/loc/map?every=1");
+      const zones = {}, other = [];
+      r.locations.forEach((l) => {
+        if (WH && String(zoneInfo(l.zone).warehouse) !== WH) return;
+        if (l.shelf == null) return other.push(l);
+        ((zones[l.zone] = zones[l.zone] || {})[shelfOf(l)] = zones[l.zone][shelfOf(l)] || []).push(l);
+      });
+      const zoneKeys = Object.keys(zones).sort();
+      if (ZONE && !zones[ZONE]) ZONE = "";
+      box.innerHTML = `${zoneKeys.length > 1 ? zchips(true) : ""}${legend}
+        ${zoneKeys.filter((z) => !ZONE || z === ZONE).map((z) => {
+          const shelves = Object.keys(zones[z]).sort((a, b) => shelfNo(a, z) - shelfNo(b, z));
+          return `<div class="card loc-zone" data-zone="${esc(z)}">${zoneHead(z, Z(`${shelves.length} 个货架`, `${shelves.length} แร็ค`))}
+            <div class="loc-shelves">${shelves.map((sc) => shelfCard(sc, zones[z][sc])).join("")}</div></div>`;
+        }).join("")}
+        ${other.length && !ZONE ? `<div class="card"><h3>${esc(Z("其他货位", "ตำแหน่งอื่นๆ"))} <span class="small muted">${esc(Z("（编号不是「区+货架号-层-位」写法的，空了可以删掉）", "(รหัสที่ไม่ใช่รูปแบบ โซน+แร็ค-ชั้น-ช่อง ถ้าว่างลบได้)"))}</span></h3>
+          <div class="loc-row" style="grid-template-columns:repeat(auto-fill,minmax(92px,1fr))">${other.map((l) => `<button class="loc-cell st-${esc(l.state || "empty")}" data-loc="${l.id}" data-notr><span class="pn">${esc(l.code)}</span>
+            <span class="it">${esc(nIt(l) ? Z(`${nIt(l)} 种`, `${nIt(l)} รายการ`) : Z("空", "ว่าง"))}</span></button>`).join("")}</div></div>` : ""}`;
+      return;
+    }
+    // 货位多：选中的库区 + 货架汇总行（点开才画格子）
+    if (!ZONE || !zlist.find((z) => z.zone === ZONE)) ZONE = zlist[0].zone;
+    const z = ZONE, zs = zlist.find((x) => x.zone === z);
+    const r = await api(`/api/inv/loc/map?zone=${encodeURIComponent(z)}${zs.total <= 300 ? "&expand=all" : ""}`);
+    const all = r.locations ? byShelf(r.locations) : {};
+    Object.entries(all).forEach(([k, v]) => { CACHE[k] = v; });
+    if (zs.total <= 300) (r.shelves || []).forEach((x) => OPEN.add(x.shelf));
+    const rows = (r.shelves || []).map((sh) => {
+      const open = OPEN.has(sh.shelf);
+      const pct = sh.total ? Math.round(100 * sh.used / sh.total) : 0;
+      return `<div class="lv-shelf ${open ? "open" : ""}" data-shelfwrap="${esc(sh.shelf)}"><div class="lv-shelfrow" data-shexp="${esc(sh.shelf)}"><span class="lv-caret">${open ? "▾" : "▸"}</span>
+          <b class="mono" data-notr>${esc(sh.shelf)}</b> <span data-notr>${esc(sh.name || "")}</span> ${catChips({ categories: sh.categories })}
+          <span class="small muted" data-notr>${esc(Z(`${sh.layers} 层 · ${sh.total} 位 · 有货 ${sh.used} · 空 ${sh.empty}`, `${sh.layers} ชั้น · ${sh.total} ช่อง · มีของ ${sh.used} · ว่าง ${sh.empty}`))}</span>
+          ${sh.over ? `<span class="bad small">${esc(Z(`超容量 ${sh.over}`, `เกินความจุ ${sh.over}`))}</span>` : ""}
+          <span class="lv-meter"><i class="ux-ok" style="width:${Math.max(2, pct)}%"></i></span></div>
+        ${open && CACHE[sh.shelf] ? shelfCard(sh.shelf, CACHE[sh.shelf]) : open ? `<div class="muted small">${esc(Z("读取中…", "กำลังโหลด…"))}</div>` : ""}</div>`;
+    }).join("");
+    box.innerHTML = `${zchips(false)}${legend}<div class="card loc-zone" data-zone="${esc(z)}">${zoneHead(z, Z(`${(r.shelves || []).length} 个货架 · ${num(zs.total, 0)} 个货位 · 有货 ${num(zs.used, 0)}`, `${(r.shelves || []).length} แร็ค · ${num(zs.total, 0)} ช่อง · มีของ ${num(zs.used, 0)}`))}
+        <p class="small muted">${esc(Z("货位很多：只画选中的库区，货架先显示一行汇总，点一行展开它的格子。", "ตำแหน่งมาก: วาดเฉพาะโซนที่เลือก แร็คแสดงเป็นแถวสรุป คลิกเพื่อกางช่อง"))}</p>
+        <div class="lv-shelflist">${rows || UX.empty(Z("这个库区还没有货架", "โซนนี้ยังไม่มีแร็ค"))}</div></div>`;
+  }
+  async function toggleShelf(sc) {
+    if (OPEN.has(sc)) OPEN.delete(sc);
+    else {
+      OPEN.add(sc);
+      if (!CACHE[sc]) { const r = await api(`/api/inv/loc/map?zone=${encodeURIComponent(ZONE)}&shelf=${encodeURIComponent(sc)}`); CACHE[sc] = r.locations || []; }
+    }
+    const wrap = document.querySelector(`[data-shelfwrap="${sc}"]`);
+    if (!wrap) return renderSub();
+    const open = OPEN.has(sc);
+    wrap.classList.toggle("open", open);
+    wrap.querySelector(".lv-caret").textContent = open ? "▾" : "▸";
+    const old = wrap.querySelector(":scope > .loc-shelf, :scope > .muted.small"); if (old) old.remove();
+    if (open) wrap.insertAdjacentHTML("beforeend", shelfCard(sc, CACHE[sc]));
   }
 
   function flash(els) {
@@ -185,20 +267,24 @@
     if (els[0]) els[0].scrollIntoView({ block: "center", behavior: "smooth" });
     setTimeout(() => els.forEach((x) => x.classList.remove("loc-hl")), 6000);
   }
-  async function toMap() {
-    if (SUB !== "map") { SUB = "map"; await page(); }
-    if (ZONE) { ZONE = ""; renderSub(); }
+  async function toView(v) {
+    if (SUB !== v) { SUB = v; await page(); }
   }
   async function found(d) {
     if (d.type === "location") return detail(d.location.id, d);
-    await toMap();
+    if (d.type === "item") {                       // 扫商品：切到「按商品」，搜它，直接看它放在哪些货位
+      const it = d.item;
+      if (window.INVLV) INVLV.focusItem(it.code);
+      SUB = "item"; await page();
+      const ls = d.locations || [];
+      return toast(`${it.code} ${itName(it)}：${ls.length ? ls.map((x) => `${x.code} ×${num(x.qty)}`).join("、") : Z("还没有货位", "ยังไม่มีช่องเก็บ")}${d.unplaced > 1e-9 ? ` · ${Z("待上架", "รอจัดเก็บ")} ${num(d.unplaced)}` : ""}`, false, 8000);
+    }
+    const z = d.type === "zone" ? d.code : String(d.code).replace(/\d+$/, "");
+    ZONE = z; if (d.type === "shelf") OPEN.add(d.code);
+    SUB = "map"; await page();
+    if (d.type === "shelf" && !CACHE[d.code]) await toggleShelf(d.code).then(() => toggleShelf(d.code)).catch(() => {});
     if (d.type === "shelf") return flash([document.querySelector(`.loc-shelf[data-shelf="${d.code}"]`)]);
     if (d.type === "zone") return flash([document.querySelector(`.loc-zone[data-zone="${d.code}"]`)]);
-    if (d.type === "item") {
-      const it = d.item, ls = d.locations || [];
-      flash(ls.map((x) => document.querySelector(`.loc-cell[data-loc="${x.id}"]`)));
-      toast(`${it.code} ${itName(it)}：${ls.length ? ls.map((x) => `${x.code} ×${num(x.qty)}`).join("、") : Z("还没有货位", "ยังไม่มีช่องเก็บ")}${d.unplaced > 1e-9 ? ` · ${Z("待上架", "รอจัดเก็บ")} ${num(d.unplaced)}` : ""}`, false, 8000);
-    }
   }
 
   function catBoxes(sel) {
@@ -227,8 +313,8 @@
 
   // ---------------- 新建货架（可以一次建几个）----------------
   async function bulk() {
-    if (!LOCS.length) await loadLocs();
-    const z0 = (LOCS[LOCS.length - 1] || {}).zone || "A";
+    await loadLocs();
+    const z0 = ZONES_ALL[ZONES_ALL.length - 1] || (LOCS[LOCS.length - 1] || {}).zone || "A";
     const m = MODAL.open(`<h3>${esc(Z("新建货架", "สร้างแร็ค"))}</h3>
       <p class="small muted">${esc(Z("一次生成货架的全部格子，编号 = 区字母 + 货架号 - 层 - 位。已经有的格子跳过（同一个货架号再建一次 = 补上缺的层和位）。", "สร้างทุกช่องของแร็คในครั้งเดียว รหัส = ตัวอักษรโซน + เลขแร็ค - ชั้น - ช่อง ช่องที่มีแล้วข้ามไป"))}</p>
       <div class="form4"><label>${esc(Z("库区（字母）", "โซน (ตัวอักษร)"))}<input id="lb-zone" value="${esc(z0)}" maxlength="2" style="text-transform:uppercase" data-notr></label>
@@ -318,8 +404,8 @@
   }
 
   function printModal() {
-    const zones = [...new Set(LOCS.map((l) => l.zone))].sort();
-    const shelves = [...new Set(LOCS.map(shelfOf).filter(Boolean))];
+    const zones = ZONES_ALL.length ? ZONES_ALL : [...new Set(LOCS.map((l) => l.zone))].sort();
+    const shelves = allShelves();
     const m = MODAL.open(`<h3>${esc(Z("打印货位标签", "พิมพ์ป้ายตำแหน่ง"))}</h3>
       <div class="form4"><label>${esc(Z("范围", "ขอบเขต"))}<select id="pl-area" data-notr><option value="">${esc(Z("全部货位", "ทุกตำแหน่ง"))}</option>
         ${zones.map((z) => `<option value="zone=${esc(z)}">${esc(Z(`${z} 区`, `โซน ${z}`))} · ${esc(ztName(zoneInfo(z).ztype))}</option>`).join("")}
@@ -336,45 +422,71 @@
     m.onchange = upd; upd();
   }
 
-  // ---------------- 点格子：里面的东西 + 移库 / 上架 / 设置 / 盘点 ----------------
+  // ---------------- 点一行 / 一格：右边抽屉（里面的商品、出入库记录、移库 / 上架 / 设置 / 盘点）----------------
+  let DR = null;
+  function closeDrawer() { if (DR) { DR.remove(); DR = null; } }
+  function openDrawer(html) {
+    closeDrawer();
+    DR = document.createElement("div");
+    DR.className = "lv-drawer-wrap";
+    DR.innerHTML = `<div class="lv-dr-mask" data-drclose></div><aside class="lv-drawer" role="dialog"><button type="button" class="lv-dr-x" data-drclose aria-label="${esc(Z("关闭", "ปิด"))}">✕</button><div class="lv-dr-in">${html}</div></aside>`;
+    document.body.appendChild(DR);
+    DR.addEventListener("click", (e) => { if (e.target.closest("[data-drclose],[data-mclose]")) closeDrawer(); });
+    return DR.querySelector(".lv-dr-in");
+  }
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && DR && !document.querySelector("#modal-in")) closeDrawer(); });
+  const LOGK = () => ({ putaway: Z("上架", "จัดเก็บ"), move: Z("移库", "ย้าย"), replenish: Z("补货", "เติม"), pick: Z("拣货", "หยิบ"), out: Z("出库", "จ่ายออก"), in: Z("入库", "รับเข้า") });
+  function logTable(log) {
+    if (!log.length) return `<p class="muted small">${esc(Z("还没有出入库记录。", "ยังไม่มีประวัติเข้า-ออก"))}</p>`;
+    const K = LOGK();
+    return `<div class="lv-wrap"><table class="grid small"><thead><tr><th>${esc(Z("时间", "เวลา"))}</th><th></th><th>${esc(Z("商品", "สินค้า"))}</th><th>${esc(Z("数量", "จำนวน"))}</th><th>${esc(Z("来源 → 去向", "จาก → ไป"))}</th><th>${esc(Z("类型", "ประเภท"))}</th></tr></thead><tbody>
+      ${log.map((x) => `<tr><td class="nowrap small" data-notr>${esc(new Date(x.ts * 1000).toLocaleString())}</td><td class="${x.dir === "in" ? "ok" : "bad"}">${x.dir === "in" ? "＋" : "−"}</td>
+        <td data-notr><b class="mono">${esc(x.code)}</b> ${esc(itName(x))}</td><td class="nowrap" data-notr>${esc(qtx(x))}</td>
+        <td class="small mono" data-notr>${esc(x.from || Z("待上架", "รอจัดเก็บ"))} → ${esc(x.to || "")}</td><td class="small">${esc(K[x.kind] || x.kind || "")}${x.user ? ` · <span data-notr>${esc(x.user)}</span>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+  }
+  const imgTag = (x) => (x.img ? `<img class="lv-img" src="${esc(x.img)}" alt="" loading="lazy">` : x.category === "filament" && x.color ? `<span class="lv-img lv-sw" style="background:${esc(swatch(x.color))}"></span>` : '<span class="lv-img lv-noimg">▣</span>');
+  const swatch = (zh) => { try { return (typeof COLORS !== "undefined" && COLORS[zh] && COLORS[zh].hex) || "#94a3b8"; } catch { return "#94a3b8"; } };
+
   async function detail(lid, pre) {
-    const d = pre && pre.items ? pre : await api(`/api/inv/locations/${lid}`);
-    if (!LOCS.length) await loadLocs();
+    if (!LOCS.length && !BIG) await loadLocs();
+    const d = await api(`/api/inv/loc/${pre && pre.location ? pre.location.id : lid}/drawer`);
     const L = d.location;
     const pend = can("inv.in") ? (await api("/api/inv/wms/pending")).items : [];
     const S = STATE();
-    const m = MODAL.open(`<h3>${esc(Z("货位", "ตำแหน่ง"))} <span class="mono" data-notr>${esc(L.code)}</span> <span class="small" data-notr>${esc(human(L.code))}</span></h3>
+    const m = openDrawer(`<h3>${esc(Z("货位", "ตำแหน่ง"))} <span class="mono" data-notr>${esc(L.code)}</span> <span class="small" data-notr>${esc(human(L.code))}</span></h3>
       <p class="small"><span class="loc-zt zt-${esc(L.ztype || "pick")}">${esc(ztName(L.ztype || "pick"))}</span> <span class="lg-in st-${esc(L.state)}">${esc(S[L.state] || "")}</span>
         <span data-notr>🏬 ${esc(whLabel(L.warehouse_name))}</span>
         ${L.capacity != null ? ` · ${esc(Z("容量", "ความจุ"))} <b>${num(L.total)} / ${num(L.capacity)}</b>` : ""}${L.size ? ` · ${esc(sizeName(L.size))}` : ""}
         ${L.mixed === 0 ? ` · ${esc(Z("不混放", "ไม่ปนกัน"))}` : ""}${L.fixed ? ` · 📌 <span data-notr>${esc(Z("固定给 ", "ตายตัวสำหรับ "))}${esc(L.fixed.code)}</span>` : ""}
         ${L.min_qty != null ? ` · ${esc(Z("最低", "ขั้นต่ำ"))} ${num(L.min_qty)}` : ""} <span class="muted" data-notr>${esc(L.note || "")}</span></p>
-      ${d.items.length ? `<table class="grid small"><thead><tr><th>${esc(Z("编码", "รหัส"))}</th><th>${esc(Z("名称", "ชื่อ"))}</th><th>${esc(Z("这里有", "ที่นี่มี"))}</th><th>${esc(Z("总库存", "สต็อกรวม"))}</th><th></th>${can("inv.in") ? `<th>${esc(Z("移到", "ย้ายไป"))}</th>` : ""}</tr></thead><tbody>
-        ${d.items.map((it) => `<tr data-iid="${it.id}" class="${it.low ? "inv-low" : ""}"><td class="mono" data-notr${it.category === "goods" ? ` data-p360="${esc(it.code)}"` : ""}>${esc(it.code)}${it.primary ? " ★" : ""}</td><td data-notr>${esc(itName(it))}</td>
-          <td class="nowrap"><b>${num(it.qty)}</b> <span data-notr>${esc(uLab(it.unit))}</span>${it.low ? ' <span class="bad">⚠</span>' : ""}</td><td class="nowrap">${num(it.total)}</td>
-          <td class="nowrap">${can("inv.in") ? `<button class="mini" data-dk="purchase">${esc(Z("＋ 入库", "＋ รับเข้า"))}</button>` : ""}${can("inv.out") ? `<button class="mini" data-dk="issue">${esc(Z("− 出库", "− จ่ายออก"))}</button>` : ""}</td>
-          ${can("inv.in") ? `<td class="nowrap"><input type="number" min="0" step="any" data-mq value="${it.qty > 1e-9 ? +(+it.qty).toFixed(3) : ""}" class="loc-mq">
-            <select data-to class="loc-to" data-notr>${locOpts("", Z("选货位", "เลือกช่อง"), L.code)}</select><button class="mini" data-mv ${it.qty > 1e-9 ? "" : "disabled"}>${esc(Z("移", "ย้าย"))}</button></td>` : ""}</tr>`).join("")}</tbody></table>
+      <h4>${esc(Z("里面的商品", "สินค้าในช่อง"))}</h4>
+      ${d.items.length ? `<table class="grid small lv-dr-tbl"><thead><tr><th></th><th>${esc(Z("商品", "สินค้า"))}</th><th>${esc(Z("这里有", "ที่นี่มี"))}</th><th>${esc(Z("总库存", "สต็อกรวม"))}</th><th></th></tr></thead><tbody>
+        ${d.items.map((it) => `<tr data-iid="${it.id}" class="${it.low ? "inv-low" : ""}"><td class="lv-imgc">${imgTag(it)}</td>
+          <td data-notr><span class="lv-nm"${it.category === "goods" ? ` data-p360="${esc(it.code)}"` : ""}>${esc(itName(it))}</span><span class="lv-sku mono">${esc(it.code)}${it.primary ? " ★" : ""}</span></td>
+          <td class="nowrap"><b data-notr>${esc(qtx(it))}</b>${it.low ? ' <span class="bad">⚠</span>' : ""}</td><td class="nowrap" data-notr>${esc(TH() ? it.total_text_th || it.total_text : it.total_text)}</td>
+          <td class="nowrap">${can("inv.in") ? `<button class="mini" data-dk="purchase">${esc(Z("＋ 入库", "＋ รับเข้า"))}</button>` : ""}${can("inv.out") ? `<button class="mini" data-dk="issue">${esc(Z("− 出库", "− จ่ายออก"))}</button>` : ""}
+            ${can("inv.in") ? `<div class="lv-mvrow"><input type="number" min="0" step="any" data-mq value="${it.qty > 1e-9 ? +(+it.qty).toFixed(3) : ""}" class="loc-mq" title="${esc(Z("数量", "จำนวน"))}">
+            ${locPick('data-to class="loc-to" data-notr', "", Z("选货位", "เลือกช่อง"), L.code)}<button class="mini" data-mv ${it.qty > 1e-9 ? "" : "disabled"}>${esc(Z("移", "ย้าย"))}</button></div>` : ""}</td></tr>`).join("")}</tbody></table>
         <p class="small muted">★ ${esc(Z("= 这个物品的主货位（拣货先到这里拿）", "= ตำแหน่งหลักของสินค้านี้ (หยิบที่นี่ก่อน)"))}</p>`
         : `<p class="muted">${esc(Z("这个货位是空的。", "ตำแหน่งนี้ว่าง"))}</p>`}
       ${can("inv.in") && pend.length ? `<div class="row gap wrap loc-putbar"><span class="small">${esc(Z("把待上架的放到这里：", "วางของที่รอจัดเก็บที่นี่:"))}</span>
         <select id="loc-put" data-notr>${pend.map((x) => `<option value="${x.item.id}" data-q="${x.qty}">${esc(x.item.code)} · ${esc(itName(x.item))} · ${esc(Z("待上架", "รอ"))} ${num(x.qty)}</option>`).join("")}</select>
         <input type="number" id="loc-put-q" min="0" step="any" class="loc-mq" value="${pend[0] ? +(+pend[0].qty).toFixed(3) : ""}">
         <button class="mini primary" id="loc-put-ok">${esc(Z("上架", "จัดเก็บ"))}</button></div>` : ""}
+      <h4>${esc(Z("出入库记录", "ประวัติเข้า-ออก"))} <span class="small muted">${esc(Z("（最近 60 条）", "(60 รายการล่าสุด)"))}</span></h4>${logTable(d.log)}
       ${can("inv.in") ? `<details class="loc-set"><summary>${esc(Z("⚙ 货位设置（容量、尺寸、混放、固定物品、最低数量）", "⚙ ตั้งค่าช่อง (ความจุ ขนาด ปนกัน สินค้าตายตัว ขั้นต่ำ)"))}</summary>
         ${propsForm(L, false)}<button class="primary mini" id="loc-props-ok">${esc(Z("保存设置", "บันทึกการตั้งค่า"))}</button></details>` : ""}
       <div class="row gap wrap" style="margin-top:10px">${can("inv.out") ? `<button id="loc-stk">${esc(Z("🧮 盘点这个货位", "🧮 ตรวจนับช่องนี้"))}</button>` : ""}
         <a class="btn" target="_blank" href="/print/inv-locations?ids=${L.id}${lang()}">${esc(Z("🏷 条码标签", "🏷 ป้ายบาร์โค้ด"))}</a>
         <a class="btn" target="_blank" href="/print/inv-locations?ids=${L.id}&fmt=qr${lang()}">${esc(Z("🏷 二维码标签", "🏷 ป้าย QR"))}</a>
         ${d.items.length ? "" : `<button class="danger" id="loc-del">${esc(Z("删除货位", "ลบตำแหน่ง"))}</button>`}<button data-mclose>${esc(Z("关闭", "ปิด"))}</button></div>`);
-    m.classList.add("wide");
     const again = async () => { await loadLocs(); detail(L.id); if (BOX() && !BOX().closest(".hidden")) page(); };
     const ps = m.querySelector("#loc-put");
     if (ps) ps.onchange = () => { m.querySelector("#loc-put-q").value = +(+ps.selectedOptions[0].dataset.q).toFixed(3); };
     m.onclick = async (e) => {
       try {
         const tr = e.target.closest("tr[data-iid]");
-        if (e.target.dataset.dk && tr && window.INV) { MODAL.close(); return INV.docModal(e.target.dataset.dk, { item_id: +tr.dataset.iid }); }
+        if (e.target.dataset.dk && tr && window.INV) { closeDrawer(); return INV.docModal(e.target.dataset.dk, { item_id: +tr.dataset.iid }); }
         if (e.target.dataset.mv !== undefined && tr) {
           const to = tr.querySelector("[data-to]").value;
           if (!to) return toast(Z("先选要移到的货位", "เลือกช่องปลายทางก่อน"), true);
@@ -389,10 +501,10 @@
           await api("/api/inv/locations/props", { json: { codes: [L.code], props: readProps(m, false) } });
           toast(Z("已保存", "บันทึกแล้ว")); return again();
         }
-        if (e.target.id === "loc-stk") { MODAL.close(); return stocktake(L.code); }
+        if (e.target.id === "loc-stk") { closeDrawer(); return stocktake(L.code); }
         if (e.target.id === "loc-del") {
           if (!confirm(Z(`删除货位 ${L.code}？`, `ลบช่อง ${L.code}?`))) return;
-          await api(`/api/inv/locations/${L.id}`, { method: "DELETE" }); toast(Z("已删除", "ลบแล้ว")); MODAL.close(); page();
+          await api(`/api/inv/locations/${L.id}`, { method: "DELETE" }); toast(Z("已删除", "ลบแล้ว")); closeDrawer(); page();
         }
       } catch (err) { toast(err.message, true); }
     };
@@ -431,6 +543,7 @@
     const tb = e.target.closest("[data-ux-tab]");
     if (tb && tb.closest('[data-ux-group="loc"]')) { SUB = tb.dataset.uxTab; return page(); }
     const zf = e.target.closest("[data-zf]"); if (zf) { ZONE = zf.dataset.zf; return renderSub(); }
+    const se = e.target.closest("[data-shexp]"); if (se) return toggleShelf(se.dataset.shexp).catch((er) => toast(er.message, true));
     const t = e.target.closest("[data-loc],[data-grp],[data-addlayer],[data-addpos],[data-rmlayer],[data-rmshelf],[data-stk]");
     if (t && t.dataset.loc) return detail(+t.dataset.loc).catch((er) => toast(er.message, true));
     if (t && t.dataset.grp) return groupModal(t.dataset.grp);
@@ -465,6 +578,7 @@
       if (prevShow) return prevShow(name);
     },
   });
-  window.INVLOC = { render: page, page, detail, loadLocs, list: () => LOCS, shelves: () => [...new Set(LOCS.map(shelfOf).filter(Boolean))], human, stocktake,
-    move, putaway, locOpts, ztName, groups: () => GROUPS, zones: () => [...new Set(LOCS.map((l) => l.zone))].sort(), zoneInfo };
+  window.INVLOC = { render: page, page, detail, loadLocs, list: () => LOCS, shelves: allShelves, human, stocktake,
+    move, putaway, locOpts, locPick, ztName, groups: () => GROUPS, zones: () => (ZONES_ALL.length ? ZONES_ALL : [...new Set(LOCS.map((l) => l.zone))].sort()), zoneInfo,
+    cats: () => CATS, propsForm, readProps, big: () => BIG, reloadSummary: () => page().catch((e) => toast(e.message, true)), closeDrawer };
 })();

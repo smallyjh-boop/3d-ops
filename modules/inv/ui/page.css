@@ -130,3 +130,71 @@
 .gs-prow .gs-img { flex: 0 0 auto }
 .gs-prow > span { flex: 1 1 auto; min-width: 0 }
 .gs-prow:hover { background: #f8fafc }
+
+/* ---- v2.55：货位页 列表 / 按商品 / 货位图 / 抽屉 ---- */
+.lv-bar { margin: 6px 0 8px; align-items: center }
+.lv-bar select, .lv-bar input[type=search] { min-height: 32px }
+.lv-qin { width: 280px; max-width: 100% }
+.lv-chk { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; margin: 0 }
+.lv-chk input { width: auto; margin: 0 }
+.lv-wrap { overflow-x: auto; max-width: 100% }
+.lv-busy { opacity: .55; transition: opacity .15s }
+.lv-tbl th.lv-th { cursor: pointer; user-select: none }
+.lv-tbl th.lv-th:hover { background: #eef2ff }
+.lv-arr { font-style: normal; font-size: 10px; margin-left: 3px; color: #2563eb }
+.lv-ck { width: 28px; text-align: center }
+.lv-row { cursor: pointer }
+.lv-row:hover { background: #f3f7ff }
+.lv-row.lv-low { box-shadow: inset 3px 0 0 #f59e0b }
+.lv-cont { min-width: 260px; max-width: 420px }
+.lv-it { display: flex; align-items: center; gap: 8px; padding: 2px 0 }
+.lv-it + .lv-it, .lv-rest .lv-it { border-top: 1px dashed #e2e8f0 }
+.lv-imgw, .lv-imgc { flex: 0 0 auto; width: 40px }
+.lv-img { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; background: #f1f5f9; display: inline-flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 16px; vertical-align: middle }
+.lv-noimg { border: 1px dashed #cbd5e1 }
+.lv-sw { border: 1px solid rgba(0,0,0,.15) }
+.lv-itx { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto }
+.lv-nm { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; font-size: 13px }
+.lv-sku { font-size: 11px; color: #64748b }
+.lv-q { white-space: nowrap; font-size: 12px; text-align: right }
+.lv-more { border: 0; background: #e0f2fe; color: #075985; border-radius: 10px; padding: 1px 8px; font-size: 12px; cursor: pointer; margin: 2px 0 }
+.lv-more.on { background: #bae6fd }
+.lv-rest.hidden { display: none }
+.lv-meter { display: block; width: 90px; height: 5px; background: #e2e8f0; border-radius: 3px; overflow: hidden; margin-top: 3px }
+.lv-meter i { display: block; height: 100%; background: #16a34a }
+.lv-meter i.ux-bad { background: #dc2626 } .lv-meter i.ux-info { background: #2563eb }
+.lv-tag { display: inline-block; font-size: 11px; border-radius: 10px; padding: 1px 7px; background: #f1f5f9; color: #475569 }
+.lv-tag.warn { background: #fef3c7; color: #92400e }
+.lv-dists { max-width: 520px; line-height: 1.7 }
+.lv-dist { display: inline-block; cursor: pointer; border-radius: 6px; padding: 0 4px }
+.lv-dist:hover { background: #dbeafe }
+.lv-flags { max-width: 220px }
+.lv-pager { margin: 8px 0; align-items: center }
+.lv-selbar { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 6px 10px; margin-bottom: 8px; align-items: center }
+.lv-shelflist { display: flex; flex-direction: column; gap: 6px }
+.lv-shelf { border: 1px solid #e2e8f0; border-radius: 8px; background: #fff }
+.lv-shelf.open { border-color: #94a3b8 }
+.lv-shelf .loc-shelf { margin: 6px; border: 0; background: #f8fafc }
+.lv-shelfrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 10px; cursor: pointer }
+.lv-shelfrow:hover { background: #f3f7ff }
+.lv-caret { width: 14px; color: #64748b }
+.loc-cell .cell-img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; margin: 1px 0 }
+.loc-cell .it { font-family: inherit; font-size: 11px; max-width: 84px }
+.loc-cell .cq { font-size: 10px; color: #475569; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.loc-row[style] { --cellw: 84px }
+/* 右边抽屉 */
+.lv-drawer-wrap { position: fixed; inset: 0; z-index: 900 }
+.lv-dr-mask { position: absolute; inset: 0; background: rgba(15, 23, 42, .35) }
+.lv-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(760px, 96vw); background: #fff; box-shadow: -6px 0 24px rgba(0,0,0,.2); overflow-y: auto; padding: 14px 16px 24px; animation: lvdr .18s ease-out }
+@keyframes lvdr { from { transform: translateX(40px); opacity: 0 } to { transform: none; opacity: 1 } }
+.lv-dr-x { position: absolute; top: 8px; right: 10px; border: 0; background: transparent; font-size: 20px; cursor: pointer; color: #64748b }
+.lv-dr-in h3 { margin: 0 28px 6px 0 }
+.lv-dr-in h4 { margin: 14px 0 6px }
+.lv-dr-tbl .lv-nm { max-width: 220px }
+.lv-mvrow { display: flex; gap: 4px; align-items: center; margin-top: 4px; flex-wrap: wrap }
+@media (max-width: 700px) {
+  .lv-qin { width: 100% }
+  .lv-bar > * { flex: 1 1 140px }
+  .lv-cont { min-width: 200px }
+  .lv-drawer { width: 100vw; padding: 12px }
+}

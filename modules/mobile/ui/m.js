@@ -112,6 +112,8 @@
     "c.confirm_q": ["确认盘点？填了数的按实盘数改库存", "ยืนยันตรวจนับ? รายการที่กรอกจะแก้สต็อกตามจำนวนจริง"],
     "c.new": ["换个货位盘点", "ตรวจตำแหน่งอื่น"], "c.diff": ["差", "ต่าง"], "c.needitem": ["这是商品码：先扫货位开始盘点", "นี่คือโค้ดสินค้า: สแกนตำแหน่งก่อน"],
     // 货位
+    "l.q": ["搜货位 / 商品 / SKU", "ค้นหาตำแหน่ง / สินค้า / SKU"], "l.more": ["再显示 20 个", "แสดงเพิ่ม 20"], "l.none": ["没有符合的货位", "ไม่พบตำแหน่ง"],
+    "l.total": ["共 {n} 个货位", "ทั้งหมด {n} ตำแหน่ง"], "l.moreitems": ["+{n} 种", "+{n} รายการ"], "l.inclempty": ["含空货位", "รวมช่องว่าง"], "l.below": ["低于补货线", "ต่ำกว่าจุดสั่งซื้อ"],
     "l.scan": ["扫货位看里面有什么；扫商品看它在哪", "สแกนตำแหน่งดูว่ามีอะไร สแกนสินค้าดูว่าอยู่ไหน"],
     "l.empty": ["这个货位是空的", "ตำแหน่งนี้ว่าง"], "l.putin": ["📥 把待上架的东西放到这里", "📥 วางของที่รอจัดเก็บที่นี่"],
     "l.cap": ["容量", "ความจุ"], "l.mvfrom": ["↔ 从这里移走", "↔ ย้ายออกจากที่นี่"], "l.goput": ["📥 上架", "📥 จัดเก็บ"], "l.gomove": ["↔ 移库", "↔ ย้ายตำแหน่ง"], "l.move": ["↔ 放到 / 换到别的货位", "↔ วาง / ย้ายไปตำแหน่งอื่น"],
@@ -955,12 +957,38 @@
 
   // ---------------- 货位（查：货位里有什么、物品在哪些货位）----------------
   SCREENS.loc = {
-    r: null, msg: null,
+    r: null, msg: null, q: "", empty: false, rows: [], total: 0, page: 0, pages: 1, busy: false,
     show(arg) {
       this.r = null; this.msg = null;
       if (!INV) { view().innerHTML = lastMsg("bad", T("k.noinv")); return; }
       this.render();
-      if (arg) this.scan(arg);
+      if (arg) this.scan(arg); else this.loadList(true);
+    },
+    // v2.55：没扫码时，下面是货位列表（紧凑卡片：图片、商品、货位、数量），服务端分页 + 搜索，扫货位编号直接打开它
+    async loadList(reset) {
+      if (this.busy) return;
+      this.busy = true;
+      try {
+        if (reset) { this.rows = []; this.page = 0; this.pages = 1; }
+        if (this.page >= this.pages) return;
+        const p = new URLSearchParams({ size: "50", page: String(this.page + 1), has: this.empty ? "" : "nonempty" });
+        if (this.q) p.set("q", this.q);
+        const r = await api(`/api/inv/loc/list?${p}`);
+        this.rows = this.rows.concat(r.rows); this.total = r.total; this.page = r.page; this.pages = r.pages;
+      } catch (e) { toast(srv(e.message), true); }
+      finally { this.busy = false; }
+      this.drawList();
+    },
+    drawList() {
+      const box = $("#l-list"); if (!box) return;
+      const qt = (x) => (TH() ? x.qty_text_th || x.qty_text : x.qty_text) || qn(x.qty);
+      const line = (x) => `<div class="item">${img(x.img)}<div class="grow"><div class="nm" data-notr>${esc(nm(x.name_zh, x.name_th))}</div><div class="mono small muted" data-notr>${esc(x.code)}</div></div><div class="q" style="font-size:16px" data-notr>${esc(qt(x))}</div></div>`;
+      box.innerHTML = `<p class="small muted">${T("l.total", { n: this.total })}</p>` + (this.rows.length ? this.rows.map((l) => `<div class="card tap" data-lcode="${esc(l.code)}" style="padding:8px 10px">
+          <div class="row between"><span class="loc" style="font-size:18px" data-notr>${esc(l.code)}</span><span class="small muted" data-notr>${l.capacity != null ? `${esc(qn(l.total))} / ${esc(qn(l.capacity))}` : ""}${l.below_min ? ` <b class="warn">⚠ ${T("l.below")}</b>` : ""}</span></div>
+          ${l.items.slice(0, 2).map(line).join("") || `<div class="muted small">${T("l.empty")}</div>`}${l.n_items > 2 ? `<div class="small muted">${T("l.moreitems", { n: l.n_items - 2 })}</div>` : ""}</div>`).join("")
+        : `<p class="hint">${T("l.none")}</p>`) + (this.page < this.pages ? `<button class="big" id="l-more">${T("l.more")}</button>` : "");
+      box.querySelectorAll("[data-lcode]").forEach((c) => c.addEventListener("click", () => this.load(c.dataset.lcode, false).catch((e) => toast(srv(e.message), true))));
+      const mo = $("#l-more"); if (mo) mo.addEventListener("click", () => this.loadList(false));
     },
     refresh() { if (this.r) this.load(this.r.code, false).catch(() => {}); },
     async load(code, beep = true) {
@@ -973,7 +1001,9 @@
     render() {
       const r = this.r;
       let body = "";
-      if (!r) body = `<p class="hint"><span class="big-ic">🗄</span>${T("l.scan")}</p>`;
+      if (!r) body = `<p class="hint" style="padding:8px"><span class="big-ic" style="font-size:30px">🗄</span>${T("l.scan")}</p>
+        <div class="row" style="gap:8px;margin-bottom:8px"><input id="l-q" type="search" inputmode="search" placeholder="${esc(T("l.q"))}" value="${esc(this.q)}" style="flex:1" data-notr>
+          <label class="small" style="white-space:nowrap;display:flex;align-items:center;gap:4px"><input type="checkbox" style="width:22px;min-height:22px;height:22px" id="l-emp" ${this.empty ? "checked" : ""}> ${T("l.inclempty")}</label></div><div id="l-list"></div>`;
       else if (r.type === "location") {
         const l = r.location;
         body = `<div class="card"><div class="loc" data-notr>${esc(l.code)}</div><div class="small muted">${esc(TH() ? l.human_th : l.human_zh)}</div>
@@ -999,6 +1029,14 @@
       else if (r.type === "order") body = `<div class="card"><p>🧾 <b class="mono" data-notr>${esc(r.order.order_no)}</b></p><button class="big primary" id="l-order">${T("go.order")}</button></div>`;
       else body = lastMsg("bad", T("unknown", { c: r.code }));
       view().innerHTML = (this.msg ? lastMsg(this.msg[0], this.msg[1]) : "") + body;
+      const lq = $("#l-q");
+      if (lq) {
+        let tm = null;
+        lq.addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(() => { this.q = lq.value.trim(); this.loadList(true); }, 300); });
+        lq.addEventListener("keydown", (e) => { if (e.key === "Enter" && lq.value.trim()) { clearTimeout(tm); this.scan(lq.value.trim()); } });   // 输入 / 扫的货位编号，回车直接打开
+        $("#l-emp").addEventListener("change", (e) => { this.empty = e.target.checked; this.loadList(true); });
+        this.drawList();
+      }
       const put = $("#l-put"); if (put) put.addEventListener("click", () => go("put", "@" + r.location.code));
       const mf = $("#l-mvfrom"); if (mf) mf.addEventListener("click", () => go("move", r.location.code));
       const gp = $("#l-goput"); if (gp) gp.addEventListener("click", () => go("put", r.item.code));

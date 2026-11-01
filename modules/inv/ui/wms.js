@@ -28,7 +28,7 @@
         <td class="small">${x.suggest.length ? x.suggest.map((p) => `<span class="nowrap"><b class="mono" data-notr>${esc(p.code)}</b>${p.qty ? ` ×${num(p.qty)}` : ""} <span class="muted">${esc(R[p.reason] || "")}</span></span>`).join("<br>")
           : `<span class="warn">${esc(Z("没有合适的空位（建货架 / 设库区放哪些分类）", "ไม่มีช่องที่เหมาะ (สร้างแร็ค / ตั้งหมวดของโซน)"))}</span>`}</td>
         ${can("inv.in") ? `<td class="nowrap"><input type="number" min="0" step="any" data-q value="${+(+(x.suggest[0] && x.suggest[0].qty ? x.suggest[0].qty : x.qty)).toFixed(3)}" class="loc-mq">
-          <select data-to class="loc-to" data-notr>${L().locOpts(x.suggest[0] ? x.suggest[0].code : "", Z("选货位", "เลือกช่อง"))}</select></td>
+          ${L().locPick('data-to class="loc-to" data-notr', x.suggest[0] ? x.suggest[0].code : "", Z("选货位", "เลือกช่อง"))}</td>
           <td><button class="mini primary" data-put>${esc(Z("上架", "จัดเก็บ"))}</button></td>` : ""}</tr>`).join("")}</tbody></table></div>`
       : UX.empty(Z("没有待上架的东西 ✓", "ไม่มีของรอจัดเก็บ ✓")) });
     box.onclick = async (e) => {
@@ -96,11 +96,11 @@
 
   // ---------------- 移库弹窗：扫 / 选 原货位 → 物品和数量 → 目标货位 ----------------
   async function moveModal(from) {
-    if (!L().list().length) await L().loadLocs();
+    if (!L().list().length && !L().big()) await L().loadLocs();
     const m = MODAL.open(`<h3>${esc(Z("↔ 移库", "↔ ย้ายตำแหน่ง"))}</h3>
       <p class="small muted">${esc(Z("扫码枪也行：先扫原货位，勾要搬的物品和数量，再扫目标货位。可以一次搬几样。", "ใช้เครื่องสแกนได้: สแกนช่องต้นทาง เลือกสินค้าและจำนวน แล้วสแกนช่องปลายทาง ย้ายหลายอย่างพร้อมกันได้"))}</p>
-      <div class="form4"><label>${esc(Z("原货位", "ช่องต้นทาง"))}<select id="mv-from" data-notr>${L().locOpts(from || "", Z("选货位", "เลือกช่อง"))}</select></label>
-        <label>${esc(Z("目标货位", "ช่องปลายทาง"))}<select id="mv-to" data-notr>${L().locOpts("", Z("选货位", "เลือกช่อง"))}</select></label>
+      <div class="form4"><label>${esc(Z("原货位", "ช่องต้นทาง"))}${L().locPick('id="mv-from" data-notr', from || "", Z("选货位", "เลือกช่อง"))}</label>
+        <label>${esc(Z("目标货位", "ช่องปลายทาง"))}${L().locPick('id="mv-to" data-notr', "", Z("选货位", "เลือกช่อง"))}</label>
         <label>${esc(Z("扫码", "สแกน"))}<input id="mv-scan" placeholder="${esc(Z("扫货位条码", "สแกนป้ายตำแหน่ง"))}" autocomplete="off"></label></div>
       <div id="mv-items"></div>
       <div class="row gap" style="margin-top:8px"><button class="primary" id="mv-ok">${esc(Z("搬过去", "ย้าย"))}</button><button data-mclose>${esc(Z("关闭", "ปิด"))}</button></div>`);

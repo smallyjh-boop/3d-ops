@@ -71,3 +71,14 @@
 - （系统 v2.53.0）复审修复：质检区默认关改以 v2.53 迁移标记为准（inv_loc_v253 没设 + 已有物品 → 明确写 inv_qc_on=False，不再看 config.json 里有没有这个键）。测试 modules/inv/tests/t_wms253.py。
 - 2.2（系统 v2.54.0）：「成品备货」页重做（core/inventory/goodsstock.py，ui/goodsstock.js，接口 /api/inv/gs*）：所有成品一张表（图 / 名称 / 规格颜色 / 可卖·待检·次品 / 货位拆开 / 目标 / 缺口 / 近 N 天销量 / 能卖几天 / 在做），标签 🖨 自产（产品库里有）/ 🛒 外购（库存里有、产品库里没有，或标了外购）；数字卡片 → 图表 → 左边自动分组（缺货 / 低于目标 / 积压 / 待上架 / 质检中 / 很久没动，来源，分类）。目标数量自动 = 近 N 天销量 ÷ N × 常备天数 + 安全库存，没销量用分类默认，也可手动覆盖（设置：gs_sales_days / stock_cover_days / gs_safety / gs_cat_default / gs_over_x）。批量加（产品库选择 / 按分类 / 标签）、「一键补货」：自产 → 一张生产单草稿（按一盘能打几个往上取整，可马上下达），外购 → 采购单草稿（modules/pur/public.py draft_po）。每行 📍 快速移库 / 上架（推荐先拣货区再备货区），🏷 SKU 标签 /print/gs-labels。测试 modules/inv/tests/t_goodsstock254.py。
 - 2.2（系统 v2.54.0，发版前审查修复）：一键补货的「在做 / 在途」算上生产单草稿 / 还没建任务的行和采购单草稿，点两次不会重复建；手填数量的 SKU 已有补货草稿时拒绝并提示改那张草稿。
+- 2.3（系统 v2.55.0）：仓库 → 货位页三种看法 + 1 万商品 / 2 万货位也流畅。顶部切换「列表 | 按商品 | 货位图」（默认列表，localStorage `inv_loc_view255` 记住上次选的）。
+  列表（locviews.py + ui/locviews.js）：一行一个货位——编号、库区、货架 / 层 / 位、里面的商品（图 + 名称 + SKU + 数量，先 2 个，「+N 种」展开）、容量 / 占用条、状态（空 / 有货 / 满 / 超容量 / 低于补货线）、最后动的时间；
+  筛选库区 / 货架 / 状态 / 分类 / 空非空 / 低于最低数量，搜索货位编号 / 商品名称 / SKU / 条码（= 物品编码），点表头排序，每页 50 / 100 / 200；勾选后批量：移库（`POST /api/inv/loc/bulk`）、打印标签（`/print/inv-locations?codes=` 或 `flt=1`）、货位设置、加入盘点，可「选中全部 N 个符合条件的」。
+  点一行 → 右边抽屉（`/api/inv/loc/<id>/drawer`：里面的商品、最近 60 条出入库记录、入库 / 出库 / 移库 / 上架 / 设置 / 盘点 / 标签）。
+  按商品：一行一个商品（图、名称、SKU、总数、分布「A1-01-01 ×20 · R2-03-02 ×100」、标记 太分散 / 没上架 / 没货位 / 低于补货线），同样的搜索 / 筛选 / 排序 / 翻页。
+  货位图保留：格子里有第一个商品的小图 + 名称前几个字，放上去看全部；货位多（> 400）只画选中的库区，货架先是一行汇总，点开才画格子，别的库区是上面的一排汇总。
+  规模：接口 `/api/inv/loc/{list,items,codes,suggest,summary,map}` 全在 SQL 里筛选 / 排序 / 搜索 / 分页；索引 inv_loc_qty(item_id / loc_id)、inv_locations(code / zone,shelf,layer,pos)、inv_items(code / name_zh / category,code / location)、inv_loc_log(from_loc / to_loc)；
+  汇总（数字卡片、各库区利用率）按「货位 / 数量 / 设置有没有变」缓存；`/api/inv/locations` 货位多于 1500 只给汇总，选货位的下拉框改成边打边联想（`/api/inv/loc/suggest`）；待上架数一条 SQL，推荐共用一次读好的数据，货位编号解析加缓存。
+  库存表（inventory.js）：`/api/inv/items?view=…&page=&size=&sort=&dir=` 服务端分页 / 排序 / 搜索（不带 page / size 还是返回全部）。
+  数量文字：全部走 `qtytext.qty_text()`（接口字段 qty_text / qty_text_th），耗材改成「2 卷 · 1.97 kg」只改这个文件。手机 /m 货位页：没扫码时是紧凑卡片列表（图、商品、货位、数量，搜索 + 翻页），扫 / 输入货位编号打开详情。
+  测试 tests/t_locviews255.py（含 synth255.py 灌 2 万货位 + 1 万商品的压测，列表 / 搜索 / 排序都 < 1 秒）。
