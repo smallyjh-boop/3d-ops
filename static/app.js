@@ -304,7 +304,7 @@ const PRINTERS_CARD = () => `<div class="card cfg-group"><h3>${ZZ("机型模板"
       <pre id="slice-log" class="small hidden" style="white-space:pre-wrap;background:#f3f4f6;padding:8px;border-radius:6px;max-height:260px;overflow:auto"></pre>
     </div>`;
 const COLORS_CARD = () => `<div class="card cfg-group"><h3>颜色代码表</h3>
-      <p class="muted small">每行一个颜色：中文, 代码, 泰文, 英文[, 渲染颜色#RRGGBB]。代码用 1-6 位大写字母/数字，会出现在 SKU 里（例 3DP0001-WH）。已导出的 SKU 不受影响。「随机颜色」「多色」没有固定颜色：第 5 列可填预览颜色（例 随机颜色, RND, สีสุ่ม, Random, #CFCBC4），留空 = 中性浅灰。</p>
+      <p class="muted small">每行一个颜色：中文, 代码, 泰文, 英文[, 渲染颜色#RRGGBB]。代码用 1-6 位大写字母/数字，会出现在 SKU 里（例 3DP0001-WH）。已导出的 SKU 不受影响。「随机颜色」「多色」没有固定颜色：第 5 列可填预览颜色（例 随机颜色, RND, 泰文名, Random, #CFCBC4），留空 = 中性浅灰。</p>
       <textarea data-c="color_table" rows="12" class="mono" data-notr>${esc((CFG.color_table || []).map((c) => (Array.isArray(c) ? c.join(", ") : String(c))).join("\n"))}</textarea></div>`;
 // 设置页按模块分开（v2.18）：结构来自服务器 /api/settings/schema，以后加模块 / 加设置不用改这里
 let CFG_SCHEMA = null, CFG_MOD = "general", INV_ITEMS_CFG = [];
