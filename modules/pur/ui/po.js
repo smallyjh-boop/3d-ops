@@ -258,7 +258,7 @@
     const cs = po.currency === "CNY";
     const lines = po.lines.map((l) => {
       const roll = !!l.rolls, net = l.net_g || 1000;
-      const q = (v) => (roll ? `${num(v / net, 2)} ${Z("卷", "ม้วน")}` : `${num(v)} ${esc(uLab(l.unit))}`);
+      const q = (v) => (roll ? `${num(v / net, 2)} ${Z("卷", "ม้วน")} · ${num(v / 1000, 2)} kg` : `${num(v)} ${esc(uLab(l.unit))}`);      // v2.55：卷数旁边带公斤
       return `<tr><td data-notr><a href="#" data-item-links="${l.item_id}"><b>${esc(itName(l))}</b></a><div class="small muted">${esc(l.code)}${l.location ? ` · 📍${esc(l.location)}` : ""}</div></td>
         <td class="nowrap">${q(l.qty)}</td><td class="nowrap">${q(l.received || 0)}${l.returned ? `<div class="small warn">${Z("退", "คืน")} ${q(l.returned)}</div>` : ""}</td>
         ${money_ ? `<td class="nowrap">${money(roll ? l.unit_cost * net : l.unit_cost, po.currency, 4)}${roll ? Z("/卷", "/ม้วน") : ""}</td><td class="nowrap">${thb(roll ? l.landed * net : l.landed, 2)}${roll ? Z("/卷", "/ม้วน") : ""}</td>

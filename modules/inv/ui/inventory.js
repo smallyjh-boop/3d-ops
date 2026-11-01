@@ -7,13 +7,16 @@
   const num = (v, d = 0) => (v == null || v === "" ? "" : Number(v).toLocaleString(undefined, { maximumFractionDigits: d }));
   const catName = (id) => { const c = (META.categories || []).find((x) => x.id === id); return c ? (TH() ? c.th : c.zh) : id; };
   const itName = (it) => (TH() && it.name_th ? it.name_th : it.name_zh) || "";
+  // v2.55 耗材两个单位：卷 + 重量。有料卷的 → 「2 卷（1 整卷 + 1 开封卷）· 1.97 kg」（树脂是瓶 + 毫升）；没有料卷记录的 → 只有重量
   function qtyText(it, q = it.qty) {
     if (it.unit === "g") {
-      const kg = (q || 0) / 1000;
+      const kg = (q || 0) / 1000, u = it.units;
+      if (u && u.tracked && q === it.qty) return `<b data-notr title="${esc(num(q) + " g")}">${esc(TH() ? u.text_th : u.text_zh)}</b>`;
       return `<b>${num(q)}</b> g <span class="muted">≈ ${num(kg, 2)} kg</span>`;
     }
     return `<b>${num(q, 2)}</b> <span data-notr>${esc(uLab(it.unit))}</span>`;
   }
+  const reorderText = (it) => (it.reorder_point == null ? "" : it.category === "filament" && it.reorder_zh ? `<span data-notr>${esc(TH() ? it.reorder_th : it.reorder_zh)}</span>` : num(it.reorder_point, 1));
   const can = (k) => !!(META && META.perms && META.perms[k]);
   const U_TH = { "个": "ชิ้น", "卷": "ม้วน", "张": "แผ่น", "件": "ชิ้น", "米": "เมตร", "瓶": "ขวด", "盒": "กล่อง", "套": "ชุด" };
   const uLab = (u) => (TH() && U_TH[u]) || u || "";
@@ -41,7 +44,7 @@
     const qcHint = META.qc_hint ? `<div class="warnbox small" id="inv-qchint">${TH() ? "ตอนอัปเกรดได้ปิดการตรวจคุณภาพไว้ (สินค้าที่พิมพ์เสร็จเข้าชั้นวางทันที) ถ้าต้องการให้เข้า「โซนรอตรวจ」ก่อน เปิดได้เลย" : "升级时把「质检区」先关掉了（打印出来的成品直接上架、可售）。想让成品先进待检区、合格再上架，可以现在开启。"}
       <button class="mini primary" data-qchint="1">${TH() ? "เปิดการตรวจคุณภาพ" : "开启质检"}</button> <button class="mini" data-qchint="0">${TH() ? "รับทราบ" : "知道了"}</button></div>` : "";
     $("#inv-alerts").innerHTML = qcHint + (al.length ? `<div class="warnbox small"><b>低于补货线</b>：` +
-      al.map((a) => `<span class="chip" data-notr>${esc(TH() && a.name_th ? a.name_th : a.name_zh)} ${num(a.qty, 1)}/${num(a.reorder_point, 1)} ${esc(uLab(a.unit))}</span>`).join(" ") + "</div>" : "");
+      al.map((a) => `<span class="chip" data-notr>${esc(TH() && a.name_th ? a.name_th : a.name_zh)} ${a.qty_zh ? esc(TH() ? a.qty_th : a.qty_zh) + " / " + esc(TH() ? a.point_th : a.point_zh) : num(a.qty, 1) + "/" + num(a.reorder_point, 1) + " " + esc(uLab(a.unit))}</span>`).join(" ") + "</div>" : "");
     if (VIEW === "locations" || VIEW === "stocktake") { const go = VIEW === "locations" ? "inv_locations" : "inv_stocktake"; VIEW = "items"; return goTab(go); }  // v2.52：搬成自己的页面
     if (VIEW === "items" || VIEW === "catalog") return renderItems();
     if (VIEW === "boxes") return renderBoxes().catch((e) => toast(e.message, true));
@@ -84,9 +87,9 @@
         ${CAT ? "" : `<td>${esc(catName(it.category))}</td>`}${has("brand") ? `<td class="muted" data-notr>${esc([it.brand, it.spec].filter(Boolean).join(" · "))}</td>` : ""}
         <td class="nowrap">${qtyText(it)}${it.low ? ' <span class="bad">⚠</span>' : ""}</td>
         ${has("transit") ? `<td>${it.transit ? num(it.transit, 1) : ""}</td>` : ""}
-        ${has("reorder") ? `<td>${it.reorder_point == null ? "" : num(it.reorder_point, 1)}</td>` : ""}
+        ${has("reorder") ? `<td class="nowrap">${reorderText(it)}</td>` : ""}
         ${has("cost") ? `<td>${it.avg_cost ? "฿" + num(it.avg_cost, it.unit === "g" ? 3 : 2) : ""}</td>` : ""}${has("value") ? `<td>${it.value ? "฿" + num(it.value, 0) : ""}</td>` : ""}
-        ${has("loc") && !catalog && window.INVZ ? `<td class="small">${INVZ.split(it)}${it.unplaced > 1e-9 ? ` <span class="warn" title="${esc(Z("待上架", "รอจัดเก็บ"))}">📥${num(it.unplaced, 2)}</span>` : ""}</td>` : ""}
+        ${has("loc") && !catalog && window.INVZ ? `<td class="small">${INVZ.split(it)}${it.unplaced > 1e-9 ? ` <span class="warn" title="${esc(Z("待上架", "รอจัดเก็บ"))}">📥${it.units && it.unplaced_rolls != null ? `<span data-notr>${it.unplaced_rolls} ${esc(TH() ? it.units.word_th : it.units.word_zh)}</span>` : num(it.unplaced, 2)}</span>` : ""}</td>` : ""}
         ${has("loc") && (catalog || !window.INVZ) ? `<td class="mono small" data-notr>${it.location ? `<a href="#" data-locgo-code="${esc(it.location)}">${esc(it.location)}</a>` : ""}${it.loc_n > 1 ? ` <span class="muted" title="${esc(Z(`放在 ${it.loc_n} 个货位`, `อยู่ ${it.loc_n} ช่อง`))}">+${it.loc_n - 1}</span>` : ""}${it.unplaced > 1e-9 ? ` <span class="warn" title="${esc(Z("待上架", "รอจัดเก็บ"))}">📥${num(it.unplaced, 2)}</span>` : ""}</td>` : ""}
         ${catalog ? `<td class="small">${!it.active ? "已停用" : it.stocked ? (Math.abs(it.qty) > 1e-9 ? "有库存" : '<span class="muted">用完了</span>') : '<span class="muted">还没入过库</span>'}</td>` : ""}
         <td class="nowrap"><button class="mini" data-item="${it.id}">查看</button></td></tr>`;
@@ -112,6 +115,12 @@
     const r = id ? await api(`/api/inv/items/${id}`) : { item: { category: CAT || "part", unit: CAT === "filament" ? "g" : "个", active: 1 }, moves: [] };
     const it = r.item, fil = it.category === "filament", edit = can("inv.in");
     const f = (k, label, extra = "") => `<label>${label}<input data-k="${k}" value="${esc(it[k] ?? "")}" ${extra} ${edit ? "" : "disabled"}></label>`;
+    // v2.55：耗材的补货线按卷或公斤填（旧的按克的显示成 g）
+    const rg = (it.units && it.units.roll_g) || it.roll_g || 1000;      // 每卷净重（物品填的，没填 = 设置里的默认）
+    const ru = it.reorder_unit || (it.reorder_point != null ? "g" : "roll");
+    const rv = it.reorder_unit ? it.reorder_value ?? "" : it.reorder_point ?? "";
+    const rq = it.reorder_qty == null ? "" : +(it.reorder_qty / (ru === "roll" ? rg : ru === "kg" ? 1000 : 1)).toFixed(3);
+    const wZ = () => ((it.material || "").toUpperCase().startsWith("RESIN") ? Z("按瓶", "ตามขวด") : Z("按卷", "ตามม้วน"));
     const m = MODAL.open(`<h3>${id ? `<span data-notr>${esc(it.code)} ${esc(itName(it))}</span>` : "新物品"}</h3>
       <div class="form4">
         <label>分类<select data-k="category" ${id || !edit ? "disabled" : ""}>${(META.categories || []).filter((c) => id || c.id !== "goods").map((c) => `<option value="${esc(c.id)}" ${c.id === it.category ? "selected" : ""}>${esc(TH() ? c.th : c.zh)}</option>`).join("")}</select></label>
@@ -120,8 +129,15 @@
         <span class="inv-fil ${fil ? "" : "hidden"}">${f("material", "材料（PLA / PETG…）", id ? "disabled" : "")}</span>
         <span class="inv-fil ${fil ? "" : "hidden"}">${f("color", "颜色（和产品颜色一致）", `list="color-list" ${id ? "disabled" : ""}`)}</span>
         <span class="inv-fil ${fil ? "" : "hidden"}">${f("loss_rate", "损耗率（空 = 用设置里的）", 'type="number" step="0.01"')}</span>
-        ${f("brand", "品牌")}${f("spec", "规格")}${f("reorder_point", "补货线（低于就提醒）", 'type="number" step="any"')}
-        ${f("reorder_qty", "每次补多少（空 = 自动）", 'type="number" step="any"')}
+        ${f("brand", "品牌")}${f("spec", "规格")}
+        <span class="inv-nfil ${fil ? "hidden" : ""}">${f("reorder_point", "补货线（低于就提醒）", 'type="number" step="any"')}</span>
+        <span class="inv-nfil ${fil ? "hidden" : ""}">${f("reorder_qty", "每次补多少（空 = 自动）", 'type="number" step="any"')}</span>
+        <span class="inv-fil ${fil ? "" : "hidden"}"><label>${Z("补货线单位", "หน่วยจุดสั่งซื้อ")}<select data-k="reorder_unit" ${edit ? "" : "disabled"}>
+          <option value="roll" ${ru === "roll" ? "selected" : ""}>${esc(wZ("roll"))}</option><option value="kg" ${ru === "kg" ? "selected" : ""}>kg</option>
+          ${ru === "g" ? `<option value="g" selected>g</option>` : ""}</select></label></span>
+        <span class="inv-fil ${fil ? "" : "hidden"}"><label>${Z("补货线（低于就提醒）", "จุดสั่งซื้อ (ต่ำกว่าแจ้งเตือน)")}<input data-k="reorder_value" type="number" step="any" min="0" value="${esc(rv)}" ${edit ? "" : "disabled"}></label></span>
+        <span class="inv-fil ${fil ? "" : "hidden"}"><label>${Z("每次补多少（空 = 自动，单位同上）", "สั่งครั้งละ (ว่าง = อัตโนมัติ หน่วยเดียวกัน)")}<input data-k="reorder_qty_value" type="number" step="any" min="0" value="${esc(rq)}" ${edit ? "" : "disabled"}></label></span>
+        <span class="inv-fil ${fil ? "" : "hidden"}"><label>${Z("每卷（瓶）净重 g（空 = 用默认）", "น้ำหนักสุทธิต่อม้วน (ขวด) g (ว่าง = ค่าเริ่มต้น)")}<input data-k="roll_g" type="number" step="any" min="10" value="${esc(it.roll_g ?? "")}" placeholder="${esc((it.units || {}).roll_g || 1000)}" ${edit ? "" : "disabled"}></label></span>
         <label>默认供应商<span class="row gap"><select data-k="supplier_id" data-notr ${edit ? "" : "disabled"}><option value="">—</option>${(SUPS || []).map((x) => `<option value="${x.id}" ${x.id === it.supplier_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>
           ${id && window.MODKIT && MODKIT.enabled("pur") ? `<button type="button" class="mini" id="inv-pur" title="${TH() ? "ผู้ขาย ลิงก์ซื้อ ประวัติราคา" : "供应商、购买链接、价格历史、比价"}">🛒 ${TH() ? "ข้อมูลจัดซื้อ" : "采购资料"}</button>` : ""}</span></label>
         ${f("location", "货位（例如 A1-02-03，空 = 没有货位）", 'list="loc-dl" data-notr')}<datalist id="loc-dl" data-notr>${((window.INVLOC && INVLOC.list()) || []).map((l) => `<option value="${esc(l.code)}">${esc(INVLOC.human ? INVLOC.human(l.code) : "")}${l.items ? "" : (TH() ? " ·ว่าง" : " ·空")}</option>`).join("")}</datalist>${f("link", "购买链接")}${f("note", "备注")}
@@ -138,15 +154,17 @@
       ${id ? `<h4>最近流水</h4>${movesTable(r.moves, false)}` : ""}`);
     m.classList.add("wide");
     const cs = m.querySelector('[data-k="category"]');
-    cs.onchange = () => { const isF = cs.value === "filament"; m.querySelectorAll(".inv-fil").forEach((x) => x.classList.toggle("hidden", !isF)); if (isF) m.querySelector('[data-k="unit"]').value = "g"; };
+    cs.onchange = () => { const isF = cs.value === "filament"; m.querySelectorAll(".inv-fil").forEach((x) => x.classList.toggle("hidden", !isF)); m.querySelectorAll(".inv-nfil").forEach((x) => x.classList.toggle("hidden", isF)); if (isF) m.querySelector('[data-k="unit"]').value = "g"; };
     const pb = m.querySelector("#inv-pur");          // v2.51：物品的采购资料（采购模块）
     if (pb) pb.onclick = () => MODKIT.load("pur").then(() => window.PURPO && PURPO.itemDialog(id)).catch((e) => toast(e.message, true));
     const sv = m.querySelector("#inv-it-save");
     if (sv) sv.onclick = () => busy(sv, async () => {
       const d = { id: id || undefined };
       m.querySelectorAll("[data-k]").forEach((el) => { if (!el.disabled || el.dataset.k === "category") d[el.dataset.k] = el.type === "checkbox" ? (el.checked ? 1 : 0) : el.value; });
+      const isF = id ? fil : d.category === "filament";
       if (id) delete d.category;
-      if (d.category !== "filament") { delete d.material; delete d.color; delete d.loss_rate; }
+      if (!isF) { delete d.material; delete d.color; delete d.loss_rate; delete d.reorder_unit; delete d.reorder_value; delete d.reorder_qty_value; delete d.roll_g; }
+      else { delete d.reorder_point; delete d.reorder_qty; if (d.reorder_unit === "g" && d.reorder_value === "") d.reorder_value = ""; }
       await api("/api/inv/items", { json: d });
       if (!id) { VIEW = "catalog"; SUB = "all"; }      // 新建的物品还没入库：在「物品资料」里
       toast(id ? "已保存" : "已建档（入库后会出现在「库存」里）"); MODAL.close(); load();
@@ -154,25 +172,29 @@
   }
 
   // ---------------- 开单 ----------------
-  const KIND_HINT = { purchase: "买来的东西入库：数量 + 单价（耗材可以按卷填）", return: "领用了没用完退回来", issue: "换喷嘴、用包材、试打……手动出库，可以写用在哪台打印机",
-    scrap: "坏了、受潮、过期（要写原因）", adjust: "个别数字不对时直接改：正数加、负数减（要写原因）" };
+  const KIND_HINT = { purchase: "买来的东西入库：数量 + 单价（耗材可以按卷填：每卷一个编号和标签）", return: "领用了没用完退回来（耗材可以按卷退，每卷一个编号和标签）", issue: "换喷嘴、用包材、试打……手动出库，可以写用在哪台打印机（耗材可以整卷出：先出未开封的）",
+    scrap: "坏了、受潮、过期（要写原因；耗材可以按卷报废）", adjust: "个别数字不对时直接改：正数加、负数减（要写原因）" };
   async function docModal(kind, pre) {
     if (!META) META = await api("/api/inv/meta");
     const all = (await api("/api/inv/items")).items;
-    const opts = all.map((it) => `<option value="${it.id}" data-cat="${esc(it.category)}" data-unit="${esc(it.unit)}">${esc(it.code)} · ${esc(itName(it))}</option>`).join("");
+    const opts = all.map((it) => `<option value="${it.id}" data-cat="${esc(it.category)}" data-unit="${esc(it.unit)}" data-ut="${esc(it.units ? (TH() ? it.units.text_th : it.units.text_zh) : "")}" data-net="${esc(it.units ? it.units.roll_g : "")}" data-word="${esc(it.units ? (TH() ? it.units.word_th : it.units.word_zh) : "")}">${esc(it.code)} · ${esc(itName(it))}</option>`).join("");
+    const ROLLK = ["purchase", "return", "issue", "scrap"].includes(kind);     // v2.55：耗材可以按卷（瓶）进出
     const row = () => `<tr><td><select data-l="item_id" data-notr><option value="">${TH() ? "เลือกรายการ" : "选物品"}</option>${opts}</select></td>
-      <td><input data-l="qty" type="number" step="any" style="width:90px"> <span class="muted inv-unit"></span></td>
-      ${kind === "purchase" ? `<td><input data-l="unit_cost" type="number" step="any" style="width:80px" placeholder="${TH() ? "ราคา" : "单价"}"></td>
-        <td class="inv-roll hidden nowrap"><input data-l="rolls" type="number" step="1" style="width:50px" placeholder="${TH() ? "ม้วน" : "卷"}"> × <input data-l="net_g" type="number" value="1000" style="width:60px"> g
-          <input data-l="brand" placeholder="${TH() ? "แบรนด์" : "品牌"}" style="width:70px"></td>` : ""}
+      <td><input data-l="qty" type="number" step="any" style="width:90px"> <span class="muted inv-unit"></span><div class="small muted inv-ut" data-notr></div></td>
+      ${kind === "purchase" ? `<td><input data-l="unit_cost" type="number" step="any" style="width:80px" placeholder="${TH() ? "ราคา" : "单价"}"></td>` : ""}
+      ${ROLLK ? `<td class="inv-roll hidden nowrap"><input data-l="rolls" type="number" step="1" min="1" style="width:50px" placeholder="${TH() ? "ม้วน" : "卷"}"> <span class="inv-word"></span>
+          ${kind === "purchase" || kind === "return" ? `× <input data-l="net_g" type="number" class="inv-net" style="width:60px"> g` : ""}
+          ${kind === "purchase" ? `<input data-l="brand" placeholder="${TH() ? "แบรนด์" : "品牌"}" style="width:70px">` : ""}
+          ${kind === "return" ? `<label class="small"><input type="checkbox" data-l="opened"> ${TH() ? "เปิดแล้ว" : "已开封"}</label>` : ""}</td>` : ""}
       <td><input data-l="note" placeholder="${TH() ? "หมายเหตุ" : "备注"}" style="width:120px"></td><td><button class="mini danger" data-rmline>✕</button></td></tr>`;
     const m = MODAL.open(`<h3>${esc((META.doc_kinds || {})[kind])}</h3><p class="muted small">${KIND_HINT[kind] || ""}</p>
-      <table class="grid small" id="inv-lines"><thead><tr><th>物品</th><th>数量</th>${kind === "purchase" ? "<th>单价（฿ / 单位）</th><th>耗材按卷</th>" : ""}<th>备注</th><th></th></tr></thead>
+      <table class="grid small" id="inv-lines"><thead><tr><th>物品</th><th>数量</th>${kind === "purchase" ? "<th>单价（฿ / 单位）</th>" : ""}${ROLLK ? `<th>${Z("耗材按卷 / 瓶", "ฟิลาเมนต์ตามม้วน / ขวด")}</th>` : ""}<th>备注</th><th></th></tr></thead>
         <tbody>${row()}</tbody></table>
       <button class="mini" id="inv-addline">＋ 加一行</button>
       <div class="form4" style="margin-top:8px">
         ${kind === "issue" ? `<label>用在哪台打印机（可空）<select id="inv-printer"><option value="">—</option>${(META.printers || []).map((p) => `<option>${esc(p)}</option>`).join("")}</select></label>` : ""}
-        <label>${kind === "scrap" || kind === "adjust" ? "原因（必填）" : "备注"}<input id="inv-note"></label></div>
+        <label>${kind === "scrap" || kind === "adjust" ? "原因（必填）" : "备注"}<input id="inv-note"></label>
+        ${kind === "purchase" || kind === "return" ? `<label class="small"><input type="checkbox" id="inv-lbl" checked> ${Z("按卷入库的打印每卷标签", "พิมพ์ป้ายทีละม้วนที่รับเข้า")}</label>` : ""}</div>
       <div class="row gap"><button class="primary" id="inv-doc-ok">确认生效</button><button data-mclose>取消</button></div>`);
     m.classList.add("wide");
     const tb = m.querySelector("#inv-lines tbody");
@@ -188,15 +210,21 @@
       const o = e.target.selectedOptions[0], tr = e.target.closest("tr");
       tr.querySelector(".inv-unit").textContent = o ? uLab(o.dataset.unit || "") : "";
       const rc = tr.querySelector(".inv-roll"); if (rc) rc.classList.toggle("hidden", !(o && o.dataset.cat === "filament"));
+      const ut = tr.querySelector(".inv-ut"); if (ut) ut.textContent = o && o.dataset.ut ? (Z("在库 ", "ในคลัง ") + o.dataset.ut) : "";
+      const wd = tr.querySelector(".inv-word"), nt = tr.querySelector(".inv-net");
+      if (wd) wd.textContent = o ? o.dataset.word || "" : "";
+      if (nt && o && o.dataset.net && !nt.value) nt.value = o.dataset.net;
       const uc = tr.querySelector('[data-l="unit_cost"]'); if (uc) uc.placeholder = o && o.dataset.cat === "filament" ? "฿ / g" : (TH() ? "ราคา" : "单价");
     };
     const ok = m.querySelector("#inv-doc-ok");
     ok.onclick = () => busy(ok, async () => {
-      const lines = [...tb.rows].map((tr) => { const d = {}; tr.querySelectorAll("[data-l]").forEach((el) => { if (el.value !== "") d[el.dataset.l] = el.value; }); return d; })
+      const lines = [...tb.rows].map((tr) => { const d = {}; tr.querySelectorAll("[data-l]").forEach((el) => { if (el.type === "checkbox") { if (el.checked) d[el.dataset.l] = 1; } else if (el.value !== "") d[el.dataset.l] = el.value; }); if (!d.rolls) { delete d.net_g; delete d.opened; } return d; })
         .filter((d) => d.item_id);
       if (!lines.length) throw new Error("至少选一个物品");
       const r = await api("/api/inv/docs", { json: { kind, lines, note: m.querySelector("#inv-note").value, printer: (m.querySelector("#inv-printer") || {}).value || "" } });
       toast(`已生效：${r.doc.no}`); MODAL.close(); load();
+      if ((r.doc.spool_codes || []).length && ["purchase", "return"].includes(kind) && $("#inv-lbl") && $("#inv-lbl").checked)      // v2.55：每卷一个标签
+        window.open(`/print/spools?ids=${r.doc.spool_codes.join(",")}`, "_blank");
     });
   }
 

@@ -126,18 +126,20 @@
       const it = r.item, fil = it.category === "filament", e = SUG_EDIT[it.id] || {};
       const supSel = `<select data-sg-sup="${it.id}" data-notr class="pur-sel"><option value="">${Z("（没设供应商）", "(ยังไม่ได้ตั้งผู้ขาย)")}</option>${sups.map((x) => `<option value="${x.id}" ${+(e.sup ?? r.supplier_id) === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`;
       const days = r.days == null ? "—" : num(r.days, 1);
-      const qtyIn = fil ? `<input type="number" min="0" step="1" data-sg-rolls="${it.id}" value="${e.rolls ?? (r.rolls || 0)}" class="pur-num"> ${Z("卷", "ม้วน")}`
+      const word = r.stock ? Z(r.stock.word_zh, r.stock.word_th) : Z("卷", "ม้วน");
+      const qtyIn = fil ? `<input type="number" min="0" step="1" data-sg-rolls="${it.id}" value="${e.rolls ?? (r.rolls || 0)}" class="pur-num"> ${word}
+          <div class="small muted"><span data-sg-kg="${it.id}">${num(((e.rolls ?? (r.rolls || 0)) * (r.net_g || 1000)) / 1000, 2)}</span> kg <span class="muted">(${num(r.net_g || 1000, 0)} g/${word})</span></div>`
         : `<input type="number" min="0" step="any" data-sg-qty="${it.id}" value="${e.qty ?? r.qty}" class="pur-num"> <span class="muted">${esc(uLab(it.unit))}</span>`;
       const link = r.link && r.link.urls && r.link.urls[0];
       return `<tr class="pur-u-${r.urgency}"><td><input type="checkbox" data-sg="${it.id}" ${r.urgency !== "green" && r.qty > 0 ? "checked" : ""}></td>
         <td><a href="#" data-item-links="${it.id}" data-notr><b>${esc(itName(it))}</b></a><div class="small muted"><span data-notr>${esc(it.code)}</span> · ${esc(CAT()[it.category] || it.category)}</div></td>
         <td>${UX.dot(TONE[r.urgency], URG()[r.urgency])}<div class="small muted">${Z("还能用", "ใช้ได้อีก")} <b>${days}</b> ${Z("天", "วัน")} · ${Z("到货", "รอของ")} ${num(r.lead, 0)} ${Z("天", "วัน")}</div>
           ${r.order_by && r.urgency !== "red" ? `<div class="small muted">${Z("最晚下单", "สั่งภายใน")} ${esc(r.order_by)}</div>` : ""}</td>
-        <td class="nowrap">${qtyText(it.qty, it)}${r.transit ? `<div class="small muted">${Z("在途", "กำลังส่ง")} ${qtyText(r.transit, it)}</div>` : ""}${r.pending ? `<div class="small warn">${Z("生产要用", "งานผลิตใช้")} ${qtyText(r.pending, it)}</div>` : ""}</td>
+        <td class="nowrap">${fil && r.stock && r.stock.tracked ? `<b data-notr>${esc(TH() ? r.stock.text_th : r.stock.text_zh)}</b>` : qtyText(it.qty, it)}${fil && r.reorder_zh ? `<div class="small muted">${Z("补货线", "จุดสั่งซื้อ")} <span data-notr>${esc(TH() ? r.reorder_th : r.reorder_zh)}</span></div>` : ""}${r.transit ? `<div class="small muted">${Z("在途", "กำลังส่ง")} ${fil && r.transit_rolls != null ? `${num(r.transit_rolls, 1)} ${word} · ${qtyText(r.transit, it)}` : qtyText(r.transit, it)}</div>` : ""}${r.pending ? `<div class="small warn">${Z("生产要用", "งานผลิตใช้")} ${qtyText(r.pending, it)}</div>` : ""}</td>
         <td class="nowrap">${r.daily ? qtyText(r.daily, it) + Z("/天", "/วัน") : "—"}<div class="small muted">${r.why.map((w) => WHY()[w] || w).join(" · ")}</div></td>
         <td>${supSel}${r.link && (r.link.moq || r.link.pack_qty) ? `<div class="small muted">${r.link.moq ? `${Z("起订", "ขั้นต่ำ")} ${num(r.link.moq)}` : ""}${r.link.pack_qty ? ` · ${Z("每包", "ต่อแพ็ก")} ${num(r.link.pack_qty)}` : ""}</div>` : ""}</td>
         <td class="nowrap">${qtyIn}</td>
-        ${hasMoney() ? `<td class="nowrap">${r.est_cost != null ? thb(r.est_cost) : "—"}${r.unit_price != null ? `<div class="small muted">${money(fil ? r.unit_price * (r.net_g || 1000) : r.unit_price, r.currency)}${fil ? Z("/卷", "/ม้วน") : ""}</div>` : ""}</td>` : ""}
+        ${hasMoney() ? `<td class="nowrap"><span data-sg-amt="${it.id}">${r.est_cost != null ? thb(r.est_cost) : "—"}</span>${r.unit_price != null ? `<div class="small muted">${money(fil ? r.unit_price * (r.net_g || 1000) : r.unit_price, r.currency)}${fil ? Z("/卷", "/ม้วน") : ""}</div>` : ""}</td>` : ""}
         <td class="nowrap">${link ? `<a class="btn mini" href="${esc(link)}" target="_blank" rel="noopener" title="${Z("打开购买链接", "เปิดลิงก์ซื้อ")}">🛒</a>` : ""}<button class="mini" data-item-links="${it.id}" title="${Z("供应商、链接、价格历史", "ผู้ขาย ลิงก์ ประวัติราคา")}">${Z("资料", "ข้อมูล")}</button></td></tr>`;
     };
     box.innerHTML = head + `<div class="pur-scroll"><table class="grid small pur-sg"><thead><tr><th><input type="checkbox" id="sg-all"></th><th>${Z("物品", "รายการ")}</th><th>${Z("紧急程度", "ความด่วน")}</th>
@@ -174,6 +176,12 @@
     box.addEventListener("change", (e) => {
       const t = e.target, id = t.dataset.sgSup || t.dataset.sgRolls || t.dataset.sgQty;
       if (id) { const s = (SUG_EDIT[id] = SUG_EDIT[id] || {}); if (t.dataset.sgSup !== undefined) s.sup = t.value; if (t.dataset.sgRolls !== undefined) s.rolls = t.value; if (t.dataset.sgQty !== undefined) s.qty = t.value; }
+      if (t.dataset.sgRolls !== undefined) {              // v2.55：改卷数 → kg 和预计金额跟着变
+        const r = SUG.rows.find((y) => String(y.item.id) === String(t.dataset.sgRolls)), g = (+t.value || 0) * ((r && r.net_g) || 1000);
+        const kg = box.querySelector(`[data-sg-kg="${t.dataset.sgRolls}"]`), am = box.querySelector(`[data-sg-amt="${t.dataset.sgRolls}"]`);
+        if (kg) kg.textContent = num(g / 1000, 2);
+        if (am && r && r.unit_price != null) am.textContent = thb(g * r.unit_price * (r.currency === "CNY" ? (META.fx || 4.5) : 1));
+      }
       sgSum();
     });
     const b = box.querySelector("#sg-po");
@@ -256,6 +264,7 @@
         <th>${Z("放到货位", "วางตำแหน่ง")}</th></tr></thead><tbody>${lines.map(row).join("")}</tbody></table></div>
       <datalist id="pur-locs" data-notr>${LOCS.map((l) => `<option value="${esc(l.code)}">${l.items ? "" : (TH() ? "ว่าง" : "空")}</option>`).join("")}</datalist>
       <label class="small pur-chk"><input type="checkbox" id="rc-print" checked> ${Z("入库后打印物品标签", "พิมพ์ป้ายสินค้าหลังรับเข้า")}</label>
+      ${lines.some((l) => l.rolls) ? `<label class="small pur-chk"><input type="checkbox" id="rc-spool" checked> ${Z("按卷（瓶）入库的，打印每一卷的标签（每卷一个编号）", "พิมพ์ป้ายทีละม้วน (ขวด) ที่รับเข้า (ม้วนละ 1 รหัส)")}</label>` : ""}
       <div class="row gap" style="margin-top:8px"><button class="primary" id="rc-ok">✅ ${Z("确认入库", "ยืนยันรับเข้า")}</button><button data-mclose>${Z("取消", "ยกเลิก")}</button></div>`);
     m.classList.add("wide");
     m.querySelector("#rc-ok").onclick = (e) => busy(e.target, async () => {
@@ -274,6 +283,8 @@
         const ls = Object.entries(qtys).map(([k, v]) => `${k}:${Math.ceil(+v)}`).join(",");
         window.open(`/print/pur-labels?po=${encodeURIComponent(po.no)}&lines=${ls}${TH() ? "&lang=th" : ""}`, "_blank");
       }
+      if ((r.spools || []).length && m.querySelector("#rc-spool") && m.querySelector("#rc-spool").checked)
+        window.open(`/print/spools?ids=${r.spools.join(",")}`, "_blank");
       MODAL.close(); render();
     });
   }

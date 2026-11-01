@@ -71,3 +71,9 @@
 - （系统 v2.53.0）复审修复：质检区默认关改以 v2.53 迁移标记为准（inv_loc_v253 没设 + 已有物品 → 明确写 inv_qc_on=False，不再看 config.json 里有没有这个键）。测试 modules/inv/tests/t_wms253.py。
 - 2.2（系统 v2.54.0）：「成品备货」页重做（core/inventory/goodsstock.py，ui/goodsstock.js，接口 /api/inv/gs*）：所有成品一张表（图 / 名称 / 规格颜色 / 可卖·待检·次品 / 货位拆开 / 目标 / 缺口 / 近 N 天销量 / 能卖几天 / 在做），标签 🖨 自产（产品库里有）/ 🛒 外购（库存里有、产品库里没有，或标了外购）；数字卡片 → 图表 → 左边自动分组（缺货 / 低于目标 / 积压 / 待上架 / 质检中 / 很久没动，来源，分类）。目标数量自动 = 近 N 天销量 ÷ N × 常备天数 + 安全库存，没销量用分类默认，也可手动覆盖（设置：gs_sales_days / stock_cover_days / gs_safety / gs_cat_default / gs_over_x）。批量加（产品库选择 / 按分类 / 标签）、「一键补货」：自产 → 一张生产单草稿（按一盘能打几个往上取整，可马上下达），外购 → 采购单草稿（modules/pur/public.py draft_po）。每行 📍 快速移库 / 上架（推荐先拣货区再备货区），🏷 SKU 标签 /print/gs-labels。测试 modules/inv/tests/t_goodsstock254.py。
 - 2.2（系统 v2.54.0，发版前审查修复）：一键补货的「在做 / 在途」算上生产单草稿 / 还没建任务的行和采购单草稿，点两次不会重复建；手填数量的 SKU 已有补货草稿时拒绝并提示改那张草稿。
+- 2.3（系统 v2.55.0）：耗材两个单位——卷 + 重量（树脂：瓶 + 毫升）。克仍是唯一的数量来源（inv_items.qty = 料卷剩余克数之和），`core/inventory/units.py` 负责「怎么数、怎么说」：
+  库存表「2 卷（1 整卷 + 1 开封卷）· 1.97 kg」（卷数从料卷数：未开封 / 已开封 / 在机上，用完的和记成负数的占位卷不算；`inv.items()` 自动带 `units`）；货位分布「A1-01-01：1 卷 · 1.0 kg」「PR2-01-01（打印机上）：1 卷 · 973 g」（`views._split` 的 `rolls / grams / text_zh / text_th`）；
+  补货线可选单位 卷 / kg（`inv_items.reorder_unit / reorder_value`，`reorder_point` 同步成克，老数据全空 = 照旧按克；按卷的提醒用真实卷数比，库存页、今日提醒、概况、补货建议一致），每卷净重 `inv_items.roll_g`（空 = 设置 filament_spool_kg）；
+  入库 / 退回 N 卷 = 新建 N 条料卷记录（编号 F0001…，开单后可打印每卷标签 `/print/spools`），领用 / 报废按卷 = 先拿未开封的再拿剩得少的（在机上的先下机）；单据行 `rolls / net_g / opened / spools`，`doc.spool_codes`；打印扣料照旧按克扣在机上那卷；
+  盘点三种数法：克 · 数卷（多了建新料卷、少了记用完；整数）· 称重（`{weigh: [{code, gross}]}`，毛重 − 空料盘 inv_spool_tare_g = 剩余）；按货位盘点也包含按卷管的耗材（只能数卷或称重，没数的不算 0）。
+  迁移：ledger.init 只加三列、可重复。测试 modules/inv/tests/t_units255.py。

@@ -43,17 +43,33 @@ def expense(start=None, end=None, group="category"):
 
 
 def alerts():
+    """低于补货线的物品。耗材按补货线的单位比（按卷的数卷，按公斤 / 克的比重量），并带上中 / 泰文的说法。"""
+    from . import units
+    rows = [ledger.item_row(r) for r in db.conn().execute("SELECT * FROM inv_items WHERE active=1 AND reorder_point IS NOT NULL ORDER BY category, code")]
+    units.decorate(rows)
     out = []
-    for r in db.conn().execute("SELECT * FROM inv_items WHERE active=1 AND reorder_point IS NOT NULL AND qty<=reorder_point ORDER BY category, code"):
-        it = ledger.item_row(r)
-        out.append({"item_id": it["id"], "code": it["code"], "name_zh": it["name_zh"], "name_th": it["name_th"], "qty": it["qty"],
-                    "unit": it["unit"], "reorder_point": it["reorder_point"]})
+    for it in rows:
+        if not it["low"]:
+            continue
+        a = {"item_id": it["id"], "code": it["code"], "name_zh": it["name_zh"], "name_th": it["name_th"], "qty": it["qty"],
+             "unit": it["unit"], "reorder_point": it["reorder_point"], "category": it["category"]}
+        if it.get("units"):
+            u = it["units"]
+            if it.get("reorder_unit") == "roll":
+                q_zh, q_th = f"{u['rolls']} {u['word_zh']}", f"{u['rolls']} {u['word_th']}"
+            else:
+                q_zh = q_th = units.fmt_g(it["qty"])
+            a.update(reorder_unit=it.get("reorder_unit"), reorder_value=it.get("reorder_value"), rolls=u["rolls"],
+                     qty_zh=q_zh, qty_th=q_th, point_zh=it.get("reorder_zh", ""), point_th=it.get("reorder_th", ""))
+        out.append(a)
     return out
 
 
 def overview():
     out = {}
-    for r in db.conn().execute("SELECT category, COUNT(*) n, SUM(qty*avg_cost) v, SUM(CASE WHEN reorder_point IS NOT NULL AND qty<=reorder_point "
-                               "THEN 1 ELSE 0 END) low FROM inv_items WHERE active=1 GROUP BY category"):
-        out[r["category"]] = {"items": r["n"], "value": round(r["v"] or 0, 2), "low": r["low"] or 0}
+    for r in db.conn().execute("SELECT category, COUNT(*) n, SUM(qty*avg_cost) v FROM inv_items WHERE active=1 GROUP BY category"):
+        out[r["category"]] = {"items": r["n"], "value": round(r["v"] or 0, 2), "low": 0}
+    for a in alerts():                      # v2.55：低于补货线按补货线的单位（卷 / 公斤 / 克）算
+        if a["category"] in out:
+            out[a["category"]]["low"] += 1
     return out
