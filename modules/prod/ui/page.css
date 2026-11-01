@@ -17,3 +17,17 @@
 .po-pill.paused { background: #f5f3ff; color: #7c3aed; border-color: #ddd6fe }
 .pill.po-badge { background: #eff6ff; color: #1d4ed8; cursor: pointer }
 @media (max-width: 700px) { .po-tools input[type=search] { min-width: 0; flex: 1 } }
+
+/* v2.55 打印机编码规则 */
+.cd-blks { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 }
+.cd-blk { display: flex; gap: 4px; align-items: center; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 8px; background: #f8fafc }
+.cd-mv { display: inline-flex; gap: 2px; margin-left: 4px }
+.cd-prev { margin: 8px 0; padding: 8px 10px; background: #f8fafc; border-radius: 8px }
+.cd-ex { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px }
+.cd-chip { display: inline-flex; flex-direction: column; padding: 4px 8px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff }
+.cd-chip.bad { border-color: #fecaca; background: #fef2f2 }
+.rn-conflict td { background: #fef2f2 }
+.rn-same td { color: #94a3b8 }
+@media (prefers-color-scheme: dark) { .cd-blk, .cd-prev { background: #1e293b; border-color: #334155 } .cd-chip { background: #1e3a5f; border-color: #1d4ed8 } .cd-chip.bad, .rn-conflict td { background: #450a0a; border-color: #991b1b } }
+.cd-blk b { white-space: nowrap }
+.cd-blk select { width: auto; min-width: 96px }

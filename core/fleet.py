@@ -174,9 +174,12 @@ def remap(old, new):
             if has_spools:
                 c.execute("UPDATE spools SET printer=?, updated_at=? WHERE status='loaded' AND printer=?", (new[i]["code"], time.time(), code))
             gone.remove(code)
-    for i, j in m.items():          # v2.54：同一台（id 一样）改了编码 → 料卷跟着改
-        if j is not None and old_codes[i] and new[j].get("code") and new[j].get("code") != old_codes[i] and has_spools:
-            c.execute("UPDATE spools SET printer=?, updated_at=? WHERE status='loaded' AND printer=?", (new[j]["code"], time.time(), old_codes[i]))
+    # v2.54：同一台（id 一样）改了编码 → 料卷等跟着改（v2.55：两台互换编码也不会串，见 fleetcodes.rename_codes）
+    ren = [(old_codes[i], new[j]["code"]) for i, j in m.items()
+           if j is not None and old_codes[i] and new[j].get("code") and new[j].get("code") != old_codes[i]]
+    if ren and has_spools:
+        from . import fleetcodes
+        fleetcodes.rename_codes(ren)
     gone = [g for g in gone if g not in new_codes_all]
     if gone and has_spools:
         # v2.41：删掉的打印机上装着的料卷 → 取下来放回库里（以前一直挂在已经不存在的编码上，新加的同型号打印机会「继承」它）
@@ -424,6 +427,9 @@ def index_of(printers, key):
     for i, p in enumerate(printers):
         if str(p.get("code") or "").upper() == s.upper():
             return i
+    for i, p in enumerate(printers):          # v2.55：改过编码的打印机，以前印的二维码标签（旧编码）还能找到它
+        if s.upper() in [str(x).upper() for x in (p.get("old_codes") or [])]:
+            return i
     if s.isdigit() and int(s) < len(printers):
         return int(s)
     return None
@@ -664,8 +670,12 @@ def validate_import(rows, cfg):
             role = "any"
         if not errs:
             if not code:
-                code = next_codes(model, 1, prs + taken)[0]
-            taken.append({"code": code})
+                from . import fleetcodes      # v2.55：按编码规则（分组有自己的规则就用它）
+                spec = {"name": model, "group": str(r.get("group") or "")[:30], "location": str(r.get("location") or "")[:30]}
+                code, prob = fleetcodes.generate(prs + taken, [spec], cfg)[0]
+                if prob:
+                    errs.append(fleetcodes.PROBLEM[prob])
+            taken.append({"code": code, "name": model, "group": str(r.get("group") or "")[:30], "location": str(r.get("location") or "")[:30]})
             used_codes.add(code)
             if host:
                 used_hosts.add(host)

@@ -11,7 +11,7 @@ import time
 from flask import request
 
 from web.common import *  # noqa: F401,F403
-from core import fleet
+from core import fleet, fleetcodes
 
 from .api import bp
 
@@ -264,7 +264,9 @@ def _apply_fields(p, b, cfg, errs):
         if code and not fleet.CODE_RE.match(code):
             errs.append((f"机器编码「{code}」只能用英文、数字和 - _，最多 16 位", f"รหัสเครื่อง «{code}» ใช้ได้เฉพาะอังกฤษ ตัวเลข - _ ไม่เกิน 16 ตัว"))
         elif code:
+            was = p.get("code")
             p["code"] = code
+            fleetcodes.remember_old(p, was)
     if b.get("name"):
         name = fleet.known_model(b["name"], cfg) or str(b["name"]).strip()[:40]
         if name != p.get("name"):
@@ -314,8 +316,10 @@ def _apply_conn(p, b, errs):
         p["conn"] = conn
 
 
-def _save(cfg, prs, reschedule=True):
+def _save(cfg, prs, reschedule=True, renames=None):
     out = save_config({"printers": prs})
+    if renames:         # v2.55：改了编码 → 料卷 / 出入库记录里的编码先跟着改，再通知仓库同步货位
+        fleetcodes.rename_codes(renames)
     _after_change(out, reschedule)
     return out
 
@@ -331,19 +335,23 @@ def fleet_printer_save(key):
         errs = []
         _apply_fields(p, b, cfg, errs)
         _apply_conn(p, b, errs)
-        if p.get("code") != prs[i].get("code") and any(x.get("code") == p.get("code") for j, x in enumerate(prs) if j != i):
-            errs.append((f"机器编码「{p['code']}」已经有了", f"รหัสเครื่อง «{p['code']}» มีอยู่แล้ว"))
+        if p.get("code") != prs[i].get("code"):          # v2.55：不分大小写查重
+            ce = fleetcodes.check_code(p.get("code"), prs, exclude_id=p.get("id"))
+            if ce:
+                errs.append(ce)
         if errs:
             return err(_e(errs))
         old = [dict(x) for x in prs]
         prs[i] = p
-        cfg = _save(cfg, prs)
-        if old[i].get("code") != p.get("code"):
-            fleet.remap(old, cfg["printers"])          # 改编码：料卷跟着换
+        ren = [(old[i].get("code"), p.get("code"))] if old[i].get("code") != p.get("code") else None
+        cfg = _save(cfg, prs, renames=ren)
+        sug = fleetcodes.suggest_after_move([old[i]], [cfg["printers"][i]], cfg) if "code" not in b or old[i].get("code") == p.get("code") else []
     from core import printers as printers_mod
     printers_mod.poll_once(i, cfg["printers"][i])
     db.audit(_uname(), "修改打印机", p.get("code"), ",".join(sorted(b.keys())))
-    return jsonify(_detail(cfg, cfg["printers"], i))
+    d = _detail(cfg, cfg["printers"], i)
+    d["renumber_suggest"] = sug                # v2.55：改了位置 / 分组，编码里带着旧的 → 页面问「要按新位置重新编号吗？」
+    return jsonify(d)
 
 
 def _new_printer(cfg, prs, b, errs, code=None):
@@ -371,11 +379,15 @@ def _new_printer(cfg, prs, b, errs, code=None):
         _apply_conn(p, b, errs)
     code = (code or str(b.get("code") or "")).strip().upper()
     if code:
-        if not fleet.CODE_RE.match(code):
-            errs.append((f"机器编码「{code}」只能用英文、数字和 - _，最多 16 位", f"รหัสเครื่อง «{code}» ใช้ได้เฉพาะอังกฤษ ตัวเลข - _ ไม่เกิน 16 ตัว"))
-        elif any(str(x.get("code") or "").upper() == code for x in prs):
-            errs.append((f"机器编码「{code}」已经有了", f"รหัสเครื่อง «{code}» มีอยู่แล้ว"))
-    p["code"] = code or fleet.next_codes(name, 1, prs)[0]
+        ce = fleetcodes.check_code(code, prs)          # v2.55：不分大小写查重 + 字符检查
+        if ce:
+            errs.append(ce)
+        p["code"] = code
+    else:                                              # 没填 = 按编码规则（分组有自己的规则就用它）自动编
+        c0, prob = fleetcodes.generate(prs, [p], cfg)[0]
+        if prob:
+            errs.append(fleetcodes.PROBLEM[prob])
+        p["code"] = c0
     host = (p.get("conn") or {}).get("host")
     if host and any((x.get("conn") or {}).get("host") == host for x in prs):
         errs.append((f"IP {host} 已经有别的打印机在用", f"IP {host} มีเครื่องอื่นใช้อยู่แล้ว"))
@@ -549,6 +561,7 @@ def fleet_bulk():
             return jsonify({"ok": True, "n": len(idx)})
         else:
             errs = []
+            olds = [dict(prs[i]) for i in idx]
             for i in idx:
                 p = dict(prs[i])
                 if act in ("enable", "disable"):
@@ -566,7 +579,10 @@ def fleet_bulk():
                 prs[i] = p
             cfg = _save(cfg, prs)
             db.audit(_uname(), "批量修改打印机", act, f"{len(idx)} 台 = {val}")
-            return jsonify({"ok": True, "n": len(idx)})
+            sug = []
+            if act in ("group", "location"):       # v2.55：编码里带着旧分组 / 位置 → 页面问「要按新位置重新编号吗？」
+                sug = fleetcodes.suggest_after_move(olds, [cfg["printers"][i] for i in idx], cfg)
+            return jsonify({"ok": True, "n": len(idx), "renumber_suggest": sug})
     # 测试连接：同时最多 32 台，一次最多 200 台
     from concurrent.futures import ThreadPoolExecutor
     sel = idx[:200]
@@ -605,7 +621,7 @@ def fleet_discover():
     r = printer_discovery.discover(load_config(), secs, scan_hosts=hosts)
     cfg = load_config()
     for d in r["devices"]:
-        d["code_suggest"] = fleet.next_codes(d.get("model") or "Bambu Lab P1S", 1, cfg.get("printers") or [])[0] if d.get("model") else ""
+        d["code_suggest"] = fleetcodes.generate(cfg.get("printers") or [], [{"name": d["model"], "group": "", "location": ""}], cfg)[0][0] if d.get("model") else ""
     return jsonify(r)
 
 
@@ -766,6 +782,118 @@ def fleet_templates_save():
     return fleet_templates_get()
 
 
+# ---------------- v2.55 编码规则 / 批量重新编号 ----------------
+def _rules_out(cfg):
+    rs = fleetcodes.get_rules(cfg)
+    groups = sorted({p.get("group") or "" for p in cfg.get("printers") or []} - {""})
+    return {"rules": rs["rules"], "default": rs["default"], "groups": rs["groups"], "group_codes": rs["group_codes"],
+            "group_list": groups, "std": fleetcodes.STD}
+
+
+@bp.get("/api/fleet/codes/rules")
+def fleet_codes_rules():
+    return jsonify(_rules_out(load_config()))
+
+
+@bp.post("/api/fleet/codes/rules")
+def fleet_codes_rules_save():
+    """{rules: {id: {name, blocks, sep}}, default, groups: {分组: 规则 id}, group_codes: {分组: 简称}}：整套保存。"""
+    b = request.get_json(force=True) or {}
+    rules, errs = {}, []
+    for rid, r in (b.get("rules") or {}).items():
+        rid = str(rid).strip()[:20]
+        rr, es = fleetcodes.clean_rule(r)
+        if not rr["name"]:
+            es.append(("规则要起个名字", "กฎต้องตั้งชื่อ"))
+        if not rid:
+            continue
+        errs += [(f"{rr['name'] or rid}：{z}", f"{rr['name'] or rid}: {t}") for z, t in es]
+        rules[rid] = rr
+    if not rules:
+        errs.append(("至少要有一条规则", "ต้องมีอย่างน้อยหนึ่งกฎ"))
+    if len(rules) > fleetcodes.MAX_RULES:
+        errs.append((f"规则最多 {fleetcodes.MAX_RULES} 条", f"กฎได้ไม่เกิน {fleetcodes.MAX_RULES} ข้อ"))
+    if errs:
+        return err(_e(errs))
+    default = b.get("default") if b.get("default") in rules else next(iter(rules))
+    groups = {str(g)[:30]: rid for g, rid in (b.get("groups") or {}).items() if rid in rules and str(g).strip()}
+    gcodes = {str(g)[:30]: fleetcodes._alnum(c, 6) for g, c in (b.get("group_codes") or {}).items() if fleetcodes._alnum(c, 6)}
+    with _EDIT:
+        save_config({"printer_code_rules": {"rules": rules, "default": default, "groups": groups, "group_codes": gcodes}})
+    db.audit(_uname(), "修改打印机编码规则", ",".join(r["name"] for r in rules.values())[:200], "")
+    return jsonify(_rules_out(load_config()))
+
+
+@bp.post("/api/fleet/codes/preview")
+def fleet_codes_preview():
+    """规则编辑器的实时预览：{rule: {blocks, sep}, group_codes?} → 几个例子（用空机群拼，不受现有编码影响）。"""
+    b = request.get_json(force=True) or {}
+    rr, errs, ex = fleetcodes.preview(b.get("rule"), load_config(), b.get("group_codes") if isinstance(b.get("group_codes"), dict) else None)
+    return jsonify({"ok": not errs, "errors": [{"zh": z, "th": t, "msg": t if TH() else z} for z, t in errs], "rule": rr,
+                    "examples": ex, "length_ok": all(len(x["code"]) <= 16 for x in ex)})
+
+
+@bp.post("/api/fleet/codes/check")
+def fleet_codes_check():
+    """手填编码的检查（不分大小写查重）：{code, id}。"""
+    b = request.get_json(force=True) or {}
+    e = fleetcodes.check_code(b.get("code"), load_config().get("printers") or [], exclude_id=b.get("id"))
+    return jsonify({"ok": not e, "message": (e[1] if TH() else e[0]) if e else ""})
+
+
+def _renumber(b, apply):
+    with _EDIT:
+        cfg, prs = _cfg_printers()
+        if b.get("ids"):
+            want = {str(x) for x in b["ids"]}
+            ids = {p.get("id") for p in prs if p.get("id") in want or p.get("code") in want}
+        elif b.get("group") is not None:
+            ids = {p.get("id") for p in prs if (p.get("group") or "") == b["group"]}
+        elif b.get("all"):
+            ids = {p.get("id") for p in prs}
+        else:
+            return err("请先选打印机（勾选，或选一个分组）")
+        if not ids:
+            return err("没有选中的打印机")
+        rule = b.get("rule") or None
+        if rule not in (fleetcodes.get_rules(cfg)["rules"] or {}):
+            rule = None                              # 空 = 每台按它分组的规则（没单独设的用默认规则）
+        order = b.get("order") if b.get("order") in fleetcodes.ORDERS else "location"
+        rows = fleetcodes.plan_renumber(prs, ids, cfg, rule, order)
+        bad = [r for r in rows if r["status"] == "conflict"]
+        out = {"rows": [dict(r, problem=(r["problem"][1] if TH() else r["problem"][0]) if r["problem"] else "") for r in rows],
+               "changed": sum(1 for r in rows if r["status"] == "change"), "same": sum(1 for r in rows if r["status"] == "same"),
+               "conflicts": len(bad)}
+        if not apply:
+            return jsonify(out)
+        if bad:
+            return jsonify(dict(out, ok=False, error=_e([("有 %d 台的新编码有冲突，没有改" % len(bad), "มี %d เครื่องที่รหัสใหม่ชนกัน ยังไม่ได้แก้" % len(bad))]))), 400
+        ch = {r["id"]: r for r in rows if r["status"] == "change"}
+        if not ch:
+            return jsonify(dict(out, ok=True, n=0, ids=[]))
+        fleetcodes.migrate_po_refs()                  # 生产单里还存着旧编码的先换成稳定 id
+        old = [dict(x) for x in prs]
+        pairs = []
+        for p in prs:
+            r = ch.get(p.get("id"))
+            if r:
+                was = p.get("code")
+                p["code"] = r["new"]
+                fleetcodes.remember_old(p, was)
+                pairs.append((r["old"], r["new"]))
+        cfg = _save(cfg, prs, renames=pairs)
+        db.audit(_uname(), "批量重新编号打印机", f"{len(ch)} 台", ";".join(f"{r['old']}>{r['new']}" for r in list(ch.values())[:30])[:300])
+        return jsonify(dict(out, ok=True, n=len(ch), ids=list(ch.keys())))
+
+
+@bp.post("/api/fleet/codes/renumber")
+def fleet_codes_renumber():
+    """批量重新编号：{ids | group | all, rule: 规则 id（空 = 每台按所在分组的规则）, order: location|code|list, apply: true}。
+    不带 apply = 预览（旧 → 新、冲突）；带 apply 才真改（服务器重新算一遍，有冲突一台都不改）。"""
+    b = request.get_json(force=True) or {}
+    return _renumber(b, bool(b.get("apply")))
+
+
 # ---------------- 二维码标签 ----------------
 @bp.get("/print/fleet-labels")
 def fleet_labels():
@@ -775,7 +903,8 @@ def fleet_labels():
     cfg = load_config()
     prs = cfg.get("printers") or []
     want = [x for x in (request.args.get("ids") or "").split(",") if x.strip()]
-    sel = [p for p in prs if not want or p.get("id") in want or p.get("code") in want]
+    hit = {fleet.index_of(prs, x) for x in want}            # v2.55：旧编码（以前印的标签）也认
+    sel = [p for i, p in enumerate(prs) if not want or i in hit]
     if request.args.get("group") is not None and not want:
         sel = [p for p in sel if (p.get("group") or "") == request.args.get("group")]
     base = request.host_url.rstrip("/")
