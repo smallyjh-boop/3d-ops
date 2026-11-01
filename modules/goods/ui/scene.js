@@ -8,7 +8,7 @@
   const st = {
     lib: [], presets: [], bgPresets: [], bgPick: new Set(), bg: null, bgImg: null, libLoaded: false,
     src: "", colors: [], sprites: [],      // sprites: [{canvas, color}]
-    x: 0.5, y: 0.8, scale: 0.42, shadow: false, loadedFor: "", aiPick: new Set(["desk"]),
+    x: 0.5, y: 0.8, scale: 0.42, shadow: false, loadedFor: "",
   };
   let opened = false;
 
@@ -153,10 +153,6 @@
     $("#scene-colors").innerHTML = cols.map((c) => `<span class="chip ${c === st.colors[0] ? "on" : ""}" data-sc="${esc(c)}" data-notr>${swatch(c)}${esc(colorLabel(c))}</span>`).join("");
   }
 
-  function renderAiChips() {
-    $("#ai-scenes").innerHTML = st.presets.map((p) => `<span class="chip ${st.aiPick.has(p.key) ? "on" : ""}" data-ai="${p.key}">${esc(p.name)}</span>`).join("");
-  }
-
   async function refreshSprites() { await buildSprites(); draw(); }
 
   async function setBg(b) {
@@ -171,11 +167,12 @@
     if (!st.libLoaded) {
       const r = await api("/api/scenes");
       st.lib = r.library; st.presets = r.presets; st.bgPresets = r.bg_presets || []; st.libLoaded = true;
-      renderAiChips(); renderBgPresets();
+      renderBgPresets();
       await setBg(st.lib[0] || null);
     }
     refreshSourceList();
     if (st.loadedFor !== P.id + "/" + st.src) { st.loadedFor = P.id + "/" + st.src; await refreshSprites(); }
+    if (window.SCENEGEN) SCENEGEN.open();
   }
 
   function refreshSourceList() {
@@ -282,33 +279,14 @@
       $("#bg-ai-prog").textContent = ok ? `已生成 ${ok} 张背景，已加入背景库，所有产品都能用。不满意的点背景右上角 ✕ 删除。` : "";
     });
   });
-  $("#ai-scenes").addEventListener("click", (e) => {
-    const c = e.target.closest("[data-ai]"); if (!c) return;
-    const k = c.dataset.ai; st.aiPick.has(k) ? st.aiPick.delete(k) : st.aiPick.add(k); renderAiChips();
-  });
-  $("#btn-scene-ai").addEventListener("click", async (e) => {
-    if (!st.sprites.length) return toast("请先选择产品来源", true);
-    const picks = [...st.aiPick];
-    const extra = $("#ai-scene-extra").value.trim();
-    if (!picks.length && !extra) return toast("请至少选一个场景，或在补充要求里写场景", true);
-    if (dirty) await saveProduct(true);
-    // 交给 AI 的产品图：透明背景，只放一个产品（多颜色时用第一个）
+  // v2.53：AI 场景图（多张候选 + 质检 + 挑图）在 scenegen.js；这里给它当前的产品抠图（透明 PNG，只放一个产品）
+  window.sceneCutout = () => {
+    if (!st.sprites.length) return "";
     const sp = st.sprites[0].canvas;
     const pad = document.createElement("canvas"); const m = Math.max(sp.width, sp.height) * 1.25;
     pad.width = pad.height = Math.round(m);
     pad.getContext("2d").drawImage(sp, (m - sp.width) / 2, (m - sp.height) / 2);
-    const data = pad.toDataURL("image/png");
-    await busy(e.target, async () => {
-      const list = picks.length ? picks : [extra];
-      let ok = 0;
-      for (let i = 0; i < list.length; i++) {
-        $("#scene-ai-prog").textContent = `AI 正在生成 ${i + 1}/${list.length}（每张约 20-60 秒）…`;
-        try {
-          const r = await apiJob(`/api/products/${P.id}/scene-ai`, { json: { image: data, scene: list[i], extra: picks.length ? extra : "", color: st.sprites[0].color } });
-          P = r.product; ok += r.added; renderImages();
-        } catch (err) { toast(err.message, true); break; }
-      }
-      $("#scene-ai-prog").textContent = ok ? `已生成 ${ok} 张场景图，请检查产品外观是否和实物一致，不一致的请删除。` : "";
-    });
-  });
+    return pad.toDataURL("image/png");
+  };
+  window.sceneColor = () => (st.sprites[0] ? st.sprites[0].color : "");
 })();

@@ -112,7 +112,7 @@ DEFAULT_CONFIG = {
     "sender_name": "",                   # 自制面单：寄件人
     "sender_phone": "",
     "sender_address": "",
-    "image_provider": "openai",          # 场景图 AI：openai（gpt-image-1 及兼容接口）或 gemini
+    "image_provider": "openai",          # 场景图 AI：openai / gemini / fal / replicate（v2.53：详细设置在 系统 → AI 接口）
     "image_api_key": "",
     "image_api_base": "",                # 留空 = 官方地址
     "image_model": "",                   # 留空 = gpt-image-1-mini / gemini-3.1-flash-lite-image（最便宜）
@@ -200,6 +200,11 @@ def load_config():
 def save_config(cfg):
     os.makedirs(DATA_DIR, exist_ok=True)
     merged = load_config()
+    try:                                       # v2.53：旧键改了密钥 → 同步到 AI 接口的新结构
+        from .ai import conf as _aic
+        cfg = _aic.sync_legacy(merged, cfg)
+    except Exception:  # noqa: BLE001
+        pass
     merged.update(cfg)
     tmp = CONFIG_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

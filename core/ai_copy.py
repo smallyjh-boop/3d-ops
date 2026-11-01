@@ -2,7 +2,7 @@
 import json
 import re
 
-import requests
+import requests  # noqa: F401  老测试替换 ai_copy.requests.post
 
 SYSTEM_PROMPT = """You are an expert Lazada / Shopee Thailand listing copywriter and SEO specialist for a small product shop.
 Write natural, native Thai (not machine-translated style). Goal: be found by as many relevant searches as
@@ -88,8 +88,7 @@ def mentions_process(text):
     return bool(PROCESS_WORDS.search(text or ""))
 
 
-class AIError(Exception):
-    pass
+from .ai import AIError, for_task as tcfg  # noqa: E402,F401  v2.53：AI 调用统一走 core/ai
 
 
 def extract_json(text):
@@ -105,60 +104,16 @@ def extract_json(text):
 
 
 def call(cfg, system, user, image_b64=None):
-    """image_b64：可选的 JPEG 图片（base64），让 AI 看图。模型不支持看图时自动退回纯文字。"""
-    if image_b64:
-        try:
-            return _request(cfg, system, user, image_b64)
-        except AIError as e:
-            if not re.search(r"\b4\d\d\b", str(e)):
-                raise
-    return _request(cfg, system, user, None)
+    """image_b64：可选的 JPEG 图片（base64），让 AI 看图。这个任务用的 AI 不能看图时自动退回纯文字（必须看图的任务除外）。
+    v2.53：走 core/ai（按任务选 AI、自动备用、记费用）；任务用 tcfg(cfg, "任务") 标在 cfg 上。"""
+    from . import ai
+    return ai.text(cfg, system, user, image_b64)
 
 
 def _request(cfg, system, user, image_b64):
-    key = (cfg.get("ai_api_key") or "").strip()
-    if not key:
-        raise AIError("还没有填写 AI 接口密钥（设置页）")
-    provider = cfg.get("ai_provider", "anthropic")
-    model = cfg.get("ai_model")
-    try:
-        if provider == "anthropic":
-            r = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": key, "anthropic-version": "2023-06-01",
-                         "content-type": "application/json"},
-                json={"model": model, "max_tokens": 4000, "system": system,
-                      "messages": [{"role": "user", "content": user if not image_b64 else [
-                          {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_b64}},
-                          {"type": "text", "text": user}]}]},
-                timeout=120,
-            )
-            if r.status_code != 200:
-                raise AIError(f"AI 接口错误 {r.status_code}: {r.text[:300]}")
-            data = r.json()
-            return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
-        base = (cfg.get("ai_base_url") or "").rstrip("/")
-        if provider == "deepseek":         # v2.50：DeepSeek 单独一个选项（OpenAI 兼容接口，地址固定）
-            if not base or "deepseek" not in base:
-                base = "https://api.deepseek.com"
-            if not model or str(model).lower().startswith("claude"):
-                raise AIError("接口类型选了 DeepSeek：请在「模型名称」里填 DeepSeek 的模型名（DeepSeek 开放平台的模型列表里有）")
-        url = base + ("/chat/completions" if base.endswith("/v1") or "deepseek" in base else "/v1/chat/completions")
-        r = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {key}", "content-type": "application/json"},
-            json={"model": model, "temperature": 0.7,
-                  "messages": [{"role": "system", "content": system},
-                               {"role": "user", "content": user if not image_b64 else [
-                                   {"type": "text", "text": user},
-                                   {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image_b64}}]}]},
-            timeout=120,
-        )
-        if r.status_code != 200:
-            raise AIError(f"AI 接口错误 {r.status_code}: {r.text[:300]}")
-        return r.json()["choices"][0]["message"]["content"]
-    except requests.RequestException as e:
-        raise AIError(f"连接 AI 接口失败：{e}") from e
+    """一定要看图（带图时不退回纯文字，看不了图就报错）。"""
+    from . import ai
+    return ai.text(cfg, system, user, image_b64, strict_image=bool(image_b64))
 
 
 def generate_copy(cfg, product, plan=None):
@@ -191,7 +146,7 @@ def generate_copy(cfg, product, plan=None):
         shop=cfg.get("shop_name_th", ""),
         kw_block=_kw_block(plan) or "(none - infer the best search terms yourself)",
     )
-    data = extract_json(call(cfg, system, user))
+    data = extract_json(call(tcfg(cfg, "copy"), system, user))
     # 把卖点合进详情开头，方便直接用
     hl = data.get("highlights_th") or []
     if hl and "<ul>" not in (data.get("description_th") or "")[:200]:
@@ -220,7 +175,7 @@ def back_translate(cfg, title_th, description_th, with_en=True):
             + ("title_en: natural English product title for Lazada (max 255 chars, no 3D printing / made-to-order words). "
                "description_en: the same description in English as simple HTML (<p>, <ul><li>), keep all facts. " if with_en else "")
             + f"Return JSON {keys}.\n\nTITLE: {title_th}\n\nDESCRIPTION:\n{description_th}")
-    d = extract_json(call(cfg, "You are a precise Thai e-commerce translator. Output only JSON.", user))
+    d = extract_json(call(tcfg(cfg, "copy"), "You are a precise Thai e-commerce translator. Output only JSON.", user))
     if with_en:
         _clean_en(d)
     return d
@@ -289,7 +244,7 @@ def complete_copy(cfg, product, plan=None):
         user = ("Fill ONLY these missing fields of a Thai e-commerce listing (Lazada / Shopee Thailand), consistent with the existing text. "
                 "Use the search terms Thai buyers use so the listing is found more often. No 3D printing / made-to-order / filament words.\n"
                 + json.dumps(info, ensure_ascii=False) + "\n\nReturn JSON with exactly these keys:\n" + json.dumps(want, ensure_ascii=False))
-        d = extract_json(call(cfg, "You are a Thai e-commerce listing expert. Output only JSON.", user))
+        d = extract_json(call(tcfg(cfg, "copy"), "You are a Thai e-commerce listing expert. Output only JSON.", user))
     out = {k: d[k] for k in miss if d.get(k)}
     if "hashtags_shopee" in out:
         tags = []
@@ -334,7 +289,7 @@ def to_english(cfg, product):
     user = ("Write the English version of this Thai e-commerce listing for Lazada Thailand. Keep the same facts, sizes, options "
             "and selling points; natural English, no 3D printing / made-to-order / filament words. "
             'Return JSON {"title_en": "max 255 chars", "description_en": "simple HTML: <ul><li> highlights then <p> paragraphs"}.\n\n' + src)
-    return _clean_en(extract_json(call(cfg, "You are an e-commerce copywriter. Output only JSON.", user)))
+    return _clean_en(extract_json(call(tcfg(cfg, "copy"), "You are an e-commerce copywriter. Output only JSON.", user)))
 
 
 # 兼容旧名称

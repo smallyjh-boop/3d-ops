@@ -251,7 +251,7 @@ def review(cfg, p):
             "\"items\": [{\"field\": \"title_th|title_shopee_th|title_en|description_th|hashtags_shopee|package_content_th|variation1_name_th|variation2_name_th|other\", "
             "\"level\": \"高|中|低\", \"problem_zh\": \"问题\", \"problem_th\": \"...\", \"suggestion_zh\": \"怎么改\", \"suggestion_th\": \"...\", "
             "\"new_value\": \"改好的完整内容（字段是 description_th 时用简单 HTML；只是建议、不好直接替换时留空）\"}]} — at most 8 items, most important first.")
-    d = ai_copy.extract_json(ai_copy.call(cfg, REVIEW_SYSTEM, user))
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "keywords"), REVIEW_SYSTEM, user))
     ok_fields = {"title_th", "title_shopee_th", "title_en", "description_th", "hashtags_shopee", "package_content_th",
                  "variation1_name_th", "variation2_name_th", "other"}
     items = []

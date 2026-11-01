@@ -43,8 +43,8 @@ MODULES = [
             ("stock_safety_g", "每个颜色留多少克不算（卷尾）")]),
         ("图片", [
             ("image_size", "输出尺寸（像素）"), ("image_fill_ratio", "产品占画面比例"), ("imgbb_api_key", "imgbb 图床密钥", "password")]),
-        ("场景图 AI（可选，按张收费）", [
-            ("image_provider", "接口类型", ["openai", "gemini"]), ("image_api_key", "接口密钥", "password"),
+        ("场景图 AI（可选，按张收费；多家服务商、按任务选、费用在 系统 → AI 接口）", [
+            ("image_provider", "接口类型", ["openai", "gemini", "fal", "replicate"]), ("image_api_key", "接口密钥", "password"),
             ("image_model", "模型（留空=最便宜的：gpt-image-1-mini / gemini-3.1-flash-lite-image；效果更好：gpt-image-1 / gemini-3.1-flash-image）"),
             ("image_quality", "清晰度（openai）", ["low", "medium", "high"]), ("image_api_base", "接口地址（留空=官方，第三方中转时填写）")]),
     ]},
@@ -95,7 +95,7 @@ MODULES = [
     {"id": "ops", "zh": "运营分析", "th": "วิเคราะห์การขาย", "module": "ops", "groups": []},     # v2.46 运营分析模块（设置在模块说明书里）
     {"id": "ai", "zh": "AI 与对接", "th": "AI และการเชื่อมต่อ", "ext": True, "groups": [
         ("AI", [
-            ("ai_provider", "接口类型（deepseek = DeepSeek；openai_compatible = 其他 OpenAI 兼容接口，例如通义、OpenAI，要填接口地址）", ["anthropic", "deepseek", "openai_compatible"]), ("ai_model", "模型名称"),
+            ("ai_provider", "接口类型（deepseek = DeepSeek；openai_compatible = 其他 OpenAI 兼容接口，例如通义、OpenAI，要填接口地址）", ["anthropic", "deepseek", "openai_compatible", "openai", "gemini", "qwen"]), ("ai_model", "模型名称"),
             ("ai_api_key", "接口密钥", "password"), ("ai_base_url", "接口地址（openai_compatible 用）")]),
     ]},
     {"id": "addons", "zh": "组件与插件", "th": "ส่วนประกอบและปลั๊กอิน", "special": ["components", "accel"], "ext": True, "groups": [

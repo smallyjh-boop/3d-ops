@@ -41,7 +41,7 @@ from PIL import Image
 from flask import Flask, abort, jsonify, redirect, request, send_file, send_from_directory, session
 
 
-from core import (ai_copy, scenes, attributes, catalog, categories, codes, images, imghost,
+from core import (ai, ai_copy, scenes, attributes, catalog, categories, codes, images, imghost,
                   lazada_template, pricing, shopee, slicer, store)
 
 
@@ -121,7 +121,7 @@ def maybe_async(label, fn, kind="", link=""):
 # 这些接口要等 AI / 网络（十几秒到一分钟）：浏览器加 ?async=1 时整个请求放到后台重放（v2.20.2），进任务中心。
 # 值 = 任务分类（任务中心显示用）
 ASYNC_ROUTES = {"ai_category": "ai_cat", "ai_shopee_category": "ai_cat", "fill_attrs": "ai_cat", "print_advice_api": "ai_advice",
-                "ad_suggest": "ai", "scenes_ai_bg": "ai_img", "scene_ai": "ai_img", "image_host": "img_host",
+                "ad_suggest": "ai", "scenes_ai_bg": "ai_img", "scene_ai": "ai_img", "scene_gen": "ai_img", "image_host": "img_host",
                 "ai_keywords": "ai_kw", "ai_back": "ai", "print_file_ai": "ai_check", "ai_english": "ai_en", "ai_complete": "ai_fill"}
 
 
@@ -405,11 +405,15 @@ def _add_images(p, items, replace_renders=False, white_bg=False):
     for item in items:
         img = item["img"].convert("RGB")
         w, h = img.size
-        if w != h:
-            s0 = min(w, h)
-            img = img.crop(((w - s0) // 2, (h - s0) // 2, (w - s0) // 2 + s0, (h - s0) // 2 + s0))
-        if img.size != (size, size):
-            img = img.resize((size, size), Image.LANCZOS)
+        if item.get("keep_aspect") and w != h:          # v2.53：场景图可以选 3:4 / 16:9 …，不裁成方图
+            k = min(size / min(w, h), 2000 / max(w, h))
+            img = img.resize((max(1, round(w * k)), max(1, round(h * k))), Image.LANCZOS)
+        else:
+            if w != h:
+                s0 = min(w, h)
+                img = img.crop(((w - s0) // 2, (h - s0) // 2, (w - s0) // 2 + s0, (h - s0) // 2 + s0))
+            if img.size != (size, size):
+                img = img.resize((size, size), Image.LANCZOS)
         kind = item.get("kind", "")
         name = f"{'s' if kind == 'scene' else 'r'}_{uuid.uuid4().hex[:10]}.jpg"
         img.save(os.path.join(store.image_dir(pid, "raw"), name), "JPEG", quality=95, subsampling=0)
@@ -419,6 +423,8 @@ def _add_images(p, items, replace_renders=False, white_bg=False):
             entry["scene"] = True
             if item.get("note"):
                 entry["note"] = item["note"]
+            if item.get("aspect") and item["aspect"] != "1:1":
+                entry["aspect"] = item["aspect"]
         else:
             entry["render"] = kind
         if replace_renders and not added:

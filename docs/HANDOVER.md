@@ -7,9 +7,14 @@
 - 已发布：v2.52.0（main，2026-11-01）：仓库 / 货位、打印方案 + 多色 + 摆盘 + 多盘生产、拍照识别、采集提速
 - 测试机已装 OrcaSlicer 2.3.1（/opt/orca，PATH 里 orca-slicer），v20_test 和 model/t_printplan_orca 现在能真切片
 - 进行中：v2.53.0
-  1. AI 接口统一管理（按任务选 AI、多家可换、自动备用、用量费用）
-  2. 场景图改进（AI 写提示词、看图质检、多张挑图、参考图、类目模板、多尺寸、批量、费用、Flux）
-  3. 「返回」回到原来的地方（全系统）——已完成：static/nav.js（换页面记浏览器历史、返回恢复筛选 / 滚动 / 高亮，抽屉和弹窗按后退先关），测试 t_nav253
+  1. ✅ AI 接口统一管理：core/ai/（catalog / conf / providers / router / usage）+ modules/ai（系统 → AI 接口、AI 用量）。
+     所有调用走 ai_copy.call(ai_copy.tcfg(cfg, "任务"), …) / ai.image；旧键（ai_provider/ai_api_key/image_*）继续是默认 AI 的来源，
+     某服务商在新页面保存过密钥后才用 ai_providers 里的；save_config 用旧键改密钥会同步过去（conf.sync_legacy）
+  2. ✅ 场景图改进：core/scene_ai.py + goods ui/scenegen.js（候选存 data/scene_cand/<产品>/），批量在产品列表勾选栏
+     （真实出图服务商的效果还没在线上验证：先用便宜的模型试几张）
+  3. ✅ 「返回」回到原来的地方：static/nav.js（换页面记浏览器历史、返回恢复筛选 / 滚动 / 高亮，抽屉和弹窗按后退先关），测试 t_nav253
+  4. 模型区改进（展示 / 打印分开、组装、按规格）——进行中
+  5. 仓库全部物品进货位（料卷、生产区 / 待检区、全流程走货位）——进行中
 
 ## 已知问题 / 坑
 - 测试临时目录 /tmp/3dops-test-* 很大（每个约 0.8–1 GB），磁盘满时要清理

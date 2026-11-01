@@ -67,10 +67,12 @@ def ai_available(cfg=None):
     s = settings(cfg)
     if s["ai"] == "off":
         return False, "设置里关了 AI 看图"
-    if not (cfg.get("ai_api_key") or "").strip():
+    from core import ai                    # v2.53：「系统 → AI 接口」里给「拍照识别产品」选的 AI
+    ok, why = ai.can(cfg, "recog", "vision")
+    if not ok and "密钥" in why:
         return False, "还没有填写 AI 接口密钥"
-    if s["ai"] == "auto" and str(cfg.get("ai_provider") or "anthropic") == "deepseek":
-        return False, "现在的 AI（DeepSeek）不能看图，只用本地比对"
+    if not ok and s["ai"] == "auto":
+        return False, why + "，只用本地比对"
     if _no_vision["until"] > time.time():
         return False, _no_vision["why"]
     if s["ai_daily"] > 0 and usage()["today_ai"] >= s["ai_daily"]:
@@ -255,7 +257,7 @@ def ai_pick(photo, cands, call=None):
     b64 = base64.b64encode(buf.getvalue()).decode()
     fn = call or ai_copy._request          # 直接用 _request：不让它在看不了图时悄悄退回纯文字（那样 AI 会瞎猜）
     try:
-        txt = fn(cfg, AI_SYSTEM, user, b64)
+        txt = fn(ai_copy.tcfg(cfg, "recog"), AI_SYSTEM, user, b64)
     except ai_copy.AIError as e:
         msg = str(e)
         if re.search(r"\b(400|404|415|422)\b", msg) and re.search(r"image|vision|multimodal|content", msg, re.I):

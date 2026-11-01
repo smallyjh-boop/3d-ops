@@ -97,7 +97,7 @@ def fill_attrs(cfg, product, limit=8):
             '\n\nFor each attribute give the best value for this product. If options are listed you MUST copy one option exactly '
             '(for brand use "No brand" / "NoBrand" style option if present). If unsure and not required, use "". '
             'Never mention 3D printing. Return JSON {"values": {"<attribute id>": "<value>"}}')
-    d = ai_copy.extract_json(ai_copy.call(cfg, "You fill Shopee Thailand product attributes. Output only JSON.", user))
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "category"), "You fill Shopee Thailand product attributes. Output only JSON.", user))
     vals = d.get("values") or {}
     out = {}
     for a in pick:

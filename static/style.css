@@ -110,6 +110,13 @@ h4{margin:14px 0 6px;font-size:13px}
 .scene-bg .x{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;border:0;border-radius:4px;font-size:11px;padding:0 5px;cursor:pointer}
 .scene-bg span{position:absolute;left:0;right:0;bottom:0;font-size:10px;background:rgba(255,255,255,.8);padding:1px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .filebtn.mini{padding:3px 8px;font-size:12px}
+/* v2.53 AI 场景图候选 */
+.sg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-top:6px}
+.sg-cand{border:2px solid #e5e7eb;border-radius:8px;padding:4px;cursor:pointer;background:#fff}
+.sg-cand img{width:100%;object-fit:cover;display:block;border-radius:5px;background:#f3f4f6}
+.sg-cand.on{border-color:#2563eb;box-shadow:0 0 0 2px #bfdbfe}
+.sg-cand.bad{border-color:#f59e0b}
+.sg-cand .x{background:none;border:0;cursor:pointer;color:#9ca3af;padding:0 3px}
 .advice{border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-top:8px;background:#fafafa}
 .advice h5{margin:8px 0 4px}
 .advice .kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}

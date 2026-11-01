@@ -448,7 +448,7 @@ def ai_review(cfg, product, recipe, geo, report):
                       ensure_ascii=False)
     user += ('\n输出：{"ok": true/false, "summary": {"zh": "一句话结论", "th": "..."}, '
              '"issues": [{"zh": "问题和怎么改", "th": "..."}], "check_points": [{"zh": "人工复核时要看的点", "th": "..."}]}')
-    d = ai_copy.extract_json(ai_copy.call(cfg, AI_SYS, user))
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "print_advice"), AI_SYS, user))
     bi = (lambda x: {"zh": str((x or {}).get("zh") or ""), "th": str((x or {}).get("th") or "")} if isinstance(x, dict)
           else {"zh": str(x or ""), "th": ""})
     return {"ok": bool(d.get("ok")), "summary": bi(d.get("summary")), "issues": [bi(x) for x in d.get("issues") or []][:6],

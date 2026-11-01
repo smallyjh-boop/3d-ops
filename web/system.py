@@ -55,7 +55,8 @@ def post_config():
     remap_old = None
     for k, v in incoming.items():
         if k not in cfg or k in ("template_defaults", "category_memory", "shopee_cat_map",
-                                 "est_calibration", "est_calibration_n"):
+                                 "est_calibration", "est_calibration_n", "ai_providers", "ai_tasks", "ai_limits", "ai_prices",
+                                 "ai_v2", "ai_migrated", "scene_templates"):
             continue
         if k == "printers":
             if not isinstance(v, list) or not v:

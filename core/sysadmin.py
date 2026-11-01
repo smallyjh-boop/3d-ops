@@ -179,9 +179,11 @@ def check():
         adimg.thai_css()
 
     G = "AI 与客服"
-    items.append(_item(G, "AI 接口密钥", "ok" if cfg.get("ai_api_key") else "err",
-                       f"{cfg.get('ai_provider')} · {cfg.get('ai_model')}" if cfg.get("ai_api_key") else "没有填写：AI 文案和 AI 客服都不能用",
-                       "" if cfg.get("ai_api_key") else "系统 → 设置 → AI 与对接"))
+    from . import ai as _ai
+    _ok = _ai.ready(cfg, "copy")
+    items.append(_item(G, "AI 接口密钥", "ok" if _ok else "err",
+                       f"{cfg.get('ai_provider')} · {cfg.get('ai_model')}" if _ok else "没有填写：AI 文案和 AI 客服都不能用",
+                       "" if _ok else "系统 → AI 接口"))
     try:
         c = db.conn()
         from . import modules as _mods

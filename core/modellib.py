@@ -780,6 +780,6 @@ def ai_check(pid, selection, user=""):
                 '\n\n输出 JSON：{"overall": {"level": "低|中|高", "zh": "整盘结论一两句", "th": "..."}, '
                 '"items": [{"name": "零件名", "level": "低|中|高", "risk_zh": "主要风险", "fix_zh": "怎么改", "risk_th": "...", "fix_th": "...", '
                 '"suggest_orient": "bottom|top|front|back|left|right 或空"}], "settings_zh": "整盘建议的支撑 / 帽檐 / 速度设置", "settings_th": "..."}')
-    data = ai_copy.extract_json(ai_copy.call(load_config(), AI_SYSTEM, user_msg))
+    data = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(load_config(), "print_advice"), AI_SYSTEM, user_msg))
     data["checked"] = rows
     return data

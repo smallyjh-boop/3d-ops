@@ -86,7 +86,7 @@ def parse(text="", image=None):
         raise ValueError("贴订单文字或者上传订单截图")
     cfg = load_config()
     user = PROMPT + ("\n\n订单内容：\n" + text[:6000] if text else "\n\n订单在图片里。")
-    raw = ai_copy.call(cfg, SYSTEM, user, _jpeg_b64(image) if image else None)
+    raw = ai_copy.call(ai_copy.tcfg(cfg, "pur_quick"), SYSTEM, user, _jpeg_b64(image) if image else None)
     d = ai_copy.extract_json(raw)
     return draft_from(d)
 

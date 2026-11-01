@@ -29,6 +29,7 @@
         <span id="lib-selinfo" class="small muted">勾选产品后批量处理</span>
         <select id="lib-grp-pick"></select><button id="btn-grp-add">加入分组</button><button id="btn-grp-rm">移出分组</button>
         <button id="btn-seo-sel" data-needmod="seo">🔍 搜索优化选中</button>
+        <button id="btn-lib-scene">🖼 批量 AI 场景图</button>
         <button id="btn-lib-zip">⬇ 下载模型和切片文件</button>
         <button id="btn-lib-del" class="danger">删除选中</button>
         <button id="btn-lib-clear" class="mini">取消勾选</button>
@@ -224,10 +225,7 @@
           <div class="row gap"><button id="btn-bg-ai" class="mini">生成选中的背景</button><span id="bg-ai-prog" class="muted small"></span></div>
           <div class="row gap"><button id="btn-scene-add" class="primary">加入商品图</button></div>
           <hr>
-          <div class="small"><b>AI 生成场景图</b>（需要在设置页填写「场景图 AI」的密钥，按张收费；会用上面选的产品图和颜色）</div>
-          <div id="ai-scenes" class="chips"></div>
-          <input id="ai-scene-extra" placeholder="补充要求（可空），例：泰式风格、圣诞节氛围、放在白色书桌上">
-          <div class="row gap" style="margin-top:6px"><button id="btn-scene-ai">AI 生成场景图</button><span id="scene-ai-prog" class="muted small"></span></div>
+          <div id="scene-gen"></div>
         </div>
       </div>
     </details>

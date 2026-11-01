@@ -118,8 +118,8 @@ class AiError(Exception):
 
 
 def ai_on(cfg=None):
-    cfg = cfg or load_config()
-    return bool((cfg.get("ai_api_key") or "").strip())
+    from core import ai
+    return ai.ready(cfg or load_config(), "ops")
 
 
 def ai_json(cfg, system, user):
@@ -128,7 +128,7 @@ def ai_json(cfg, system, user):
     if not ai_on(cfg):
         raise AiError("还没设置 AI：到「设置 → AI」填接口密钥")
     try:
-        txt = ai_copy.call(cfg, system, user)
+        txt = ai_copy.call(ai_copy.tcfg(cfg, "ops"), system, user)
         r = ai_copy.extract_json(txt)
     except ai_copy.AIError as e:
         raise AiError(str(e)) from e

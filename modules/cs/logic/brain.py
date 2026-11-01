@@ -200,7 +200,7 @@ def read_screenshot(raw):
             "右边/卖家发的是 seller，左边/买家发的是 buyer。"
             '输出 JSON：{"platform": "shopee/lazada/tiktok/unknown", "buyer": "买家名字（看得到就填）", '
             '"order_no": "截图里看到的订单号", "messages": [{"from": "buyer/seller", "text": "原文"}]}')
-    d = ai_copy.extract_json(ai_copy.call(cfg, "你是 OCR 助手，准确读出聊天内容，不要翻译，不要漏字。只输出 JSON。", user, _jpeg_b64(raw)))
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "cs_ocr"), "你是 OCR 助手，准确读出聊天内容，不要翻译，不要漏字。只输出 JSON。", user, _jpeg_b64(raw)))
     msgs = [{"from": "seller" if str(m.get("from")).lower().startswith("s") else "buyer", "text": str(m.get("text") or "").strip()}
             for m in d.get("messages") or [] if str(m.get("text") or "").strip()]
     return {"platform": str(d.get("platform") or ""), "buyer": str(d.get("buyer") or ""), "order_no": str(d.get("order_no") or ""),
@@ -282,7 +282,7 @@ def draft(conv, msgs, orders_found, instruction=""):
     system = SYSTEM.format(shop=s.get("shop_name") or "我们的店", persona=s.get("persona"),
                            forbidden=s.get("forbidden") or "退款、赔偿、补发、免运费、额外折扣",
                            smart=SMART if str(s.get("smart", "1")) == "1" else "")
-    raw = ai_copy.call(cfg, system, json.dumps(ctx, ensure_ascii=False, default=str) + "\n\n" + OUT_SPEC)
+    raw = ai_copy.call(ai_copy.tcfg(cfg, "cs_draft"), system, json.dumps(ctx, ensure_ascii=False, default=str) + "\n\n" + OUT_SPEC)
     d = ai_copy.extract_json(raw)
     intent = d.get("intent") if d.get("intent") in INTENTS else intent0
     tier = data.tiers(s).get(intent, "confirm")
@@ -404,7 +404,7 @@ def translate(text, to="zh", conv=None, polite=True):
     else:
         lang = {"zh": "简体中文", "th": "泰语", "en": "英语"}.get(to, to)
         user = f'把下面的话翻译成{lang}，口语自然：\n{text}\n输出 {{"text": "..."}}'
-    d = ai_copy.extract_json(ai_copy.call(cfg, "你是翻译。只输出 JSON。", user))
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "cs_translate"), "你是翻译。只输出 JSON。", user))
     out = str(d.get("text") or "")
     if len(_TR_CACHE) > 500:
         _TR_CACHE.clear()
@@ -423,7 +423,7 @@ def learn(question, ai_reply, final_reply, kb_near):
             "\"a_zh\": \"回答的中文意思\", \"tags\": \"标签\", \"update_id\": 如果是在补充 / 更正知识库里某一条就写它的 id 否则 null}；不要就输出 {\"learn\": false}。\n\n"
             + json.dumps({"买家问": question[:1500], "AI 原稿": (ai_reply or "")[:1500], "实际回复": final_reply[:1500],
                           "知识库里接近的": [{"id": k["id"], "问": k["q"][:300], "答": k["a"][:500]} for k in kb_near]}, ensure_ascii=False))
-    d = ai_copy.extract_json(ai_copy.call(cfg, "你是客服知识库整理员。只输出 JSON。", user))
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "cs_kb"), "你是客服知识库整理员。只输出 JSON。", user))
     if not d.get("learn") or not d.get("q") or not d.get("a"):
         return None
     return {"q": str(d["q"])[:1000], "a": str(d["a"])[:3000], "a_zh": str(d.get("a_zh") or "")[:3000],
@@ -433,7 +433,7 @@ def learn(question, ai_reply, final_reply, kb_near):
 def weekly_insight(stats):
     """周报里 AI 写的一段总结和建议（中文）。"""
     cfg = _cs_cfg()
-    d = ai_copy.extract_json(ai_copy.call(cfg, "你是电商客服主管。只输出 JSON。",
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "cs_kb"), "你是电商客服主管。只输出 JSON。",
                                           "根据这周的客服数据，写 3-5 条简短的中文总结和下周建议（哪些问题多、该补什么知识库、哪些客户要跟进、"
                                           "自动回复哪里可以放开或收紧），每条再给一句意思一样的泰语（给泰国员工看）。"
                                           "输出 {\"points\": [\"...\"], \"points_th\": [\"...\"]}\n\n" + json.dumps(stats, ensure_ascii=False, default=str)))

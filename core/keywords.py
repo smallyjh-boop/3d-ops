@@ -82,7 +82,7 @@ def research(cfg, product, category_name=""):
         name=product.get("name_zh", ""), features=seo.clean_source(product.get("features_zh", ""))[:3000],
         keywords=product.get("keywords", ""), material=product.get("material", ""),
         size=product.get("size_text", ""), options="、".join(opts) or "-", category=category_name or "-")
-    d = ai_copy.extract_json(ai_copy.call(cfg, SYSTEM, user))
+    d = ai_copy.extract_json(ai_copy.call(ai_copy.tcfg(cfg, "keywords"), SYSTEM, user))
     plan = {k: _clean_list(d.get(k), 14) for k, _ in GROUPS}
     plan["title_core"] = str(d.get("title_core") or (plan["core"][0] if plan["core"] else "")).strip()
     plan["avoid"] = _clean_list(d.get("avoid"), 10)
