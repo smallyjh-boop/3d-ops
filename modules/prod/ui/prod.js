@@ -35,8 +35,9 @@
     clearInterval(PR_TIMER); clearInterval(BOARD_TIMER);
     if (name === "production") { loadBoard(); BOARD_TIMER = setInterval(() => { if (!document.hidden && !$("#modal:not(.hidden)")) loadBoard().catch(() => {}); }, 20000); }
     if (name === "printers") { loadPrinters(); PR_TIMER = setInterval(() => loadPrinters().catch(() => {}), 10000); }
+    if (name === "po" && window.PO) PO.load().catch((e) => toast(e.message, true));      // v2.54 生产单
     if (name === "recipes") loadRecipes();
-    if (name === "stock") loadStock();
+    if (name === "stock" && window.GS) GS.load().catch((e) => toast(e.message, true));      // v2.54：成品备货在仓库模块（goodsstock.js）
     if (name === "quality") { loadQuality(); loadCalib().catch(() => {}); }
   }
 
@@ -63,6 +64,7 @@
     const kind = (j.kind && j.kind !== "order" ? `<span class="pill kind-${j.kind}">${esc(window.TRIAL ? TRIAL.kindName(j.kind) : j.kind_zh)}</span>` : "") +
       (j.trial && j.trial.plate_label ? `<span class="pill tag-pill" data-notr>${esc(TH_() ? j.trial.plate_label_th : j.trial.plate_label)}</span>` : "") +
       (j.tech === "resin" ? `<span class="pill resin-pill" title="光固化：打完先用酒精清洗，晾干后二次固化，再去支撑">🧪 树脂${j.status === "post" ? " · 清洗→固化→去支撑" : ""}</span>` : "") +
+      (j.po_no ? `<span class="pill po-badge" data-po-open="${j.po_id}" title="${Z("属于生产单", "อยู่ในใบสั่งผลิต")}">📑 ${esc(j.po_no)}</span>` : "") +
       (j.stock_n ? `<span class="pill tag-pill" title="先占住，发货出库时扣库存">📦 ${Z("用库存", "ใช้สต็อก")} ×${j.stock_n}</span>` : "");
     const btns = {
       todo: `<button class="big primary" data-start="${j.id}"${j.plate ? ` data-plate="${esc(j.plate.plate_id)}"` : ""}>▶ 开始打印…</button>` +
@@ -98,6 +100,15 @@
         ${j.priority ? ' <span class="pill bad-pill">加急</span>' : ""}${j.fails ? ` <span class="bad">失败 ${j.fails} 次</span>` : ""}</div>
       <div class="row gap wrap jbtns">${btns}${mv}<button class="mini" data-ticket="${j.id}" title="打印工单贴纸">🏷</button></div></div>`;
   }
+  // v2.54：这台打印机在做哪张生产单 / 专用于哪张 / 暂停 / 用途（字段由打印机页维护，缺了就不显示）
+  function laneBadges(l) {
+    const roles = { orders: Z("只接订单", "รับเฉพาะออเดอร์"), stock: Z("只接备货", "รับเฉพาะสต็อก") };
+    return (l.paused ? ` <span class="pill po-badge paused">⏸ ${Z("暂停", "หยุด")}</span>` : "")
+      + (l.working_po ? ` <span class="pill po-badge" data-po-open="${l.working_po.id}" title="${Z("正在做的生产单", "ใบสั่งผลิตที่กำลังทำ")}">📑 ${esc(l.working_po.no)}</span>` : "")
+      + (l.dedicated ? ` <span class="pill po-badge" data-po-open="${l.dedicated.id}" title="${Z("专用于这张生产单", "ใช้เฉพาะใบสั่งผลิตนี้")}">🔒 ${esc(l.dedicated.no)}</span>` : "")
+      + (roles[l.role] ? ` <span class="pill">${roles[l.role]}</span>` : "");
+  }
+  document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest(".po-badge[data-po-open]"); if (b && window.PO) PO.open(+b.dataset.poOpen); });
   function runCard(r, lane) {
     const h = H();
     const st = lane.status || {};
@@ -123,7 +134,7 @@
     if (!b.lanes.length) warn.push("还没有设置打印机（系统 → 设置 → 生产），任务没法分配。");
     if (b.missing_data.length) warn.push(`${b.missing_data.length} 个任务的产品缺少克数/时长，也没有切片文件，排单时间不准。请到产品的「打印方案」里切片。`);
     $("#prod-warn").innerHTML = warn.map((w) => `<p class="card warn small">${esc(w)}</p>`).join("");
-    const lanes = b.lanes.map((l) => `<div class="lane card ${l.enabled ? "" : "lane-off"}" data-lane="${l.index}"><div class="row between"><h3><span class="pcode" data-notr>${esc(l.code)}</span> <span class="small muted" data-notr>${esc(l.name)}${l.note ? " · " + esc(l.note) : ""}</span>${l.tech === "resin" ? ' <span class="pill resin-pill">光固化</span>' : ""}</h3>${l.enabled ? H().stChip(l.status, l.status_zh) : '<span class="pill">停用</span>'}</div>
+    const lanes = b.lanes.map((l) => `<div class="lane card ${l.enabled ? "" : "lane-off"}" data-lane="${l.index}"><div class="row between"><h3><span class="pcode" data-notr>${esc(l.code)}</span> <span class="small muted" data-notr>${esc(l.name)}${l.note ? " · " + esc(l.note) : ""}</span>${l.tech === "resin" ? ' <span class="pill resin-pill">光固化</span>' : ""}${laneBadges(l)}</h3>${l.enabled ? H().stChip(l.status, l.status_zh) : '<span class="pill">停用</span>'}</div>
         <div class="small muted">排队 ${l.queue.length} 个任务 · 约 ${l.hours} 小时${l.free_at ? " · 空闲 " + H().short(l.free_at) : ""}</div>
         ${l.runs.map((r) => runCard(r, l)).join("")}
         ${l.queue.map(jobCard).join("") || (l.runs.length ? "" : '<p class="muted small">空闲</p>')}</div>`);
@@ -442,36 +453,6 @@
     const tr = e.target.closest("[data-rcp]");
     if (tr) openRecipe(tr.dataset.rcp);
   });
-
-  // ---------------- 成品库存 / 备货 ----------------
-  async function loadStock() {
-    const r = await api("/api/stock");
-    const h = H();
-    $("#sg-table tbody").innerHTML = r.suggest.map((s) => `<tr><td class="mono" data-notr data-p360="${esc(s.sku)}">${esc(s.sku)}</td><td data-notr>${esc(s.name || "")} ${h.colorTxt(s.color)}</td>
-      <td>${s.sold30}</td><td>${s.daily}</td><td>${s.target}${s.auto_target ? ' <span class="muted small">(自动)</span>' : ""}</td><td>${s.stock}${s.reserved ? ` <span class="small muted">${Z(`（订单占 ${s.reserved}）`, `(จองให้ออเดอร์ ${s.reserved})`)}</span>` : ""}</td><td>${s.order_need}</td><td>${s.making}</td>
-      <td>${s.suggest ? `<b>${s.suggest}</b>` : '<span class="muted">够了</span>'}</td>
-      <td class="small">${s.suggest ? (s.suggest_after - Date.now() / 1000 < 3600 ? "现在（打印机有空）" : h.short(s.suggest_after) + " 以后（订单排完）") : ""}</td>
-      <td>${s.suggest ? `<input type="number" min="1" value="${s.suggest}" style="width:64px" data-mkq="${esc(s.sku)}"> <button class="mini" data-mk="${esc(s.sku)}">生成备货任务</button>` : ""}</td></tr>`).join("")
-      || '<tr><td colspan="11" class="muted">暂时没有建议（近 30 天销量不够多，或者库存已经够）</td></tr>';
-    $("#st-table tbody").innerHTML = r.items.map((s) => `<tr><td class="mono" data-notr data-p360="${esc(s.sku)}">${esc(s.sku)}</td><td data-notr>${esc(s.name || "")}</td><td>${h.colorTxt(s.color)}</td>
-      <td><b>${s.qty}</b>${s.reserved ? ` <span class="small muted">${Z(`（订单占 ${s.reserved}，发货时扣）`, `(จองให้ออเดอร์ ${s.reserved} ตัดตอนส่ง)`)}</span>` : ""}</td><td>${s.target ?? '<span class="muted">自动</span>'}</td><td class="small">${fmtTime(s.updated_at)}</td></tr>`).join("")
-      || '<tr><td colspan="6" class="muted">还没有成品库存</td></tr>';
-    if (window.OPS && OPS.loadSkus) OPS.loadSkus();
-  }
-  $("#btn-stock-reload").addEventListener("click", (e) => busy(e.target, loadStock));
-  $("#sg-table").addEventListener("click", async (e) => {
-    const sku = e.target.dataset.mk;
-    if (!sku) return;
-    const q = +$(`[data-mkq="${CSS.escape(sku)}"]`).value;
-    if (!q || !confirm(`生成备货任务：${sku} × ${q}？会排在订单任务后面。`)) return;
-    try { await api("/api/stock/make", { json: { sku, qty: q } }); toast("已生成备货任务，在生产看板里"); loadStock(); } catch (err) { toast(err.message, true); }
-  });
-  $("#btn-st-save").addEventListener("click", (e) => busy(e.target, async () => {
-    const sku = $("#st-sku").value.trim();
-    if (!sku) throw new Error("请填写 SKU");
-    await api("/api/stock", { json: { sku, qty: $("#st-qty").value === "" ? null : +$("#st-qty").value, target: $("#st-target").value } });
-    toast("已保存"); loadStock();
-  }));
 
   // ---------------- 质量统计 ----------------
   async function loadQuality() {

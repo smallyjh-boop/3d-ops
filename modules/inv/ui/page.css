@@ -95,3 +95,32 @@
 .inv-loc.z-qc, .inv-loc.z-staging, .inv-loc.z-returns { background: #fef3c7 } .inv-loc.z-defect { background: #fee2e2 } .inv-loc.z-production { background: #cffafe }
 @media (max-width: 600px) { .inv-charts { grid-template-columns: 1fr } #inv-zone, #inv-locq { width: 100% !important } }
 .inv-scroll { overflow-x: auto; max-width: 100% }
+
+/* v2.54 成品备货 */
+.gs-wrap { margin-top: 10px }
+.gs-tools { margin-bottom: 8px; align-items: center }
+.gs-tools input[type=search] { min-width: 220px }
+.gs-bulk { display: inline-flex; gap: 4px; flex-wrap: wrap; align-items: center; background: #eff6ff; border-radius: 8px; padding: 3px 8px }
+.gs-scroll { overflow-x: auto }
+.gs-table td { vertical-align: top }
+.gs-table tr.gs-out { background: #fef2f2 }
+.gs-table tr.gs-low { background: #fffbeb }
+.gs-img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; background: #f1f5f9; display: block }
+.gs-tag { display: inline-block; padding: 0 7px; border-radius: 10px; font-size: 12px; border: 1px solid #cbd5e1; background: #fff }
+.gs-own { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff }
+.gs-buy { color: #b45309; border-color: #fde68a; background: #fffbeb }
+.gs-loc { display: inline-flex; gap: 4px; align-items: baseline; margin: 1px 3px 1px 0; padding: 0 6px; border-radius: 6px; font-family: monospace; font-size: 12px; border: 1px solid #cbd5e1; background: #f8fafc }
+.gs-loc i { font-style: normal; font-weight: 700; font-family: inherit }
+.gs-z-pick { border-color: #86efac; background: #f0fdf4 }
+.gs-z-qc, .gs-z-unplaced { border-color: #fcd34d; background: #fffbeb }
+.gs-z-defect, .gs-z-returns { border-color: #fca5a5; background: #fef2f2 }
+.gs-bad { color: #b91c1c }
+.gs-warn { color: #b45309 }
+.gs-man { color: #7c3aed }
+.gs-table td:nth-child(6) { white-space: nowrap }
+.gs-target { cursor: pointer; font-weight: 700; border-bottom: 1px dashed #94a3b8 }
+.gs-act { white-space: nowrap }
+.gs-plist { max-height: 340px; overflow: auto; margin: 8px 0; border: 1px solid #e5e7eb; border-radius: 8px }
+.gs-prow { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #f1f5f9; cursor: pointer; flex-direction: row }
+.gs-put { margin: 10px 0; padding: 8px 10px; background: #fffbeb; border-radius: 8px }
+@media (max-width: 700px) { .gs-tools input[type=search] { min-width: 0; flex: 1 } }

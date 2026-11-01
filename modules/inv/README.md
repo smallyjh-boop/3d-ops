@@ -69,3 +69,4 @@
   其它 → v2.52 时这个耗材放的货位（没放过 → 待上架）；其它物品的货位数量、成品备货目标不动。测试 modules/inv/tests/t_wms253.py。
 
 - （系统 v2.53.0）复审修复：质检区默认关改以 v2.53 迁移标记为准（inv_loc_v253 没设 + 已有物品 → 明确写 inv_qc_on=False，不再看 config.json 里有没有这个键）。测试 modules/inv/tests/t_wms253.py。
+- 2.2（系统 v2.54.0）：「成品备货」页重做（core/inventory/goodsstock.py，ui/goodsstock.js，接口 /api/inv/gs*）：所有成品一张表（图 / 名称 / 规格颜色 / 可卖·待检·次品 / 货位拆开 / 目标 / 缺口 / 近 N 天销量 / 能卖几天 / 在做），标签 🖨 自产（产品库里有）/ 🛒 外购（库存里有、产品库里没有，或标了外购）；数字卡片 → 图表 → 左边自动分组（缺货 / 低于目标 / 积压 / 待上架 / 质检中 / 很久没动，来源，分类）。目标数量自动 = 近 N 天销量 ÷ N × 常备天数 + 安全库存，没销量用分类默认，也可手动覆盖（设置：gs_sales_days / stock_cover_days / gs_safety / gs_cat_default / gs_over_x）。批量加（产品库选择 / 按分类 / 标签）、「一键补货」：自产 → 一张生产单草稿（按一盘能打几个往上取整，可马上下达），外购 → 采购单草稿（modules/pur/public.py draft_po）。每行 📍 快速移库 / 上架（推荐先拣货区再备货区），🏷 SKU 标签 /print/gs-labels。测试 modules/inv/tests/t_goodsstock254.py。

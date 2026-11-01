@@ -48,39 +48,29 @@ def _plan_mod():
 
 
 # ---------------- 备货任务（任何入口） ----------------
-def create_stock(items, priority=0, printer=None, user="", source=""):
-    """items: [{sku, qty}]（或 [{product_id, sku, qty}]）。每个 SKU 一个备货任务。返回建好的任务列表。"""
-    from . import orders, production
+def create_stock(items, priority=0, printer=None, user="", source="", po_source="manual", due=None, printers=None):
+    """items: [{sku, qty}]（或 [{product_id, sku, qty}]）。v2.54：一次操作建一张生产单（同一 SKU 合并成一行）并马上下达，
+    每行一个备货任务。返回 {"jobs": 建好的任务, "errors": 没对上的行, "po": 生产单}。"""
+    from . import po as _po
     if not items:
         raise ValueError("请选择要生产的 SKU")
-    idx = orders.sku_index()
-    made, errs = [], []
-    for it in items:
-        sku = str(it.get("sku") or "").strip()
-        try:
-            qty = int(it.get("qty") or 0)
-        except (TypeError, ValueError):
-            qty = 0
-        if not sku:
-            continue
-        if qty <= 0:
-            errs.append(f"{sku}：数量要大于 0")
-            continue
-        hit = orders.match_sku(sku, idx)
-        if not hit:
-            errs.append(f"{sku}：产品库里找不到这个 SKU")
-            continue
-        try:
-            j = production.create_job(hit[0], sku, qty, "stock", None, user, "备货" + (f"（{source}）" if source else ""),
-                                      priority=1 if int(priority or 0) else 0, printer=printer)
-        except (ValueError, FileNotFoundError) as e:
-            errs.append(f"{sku}：{e}")
-            continue
-        made.append(j)
-    if not made:
-        raise ValueError("；".join(errs) or "没有可生产的 SKU")
-    db.audit(user, "新建备货任务", ",".join(j["sku"] for j in made), f"来源 {source or '-'}" + (f"；{'；'.join(errs)}" if errs else ""))
-    return {"jobs": made, "errors": errs}
+    note = "备货" + (f"（{source}）" if source else "")
+    po = _po.create(items, po_source if po_source in _po.SOURCES else "manual", user, priority=1 if int(priority or 0) else 0, due=due,
+                    note=note, printers=printers)
+    errs = po.get("errors") or []
+    try:
+        po = _po.release_po(po["id"], user, pin=printer)
+    except (ValueError, FileNotFoundError):
+        c = db.conn()                                  # 下达不成功：这张草稿单不留
+        c.execute("DELETE FROM po_lines WHERE po_id=?", (po["id"],))
+        c.execute("DELETE FROM production_orders WHERE id=?", (po["id"],))
+        c.commit()
+        raise
+    from . import production
+    jobs = [j for j in production.list_jobs(("todo", "printing")) if j.get("po_id") == po["id"]]
+    db.audit(user, "新建备货任务", ",".join(j["sku"] for j in jobs), f"来源 {source or '-'}；生产单 {po['no']}" + (f"；{'；'.join(errs)}" if errs else ""))
+    po["errors"] = errs
+    return {"jobs": jobs, "errors": errs, "po": po}
 
 
 # ---------------- 试打 ----------------

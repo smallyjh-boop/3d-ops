@@ -119,18 +119,8 @@
   </details>
 </section>
 
-<!-- 成品库存 / 备货 -->
-<section id="tab-stock" class="panel hidden">
-  <div class="row between"><h2>成品库存 / 备货</h2><button id="btn-stock-reload">刷新</button></div>
-  <div class="card"><h3>备货建议</h3>
-    <p class="muted small">按近 30 天销量，给卖得好的商品建议常备数量（设置里可改常备天数）。建议只是参考：在打印机排完订单、空闲的时候打，
-      不和订单抢打印机；要不要打由你决定，点「生成备货任务」后才会排进生产。</p>
-    <table class="grid" id="sg-table"><thead><tr><th>SKU</th><th>商品</th><th>近30天销量</th><th>每天约</th><th>常备数量</th><th>现有库存</th><th>订单还要</th><th>备货中</th><th>建议打</th><th>建议时间</th><th></th></tr></thead><tbody></tbody></table>
-  </div>
-  <div class="card"><h3>成品库存</h3>
-    <p class="muted small">多打的、备货打好的成品。有订单时在生产看板点「用库存」直接出货。</p>
-    <div class="row gap wrap btn-edit-only"><input id="st-sku" list="sku-list" placeholder="SKU" style="width:160px" data-notr><input id="st-qty" type="number" placeholder="现有数量" style="width:110px">
-      <input id="st-target" type="number" placeholder="常备数量（可空=自动）" style="width:170px"><button id="btn-st-save">保存</button></div>
-    <table class="grid" id="st-table"><thead><tr><th>SKU</th><th>商品</th><th>颜色</th><th>库存</th><th>常备数量</th><th>更新</th></tr></thead><tbody></tbody></table>
-  </div>
-</section>
+<!-- 成品库存 / 备货（v2.54：整页在仓库模块的 goodsstock.js 里画） -->
+<!-- 生产单（v2.54，po.js） -->
+<section id="tab-po" class="panel hidden"><div id="po-root"></div></section>
+
+<section id="tab-stock" class="panel hidden"><div id="gs-root"></div></section>

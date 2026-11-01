@@ -6,7 +6,7 @@ from web.common import *  # noqa: F401,F403
 from core import trial
 
 bp = Blueprint("m_prod", __name__)
-PREFIXES = ['/api/print-files', '/api/trial', '/api/slicer', '/api/printers', '/api/printer-models', '/api/jobs', '/api/spools', '/api/materials', '/api/files', '/print/spools', '/print/jobs', '/api/sliced', '/api/runs', '/api/quality', '/api/production', '/api/maintenance', '/api/calib']
+PREFIXES = ['/api/print-files', '/api/trial', '/api/slicer', '/api/printers', '/api/printer-models', '/api/jobs', '/api/spools', '/api/materials', '/api/files', '/print/spools', '/print/jobs', '/api/sliced', '/api/runs', '/api/quality', '/api/production', '/api/maintenance', '/api/calib', '/api/porders', '/print/po']
 PATTERNS = [r"^/api/stock(/make)?$", '^/api/products/[^/]+/recipe(/slice)?$']
 
 
@@ -1126,3 +1126,92 @@ def stock_get():
 @bp.get("/api/maintenance")
 def maintenance_get():
     return jsonify({"printers": production.maintenance_status()})
+
+
+# ---------------- 生产单（v2.54） ----------------
+@bp.get("/api/porders")
+def po_list():
+    from core import po
+    return jsonify({"orders": po.listing(request.args.get("status") or "", (request.args.get("q") or "").strip()), "counts": po.counts()})
+
+
+@bp.get("/api/porders/<int:pid>")
+def po_get(pid):
+    from core import po
+    try:
+        return jsonify(po.get(pid))
+    except ValueError as e:
+        return err(str(e), 404)
+
+
+@bp.post("/api/porders")
+def po_create():
+    """建生产单。{lines: [{sku, qty}], source, priority, due, note, printers: [编号或序号], release: true 马上下达}"""
+    from core import po
+    deny = _need_producer()
+    if deny:
+        return deny
+    b = request.get_json(force=True) or {}
+    try:
+        return jsonify(po.create(b.get("lines") or [], b.get("source") or "manual", _uname(), b.get("priority") or 0, b.get("due"),
+                                 b.get("note") or "", b.get("printers"), bool(b.get("release"))))
+    except (ValueError, FileNotFoundError) as e:
+        return err(str(e))
+
+
+@bp.post("/api/porders/from-orders")
+def po_from_orders():
+    """订单汇总：今天所有还没开始的订单任务归到一张生产单（scope=all 是所有没开始的）。"""
+    from core import po
+    deny = _need_producer()
+    if deny:
+        return deny
+    b = request.get_json(silent=True) or {}
+    try:
+        return jsonify(po.from_orders(_uname(), b.get("scope") or "today", b.get("priority") or 0, b.get("note") or ""))
+    except ValueError as e:
+        return err(str(e))
+
+
+@bp.post("/api/porders/<int:pid>")
+def po_update(pid):
+    from core import po
+    deny = _need_producer()
+    if deny:
+        return deny
+    try:
+        return jsonify(po.update(pid, request.get_json(force=True) or {}, _uname()))
+    except (ValueError, FileNotFoundError) as e:
+        return err(str(e))
+
+
+@bp.post("/api/porders/<int:pid>/<act>")
+def po_act(pid, act):
+    from core import po
+    deny = _need_producer()
+    if deny:
+        return deny
+    u = _uname()
+    try:
+        if act == "release":
+            return jsonify(po.release_po(pid, u))
+        if act == "pause":
+            return jsonify(po.pause(pid, True, u))
+        if act == "resume":
+            return jsonify(po.pause(pid, False, u))
+        if act == "cancel":
+            return jsonify(po.cancel(pid, u))
+    except (ValueError, FileNotFoundError) as e:
+        return err(str(e))
+    return err("没有这个操作", 404)
+
+
+@bp.get("/print/po/<int:pid>")
+def po_sheet(pid):
+    """可打印的生产单（A4，带单号二维码）。?lang=th 泰文。"""
+    from core import po
+    try:
+        html = po.sheet_html(pid, "th" if request.args.get("lang") == "th" else "zh")
+    except ValueError as e:
+        return err(str(e), 404)
+    return app.response_class(html, mimetype="text/html")

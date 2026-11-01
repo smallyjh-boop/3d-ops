@@ -15,6 +15,12 @@
   // ---------------- 文字（中文 / 泰文） ----------------
   const L = {
     "app": ["3D 运营 · 手机", "3D Ops · มือถือ"],
+    "t.po": ["生产单", "ใบสั่งผลิต"], "t.po.s": ["看进度、暂停 / 恢复；扫单号二维码", "ดูความคืบหน้า หยุด / ทำต่อ สแกน QR เลขที่"],
+    "po.saved": ["已保存", "บันทึกแล้ว"], "po.none": ["没有进行中的生产单", "ไม่มีใบสั่งผลิตที่กำลังทำ"], "po.eta": ["预计完成", "คาดว่าเสร็จ"], "po.due": ["交期", "กำหนดส่ง"], "po.paused": ["已暂停", "หยุดชั่วคราว"],
+    "po.pause": ["⏸ 暂停整张单", "⏸ หยุดทั้งใบ"], "po.resume": ["▶ 恢复", "▶ ทำต่อ"], "po.pause.q": ["暂停这张生产单？没开始的任务不会再排给打印机。", "หยุดใบสั่งผลิตนี้? งานที่ยังไม่เริ่มจะไม่ถูกจัดให้เครื่อง"],
+    "po.late": ["可能来不及", "อาจไม่ทัน"], "po.done": ["已完成", "เสร็จแล้ว"], "po.unknown": ["没有这张生产单：{c}", "ไม่พบใบสั่งผลิต: {c}"], "po.prs": ["专用打印机", "เครื่องพิมพ์เฉพาะ"],
+    "po.st.draft": ["草稿", "ฉบับร่าง"], "po.st.released": ["已下达", "สั่งผลิตแล้ว"], "po.st.producing": ["生产中", "กำลังผลิต"], "po.st.partial": ["部分完成", "เสร็จบางส่วน"],
+    "po.st.done": ["完成", "เสร็จสิ้น"], "po.st.cancelled": ["已取消", "ยกเลิก"],
     "home": ["首页", "หน้าแรก"],
     "t.order": ["查订单", "ค้นหาออเดอร์"], "t.order.s": ["扫面单或输入订单号 / 买家", "สแกนใบปะหน้าหรือพิมพ์เลขออเดอร์ / ชื่อผู้ซื้อ"],
     "t.ship": ["扫码发货交接", "สแกนส่งมอบพัสดุ"], "t.ship.s": ["交给快递：一包一扫", "ส่งให้ขนส่ง: สแกนทีละกล่อง"],
@@ -380,7 +386,7 @@
   // ---------------- 首页 ----------------
   SCREENS.home = {
     show() {
-      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["loc", "🗄"], ["put", "📍"], ["move", "🔀"], ["count", "🧮"], ["spool", "🧵"], ["qc", "🔍"], ["ret", "↩"]] : []), ...(PUR ? [["rcv", "📥"]] : []), ...(["owner", "production"].includes(ME.role) ? [["trial", "🧪"]] : [])];
+      const tiles = [["order", "🔎"], ["ship", "🚚"], ["pack", "✅"], ...(INV ? [["stock", "📦"], ["loc", "🗄"], ["put", "📍"], ["move", "🔀"], ["count", "🧮"], ["spool", "🧵"], ["qc", "🔍"], ["ret", "↩"]] : []), ...(PUR ? [["rcv", "📥"]] : []), ...(["owner", "production"].includes(ME.role) ? [["po", "📑"], ["trial", "🧪"]] : [])];
       view().innerHTML = `<div class="me"><span data-notr>👤 ${esc(ME.display_name || ME.username)}</span>
           <span class="row"><a href="/" class="small">${T("full")}</a><button class="sm" id="logout">${T("logout")}</button></span></div>
         <div class="tiles">${tiles.map(([k, ic]) => `<button class="tile" data-go="${k}"><span class="ti">${ic}</span>${T("t." + k)}<small>${T("t." + k + ".s")}</small></button>`).join("")}</div>
@@ -389,6 +395,7 @@
       $("#logout").addEventListener("click", async () => { try { await api("/api/auth/logout", { json: {} }); } catch { /* 忽略 */ } showLogin(); });
     },
     async scan(code) {
+      if (PO_RE.test(String(code || "").trim()) && ["owner", "production"].includes(ME.role)) return SCREENS.po.scan(code);      // v2.54：生产单二维码
       try {
         const r = await api(`/api/mobile/resolve?code=${encodeURIComponent(code)}`);
         if (r.type === "order") { if (r.alert && r.alert.level === "error") SCAN.bad(); else SCAN.ok(); go("order", code); }
@@ -1228,6 +1235,56 @@
         try { await api(`/api/trial/job/${x.job_id}/result`, { method: "POST", body: fd }); SCAN.ok(); this.it = null; this.list = this.list.filter((y) => y.job_id !== x.job_id); history.replaceState(history.state, "", "#/trial"); this.render(["ok", T("tr.saved")]); }
         catch (e) { SCAN.bad(); toast(srv(e.message), true); }
       });
+    },
+  };
+
+  // ---------------- 生产单（v2.54）：进行中的单子 + 每行进度 + 暂停 / 恢复；扫生产单上的二维码直接打开 ----------------
+  const PO_RE = /^PO\d{6}-\d+$/i;
+  SCREENS.po = {
+    list: [], it: null,
+    async show(arg) {
+      try {
+        const all = (await api("/api/porders")).orders;
+        this.list = all.filter((o) => ["released", "producing", "partial"].includes(o.status));
+        this.it = null;
+        if (arg) { const f = /^\d+$/.test(arg) ? { id: arg } : all.find((o) => o.no.toUpperCase() === arg.toUpperCase()); if (f) this.it = await api(`/api/porders/${f.id}`); }
+      } catch (e) { view().innerHTML = lastMsg("bad", srv(e.message)); return; }
+      this.render();
+    },
+    bar(o) { return `<div class="pobar"><i style="width:${o.pct}%"></i></div>`; },
+    render(msg) {
+      const x = this.it, can = ["owner", "production"].includes(ME.role);
+      if (!x) {
+        view().innerHTML = (msg ? lastMsg(msg[0], msg[1]) : "") + `<div class="card"><b>${T("t.po")}</b>${this.list.length ? `<ul class="list">${this.list.map((o) => `<li class="tap" data-j="${o.id}"><div class="grow">
+          <div class="mono" data-notr><b>${esc(o.no)}</b> ${o.paused ? "⏸" : ""}${o.late ? " ⚠" : ""}</div>${this.bar(o)}<div class="small">${o.done}/${o.qty} · ${T("po.st." + o.status)} · ${T("po.eta")} ${fmtT(o.eta) || "—"}</div></div></li>`).join("")}</ul>`
+          : `<p class="muted">${T("po.none")}</p>`}</div>`;
+        view().querySelectorAll("[data-j]").forEach((el) => el.addEventListener("click", () => go("po", el.dataset.j)));
+        return;
+      }
+      const live = ["released", "producing", "partial"].includes(x.status);
+      view().innerHTML = (msg ? lastMsg(msg[0], msg[1]) : "") + `<div class="card"><div class="mono" data-notr><b>${esc(x.no)}</b></div>
+        <div class="small">${T("po.st." + x.status)}${x.paused ? " · ⏸ " + T("po.paused") : ""}${x.late ? " · ⚠ " + T("po.late") : ""}</div>${this.bar(x)}
+        <div class="small">${x.done}/${x.qty} · ${T("po.eta")} ${fmtT(x.eta) || "—"}${x.due ? " · " + T("po.due") + " " + fmtT(x.due).split(" ")[0] : ""}</div>
+        ${(x.printers || []).length ? `<div class="small" data-notr>${T("po.prs")}: ${x.printers.map((i) => esc(i)).join(", ")}</div>` : ""}
+        ${(x.warnings || []).map((w) => `<div class="warn small">⚠ ${esc(TH() ? w.th : w.zh)}</div>`).join("")}</div>
+        <div class="card"><ul class="list">${x.lines.map((l) => `<li><div class="grow"><div class="mono" data-notr><b>${esc(l.sku)}</b> × ${l.qty}</div>${this.bar(l)}
+          <div class="small" data-notr>${esc(l.name || "")} ${esc(l.color || "")}</div><div class="small">${l.done}/${l.qty}${l.printing ? " 🖨" : ""}</div></div></li>`).join("")}</ul></div>
+        ${can && live ? `<div class="card col"><button class="big" id="po-pz">${x.paused ? T("po.resume") : T("po.pause")}</button></div>` : ""}
+        <div class="card col"><button class="big" id="po-back">${T("u.back")}</button></div>`;
+      $("#po-back").addEventListener("click", () => go("po"));
+      const pz = $("#po-pz");
+      if (pz) pz.addEventListener("click", async () => {
+        if (!x.paused && !(await confirmBox(T("po.pause.q")))) return;
+        try { this.it = await api(`/api/porders/${x.id}/${x.paused ? "resume" : "pause"}`, { json: {} }); SCAN.ok(); this.render(["ok", T("po.saved")]); }
+        catch (e) { SCAN.bad(); toast(srv(e.message), true); }
+      });
+    },
+    async scan(code) {
+      const c = String(code || "").trim();
+      if (!PO_RE.test(c)) { SCAN.bad(); return toast(T("po.unknown", { c }), true); }
+      try { const all = (await api("/api/porders?q=" + encodeURIComponent(c))).orders; const f = all.find((o) => o.no.toUpperCase() === c.toUpperCase());
+        if (!f) { SCAN.bad(); return toast(T("po.unknown", { c }), true); } SCAN.ok(); go("po", String(f.id)); }
+      catch (e) { SCAN.bad(); toast(srv(e.message), true); }
     },
   };
 

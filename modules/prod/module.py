@@ -14,7 +14,8 @@ MODULE = {
     "order": 5,
     "menus": [
         {"tab": "production", "mod": "prod", "zh": "生产看板", "th": "บอร์ดผลิต", "roles": "owner,production"},
-        {"tab": "printers", "mod": "prod", "zh": "打印机", "th": "เครื่องพิมพ์", "roles": "owner,production", "after": "production"},
+        {"tab": "po", "mod": "prod", "zh": "生产单", "th": "ใบสั่งผลิต", "roles": "owner,production", "after": "production"},      # v2.54
+        {"tab": "printers", "mod": "prod", "zh": "打印机", "th": "เครื่องพิมพ์", "roles": "owner,production", "after": "po"},
         {"tab": "files", "mod": "prod", "zh": "文件管理", "th": "จัดการไฟล์", "roles": "owner,production,listing", "after": "printers"},
         {"tab": "recipes", "mod": "prod", "zh": "打印方案 / 切片文件", "th": "แผนการพิมพ์ / ไฟล์สไลซ์", "roles": "owner,production", "after": "files"},
         {"tab": "quality", "mod": "prod", "zh": "质量统计", "th": "สถิติคุณภาพ", "roles": "owner,production", "after": "recipes"},
@@ -25,11 +26,12 @@ MODULE = {
     "owner_only": [("POST", r"^/api/print-files/\d+/confirm-printer$")],
     # v2.53：备货 / 试打 / 打印测试任务：生产角色也能用（接口里再核对一次角色：别的角色不行）
     "production_allow": [("POST", r"^/api/(jobs/stock|trial|trial/check-file|trial/job/\d+/result|trial/\d+/retry|printers/\d+/print-test)$"),
+                         ("POST", r"^/api/porders(/from-orders|/\d+(/(release|pause|resume|cancel))?)?$"), ("GET", r"^/print/po/\d+$"),      # v2.54 生产单
                          ("GET", r"^/api/trial/(skus|printers|pending|history|stats|job/\d+)$")],
     "settings_module": "orders",
     "settings": [("成品库存怎么用", [
         ("stock_auto_use", "订单的商品有成品库存时，自动「用库存发」（先占住数量，发货出库时才扣库存；不够的部分才排打印）", "bool")])],
     "config_defaults": {"stock_auto_use": True},
     "events": {"order.changed": events.on_order_changed, "chain.reschedule": events.on_reschedule},
-    "ui": {"inline": True, "html": "page.html", "eager_js": ["recipe.js", "trial.js", "prod.js", "files.js", "spools.js", "materials.js"], "page_js": [], "boot_js": []},
+    "ui": {"inline": True, "html": "page.html", "eager_js": ["recipe.js", "trial.js", "prod.js", "po.js", "files.js", "spools.js", "materials.js"], "css": ["page.css"], "page_js": [], "boot_js": []},
 }

@@ -141,3 +141,4 @@ main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:10px 10px 1
 .sugrow.first .loc{color:#1d4ed8}
 .steps>div{padding:6px 4px;color:#94a3b8;font-weight:600}
 .steps>div.on{color:#1e3a8a;font-size:17px}.steps>div.done{color:#16a34a}
+.pobar{height:8px;border-radius:4px;background:#e5e7eb;overflow:hidden;margin:4px 0}.pobar i{display:block;height:100%;background:#3b82f6}
