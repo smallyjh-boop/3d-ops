@@ -18,5 +18,5 @@ MODULE = {
         {"tab": "library", "mod": "goods", "zh": "产品库", "th": "คลังสินค้า", "roles": "owner,listing,production"},
         {"tab": "edit", "mod": "goods", "zh": "编辑产品", "th": "แก้ไขสินค้า", "roles": "owner,listing,production", "after": "library", "ghost": True},
     ],
-    "ui": {"inline": True, "html": "page.html", "eager_js": ["library.js", "editor.js", "category.js", "catalog.js", "scene.js", "adimg.js", "imgedit.js", "specmodel.js"], "page_js": [], "boot_js": []},
+    "ui": {"inline": True, "html": "page.html", "eager_js": ["library.js", "editor.js", "category.js", "catalog.js", "scene.js", "adimg.js", "imgedit.js", "specmodel.js", "cursrc.js"], "page_js": [], "boot_js": []},
 }

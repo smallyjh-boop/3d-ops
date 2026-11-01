@@ -1,7 +1,7 @@
 {
   "id": "makerworld",
   "name": "MakerWorld",
-  "version": 1,
+  "version": 2,
   "enabled": true,
   "key_prefix": "mw",
   "domains": [
@@ -39,6 +39,26 @@
       "url": "https://makerworld.com.cn/zh/search/models?keyword={q}"
     }
   ],
+  "list": {
+    "_note": "列表页卡片：模型链接 /models/<编号>，作者链接 /@用户（头像在卡片下面）",
+    "title": [
+      "h3 a[href*='/models/']",
+      "h4 a[href*='/models/']",
+      "a[href*='/models/'] h3",
+      "a[href*='/models/'] h4",
+      "[class*='title' i] a[href*='/models/']",
+      "a[href*='/models/'][class*='title' i]",
+      "a[href*='/models/'][class*='name' i]",
+      "[class*='title' i]"
+    ],
+    "image": [
+      "a[href*='/models/'] img",
+      "[class*='cover' i] img",
+      "[class*='image' i] img"
+    ],
+    "author_link": "/@[^/]+|/user/",
+    "avatar": "avatar|/user/|/profiles?/|/logos?/|/badges?/"
+  },
   "image_rules": [
     {
       "host": "bblmw\\.(?:com|cn)$",

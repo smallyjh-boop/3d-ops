@@ -795,3 +795,15 @@ html.in-app .m-app-chip{display:inline-flex}
 .ux-dot{display:inline-flex;align-items:center;gap:6px}.ux-dot i{width:8px;height:8px;border-radius:50%;background:#9ca3af}
 .ux-dot.ux-ok i{background:var(--ux-ok)}.ux-dot.ux-warn i{background:#f59e0b}.ux-dot.ux-bad i{background:var(--ux-bad)}
 @media (max-width:760px){.ux-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.ux-kpi-v{font-size:20px}.ux-meter{grid-template-columns:1fr 70px;}.ux-meter-t,.ux-meter-nd{grid-column:1/-1;order:3}}
+/* v2.50.1 选品采用的产品：编辑页的模型文件 / 没模型时的 3D 占位块 / 原站图片提醒 / 产品库的采集箱链接 */
+.cur-files{margin-top:8px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#f8fafc}
+.cur-flist{margin-top:6px;display:flex;flex-direction:column;gap:3px}
+.cur-fl{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px}
+.cur-fl a.btn{padding:1px 8px;font-size:12px;text-decoration:none}
+.cur-ext-off{margin-top:6px;padding:5px 9px;border-radius:6px;background:#fffbeb;border:1px solid #fcd34d;color:#92400e}
+.cur-model-empty{border:2px dashed #cbd5e1;border-radius:10px;background:#f8fafc;min-height:220px;display:flex;align-items:center;justify-content:center;text-align:center;padding:18px;margin:8px 0}
+.cur-me-in{max-width:520px}.cur-me-ico{font-size:40px;line-height:1}.cur-me-t{font-size:17px;font-weight:600;margin:6px 0 4px}
+.info-t{color:#1d4ed8}
+.img-card .tag.src-img-tag{background:#fef3c7;color:#92400e}
+.lib-inbox{font-size:13px;padding:3px 10px;border-radius:999px;background:#eff6ff;border:1px solid #bfdbfe;text-decoration:none;white-space:nowrap}
+#img-src-warn .warnbox{margin:6px 0;padding:7px 10px;border-radius:6px;background:#fffbeb;border:1px solid #fcd34d;color:#92400e}

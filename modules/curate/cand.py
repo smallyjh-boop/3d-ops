@@ -1,7 +1,9 @@
 """候选池：扩展在模型网站列表页读到的卡片（标题、图、热度数字），进来就按规则打分，后台再让 AI 按泰国电商判断一批（20 个一起问）。
 有了实测打印时长 / 克数（采集后分析文件、OrcaSlicer 切片、ERP 生产记录）就用实测的重算分数，并校准以后的估算。"""
 import json
+import re
 import time
+from urllib.parse import urlparse
 
 from core.config import load_config
 
@@ -61,11 +63,42 @@ def badge(row, cfg=None):
             "category": row["category"], "category_th": rules.CATEGORY_TH.get(row["category"], ""), "est": est.strip(" ·"), "measured": measured,
             "single": ai.get("single_color"), "reason": str(ai.get("reason") or "")[:160], "reason_th": str(ai.get("reason_th") or "")[:200], "keywords": ai.get("thai_keywords") or [],
             "price": f"฿{rules.tf(ai.get('price_low')):.0f}–{rules.tf(ai.get('price_high')):.0f}" if ai.get("price_low") else "",
-            "ai": bool(ai), "ai_error": row["ai_error"], "status": row["status"], "product_id": row["product_id"]}
+            "ai": bool(ai), "ai_error": row["ai_error"], "status": row["status"], "product_id": row["product_id"],
+            "capture_bad": row["capture_bad"], "capture_bad_th": BAD_TH.get(row["capture_bad"], ""), "refreshing": bool(row["refresh_at"])}
+
+
+BAD_TH = {"没读到模型标题": "ไม่ได้อ่านชื่อโมเดล", "标题是作者 / 店铺名": "ชื่อเป็นชื่อผู้ออกแบบ / ร้าน", "缩略图是头像 / 标志": "รูปย่อเป็นรูปโปรไฟล์ / โลโก้",
+          "缩略图不是模型图片（可能是头像）": "รูปย่อไม่ใช่รูปโมเดล (อาจเป็นรูปโปรไฟล์)", "缩略图太小，像头像": "รูปย่อเล็กเกิน คล้ายรูปโปรไฟล์"}
+AVATAR_RX = re.compile(r"avatar|/users?/|/profiles?/|/logos?/|/badges?/|gravatar|/icons?/|[?&/_-](?:s|size|w)=?(?:16|24|32|40|48|56|64|72|80|96)(?:\D|$)", re.I)
+
+
+def capture_check(url, title, author="", thumb="", thumb_w=0):
+    """列表页读卡片的常见错误（读成了作者那一块）：标题是作者名、缩略图是头像 / 店铺标志。返回原因（空 = 看起来正常）。
+    这样的候选标「采集可能出错」，不交给 AI 打分（AI 会按设计师名字乱猜），可以「重新读取」详情页改正，或批量删掉。"""
+    t, a = (title or "").strip(), (author or "").strip()
+    if not t:
+        return "没读到模型标题"
+    if t.startswith("@") or (a and t.lower() == a.lower()):
+        return "标题是作者 / 店铺名"
+    if thumb:
+        site = sites.site_for_url(url) or {}
+        lst = site.get("list") or {}
+        if AVATAR_RX.search(thumb) or (lst.get("avatar") and re.search(lst["avatar"], thumb, re.I)):
+            return "缩略图是头像 / 标志"
+        host = (urlparse(thumb).hostname or "").lower()
+        if lst.get("model_image") and host in [h.lower() for h in site.get("image_hosts") or []] and not re.search(lst["model_image"], thumb, re.I):
+            return "缩略图不是模型图片（可能是头像）"
+    try:
+        if thumb_w and 0 < float(thumb_w) < 64:
+            return "缩略图太小，像头像"
+    except (TypeError, ValueError):
+        pass
+    return ""
 
 
 def upsert(items, who="", watch_id=0):
-    """扩展交来列表页的卡片：存下来、打分。返回 {原链接: 角标}。"""
+    """扩展交来列表页的卡片：存下来、打分。返回 {原链接: 角标}。
+    卡片读错了（标题是作者名、图是头像）：标「采集可能出错」不交给 AI；已经存着正确资料的不会被错的覆盖。"""
     cfg = load_config()
     c = db.conn()
     out = {}
@@ -85,25 +118,84 @@ def upsert(items, who="", watch_id=0):
             metrics = old
         title = str(it.get("title") or (row["title"] if row else ""))[:200]
         author = str(it.get("author") or (row["author"] if row else ""))[:100]
-        ai = db.jl(row["ai"]) if row else {}
-        pp, ex, cat, sc = compute(cfg, {"title": title, "author": author, "metrics": metrics}, ai, db.jl(row["real"]) if row else None)
         thumb = str(it.get("thumb") or "")[:500]
         thumb = thumb if thumb.startswith("https://") else ""
+        bad = capture_check(url, title, author, thumb, it.get("thumb_w") or 0)
+        reset_ai = False
+        if row and bad and not row["capture_bad"] and row["title"]:
+            title, author, thumb, bad = row["title"], row["author"], "", ""        # 已经有正确的，不用错的覆盖
+        elif row and row["capture_bad"] and not bad:
+            reset_ai = True                                                       # 原来读错了，现在对了：重新让 AI 判断
+        ai = {} if reset_ai else (db.jl(row["ai"]) if row else {})
+        pp, ex, cat, sc = compute(cfg, {"title": title, "author": author, "metrics": metrics}, ai, db.jl(row["real"]) if row else None)
         if row:
             c.execute("UPDATE cur_candidates SET url=?, title=?, thumb=CASE WHEN ?<>'' THEN ? ELSE thumb END, author=?, metrics=?, score=?, parts=?, "
-                      "excluded=?, category=?, last_seen=?, watch_id=CASE WHEN watch_id=0 THEN ? ELSE watch_id END WHERE skey=?",
-                      (url, title, thumb, thumb, author, json.dumps(metrics, ensure_ascii=False), sc, json.dumps(pp), ex, cat, now, watch_id, k))
+                      "excluded=?, category=?, last_seen=?, watch_id=CASE WHEN watch_id=0 THEN ? ELSE watch_id END, capture_bad=? WHERE skey=?",
+                      (url, title, thumb, thumb, author, json.dumps(metrics, ensure_ascii=False), sc, json.dumps(pp), ex, cat, now, watch_id, bad, k))
+            if reset_ai:
+                c.execute("UPDATE cur_candidates SET ai='', ai_at=0, ai_error='' WHERE skey=?", (k,))
         else:
             c.execute("INSERT INTO cur_candidates(skey, platform, url, title, thumb, author, metrics, score, parts, excluded, category, seen_by, "
-                      "first_seen, last_seen, watch_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "first_seen, last_seen, watch_id, capture_bad) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (k, sites.platform(url), url, title, thumb, author, json.dumps(metrics, ensure_ascii=False), sc, json.dumps(pp), ex, cat,
-                       who[:60], now, now, watch_id))
+                       who[:60], now, now, watch_id, bad))
         r2 = c.execute("SELECT * FROM cur_candidates WHERE skey=?", (k,)).fetchone()
         out[str(it.get("url"))] = badge(r2, cfg)
     c.commit()
     from . import pipeline
     pipeline.kick()
     return out
+
+
+def sanity_sweep():
+    """已经存着的候选按同样的规则再查一遍（升级后第一次打开候选池时；标题是别的卡片的作者名也算）。返回新标出的个数。"""
+    c = db.conn()
+    authors = {str(r[0]).strip().lower() for r in c.execute("SELECT DISTINCT author FROM cur_candidates WHERE author<>''")}
+    n = 0
+    for r in c.execute("SELECT id, url, title, author, thumb FROM cur_candidates WHERE capture_bad='' AND product_id=''").fetchall():
+        why = capture_check(r["url"], r["title"], r["author"], r["thumb"])
+        if not why and (r["title"] or "").strip().lower() in authors and (r["title"] or "").strip().lower() != (r["author"] or "").strip().lower():
+            why = "标题是作者 / 店铺名"
+        if why:
+            c.execute("UPDATE cur_candidates SET capture_bad=? WHERE id=?", (why, r["id"]))
+            n += 1
+    c.commit()
+    db.put("sanity_v", 1)
+    return n
+
+
+def refresh_from_detail(skey, data):
+    """「重新读取」：扩展从详情页读到的标题、作者、第一张图改正候选（清掉「采集可能出错」，重新让 AI 判断）。"""
+    c = db.conn()
+    r = c.execute("SELECT * FROM cur_candidates WHERE skey=?", (skey,)).fetchone()
+    if not r:
+        return False
+    title = str(data.get("title") or "").strip()[:200] or r["title"]
+    author = str(data.get("author") or "").strip()[:100] or r["author"]
+    thumb = next((u for u in data.get("image_urls") or [] if isinstance(u, str) and u.startswith("https://")), "")[:500] or r["thumb"]
+    bad = capture_check(r["url"], title, author, thumb)
+    if bad == "缩略图是头像 / 标志" or bad.startswith("缩略图"):
+        thumb, bad = "", capture_check(r["url"], title, author, "")
+    cfg = load_config()
+    pp, ex, cat, sc = compute(cfg, {"title": title, "author": author, "metrics": db.jl(r["metrics"])}, {}, db.jl(r["real"]))
+    c.execute("UPDATE cur_candidates SET title=?, author=?, thumb=?, capture_bad=?, ai='', ai_at=0, ai_error='', score=?, parts=?, excluded=?, category=?, "
+              "refresh_at=0 WHERE id=?", (title, author, thumb, bad, sc, json.dumps(pp), ex, cat, r["id"]))
+    c.commit()
+    from . import pipeline
+    pipeline.kick()
+    return True
+
+
+def delete_bad(ids=None):
+    """删掉「采集可能出错」的候选（没采用过的）。ids 空 = 全部。返回删了几个。"""
+    c = db.conn()
+    q, a = "DELETE FROM cur_candidates WHERE capture_bad<>'' AND product_id=''", []
+    if ids:
+        q += f" AND id IN ({','.join('?' for _ in ids)})"
+        a = [int(i) for i in ids]
+    n = c.execute(q, a).rowcount
+    c.commit()
+    return n
 
 
 AI_PROMPT = (
@@ -126,7 +218,7 @@ def ai_batch(cfg=None, limit=20):
     if not ai_on(cfg):
         return 0
     c = db.conn()
-    rows = c.execute("SELECT * FROM cur_candidates WHERE ai_at=0 AND ai_error='' AND status<>'ignored' ORDER BY last_seen DESC LIMIT ?", (limit,)).fetchall()
+    rows = c.execute("SELECT * FROM cur_candidates WHERE ai_at=0 AND ai_error='' AND capture_bad='' AND status<>'ignored' ORDER BY last_seen DESC LIMIT ?", (limit,)).fetchall()
     if not rows:
         return 0
     items = [{"i": n, "title": r["title"], "author": r["author"], "platform": r["platform"], "metrics": db.jl(r["metrics"])} for n, r in enumerate(rows)]
@@ -164,6 +256,8 @@ def rescore_all(cfg=None):
 def listing(args, owner=True):
     """候选池列表 + 数字卡片。args：min, platform, cat, ex(显示排除的), new(今日新品), watch, q, status"""
     c = db.conn()
+    if not db.get("sanity_v"):
+        sanity_sweep()
     where, a = ["score>=?"], [rules.tf(args.get("min"), 0)]
     if args.get("platform"):
         where.append("platform=?"); a.append(args["platform"])
@@ -175,6 +269,8 @@ def listing(args, owner=True):
         where.append("new_at>=?"); a.append(db.day_start())
     if args.get("watch"):
         where.append("watch_id=?"); a.append(int(rules.tf(args["watch"])))
+    if str(args.get("bad")) == "1":
+        where.append("capture_bad<>''")
     if args.get("q"):
         where.append("(title LIKE ? OR author LIKE ?)"); a += [f"%{args['q']}%"] * 2
     st = args.get("status") or "open"
@@ -191,7 +287,7 @@ def listing(args, owner=True):
         b = badge(r, cfg)
         b.update(id=r["id"], url=r["url"], title=r["title"], thumb=r["thumb"], author=r["author"], platform=r["platform"],
                  platform_name=sites.name_of(r["platform"]), metrics=db.jl(r["metrics"]), new=r["new_at"] >= db.day_start(),
-                 watch_id=r["watch_id"], last_seen=r["last_seen"], market=dem(r["title"], (db.jl(r["ai"]).get("thai_keywords") or [])))
+                 watch_id=r["watch_id"], last_seen=r["last_seen"], market=dem(r["title"], (db.jl(r["ai"]).get("thai_keywords") or []), r["category"]))
         out.append(b)
     t0 = db.day_start()
     k = {"total": c.execute("SELECT COUNT(*) FROM cur_candidates").fetchone()[0],
@@ -199,14 +295,15 @@ def listing(args, owner=True):
                            (rules.tf(cfg.get("cur_alert_score"), 70),)).fetchone()[0],
          "new_today": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE new_at>=? AND excluded=''", (t0,)).fetchone()[0],
          "excluded": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE excluded<>''").fetchone()[0],
-         "wait_ai": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE ai_at=0 AND ai_error=''").fetchone()[0] if ai_on(cfg) else 0}
+         "bad": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE capture_bad<>'' AND product_id=''").fetchone()[0],
+         "wait_ai": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE ai_at=0 AND ai_error='' AND capture_bad=''").fetchone()[0] if ai_on(cfg) else 0}
     hist = [0] * 10
     for r in c.execute("SELECT score FROM cur_candidates WHERE excluded=''"):
         hist[min(9, int(r[0] // 10))] += 1
     reasons = [{"reason": r[0], "reason_th": rules.REASON_TH.get(r[0], ""), "n": r[1]}
                for r in c.execute("SELECT excluded, COUNT(*) FROM cur_candidates WHERE excluded<>'' GROUP BY excluded ORDER BY 2 DESC LIMIT 6")]
     cats = [{"name": r[0], "th": rules.CATEGORY_TH.get(r[0], r[0])} for r in c.execute("SELECT DISTINCT category FROM cur_candidates WHERE category<>'' ORDER BY category")]
-    res = {"rows": out, "kpi": k, "hist": hist, "reasons": reasons, "cats": cats, "ai": ai_on(cfg), "calib": calib(),
+    res = {"rows": out, "kpi": k, "radar": demand.has_radar(), "hist": hist, "reasons": reasons, "cats": cats, "ai": ai_on(cfg), "calib": calib(),
            "alert_score": rules.tf(cfg.get("cur_alert_score"), 70)}
     if not owner:
         for r in res["rows"]:

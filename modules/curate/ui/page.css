@@ -59,3 +59,57 @@ button.mini.ghost:hover, button.ghost:hover { color: #b91c1c; border-color: #fec
 .cur-det .cur-up input { display: none }
 #tab-curate .cur-fbar select { max-width: 200px }
 #tab-curate .cur-tbl th:first-child, #tab-curate .cur-tbl td:first-child:has(input[type=checkbox]) { width: 28px }
+/* v2.50.1：页面头的大按钮、模型站菜单、提醒 */
+#tab-curate .cur-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+#tab-curate .cur-big { font-size: 15px; padding: 9px 18px; font-weight: 600 }
+#tab-curate details.cur-sites { position: relative }
+#tab-curate details.cur-sites > summary { list-style: none; cursor: pointer; padding: 8px 14px; border: 1px solid #cfd4dc; border-radius: 6px; background: #fff; white-space: nowrap; user-select: none }
+#tab-curate details.cur-sites > summary::-webkit-details-marker { display: none }
+#tab-curate details.cur-sites[open] > summary { border-color: var(--accent); color: var(--accent) }
+#tab-curate .cur-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px #0002;
+  padding: 6px; min-width: 260px; display: flex; flex-direction: column }
+#tab-curate .cur-menu a { padding: 8px 10px; border-radius: 6px; text-decoration: none; color: var(--ink); font-weight: 500 }
+#tab-curate .cur-menu a:hover { background: #eff6ff; color: var(--accent) }
+#tab-curate .cur-menu p { margin: 6px 8px 4px; max-width: 280px }
+#tab-curate .cur-note { margin: 0 0 10px; padding: 7px 12px; border: 1px solid #fcd34d; border-radius: 8px }
+#tab-curate .cur-note .mini { margin-left: 6px }
+#tab-curate .cur-ext-note { background: #fff7ed; border-color: #fdba74; color: #9a3412 }
+#tab-curate .cur-frow { flex-wrap: wrap; gap: 6px }
+#tab-curate .cur-frow select, #tab-curate .cur-frow input[type=search] { padding: 5px 8px; font-size: 13px }
+#tab-curate .cur-tbl tr.cur-badrow { background: #fff7ed }
+.info-t { color: #1d4ed8 }
+/* 勾选了才出现的浮动操作条（和订单页一样） */
+.cur-float { position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 39; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #111827; color: #fff; border-radius: 12px; padding: 8px 12px; box-shadow: 0 12px 40px #0004; max-width: calc(100vw - 24px) }
+.cur-float.hidden { display: none }
+.cur-float .fb-n b { font-size: 15px }
+.cur-float > button { background: #1f2937; color: #fff; border-color: #374151; padding: 6px 12px }
+.cur-float > button.primary-lite { background: var(--accent); border-color: var(--accent); color: #fff }
+.cur-float > button.fb-del { color: #fca5a5 }
+.cur-float > button.mini { background: transparent; color: #d1d5db; border-color: #4b5563; padding: 4px 8px }
+#tab-curate.cur-has-sel .cur-body { padding-bottom: 70px }
+/* 采集箱：左边文件夹，右边卡片 */
+.cur-inbox { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 14px; align-items: start }
+.cur-folders { position: sticky; top: 60px; padding: 10px; margin: 0; max-height: calc(100vh - 80px); overflow: auto }
+.cur-fo { display: flex; justify-content: space-between; gap: 6px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 13px }
+.cur-fo:hover { background: #f1f5f9 }
+.cur-fo.on { background: #eff6ff; color: var(--accent); font-weight: 600 }
+.cur-fo-h { font-size: 11px; color: #6b7280; margin: 10px 8px 4px; text-transform: uppercase; letter-spacing: .02em; align-items: center }
+.cur-fo-h .mini { padding: 0 8px }
+.cur-cards { display: flex; flex-direction: column; gap: 8px }
+.cur-ic { display: grid; grid-template-columns: 24px 76px minmax(0, 1fr) auto; gap: 12px; align-items: start; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px }
+.cur-ic.sel { border-color: #93c5fd; background: #f8fbff }
+.cur-ic-sel { margin: 0; padding-top: 26px }
+.cur-ic-main { min-width: 0; display: flex; flex-direction: column; gap: 3px }
+.cur-ic-main b { font-size: 14px }
+.cur-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px }
+.cur-chips .cur-pill { font-size: 12px; padding: 2px 8px }
+.cur-ic-act { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; min-width: 250px }
+.cur-ic-act .mini { white-space: nowrap; justify-content: center }
+.clamp1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.cur-mvlist { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto }
+.cur-qact { display: flex; flex-direction: column; gap: 4px; align-items: stretch }
+.cur-qact .mini { justify-content: center }
+.cur-fcell { min-width: 140px }
+@media (max-width: 1200px) { .cur-ic { grid-template-columns: 24px 64px minmax(0, 1fr) } .cur-ic-act { grid-column: 3; grid-template-columns: repeat(3, auto); justify-content: start; min-width: 0 } }
+@media (max-width: 900px) { .cur-inbox { grid-template-columns: 1fr } .cur-folders { position: static; max-height: none } }

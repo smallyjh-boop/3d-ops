@@ -24,7 +24,7 @@
     } catch { return ''; }
   };
   const idOf = url => { try { const m = decodeURIComponent(new URL(url, location.href).pathname).match(RE); return m ? m[IDG] : url; } catch { return url; } };
-  const states = {}, buttons = {}, info = {}, roots = {}, scores = {}, badges = {}, urlOf = {};
+  const states = {}, buttons = {}, info = {}, roots = {}, scores = {}, badges = {}, urlOf = {}, dlBtn = {};
   let filt = {min: 0, hideDone: false, hideEx: true};
   let needLogin = false, queue = null;
 
@@ -74,18 +74,8 @@
     }
     return out;
   }
-  // 一张卡片只放一个按钮：从链接往上找「只包含这一个模型」的最大的块
-  function cardRoot(a, id) {
-    let el = a;
-    while (el.parentElement && el.parentElement !== document.body) {
-      const p = el.parentElement;
-      const ids = new Set([...p.querySelectorAll('a[href]')].map(x => canon(x.getAttribute('href'))).filter(Boolean).map(idOf));
-      if (ids.size > 1 || (ids.size === 1 && !ids.has(id))) break;
-      el = p;
-      if (el.offsetHeight > 700) break;
-    }
-    return el;
-  }
+  // 卡片的标题 / 图 / 作者（3.1.1：按站点包的 list 规则，作者那一块不算，见 cur_sites.js readCard / listCards）
+  const CS = globalThis.CuratorSites;
 
   if (WATCH) {
     // 关注巡逻：后台标签页里往下翻几屏，读出每张卡片（链接、标题、图、热度、作者），不加按钮
@@ -93,21 +83,8 @@
       const sleep = ms => new Promise(r => setTimeout(r, ms));
       for (let i = 0; i < (scrolls || 1); i++) { window.scrollTo(0, document.body.scrollHeight); await sleep(2500); }
       window.scrollTo(0, 0);
-      const out = [], seen = new Set();
-      for (const a of document.querySelectorAll('a[href]')) {
-        if (!a.querySelector('img')) continue;
-        const url = canon(a.getAttribute('href'));
-        const id = url && idOf(url);
-        if (!url || seen.has(id)) continue;
-        seen.add(id);
-        const root = cardRoot(a, id);
-        const img = root.querySelector('img');
-        const who = [...root.querySelectorAll('a[href]')].find(x => /\/@[^/]+|\/user\/|\/designer\//.test(x.getAttribute('href') || '') && !x.querySelector('img'));
-        const tl = [...root.querySelectorAll('a[href]')].find(x => !x.querySelector('img') && canon(x.getAttribute('href')) === url && (x.innerText || '').trim().length > 3);
-        const title = (tl?.innerText || '').trim() || img?.alt || (root.innerText || '').split('\n').map(x => x.trim()).find(x => x.length > 3) || '';
-        out.push({url, title: title.slice(0, 200), thumb: img?.currentSrc || img?.src || '', author: (who?.innerText || '').trim().slice(0, 80), metrics: readMetrics(root, id)});
-        if (out.length >= 80) break;
-      }
+      const out = CS.listCards(SITE, document, {max: 80}).map(c => ({url: c.url, title: c.title, thumb: c.thumb, thumb_w: c.thumb_w, author: c.author,
+        metrics: readMetrics(c.root, c.id)}));
       const text = document.body?.innerText || '';
       return {items: out, url: location.href, snippet: out.length ? '' : text.slice(0, 1500)};
     };
@@ -117,7 +94,7 @@
   const css = document.createElement('style');
   css.textContent = `.cur-pick{position:absolute;z-index:2147483000;top:6px;left:6px;font:600 12px/1 system-ui,sans-serif;padding:6px 9px;border-radius:999px;border:0;cursor:pointer;white-space:nowrap;
     background:#0f6fde;color:#fff;box-shadow:0 2px 8px #0004;opacity:.95}.cur-pick:hover{opacity:1}
-    .cur-pick.done{background:#e2e8f0;color:#334155}.cur-pick.wait{background:#7c3aed}.cur-pick.err{background:#b91c1c}
+    .cur-pick.done{background:#e2e8f0;color:#334155}.cur-pick.cur-dl{background:#15803d}.cur-pick:disabled{opacity:.6;cursor:wait}.cur-pick.wait{background:#7c3aed}.cur-pick.err{background:#b91c1c}
     .cur-panel{position:fixed;z-index:2147483001;right:14px;bottom:14px;width:310px;background:#1d2330;color:#fff;border-radius:12px;padding:10px 12px;font:13px/1.45 system-ui,"Noto Sans Thai",sans-serif;box-shadow:0 6px 24px #0005}
     .cur-panel.min .cur-body{display:none}.cur-panel a{color:#93c5fd}.cur-head{display:flex;justify-content:space-between;align-items:center;gap:6px;cursor:pointer}
     .cur-panel button.b{padding:3px 8px;border:0;border-radius:6px;font:600 12px system-ui;cursor:pointer;background:#374151;color:#fff}
@@ -151,7 +128,11 @@
       : s === 'failed' ? Z('！失败', '！ไม่สำเร็จ') : Z('＋ 采集', '＋ เก็บ');
     btn.title = s === 'imported' ? Z('已经在 ERP 的选品库里', 'อยู่ในคลังคัดเลือกของ ERP แล้ว') : Z('点一下，把这个模型加入 ERP 的采集队列', 'คลิกเพื่อเพิ่มโมเดลนี้เข้าคิวเก็บข้อมูลของ ERP');
   }
-  const relabel = () => { Object.entries(buttons).forEach(([id, list]) => list.forEach(b => label(b, id))); applyFilter(); };
+  const relabel = () => {
+    Object.entries(buttons).forEach(([id, list]) => list.forEach(b => label(b, id)));
+    Object.entries(dlBtn).forEach(([id, b]) => { const s = states[id]?.state; b.style.display = s === 'imported' || s === 'done' ? '' : 'none'; });
+    applyFilter();
+  };
 
   function renderQueue() {
     const q = queue;
@@ -239,7 +220,8 @@
   }
   let scoreTries = 0, scoreTimer = 0;
   async function requestScores(urls) {
-    const items = urls.map(u => { const id = idOf(u); return {url: u, title: info[id]?.title || '', thumb: info[id]?.thumb || '', metrics: info[id]?.metrics || {}}; });
+    const items = urls.map(u => { const id = idOf(u); return {url: u, title: info[id]?.title || '', thumb: info[id]?.thumb || '', thumb_w: info[id]?.thumb_w || 0,
+      author: info[id]?.author || '', metrics: info[id]?.metrics || {}}; });
     for (let i = 0; i < items.length; i += 60) {
       const res = await send({type: 'cur-score', items: items.slice(i, i + 60)});
       if (!res || !res.scores) continue;
@@ -268,13 +250,12 @@
       chrome.storage.local.set({curFilter: filt}); applyFilter(); };
     box.querySelectorAll('select,input').forEach(x => x.addEventListener('change', save));
   }
-  function addButton(a, url) {
-    const id = idOf(url);
-    const root = cardRoot(a, id);
+  function addButton(card) {
+    const {url, id, root} = card;
     if (root.dataset.curPick) return null;
     root.dataset.curPick = id;
-    const img = root.querySelector('img');
-    info[id] = {title: (root.innerText || '').split('\n').map(x => x.trim()).find(x => x.length > 3) || img?.alt || '', thumb: img?.currentSrc || img?.src || ''};
+    info[id] = {title: card.title, thumb: card.thumb, thumb_w: card.thumb_w, author: card.author};
+    const img = [...root.querySelectorAll('img')].find(x => (x.currentSrc || x.src) === card.thumb) || root.querySelector('img');
     const box = img?.parentElement || root;
     if (getComputedStyle(box).position === 'static') box.style.position = 'relative';
     roots[id] = root; urlOf[id] = url;
@@ -300,11 +281,7 @@
   }
   function scan() {
     const found = [];
-    for (const a of document.querySelectorAll('a[href]')) {
-      if (a.closest('[data-cur-pick]') || !a.querySelector('img')) continue;
-      const url = canon(a.getAttribute('href'));
-      if (url && idOf(url) !== idOf(canon(location.href) || '-')) { const r = addButton(a, url); if (r) found.push(r); }
-    }
+    for (const card of CS.listCards(SITE, document, {skip: a => !!a.closest('[data-cur-pick]')})) { const r = addButton(card); if (r) found.push(r); }
     const here = canon(location.href);
     if (!here) document.querySelector('.cur-fab')?.remove();
     if (here && document.querySelector('.cur-fab')?.dataset.url !== here) {
@@ -317,7 +294,21 @@
       fb.onclick = () => { const s = states[id]?.state; if (!s || s === 'failed') collect(here); else panel.classList.remove('min'); };
       const badge = document.createElement('span'); badge.className = 'cur-score'; badge.textContent = '…';
       badges[id] = badge; urlOf[id] = here;
-      fab.append(fb, badge);
+      // 3.1.1：已经采用过的模型，详情页上「⬇ 下载模型文件到 ERP」（用这台浏览器里原站的登录状态下载，进产品的模型库）
+      const dl = document.createElement('button'); dl.type = 'button'; dl.className = 'cur-pick cur-dl'; dl.style.display = 'none';
+      dl.textContent = Z('⬇ 下载模型文件到 ERP', '⬇ ดาวน์โหลดไฟล์โมเดลเข้า ERP');
+      dl.title = Z('让扩展用这台浏览器里原站的登录状态下载这个模型的文件，直接放进 ERP 产品的模型库', 'ให้ส่วนขยายดาวน์โหลดไฟล์ของโมเดลนี้ด้วยการล็อกอินเว็บต้นทางในเบราว์เซอร์นี้ แล้วใส่ในคลังโมเดลของสินค้าใน ERP');
+      dl.onclick = async () => {
+        dl.disabled = true;
+        const r = await send({type: 'cur-download', url: here});
+        dl.disabled = false;
+        if (!r) return;
+        panel.classList.remove('min');
+        say(r.queued ? Z(`已排队 ${r.queued} 个文件，马上开始下载`, `เข้าคิว ${r.queued} ไฟล์ จะเริ่มดาวน์โหลดเลย`) : r.busy ? Z('已经在下载了', 'กำลังดาวน์โหลดอยู่แล้ว')
+          : r.recollect ? Z('先重新读一遍详情页，读到文件链接后自动下载', 'อ่านหน้ารายละเอียดใหม่ก่อน เจอลิงก์ไฟล์แล้วจะดาวน์โหลดอัตโนมัติ') : Z('文件都已经下载过了', 'ดาวน์โหลดไฟล์ครบแล้ว'));
+      };
+      dlBtn[id] = dl;
+      fab.append(fb, dl, badge);
       document.body.appendChild(fab);
       (buttons[id] = buttons[id] || []).push(fb);
       label(fb, id);

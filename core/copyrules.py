@@ -94,6 +94,9 @@ def problems(p):
     bad = words_in(allt, CLAIM_WORDS)
     if bad:
         warnings.append("文案里有需要证明的功能说法（" + "、".join(bad[:4]) + "），确认产品真能做到再保留")
+    n_src = sum(1 for i in p.get("images") or [] if i.get("file") and i.get("from") == "source" and not i.get("edited"))
+    if n_src:          # v2.50.1：选品从原站下载的图片（可能有原站水印 / logo，也可能有版权）
+        warnings.append(f"还在用原站图片（{n_src} 张）：原站图片，可能有水印，建议换成自己拍的或去水印")
     why = sensitive(names + " " + str((p.get("source") or {}).get("title_original") or ""))
     if why:
         warnings.append(f"泰国市场的敏感品类：{why}，请确认能卖")

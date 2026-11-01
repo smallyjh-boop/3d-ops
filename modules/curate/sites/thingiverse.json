@@ -1,7 +1,7 @@
 {
   "id": "thingiverse",
   "name": "Thingiverse",
-  "version": 1,
+  "version": 2,
   "enabled": true,
   "key_prefix": "tv",
   "domains": [
@@ -30,6 +30,26 @@
       "url": "https://www.thingiverse.com/search?q={q}&type=things&sort=newest"
     }
   ],
+  "list": {
+    "_note": "列表页卡片：上面是作者（头像 + 名字，链接 /<用户名>），中间是图，下面是标题（链接 /thing:<编号>）",
+    "title": [
+      "a[href*='/thing:'][class*='title' i]",
+      "[class*='title' i] a[href*='/thing:']",
+      "[class*='name' i] a[href*='/thing:']",
+      "h2 a[href*='/thing:']",
+      "h3 a[href*='/thing:']",
+      "h4 a[href*='/thing:']",
+      "a[href*='/thing:'] h2",
+      "a[href*='/thing:'] h3",
+      "a[href*='/thing:'] h4"
+    ],
+    "image": [
+      "a[href*='/thing:'] img",
+      "[class*='image' i] img"
+    ],
+    "author_link": "^/(?!thing:|search|tag:|groups|explore|about|categories|customizable|education|apps|make:|collections)[^/:?#]+/?(?:designs)?/?$|/@[^/]+",
+    "avatar": "avatar|/default/|/profiles?/|/logos?/|/badges?/"
+  },
   "image_rules": [
     {
       "host": "^resize\\.thingiverse\\.com$",

@@ -1,7 +1,7 @@
 {
   "id": "printables",
   "name": "Printables",
-  "version": 1,
+  "version": 2,
   "enabled": true,
   "key_prefix": "pr",
   "domains": [
@@ -27,6 +27,30 @@
       "url": "https://www.printables.com/search/models?q={q}"
     }
   ],
+  "list": {
+    "_note": "列表页 / 搜索页的卡片（扩展 3.1.1 cur_sites.js readCard）：作者那一块（/@用户 链接、头像）不算。模型链接 /model/<编号>-<slug>，模型图片在 media.printables.com/media/prints/",
+    "title": [
+      "h2 a[href*='/model/']",
+      "h3 a[href*='/model/']",
+      "h4 a[href*='/model/']",
+      "h5 a[href*='/model/']",
+      "a[href*='/model/'] h2",
+      "a[href*='/model/'] h3",
+      "a[href*='/model/'] h4",
+      "a[href*='/model/'] h5",
+      "[class*='title' i] a[href*='/model/']",
+      "a[href*='/model/'][class*='title' i]",
+      "a[href*='/model/'][class*='name' i]"
+    ],
+    "image": [
+      "a[href*='/model/'] img",
+      "[class*='image' i] img",
+      "picture img"
+    ],
+    "author_link": "/@[^/]+|/social/\\d+",
+    "avatar": "avatar|/media/users?/|/profiles?/|/logos?/",
+    "model_image": "/media/prints/"
+  },
   "image_rules": [
     {
       "host": "^media\\.printables\\.com$",

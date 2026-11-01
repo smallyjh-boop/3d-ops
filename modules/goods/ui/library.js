@@ -6,8 +6,11 @@ const LIB_SEL = new Set();
 const FST_ZH = { draft: "草稿", reviewed: "未试打", verified: "已验证" };
 window.LIB_SEL_IDS = () => LIB_SEL;
 async function loadLibrary() {
-  const [list, g] = await Promise.all([api("/api/products"), api("/api/groups").catch(() => ({ groups: [] }))]);
-  LIB = list; GROUPS = g.groups;
+  // v2.50.1：选品采用的模型先在「选品 → 采集箱」，不进产品库（这里只显示个数和链接）
+  const [list, g] = await Promise.all([api("/api/products?inbox=all"), api("/api/groups").catch(() => ({ groups: [] }))]);
+  LIB = list.filter((p) => !p.inbox); GROUPS = g.groups;
+  const nIn = list.length - LIB.length, li = $("#lib-inbox");
+  if (li) { li.classList.toggle("hidden", !nIn); $("#lib-inbox-n").textContent = nIn; }
   renderGroups();
   renderLibrary();
 }
@@ -76,6 +79,7 @@ function renderLibrary() {
   $("#lib-bulk").classList.toggle("on", LIB_SEL.size > 0);
   $("#btn-lib-del").classList.toggle("hidden", !CAN("products.delete"));
 }
+$("#lib-inbox").addEventListener("click", (e) => { e.preventDefault(); goTab("cur_inbox"); });
 ["#lib-status", "#lib-print", "#lib-sort"].forEach((k) => $(k).addEventListener("change", renderLibrary));
 $("#lib-q").addEventListener("input", renderLibrary);
 $("#lib-all").addEventListener("change", (e) => { libFiltered().forEach((p) => (e.target.checked ? LIB_SEL.add(p.id) : LIB_SEL.delete(p.id))); renderLibrary(); });

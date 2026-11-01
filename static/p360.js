@@ -143,6 +143,14 @@
       const x = LST[st.status] || [st.status, st.status, ""];
       return chip(`${k} ${Z(x[0], x[1])}`, x[2], st.note || "");
     };
+    // v2.50.1 选品采用的产品：模型文件数量 + 「⬇ 下载模型文件」
+    const mf = p.model_files, mfs = (mf && mf.status) || {};
+    const mfTxt = !mf ? "" : mf.n ? Z(`模型文件 ${mf.n} 个`, `ไฟล์โมเดล ${mf.n} ไฟล์`) + (mf.model ? "" : Z("（还没设 3D 模型）", " (ยังไม่ตั้งโมเดล 3D)"))
+      : mfs.queued || mfs.downloading ? Z(`模型文件：等扩展下载 ${(mfs.queued || 0) + (mfs.downloading || 0)} 个`, `ไฟล์โมเดล: รอส่วนขยายดาวน์โหลด ${(mfs.queued || 0) + (mfs.downloading || 0)} ไฟล์`)
+      : mfs.failed ? Z(`模型文件下载失败 ${mfs.failed} 个`, `ดาวน์โหลดไฟล์โมเดลไม่สำเร็จ ${mfs.failed} ไฟล์`) : Z("还没有模型文件", "ยังไม่มีไฟล์โมเดล");
+    const mfH = !mf ? "" : `<div class="p360-mf small"><span class="${mf.n ? "" : mfs.failed ? "p360-bad" : "p360-warn"}">🧊 ${E(mfTxt)}</span>
+      ${mf.can && role !== "production" ? `<button type="button" class="p360-mini" data-p360-act="dlmodel" data-id="${E(p.id)}">⬇ ${E(Z("下载模型文件", "ดาวน์โหลดไฟล์โมเดล"))}</button>` : ""}
+      ${mf.can && mfs.ext && !mfs.ext.online && role !== "production" ? `<div class="p360-muted">${E(Z("要有一台装了扩展、登录了原站的 Chrome 开着", "ต้องมี Chrome ที่ติดตั้งส่วนขยายและล็อกอินเว็บต้นทางเปิดอยู่"))}</div>` : ""}</div>`;
     const head = `<div class="p360-head">
       ${p.image ? `<img class="p360-img" src="${E(p.image)}" alt="" data-zoom data-full="${E(p.image)}">` : `<div class="p360-img p360-noimg">📦</div>`}
       <div class="p360-h-main">
@@ -155,8 +163,9 @@
         </div>
         <div class="p360-chips">
           ${!p.active ? chip(Z("ERP 已下架", "ปิดใน ERP"), "warn") : ""}${p.draft ? chip(Z("草稿", "ฉบับร่าง"), "warn") : ""}${p.license_pending ? chip(Z("许可待核验", "รอตรวจสัญญาอนุญาต"), "bad") : ""}
-          ${lstChip("LZ", lz)}${lstChip("SP", sp)}
+          ${lstChip("LZ", lz)}${lstChip("SP", sp)}${p.model_files && p.model_files.inbox ? chip(Z("在采集箱", "อยู่ในกล่องเก็บ"), "info") : ""}
         </div>
+        ${mfH}
       </div></div>
       <div class="p360-acts">
         <button type="button" class="primary" data-p360-act="edit" data-id="${E(p.id)}">✏️ ${E(Z("编辑产品", "แก้ไขสินค้า"))}</button>
@@ -343,6 +352,12 @@
           if (!confirm(Z("确认已经打开原站看过许可证，可以商用？", "ยืนยันว่าเปิดดูสัญญาอนุญาตที่เว็บต้นทางแล้ว และใช้เชิงพาณิชย์ได้?"))) return;
           await api(`/api/products/${encodeURIComponent(id)}/license`, { json: { verified: true } });
           if (typeof toast === "function") toast(Z("许可已核验", "ตรวจสัญญาอนุญาตแล้ว"));
+          await load(HIST[POS] || id); return;
+        }
+        if (a.dataset.p360Act === "dlmodel") {        // v2.50.1：选品采用的产品，让扩展从原站下载模型文件
+          const r = await api(`/api/cur/products/${encodeURIComponent(id)}/download`, { json: {} });
+          if (typeof toast === "function") toast(r.queued ? Z(`已排队 ${r.queued} 个文件`, `เข้าคิว ${r.queued} ไฟล์`) : r.busy ? Z("已经在下载了", "กำลังดาวน์โหลดอยู่แล้ว")
+            : Z("已让扩展重新读原站详情页，读到文件后自动下载", "ให้ส่วนขยายอ่านหน้ารายละเอียดใหม่ เจอไฟล์แล้วจะดาวน์โหลดอัตโนมัติ"));
           await load(HIST[POS] || id); return;
         }
         if (a.dataset.p360Act === "export") { close(); await goTab("export"); setTimeout(() => setQuery("#exp-q", id), 50); return; }
