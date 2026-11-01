@@ -629,6 +629,11 @@ def stock_add(sku, delta, reason, user="", product_id=None, name="", color=""):
         import logging
         logging.getLogger("3dops").warning("成品库存流水没记上（%s %+d）：%s", sku, int(delta), e)
     c.commit()
+    try:   # v2.53：成品库存变了 → 广播事件（上架模块的库存同步收听，推到各店铺）
+        from . import modules
+        modules.emit("stock.changed", sku=sku.upper(), delta=int(delta), reason=reason)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def stock_qty(sku):

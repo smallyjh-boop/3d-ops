@@ -74,3 +74,9 @@ def product_online(pid, skus=()):
                     "updated": r["updated"] or None,
                     "skus": [{k: s.get(k) for k in ("seller_sku", "price", "special_price", "qty", "status")} for s in (mine or sk)]})
     return out
+
+
+def stock_sync_recent(skus, limit=10):
+    """商品 360 抽屉（v2.53）：这些 SKU 最近的库存同步记录 [{ts, sku, shop, old, new, reason, reason_zh, ok, result}]。"""
+    from . import stocksync
+    return stocksync.recent_for(skus, limit)

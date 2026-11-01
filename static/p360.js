@@ -192,7 +192,7 @@
     if (d.reviews) kp.push({ label: Z("评分", "คะแนนรีวิว"), value: k.rating != null ? `★ ${k.rating}` : "—", sub: k.reviews ? Z(`${k.reviews} 条评价`, `${k.reviews} รีวิว`) : Z("还没有评价", "ยังไม่มีรีวิว"),
       tone: k.rating == null ? "" : k.rating < 4 ? "warn" : "ok" });
     const kpis = window.UX ? `<div class="p360-k p360-k${kp.length}">${UX.kpis(kp)}</div>` : "";
-    return head + kpis + [secStock(d), secOnline(d), secSales(d), secComp(d), secReviews(d), secPlans(d), secChanges(d), secJobs(d), secOrders(d)].join("");
+    return head + kpis + [secStock(d), secOnline(d), secStockSync(d), secSales(d), secComp(d), secReviews(d), secPlans(d), secChanges(d), secJobs(d), secOrders(d)].join("");
   }
 
   function secStock(d) {
@@ -212,6 +212,18 @@
     </tr>`).join("");
     return card(Z("库存与货位", "สต็อกและตำแหน่ง"), `<div class="p360-tw"><table class="p360-t"><thead>${th}</thead><tbody>${rows}</tbody></table></div>`, { n: vs.length });
   }
+
+  function secStockSync(d) {
+    const h = d.stocksync;
+    if (!h) return "";
+    const RZ = { ship: ["出货", "ส่งของ"], in: ["入库", "รับเข้า"], produce: ["生产完成", "ผลิตเสร็จ"], manual: ["手动", "ด้วยมือ"], timer: ["定时", "ตามเวลา"], rule: ["规则变更", "เปลี่ยนกฎ"], event: ["库存变化", "สต็อกเปลี่ยน"] };
+    if (!h.length) return card(Z("库存同步记录", "ประวัติซิงก์สต็อก"), empty("还没有同步记录", "ยังไม่มีประวัติซิงก์"));
+    const rows = h.map((x) => `<tr><td class="small muted" data-notr>${E(new Date(x.ts * 1000).toLocaleString("sv").slice(5, 16))}</td><td class="mono" data-notr>${E(x.sku.replace(p360id(d) + "-", "-"))}</td>
+      <td data-notr>${E(x.shop || "")}</td><td class="r" data-notr>${x.old == null ? "—" : x.old} → <b>${x.new == null ? "—" : x.new}</b></td>
+      <td>${E(Z(...(RZ[x.reason] || [x.reason, x.reason])))}</td><td class="${x.ok ? "ok" : "bad"}">${x.ok ? "✔" : "✗"}</td></tr>`).join("");
+    return card(Z("库存同步记录", "ประวัติซิงก์สต็อก"), `<div class="p360-tw"><table class="p360-t small"><thead><tr><th>${E(Z("时间", "เวลา"))}</th><th>SKU</th><th>${E(Z("店铺", "ร้าน"))}</th><th class="r">${E(Z("库存", "สต็อก"))}</th><th>${E(Z("原因", "เหตุผล"))}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`, { n: h.length });
+  }
+  const p360id = (d) => (d.product && d.product.id) || "";
 
   function secOnline(d) {
     if (!d.online) return "";
