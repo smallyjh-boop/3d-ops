@@ -55,7 +55,18 @@ _inited = set()
 COLUMNS = [("cur_candidates", "capture_bad", "TEXT DEFAULT ''"),      # 「采集可能出错」的原因（标题 = 作者名、缩略图是头像……）：不交给 AI
            ("cur_candidates", "refresh_at", "REAL DEFAULT 0"),         # 排队重新从详情页读的时间
            ("cur_collect", "copy", "INTEGER DEFAULT 0"),               # 0 = 采用后要写 AI 文案；1 = 写过了 / 不用写
-           ("cur_collect", "kind", "TEXT DEFAULT ''")]                 # '' = 采用的产品草稿；refresh = 只重新读候选的标题 / 图（不建产品）
+           ("cur_collect", "kind", "TEXT DEFAULT ''"),                 # '' = 采用的产品草稿；refresh = 只重新读候选的标题 / 图（不建产品）
+           # v2.51.x（扩展 3.1.2）：采集队列管理 + 两条线并行
+           ("cur_collect", "prio", "INTEGER DEFAULT 0"),               # 优先级 1 高 / 0 普通 / -1 低（扩展领活：优先级 → pos → id）
+           ("cur_collect", "held", "INTEGER DEFAULT 0"),               # 1 = 这个任务手动暂停
+           ("cur_collect", "hidden", "INTEGER DEFAULT 0"),             # 1 = 从队列里拿掉了（删除 / 清理 / 产品已删除；这一行还留着文案 / 整理标记）
+           ("cur_files", "prio", "INTEGER DEFAULT 0"),
+           ("cur_files", "held", "INTEGER DEFAULT 0"),
+           ("cur_files", "pos", "REAL DEFAULT 0"),                     # 0 = 按 id（先来后到）
+           ("cur_files", "got", "INTEGER DEFAULT 0"),                  # 下载进度（字节）
+           ("cur_files", "total", "INTEGER DEFAULT 0"),
+           ("cur_files", "started_at", "REAL DEFAULT 0"),
+           ("cur_files", "beat", "REAL DEFAULT 0")]                    # 扩展最后一次报进度的时间（3 分钟没进度 = 卡住，放回队列）
 
 
 def init():

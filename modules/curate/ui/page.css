@@ -113,3 +113,13 @@ button.mini.ghost:hover, button.ghost:hover { color: #b91c1c; border-color: #fec
 .cur-fcell { min-width: 140px }
 @media (max-width: 1200px) { .cur-ic { grid-template-columns: 24px 64px minmax(0, 1fr) } .cur-ic-act { grid-column: 3; grid-template-columns: repeat(3, auto); justify-content: start; min-width: 0 } }
 @media (max-width: 900px) { .cur-inbox { grid-template-columns: 1fr } .cur-folders { position: static; max-height: none } }
+/* v2.51.x 采集队列：进度条、任务列表（勾选、拖动排序）、网站节奏 */
+.cur-prog { display: inline-block; width: 110px; height: 6px; border-radius: 3px; background: #e5e7eb; overflow: hidden; vertical-align: middle; margin-right: 6px }
+.cur-prog i { display: block; height: 100%; background: var(--accent) }
+#tab-curate .cur-jobs td { vertical-align: top }
+#tab-curate .cur-jobs tr.cur-qsel { background: #f8fbff }
+#tab-curate .cur-jobs td.cur-drag { cursor: grab; color: #9ca3af; width: 18px; user-select: none }
+#tab-curate .cur-jobs tr.cur-dropto td { border-top: 2px solid var(--accent) }
+#tab-curate .cur-jobs button.mini.ghost { padding: 0 6px }
+#tab-curate .cur-sitetbl { margin-top: 8px }
+.cur-float select { width: auto; background: #1f2937; color: #fff; border-color: #374151; padding: 5px 8px }

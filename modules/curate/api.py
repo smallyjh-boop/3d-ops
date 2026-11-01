@@ -97,7 +97,8 @@ def cur_cand_recollect():
 def cur_cand_delete_bad():
     """批量「删除采集错误的」（没采用过的）。"""
     b = _b()
-    return _go(lambda: {"deleted": cand.delete_bad(b.get("ids") or None)})
+    # 它们排着的「重新读取」任务一起删掉（以前留在采集队列里，扩展读到才发现「候选已经删掉了」，白白占着队列）
+    return _go(lambda: {"deleted": cand.delete_bad(b.get("ids") or None), "jobs_canceled": watch.cancel_orphans()})
 
 
 @bp.post("/api/cur/candidates/adopt")
@@ -128,6 +129,7 @@ def cur_queue():
     """采集队列页：等读详情页的、文件下载进度、最近采用的产品草稿（许可状态、图片 / 文件 / 规格到了没有）。"""
     def go():
         from core import store
+        watch.cancel_orphans()                     # 候选 / 产品草稿已删除的任务：自动取消，不当失败显示
         c = db.conn()
         rows = []
         for r in c.execute("SELECT * FROM cur_candidates WHERE product_id<>'' ORDER BY adopted_at DESC LIMIT 60").fetchall():
@@ -147,8 +149,6 @@ def cur_queue():
                          "specs": len(p.get("specs") or []), "model": bool(p.get("model")), "copy": bool((p.get("copy") or {}).get("title_th")),
                          "ip": (p.get("ip_risk") or {}).get("status") == "pending", "fstat": watch.file_status(p["id"]),
                          "inbox": bool(p.get("inbox"))})
-        dl = [dict(r) for r in c.execute("SELECT id, product_id, name, state, error, updated_at FROM cur_files WHERE kind<>'image' AND state IN "
-                                         "('queued','downloading','failed') ORDER BY state='failed', updated_at DESC LIMIT 40")]
         k = {"waiting": c.execute("SELECT COUNT(*) FROM cur_collect WHERE state IN ('waiting','running')").fetchone()[0],
              "files": c.execute("SELECT COUNT(*) FROM cur_files WHERE kind<>'image' AND state IN ('queued','downloading')").fetchone()[0],
              "failed": c.execute("SELECT COUNT(*) FROM cur_files WHERE kind<>'image' AND state='failed'").fetchone()[0],
@@ -160,8 +160,29 @@ def cur_queue():
             a = t0 - i * 86400
             days.append({"day": time.strftime("%m-%d", time.gmtime(a + 7 * 3600)),
                          "n": c.execute("SELECT COUNT(*) FROM cur_candidates WHERE adopted_at>=? AND adopted_at<?", (a, a + 86400)).fetchone()[0]})
-        return {"rows": rows, "downloads": dl, "collect": watch.collect_queue(), "kpi": k, "days": days, "pace": watch.overview(), "ext": watch.ext_status()}
+        return {"rows": rows, "jobs": watch.jobs(request.args.to_dict()), "status": watch.queue_status(), "collect": watch.collect_queue(), "kpi": k,
+                "days": days, "pace": watch.overview(), "ext": watch.ext_status()}
     return _go(go)
+
+
+@bp.post("/api/cur/jobs/action")
+def cur_jobs_action():
+    """采集队列的批量操作（勾选的任务 c<编号> = 详情页、f<编号> = 文件下载）：delete / retry / hold / resume / prio / top / bottom / up / down / move。"""
+    b = _b()
+    return _go(lambda: watch.job_action([str(x) for x in (b.get("ids") or [])][:500], b.get("action") or "", b.get("prio"), b.get("before")))
+
+
+@bp.post("/api/cur/queue/cleanup")
+def cur_queue_cleanup():
+    """「清理失败 / 无效任务」。"""
+    return _go(lambda: watch.cleanup())
+
+
+@bp.post("/api/cur/sites/<site>/hold")
+def cur_site_hold(site):
+    """手动暂停 / 继续一个网站（采集、下载、巡逻一起）；继续也会清掉风控暂停。"""
+    b = _b()
+    return _go(lambda: watch.hold_site(site, bool(b.get("on"))) or {"pace": watch.overview()})
 
 
 @bp.post("/api/cur/products/<pid>/download")
@@ -403,6 +424,13 @@ def ext_files_next():
 def ext_file_upload(fid):
     name = request.args.get("name") or ""
     return _go(lambda: watch.file_uploaded(fid, name, request.stream))
+
+
+@bp.post("/api/v1/curate/ext/files/<int:fid>/progress")
+def ext_file_progress(fid):
+    """扩展 3.1.2：下载进度（也是心跳）。cancel = 任务被删掉 / 取消了，扩展停下这个下载。"""
+    b = _b()
+    return _go(lambda: watch.file_progress(fid, b.get("got"), b.get("total")))
 
 
 @bp.post("/api/v1/curate/ext/files/<int:fid>/fail")

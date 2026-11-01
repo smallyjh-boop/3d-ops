@@ -287,7 +287,7 @@ for w in ("贴链接采集", "打开模型站去采集", "cur-float", "采集箱
 ed = open(os.path.join(APP, "modules", "goods", "ui", "cursrc.js"), encoding="utf-8").read()
 ok("还没有模型文件" in ed and "从原站下载模型文件" in ed and "原站图片，可能有水印" in ed and "要有一台装了扩展、登录了原站的 Chrome 开着" in ed, "editor: model placeholder + download / upload + source image notice")
 man = json.load(open(os.path.join(APP, "extension", "manifest.json"), encoding="utf-8"))
-ok(man["version"] == integrations.EXT_LATEST == "3.1.1", "extension 3.1.1")
+ok(man["version"] == integrations.EXT_LATEST == "3.1.2", "extension 3.1.2")
 pk = open(os.path.join(APP, "extension", "cur_picker.js"), encoding="utf-8").read()
 ok("下载模型文件到 ERP" in pk and "listCards" in pk and "cur-download" in open(os.path.join(APP, "extension", "cur_bg.js"), encoding="utf-8").read(), "extension: detail-page download button + shared card reader")
 print("ERRORS", E_)
