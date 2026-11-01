@@ -270,10 +270,21 @@ def spools_print():
            ".c{font-size:20px;font-weight:bold}@media print{.noprint{display:none}.lb{border:none;page-break-inside:avoid}}")
     out = [f"<!doctype html><html><head><meta charset='utf-8'><title>料卷标签</title><style>{css}</style></head><body>"
            "<p class='noprint'><button onclick='print()'>打印 / พิมพ์</button></p>"]
+    where, qr = {}, None
+    try:                          # v2.53：标签带二维码（手机扫码上架 / 上机）和放在哪个货位（仓库模块开着时）
+        from core import modules
+        m = modules.public("inv")
+        if m is not None and hasattr(m, "spool_locs"):
+            where = m.spool_locs()
+            from modules.inv import qr
+    except Exception:  # noqa: BLE001
+        where = {}
     for r in rows:
-        out.append(f"<div class='lb'><div class='c'>{h(r['code'])}</div><div><b>{h(r['material'])} {h(r['color'])}</b> "
+        lc = (where.get(r["id"]) or {}).get("code") or ""
+        q = f"<div style='float:right;width:18mm;height:18mm'>{qr.svg(r['code'], 18)}</div>" if qr else ""
+        out.append(f"<div class='lb'>{q}<div class='c'>{h(r['code'])}</div><div><b>{h(r['material'])} {h(r['color'])}</b> "
                    f"{h(r.get('brand') or '')} {r['net_g']:.0f}g</div><div>{labels.code128_svg(r['code'], 22, 1)}</div>"
-                   f"<div>入库 {fmt(r['created_at'])}</div></div>")
+                   f"<div>入库 {fmt(r['created_at'])}{(' · 📍 ' + h(lc)) if lc else ''}</div></div>")
     out.append("</body></html>")
     return app.response_class("".join(out), mimetype="text/html")
 

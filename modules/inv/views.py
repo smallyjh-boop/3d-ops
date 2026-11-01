@@ -20,21 +20,54 @@ def is_low(it, stocked):
     return it.get("reorder_point") is not None and (it.get("qty") or 0) <= it["reorder_point"] and it["id"] in stocked
 
 
-def listing(view="stock", category="", q=""):
+def _split():
+    """v2.53：每个物品放在哪些货位：{物品id: [{code, qty, ztype, zone}]}（拣货区在前、按走路顺序）"""
+    from . import locations as L, wms
+    c = db.conn()
+    try:
+        locs = wms._locs(c, active=False)
+        rows = wms._qty_rows(c)
+    except Exception:  # noqa: BLE001  货位表还没建
+        return {}
+    out = {}
+    for r in rows:
+        l = locs.get(r["loc_id"])
+        if l:
+            out.setdefault(r["item_id"], []).append({"code": l["code"], "qty": round(r["qty"], 6), "ztype": l["ztype"], "zone": l["zone"]})
+    for v in out.values():
+        v.sort(key=lambda x: (0 if x["ztype"] == "pick" else 1, L.sort_key(x["code"])))
+    return out
+
+
+def zone_options():
+    """库存页「区」筛选：[{value, ztype, zone, name}]（区类型 + 每个区）"""
+    from . import wms
+    try:
+        zs, _wn, _d = wms.zinfo()
+        have = {r[0] for r in db.conn().execute("SELECT DISTINCT zone FROM inv_locations WHERE active=1")}
+    except Exception:  # noqa: BLE001
+        return []
+    types = sorted({(zs.get(z) or {}).get("ztype", "pick") for z in have}, key=lambda t: list(wms.ZTYPES).index(t) if t in wms.ZTYPES else 99)
+    return ([{"value": "t:" + t, "ztype": t} for t in types] +
+            [{"value": "z:" + z, "zone": z, "ztype": (zs.get(z) or {}).get("ztype", "pick"), "name": (zs.get(z) or {}).get("name", "")}
+             for z in sorted(have)])
+
+
+def listing(view="stock", category="", q="", zone="", loc=""):
+    """zone（v2.53）：t:区类型 / z:区字母 / unplaced 待上架；loc：货位编号开头（A1、A1-02 …）"""
     view = view if view in VIEWS else "stock"
     rows = inv.items(category, q, False, view == "inactive")
     stocked = _stocked_ids()
-    nloc, placed = {}, {}                        # v2.52：放在几个货位、货位上一共多少（其余 = 待上架）
-    try:
-        for r in db.conn().execute("SELECT item_id, COUNT(*) n, SUM(qty) q FROM inv_loc_qty WHERE qty>0 GROUP BY item_id"):
-            nloc[r["item_id"]], placed[r["item_id"]] = r["n"], r["q"] or 0
-    except Exception:  # noqa: BLE001  货位表还没建
-        pass
+    split = _split()
+    loc = str(loc or "").strip().upper()
     out = []
     for it in rows:
+        where = split.get(it["id"], [])
+        placed = sum(x["qty"] for x in where)
         it["stocked"] = it["id"] in stocked
-        it["loc_n"] = nloc.get(it["id"], 0)
-        it["unplaced"] = round(max(0.0, (it.get("qty") or 0) - placed.get(it["id"], 0)), 6) if nloc.get(it["id"]) or it.get("location") else 0
+        it["loc_n"] = len(where)
+        it["locs"] = where
+        it["unplaced"] = round(max(0.0, (it.get("qty") or 0) - placed), 6) if where or it.get("location") else 0
         it["low"] = is_low(it, stocked)
         has = abs(it.get("qty") or 0) > 1e-9 or (it.get("transit") or 0) > 0
         if view == "inactive" and it.get("active"):
@@ -42,6 +75,14 @@ def listing(view="stock", category="", q=""):
         if view == "stock" and not (has or it["low"]):
             continue
         if view == "zero" and has:
+            continue
+        if zone == "unplaced" and it["unplaced"] <= 1e-9 and not (has and not where):
+            continue
+        if zone.startswith("t:") and not any(x["ztype"] == zone[2:] for x in where):
+            continue
+        if zone.startswith("z:") and not any(x["zone"] == zone[2:] for x in where):
+            continue
+        if loc and not any(x["code"].startswith(loc) for x in where):
             continue
         out.append(it)
     return out

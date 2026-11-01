@@ -9,7 +9,7 @@ from core import db
 from core import inventory as inv
 
 from . import locations as L
-from . import wms
+from . import flows, wms
 
 
 def is_loc_doc(doc_id, c=None):
@@ -35,8 +35,8 @@ def start(area, user="", note="", category=""):
             ids.add(int(l["fixed_item"]))
         for iid in ids:
             it = wms._item(c, iid)
-            if it and it["active"] and (not category or it["category"] == category):
-                pairs.append((l, iid))
+            if it and it["active"] and (not category or it["category"] == category) and not flows.spool_item(c, iid):
+                pairs.append((l, iid))       # v2.53：按料卷管的耗材用料卷称重盘点
     item_ids = sorted({iid for _l, iid in pairs})
     label = ",".join(L.norm_code(p) for p in parts)
     d = inv.stocktake_start(category or "", user, note, label, item_ids=item_ids, allow_empty=True)
@@ -112,7 +112,7 @@ def summary(doc_id):
     d = inv.doc(doc_id)
     if not d:
         raise ValueError("没有这张盘点单")
-    items = {r["id"]: r for r in c.execute("SELECT id, code, name_zh, name_th, unit FROM inv_items")}
+    items = {r["id"]: r for r in c.execute("SELECT id, code, name_zh, name_th, unit, avg_cost FROM inv_items")}
     locs = []
     for r in c.execute("SELECT * FROM inv_loc_count_locs WHERE doc_id=?", (d["id"],)):
         rows = []
@@ -122,7 +122,8 @@ def summary(doc_id):
                 continue
             book = x["expected"] if d["status"] != "draft" else wms.loc_qty(c, x["item_id"], r["loc_id"])
             rows.append({"item_id": x["item_id"], "code": it["code"], "name_zh": it["name_zh"], "name_th": it["name_th"], "unit": it["unit"],
-                         "book": book, "counted": x["counted"], "diff": None if x["counted"] is None else round(x["counted"] - book, 6)})
+                         "book": book, "counted": x["counted"], "diff": None if x["counted"] is None else round(x["counted"] - book, 6),
+                         "amount": None if x["counted"] is None else round((x["counted"] - book) * float(it["avg_cost"] or 0), 2)})
         rows.sort(key=lambda x: x["code"])
         locs.append({"code": r["code"], "loc_id": r["loc_id"], "done": bool(r["done"]), "by": r["counted_by"] or "", "at": r["counted_at"],
                      "rows": rows, "diffs": sum(1 for x in rows if x["diff"])})
@@ -131,7 +132,10 @@ def summary(doc_id):
     d["by_location"] = bool(locs)
     d["progress"] = {"done": sum(1 for x in locs if x["done"]), "total": len(locs),
                      "diffs": sum(x["diffs"] for x in locs), "plus": sum(x["diff"] for l in locs for x in l["rows"] if (x["diff"] or 0) > 0),
-                     "minus": sum(x["diff"] for l in locs for x in l["rows"] if (x["diff"] or 0) < 0)}
+                     "minus": sum(x["diff"] for l in locs for x in l["rows"] if (x["diff"] or 0) < 0),
+                     # v2.53：差异折成钱（盘盈 / 盘亏，按平均单价；没有金额权限的人看不到）
+                     "amount": {"plus": round(sum(x["amount"] for l in locs for x in l["rows"] if (x["amount"] or 0) > 0), 2),
+                                "minus": round(sum(x["amount"] for l in locs for x in l["rows"] if (x["amount"] or 0) < 0), 2)}}
     return d
 
 

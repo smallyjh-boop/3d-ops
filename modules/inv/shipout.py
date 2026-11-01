@@ -146,7 +146,9 @@ def ship_order(oid, user=""):
         if not merged:
             return None
         try:
-            d = docs.create("ship", list(merged.values()), f"订单 {o['order_no']}", user or "系统", ref=f"order:{oid}", allow_negative=True)
+            from . import flows, wms            # v2.53：包材先从打包台 / 包材区扣，成品从拣货区扣
+            with wms.prefer(flows.pack_prefer()):
+                d = docs.create("ship", list(merged.values()), f"订单 {o['order_no']}", user or "系统", ref=f"order:{oid}", allow_negative=True)
         except Exception:
             c.execute("DELETE FROM inv_order_out WHERE order_id=? AND doc_id IS NULL", (oid,))     # v2.40：没开成 → 以后还能再出库
             c.commit()

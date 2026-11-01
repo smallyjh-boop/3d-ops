@@ -14,6 +14,7 @@ import app as A
 from core import db, config, inventory as inv, production, store
 from modules.inv import locations as L
 C = A.app.test_client()
+config.save_config({"inv_qc_on": False})       # v2.53 起打印出来的成品先进待检区；这里测的是原来的上架规则
 loc_of = lambda iid: inv.get_item(iid)["location"]
 # 编号
 ok(L.norm_code("a1-2-3") == "A1-02-03" and L.parse("A1-02-03") == ("A", 1, 2, 3) and L.parse("A-01-03") is None, "code normalize / parse")

@@ -38,8 +38,9 @@ def inv_items():
     a = request.args
     if a.get("view"):            # v2.32：库存 / 物品资料 / 没库存 / 已停用
         from modules.inv import views
-        return jsonify({"ok": True, "items": views.listing(a.get("view"), a.get("category") or "", (a.get("q") or "").strip()),
-                        "counts": views.counts()})
+        return jsonify({"ok": True, "items": views.listing(a.get("view"), a.get("category") or "", (a.get("q") or "").strip(),
+                                                           a.get("zone") or "", (a.get("loc") or "").strip()),
+                        "counts": views.counts(), "zones": views.zone_options()})
     return jsonify({"ok": True, "items": inv.items(a.get("category") or "", (a.get("q") or "").strip(), a.get("low") == "1", a.get("all") == "1")})
 
 
@@ -443,7 +444,7 @@ def inv_wms_putaway():
     b = request.get_json(force=True) or {}
     if b.get("all"):
         return _ok(lambda: {"done": _loc.assign_all(_uname())})
-    return _ok(lambda: wms.putaway(int(b.get("item_id") or 0), b.get("code"), b.get("qty"), _uname(), bool(b.get("force"))))
+    return _ok(lambda: wms.putaway(int(b.get("item_id") or 0), b.get("code"), b.get("qty"), _uname(), bool(b.get("force")), b.get("from") or ""))
 
 
 @bp.post("/api/inv/wms/move")
@@ -477,3 +478,148 @@ def inv_wms_task_act(tid, act):
         return _ok(lambda: wms.task_cancel(tid, _uname()) or {})
     return err("操作不对")
 
+
+
+# ---------------- v2.53：一本库存按区管：料卷货位、生产区（打印机 · 槽）、待检 / 退货 / 次品、库存金额 ----------------
+def _flows():
+    from modules.inv import flows
+    return flows
+
+
+@bp.get("/api/inv/value")
+def inv_value():
+    """库存金额：按区类型 / 区 / 分类、还够几天、很久没动的（金额字段只给有金额权限的人）。"""
+    return jsonify({"ok": True, **_flows().value_report(request.args.get("slow_days") or None)})
+
+
+@bp.get("/api/inv/printer-locs")
+def inv_printer_locs():
+    f = _flows()
+    f.sync_printers()
+    rows = [dict(r) for r in db.conn().execute("SELECT * FROM inv_printer_locs ORDER BY shelf")]
+    return jsonify({"ok": True, "printers": rows, "zone": f.zone_letter(db.conn(), "production", create=False)})
+
+
+@bp.get("/api/inv/spools")
+def inv_spools():
+    """料卷（一卷一行）+ 放在哪个货位 + 提醒。"""
+    from core import materials
+    f = _flows()
+    try:
+        f.sync_printers()
+    except Exception:  # noqa: BLE001
+        pass
+    a = request.args
+    rows = materials.spools(a.get("material") or "", a.get("color") or "", a.get("status") or "active", "")
+    where = f.spool_locs()
+    z = (a.get("loc") or "").strip().upper()
+    out = []
+    for s in rows:
+        s = dict(s)
+        s.pop("price", None)
+        s["loc"] = where.get(s["id"])
+        if z == "UNPLACED" and s["loc"]:
+            continue
+        if z and z != "UNPLACED" and not (s["loc"] and s["loc"]["code"].startswith(z)):
+            continue
+        out.append(s)
+    return jsonify({"ok": True, "items": out, "alerts": f.spool_alerts(), "tare_g": f.tare_g(),
+                    "stats": {"n": len(out), "grams": round(sum(max(0, x["remaining_g"] or 0) for x in out)),
+                              "unplaced": sum(1 for x in out if not x["loc"]), "loaded": sum(1 for x in out if x["status"] == "loaded")}})
+
+
+@bp.post("/api/inv/spools/<sid>/<act>")
+def inv_spool_act(sid, act):
+    """料卷：put {code} 放到货位（扫打印机 · 槽 = 上机）/ load {printer, slot} / unload {to, grams} / weigh {gross, tare}"""
+    f = _flows()
+    b = request.get_json(force=True) or {}
+    u = _uname()
+    if act == "put":
+        return _ok(lambda: {"spool": f.spool_put(sid, b.get("code") or "", u)})
+    if act == "load":
+        return _ok(lambda: {"spool": f.spool_load(sid, b.get("printer") or "", b.get("slot") or "", u)})
+    if act == "unload":
+        return _ok(lambda: {"spool": f.spool_unload(sid, b.get("to") or "", b.get("grams"), u)})
+    if act == "weigh":
+        return _ok(lambda: {"result": f.spool_weigh(sid, b.get("gross"), u, b.get("tare")), "spool": f.spool_info(sid)})
+    return err("操作不对")
+
+
+@bp.post("/api/inv/spools/count")
+def inv_spool_count():
+    """料卷称重盘点：{code: 货位（可空）, entries: [{code: 料卷, gross: 毛重 g}]}"""
+    b = request.get_json(force=True) or {}
+    return _ok(lambda: _flows().spool_count(b.get("entries") or [], b.get("code") or "", _uname()))
+
+
+@bp.get("/api/inv/held/<ztype>")
+def inv_held(ztype):
+    """待检区 / 退货区 / 次品区 / 暂存区里放着的：[{item, from, qty, suggest}]"""
+    if ztype not in ("qc", "returns", "defect", "staging"):
+        return err("区的类型不对")
+    return jsonify({"ok": True, "items": _flows().held_list(ztype)})
+
+
+def _iid(b):
+    v = b.get("item_id") or b.get("code")
+    it = inv.get_item(str(v).upper() if v and not str(v).isdigit() else v) if v else None
+    if not it:
+        raise ValueError("没有这个物品")
+    return it["id"]
+
+
+@bp.post("/api/inv/qc/<act>")
+def inv_qc(act):
+    """质检：pass {item_id, qty, to, from} → 上架；fail {item_id, qty, action: defect/scrap, from, note} → 次品区"""
+    f = _flows()
+    b = request.get_json(force=True) or {}
+    if act == "pass":
+        return _ok(lambda: f.qc_pass(_iid(b), b.get("qty"), b.get("to") or "", b.get("from") or "", _uname()))
+    if act == "fail":
+        if b.get("action") == "scrap" and _need("inv.out"):
+            return _need("inv.out")
+        return _ok(lambda: f.qc_fail(_iid(b), b.get("qty"), b.get("action") or "defect", b.get("from") or "", _uname(), b.get("note") or ""))
+    return err("操作不对")
+
+
+@bp.post("/api/inv/returns/<act>")
+def inv_returns(act):
+    """退货：receive {item_id/code, qty, note} 登记 → 退货区；act {item_id, act: restock/defect/scrap, qty, from, to}"""
+    f = _flows()
+    b = request.get_json(force=True) or {}
+    if act == "receive":
+        if _need("inv.in"):
+            return _need("inv.in")
+        def go():
+            try:
+                iid = _iid(b)
+            except ValueError:
+                if not b.get("code"):
+                    raise
+                from core.inventory import goods          # 产品的 SKU 还没建过成品档 → 建一个
+                c = db.conn()
+                iid = goods.ensure_item(c, str(b["code"]).strip().upper())
+                c.commit()
+            return f.return_receive(iid, b.get("qty") or 1, _uname(), b.get("note") or "")
+        return _ok(go)
+    if act == "act":
+        if b.get("act") == "scrap" and _need("inv.out"):
+            return _need("inv.out")
+        return _ok(lambda: f.return_act(_iid(b), b.get("act") or "", b.get("qty"), b.get("from") or "", b.get("to") or "", _uname(), b.get("note") or ""))
+    return err("操作不对")
+
+
+@bp.post("/api/inv/defect/act")
+def inv_defect():
+    """次品区：{item_id, act: scrap 报废 / rework 返工好了重新质检 / restock 上架, qty, from, to, note}"""
+    b = request.get_json(force=True) or {}
+    if b.get("act") == "scrap" and _need("inv.out"):
+        return _need("inv.out")
+    return _ok(lambda: _flows().defect_act(_iid(b), b.get("act") or "", b.get("qty"), b.get("from") or "", b.get("to") or "", _uname(), b.get("note") or ""))
+
+
+@bp.get("/api/inv/spools/<sid>")
+def inv_spool_one(sid):
+    """一卷料 + 放在哪（手机扫料卷）。"""
+    s = _flows().spool_info(sid)
+    return jsonify({"ok": True, "spool": s}) if s else err("没有这卷料", 404)

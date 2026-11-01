@@ -86,3 +86,12 @@
   .loc-shelves { --cellw: 58px }
   .loc-rack th { padding-right: 3px }
 }
+/* v2.53：库存页顶上的页签、按区 / 分类的图表、「分布在」的货位小标签（按区类型上色） */
+.inv-top .ux-tabs { margin: 0 0 10px }
+.inv-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 8px 0 }
+.inv-charts .ux-card { margin: 0 }
+.inv-loc { display: inline-block; padding: 0 6px; margin: 1px 0; border-radius: 8px; background: #f1f5f9; white-space: nowrap }
+.inv-loc.z-pick { background: #dcfce7 } .inv-loc.z-reserve { background: #e0f2fe } .inv-loc.z-supply, .inv-loc.z-pack { background: #ede9fe }
+.inv-loc.z-qc, .inv-loc.z-staging, .inv-loc.z-returns { background: #fef3c7 } .inv-loc.z-defect { background: #fee2e2 } .inv-loc.z-production { background: #cffafe }
+@media (max-width: 600px) { .inv-charts { grid-template-columns: 1fr } #inv-zone, #inv-locq { width: 100% !important } }
+.inv-scroll { overflow-x: auto; max-width: 100% }
