@@ -736,7 +736,7 @@ def suggest():
             if r["gap"] <= 0 and op <= 0:
                 continue
             per = production.sku_per_plate(r["sku"])
-            need = r["gap"] + op
+            need = r["gap"]                       # 订单待打的件数不再叠加到建议数量上（订单任务本身照样会打），只用来排前面 + 写进理由
             qty = int(math.ceil(need / per) * per) if per > 1 else need
             s7 = int(s7m.get(r["sku"], 0))
             g, h = _est_of(r["sku"], idx)

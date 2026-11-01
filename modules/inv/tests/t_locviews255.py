@@ -206,6 +206,18 @@ def perf(name, url, limit=1.0, check=None):
     good = j.get("ok") and (check(j) if check else True)
     ok(good and t < limit, f"perf {name}: {t * 1000:.0f} ms (< {limit * 1000:.0f})")
     return j
+# 耗材带卷数：合并 v2.55 B 之后，分页路径也要带每个货位几卷 / 多少克（给耗材物品各配 1–2 卷料卷，放在它们的货位上）
+_t = time.time()
+_fil = c.execute("SELECT id, code FROM inv_items WHERE category='filament' ORDER BY id").fetchall()
+for _i, _r in enumerate(_fil):
+    c.execute("UPDATE inv_items SET material='PLA', color=? WHERE id=?", (f"C{_i:04d}", _r["id"]))
+    for _q in c.execute("SELECT loc_id, qty FROM inv_loc_qty WHERE item_id=? AND qty>1e-9", (_r["id"],)).fetchall():
+        for _n in range(1 if _q["qty"] <= 500 else 2):
+            _sid = c.execute("INSERT INTO spools(code, material, color, net_g, remaining_g, status, created_at) VALUES(?,?,?,?,?,?,?)",
+                             (f"SYN{_i}-{_n}", "PLA", f"C{_i:04d}", 1000, min(1000.0, _q["qty"] / (2 if _q["qty"] > 500 else 1)), "sealed", time.time())).lastrowid
+            c.execute("INSERT INTO inv_spool_loc(spool_id, loc_id, updated_at) VALUES(?,?,?)", (_sid, _q["loc_id"], time.time()))
+c.commit()
+print(f"     synthetic spools: {c.execute('SELECT COUNT(*) FROM spools').fetchone()[0]} in {time.time() - _t:.1f}s")
 tot_locs = c.execute("SELECT COUNT(*) FROM inv_locations WHERE active=1").fetchone()[0]
 perf("list page 1 (50)", "/api/inv/loc/list", check=lambda j: j["total"] >= 20000 and len(j["rows"]) == 50)
 perf("list page 100 (200 rows)", "/api/inv/loc/list?size=200&page=100", check=lambda j: j["page"] == 100 and len(j["rows"]) == 200)
@@ -233,6 +245,14 @@ perf("drawer", f"/api/inv/loc/{c.execute('SELECT loc_id FROM inv_loc_qty LIMIT 1
 perf("inventory table page 1", "/api/inv/items?view=stock&page=1&size=50", check=lambda j: j["total"] >= 10000 and len(j["items"]) == 50)
 perf("inventory table page 50 / 200 rows", "/api/inv/items?view=stock&page=50&size=200", check=lambda j: j["page"] == 50)
 perf("inventory table sort by qty", "/api/inv/items?view=stock&page=1&size=100&sort=qty&dir=desc", check=lambda j: j["items"][0]["qty"] >= j["items"][-1]["qty"])
+_fp = perf("inventory table filament page (rolls)", "/api/inv/items?view=stock&category=filament&page=1&size=200", check=lambda j: len(j["items"]) == 200 and all(x.get("units") for x in j["items"]))
+_x = _fp["items"][0]
+ok("卷" in _x["qty_text"] and ("kg" in _x["qty_text"] or " g" in _x["qty_text"]), f"filament qty_text shows rolls + weight: {_x['qty_text']}")
+ok(_x["locs"] and all("rolls" in l_ and l_.get("text_zh") and "卷" in l_["qty_text"] for l_ in _x["locs"]), f"paged locs carry roll info: {_x['locs'][0].get('text_zh')}")
+_lp = perf("list filament only (roll text)", "/api/inv/loc/list?category=filament&size=200", check=lambda j: len(j["rows"]) == 200)
+ok(any("卷" in i_["qty_text"] for r_ in _lp["rows"] for i_ in r_["items"]), "loc list shows rolls for filament")
+_ip = perf("items view filament (roll text)", "/api/inv/loc/items?category=filament&size=200", check=lambda j: len(j["rows"]) == 200)
+ok(all("卷" in r_["qty_text"] for r_ in _ip["rows"] if r_["qty"] > 0), "by-item totals show rolls for filament")
 perf("inventory table sort by name", "/api/inv/items?view=stock&page=2&size=50&sort=name")
 perf("inventory table search", "/api/inv/items?view=stock&page=1&size=50&q=SKU0077", check=lambda j: j["total"] >= 1)
 perf("inventory table zone filter", "/api/inv/items?view=stock&page=1&size=50&zone=z:C")

@@ -61,7 +61,7 @@ ok(rowof(SKC) is None, "a SKU already covered (stock >= target) is not suggested
 it = C.post("/api/inv/items", json={"name_zh": "外购手机支架", "category": "goods", "unit": "个", "code": "BUY-001"}).get_json()["item"]
 C.post("/api/inv/gs/target", json={"skus": ["BUY-001"], "target": 9})
 ok(rowof("BUY-001") is None, "bought-in goods are not production suggestions")
-# 订单待打：建议里排最前、数量加上去
+# 订单待打：只排最前 + 写进理由，数量不叠加（订单任务本身照样会打）
 C.post("/api/orders/manual", json={"order_no": "P-C1", "items": [{"sku": SKC, "qty": 3, "unit_price": 100}]})
 db.conn().execute("DELETE FROM jobs WHERE kind='order' AND UPPER(sku)<>?", (SKC,))
 db.conn().execute("UPDATE jobs SET status='todo', run_id=NULL, qty_done=0 WHERE kind='order'"); db.conn().commit()
@@ -70,7 +70,7 @@ s = sug(); c_ = rowof(SKC)
 ok(nj > 0, f"manual order generated order jobs ({nj})")
 if nj:
     ok(c_ and c_["order_pending"] == nj and s["items"][0]["sku"] == SKC, f"unprinted order units first: pending {c_ and c_['order_pending']}, first={s['items'][0]['sku']}")
-    ok(c_["qty"] == c_["gap"] + nj and "订单还有" in c_["reason_zh"], f"qty includes order units {c_['qty']}")
+    ok(c_["qty"] == c_["gap"] and c_["qty"] >= 0 and "订单还有" in c_["reason_zh"], f"qty does NOT add order units: gap {c_['gap']} qty {c_['qty']} pending {nj}")
 else:
     ok(True, "order jobs not generated in this fixture (skipped)")
 db.conn().execute("DELETE FROM jobs WHERE kind='order'"); db.conn().commit()

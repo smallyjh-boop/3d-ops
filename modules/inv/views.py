@@ -64,7 +64,7 @@ def _split(ids=None):
             code, zone, ztype = l["code"], l["zone"], l["ztype"]
         else:
             code, zone, ztype = r["code"], r["zone"], r["ztype"]
-        x = {"code": code, "qty": round(r["qty"], 6), "ztype": ztype, "zone": zone}
+        x = {"code": code, "qty": round(r["qty"], 6), "ztype": ztype, "zone": zone, "loc_id": r["loc_id"]}
         k = fil.get(r["item_id"])
         if k:
             st = (lstat.get(k) or {}).get(r["loc_id"]) or {"rolls": 0, "grams": r["qty"]}
@@ -264,7 +264,7 @@ def listing_page(view="stock", category="", q="", zone="", loc="", sort="", desc
         it["low"] = is_low(it, stocked)
         it.update(qtytext.both(it.get("qty") or 0, it.get("unit") or "", it, qc))
         for x in where_:
-            x.update(qtytext.both(x["qty"], it.get("unit") or "", it, qc))
+            x.update(qtytext.both(x["qty"], it.get("unit") or "", it, qc, x["loc_id"]))
         out.append(it)
     return {"items": out, "total": total, "page": page, "pages": pages, "size": size}
 

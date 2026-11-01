@@ -186,7 +186,7 @@
     };
     const filters = () => {
       const f = m.querySelector("#pk-filters");
-      if (tab === "sug") { f.innerHTML = `<button class="mini" id="pk-addall">＋ ${E(Z("全部加入", "เพิ่มทั้งหมด"))}</button><button class="mini" id="pk-clr">${E(Z("取消全选", "ยกเลิกทั้งหมด"))}</button><span class="small muted">${E(Z("勾选后可改数量。数量 = 缺口（含订单还没打的）补到整盘。", "ติ๊กแล้วแก้จำนวนได้ จำนวน = ส่วนที่ขาด (รวมออเดอร์ที่ยังไม่พิมพ์) ปัดเป็นเต็มถาด"))}</span>`; return; }
+      if (tab === "sug") { f.innerHTML = `<button class="mini" id="pk-addall">＋ ${E(Z("全部加入", "เพิ่มทั้งหมด"))}</button><button class="mini" id="pk-clr">${E(Z("取消全选", "ยกเลิกทั้งหมด"))}</button><span class="small muted">${E(Z("勾选后可改数量。数量 = 缺口补到整盘（订单还没打的另外会打，不再加进来）。", "ติ๊กแล้วแก้จำนวนได้ จำนวน = ส่วนที่ขาด ปัดเป็นเต็มถาด (ออเดอร์ที่ยังไม่พิมพ์จะพิมพ์แยกต่างหาก ไม่รวมในนี้)"))}</span>`; return; }
       const A = [["", Z("全部", "ทั้งหมด")], ["hot", Z("有销量", "มียอดขาย")], ["below", Z("低于目标", "ต่ำกว่าเป้า")], ["out", Z("缺货", "ของหมด")], ["nosale", Z("没销量", "ไม่มียอดขาย")]];
       f.innerHTML = `<input id="pk-q" type="search" placeholder="${E(Z("搜产品 / SKU", "ค้นหาสินค้า / SKU"))}" value="${E(q)}" data-notr>
         <select id="pk-cat"><option value="">${E(Z("全部类目", "ทุกหมวด"))}</option>${PRD.categories.map((c) => `<option ${c === cat ? "selected" : ""} data-notr>${E(c)}</option>`).join("")}</select>
