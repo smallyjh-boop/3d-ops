@@ -181,8 +181,14 @@ def overview(q="", kind="", status="", printer=""):
         thumb = next((f"/files/{p['id']}/{'out' if im.get('processed') else 'raw'}/{im['file']}"
                       for im in p.get("images", []) if im.get("file")), "")
         slim = [{k: f.get(k) for k in ("id", "filename", "printer", "per_plate", "version", "status", "status_zh", "active",
-                                       "size", "created_at", "username", "grams", "hours", "source", "sku", "color", "kind", "note")}
+                                       "size", "created_at", "username", "grams", "hours", "source", "sku", "color", "kind", "note", "spec", "plate_id")}
                 | {"material": ((f.get("report") or {}).get("params") or {}).get("material")} for f in fs]
+        if any(f.get("plate_id") for f in slim):        # v2.52：打印方案某一盘的文件 →「盘 1/2 · 主体件」
+            from . import modules
+            pp = modules.public("model")
+            for f in slim:
+                if f.get("plate_id") and pp:
+                    f["plate"] = pp.plate_info(p, f.get("spec") or "", f["plate_id"])
         from . import modellib
         rows.append({"id": p["id"], "name_zh": p.get("name_zh", ""), "title_th": (p.get("copy") or {}).get("title_th", ""),
                      "material": p.get("material") or "PLA", "thumb": thumb, "model": m, "slices": slim,
@@ -251,7 +257,8 @@ def replace_slice(fid, src_path, filename, user=""):
     pidx = names.index(old["printer"]) if old["printer"] in names else 0
     new = print_files.add(src_path, filename, old["product_id"], old["printer"], old.get("sku") or "", old["per_plate"],
                           old.get("color") or "", f"替换 v{old.get('version') or 1}", user, p.get("material") or "PLA",
-                          move=True, source="upload", bed=recipes.bed_size(pidx))
+                          move=True, source="upload", bed=recipes.bed_size(pidx),
+                          spec=old.get("spec") or "", plate_id=old.get("plate_id") or "")     # v2.52：替换后还是同一个规格 / 同一盘
     rec = recipes.get(p) if p.get("id") else dict(recipes.DEFAULT)
     rec["per_plate"] = new["per_plate"]
     new = print_files.set_checks(new["id"], recipes.check(rec, None, new.get("report"), p.get("material") or "PLA"))

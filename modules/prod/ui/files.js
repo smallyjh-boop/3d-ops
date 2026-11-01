@@ -2,6 +2,7 @@
 // 文件管理：所有产品的 3D 模型 + 切片文件，统一查看、预览、下载、替换、删除
 (function () {
   const H = () => window.OPSH;
+  const Z = (zh, th) => (window.I18N && I18N.lang === "th" ? th : zh);
   let D = null;
   const SEL = new Set();
   const size = (b) => (b == null ? "" : b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB");
@@ -31,7 +32,7 @@
     return `<div class="fm-slice ${f.active ? "" : "off"}" data-fid="${f.id}" data-pid="${esc(pid)}">
       <span class="pill fpill-${st}">${esc(D.status_zh[st] || st)}</span>
       ${f.material ? `<span class="mat-badge" data-notr>${esc(f.material)}</span>` : ""}
-      ${f.printer === "*" ? "<span>任何打印机</span>" : `<span data-notr>${esc(f.printer)}</span>`}${f.spec ? ` · 规格 <b data-notr>${esc(f.spec)}</b>` : ""} · 一盘 ${f.per_plate} 个 · v${f.version || 1}
+      ${f.printer === "*" ? "<span>任何打印机</span>" : `<span data-notr>${esc(f.printer)}</span>`}${f.spec ? ` · 规格 <b data-notr>${esc(f.spec)}</b>` : ""}${f.plate ? ` · 🧩 <b>${Z("盘", "เพลท")} ${f.plate.no}/${f.plate.total}${f.plate.name ? ` · <span data-notr>${esc(f.plate.name)}</span>` : ""}</b>` : ""} · 一盘 ${f.per_plate} ${f.plate ? Z("套", "ชุด") : "个"} · v${f.version || 1}
       ${f.sku ? `<span class="mono small" data-notr>${esc(f.sku)}</span>` : ""}
       <span class="small muted">${f.grams ? H().num(f.grams, 0) + "g · " : ""}${f.hours ? H().num(f.hours, 1) + "h · " : ""}${size(f.size)} · ${fmtTime(f.created_at).slice(0, 10)}${f.active ? "" : " · 已停用"}</span>
       <span class="fm-acts">

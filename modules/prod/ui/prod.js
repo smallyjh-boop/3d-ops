@@ -13,6 +13,23 @@
     return `<div class="small ams-line">🎨 <b>AMS</b> ${cols.map((c, i) => `${Z("槽", "ช่อง")} ${i + 1} ${H().colorTxt(c.colour)} <span class="mat-badge" data-notr>${esc(c.material)}</span>`).join(" · ")}
       <span class="muted">${Z("（多色，只能用有 AMS 的打印机）", "(หลายสี ใช้ได้เฉพาะเครื่องที่มี AMS)")}</span></div>`;
   }
+  // v2.52 几盘的打印方案：「盘 1/2 · 主体件」（盘名是产品资料里写的，原样显示）
+  function plateName(v) {
+    return `${Z("盘", "เพลท")} ${v.no}/${v.total}${v.name ? ` · <span data-notr>${esc(v.name)}</span>` : ""}`;
+  }
+  // 每一盘的进度：「盘 1 · 主体件 已打 1/4 · 盘 2 · 小零件 已打 1/2」（当前这一盘加粗）
+  function plateLine(j) {
+    const v = j.plate;
+    if (!v && !(j.plates && j.plates.length)) return "";
+    const prog = (j.plates || []).map((x) => {
+      const tot = (x.prints || 0) + (x.prints_left || 0);
+      const s = `${plateName(x)} ${Z("已打", "พิมพ์แล้ว")} ${x.prints || 0}/${tot}${x.run_id ? " ⏳" : ""}`;
+      return v && x.plate_id === v.plate_id ? `<b>${s}</b>` : s;
+    }).join(" · ");
+    return `<div class="small plate-line">🧩 ${v ? `<b>${plateName(v)}</b> · ${Z(`一盘 ${v.sets} 套 · 还要打 ${v.prints_left} 次`, `เพลทละ ${v.sets} ชุด · ต้องพิมพ์อีก ${v.prints_left} ครั้ง`)}` : Z("分几盘打", "พิมพ์หลายเพลท")}</div>
+      ${prog ? `<div class="small muted">${prog}</div>` : ""}
+      ${v ? `<div class="small muted">${Z("所有盘都打好、凑齐一套才算打好一件", "ต้องพิมพ์ครบทุกเพลทจึงนับเป็น 1 ชิ้น")}</div>` : ""}`;
+  }
   function show(name) {
     clearInterval(PR_TIMER); clearInterval(BOARD_TIMER);
     if (name === "production") { loadBoard(); BOARD_TIMER = setInterval(() => { if (!document.hidden && !$("#modal:not(.hidden)")) loadBoard().catch(() => {}); }, 20000); }
@@ -46,22 +63,25 @@
       (j.tech === "resin" ? `<span class="pill resin-pill" title="光固化：打完先用酒精清洗，晾干后二次固化，再去支撑">🧪 树脂${j.status === "post" ? " · 清洗→固化→去支撑" : ""}</span>` : "") +
       (j.stock_n ? `<span class="pill tag-pill" title="先占住，发货出库时扣库存">📦 ${Z("用库存", "ใช้สต็อก")} ×${j.stock_n}</span>` : "");
     const btns = {
-      todo: `<button class="big primary" data-start="${j.id}">▶ 开始打印…</button>` +
+      todo: `<button class="big primary" data-start="${j.id}"${j.plate ? ` data-plate="${esc(j.plate.plate_id)}"` : ""}>▶ 开始打印…</button>` +
         (j.stock > 0 && j.kind !== "stock" ? `<button class="big" data-usestock="${j.id}" title="先占住，发货出库时才扣库存">📦 ${Z(`用库存（可用 ${j.stock} 个）`, `ใช้สต็อก (มี ${j.stock} ชิ้น)`)}</button>` : "") +
         (j.kind === "stock" && !j.run_id ? `<button class="mini btn-edit-only" data-jdel="${j.id}">删除备货任务</button>` : ""),      // v2.41
       post: `<button class="big primary" data-js="packed">📦 已打包</button><button class="mini" data-js="todo">退回重打</button>`,
       packed: `<button class="big primary" data-js="done">🚚 已发货</button><button class="mini" data-js="post">退回</button>`,
     }[j.status] || "";
-    const mv = j.status === "todo" && (CFG && CFG.printers || []).length > 1
+    const mv = j.status === "todo" && !j.plate && (CFG && CFG.printers || []).length > 1
       ? `<select class="mv" data-mv="${j.id}"><option value="">换打印机…</option>${CFG.printers.map((p, i) => i === j.printer || p.enabled === false ? "" : `<option value="${i}" data-notr>${esc((p.code ? p.code + " · " : "") + p.name)}</option>`).join("")}</select>` : "";
     const fileLine = j.status === "todo" ? (pl.file
-      ? `<div class="small">📄 一盘 ${pl.per_plate} 个 · 还要 ${pl.plates} 盘 · <span class="pill fpill-${pl.file_status}">${esc(FST[pl.file_status] || "")}</span></div>`
-      : '<div class="small warn">还没有可用的切片文件（打印方案里切片并复核），只能手动开始</div>') : "";
+      ? `<div class="small">📄 ${j.plate ? Z(`这一盘的文件 · 一盘 ${pl.per_plate} 套`, `ไฟล์ของเพลทนี้ · เพลทละ ${pl.per_plate} ชุด`) : `一盘 ${pl.per_plate} 个`} · 还要 ${pl.plates} 盘 · <span class="pill fpill-${pl.file_status}">${esc(FST[pl.file_status] || "")}</span></div>`
+      : (j.plate ? `<div class="small warn">${Z("这一盘还没有可用的切片文件（打印方案里切这一盘并复核），只能手动开始", "เพลทนี้ยังไม่มีไฟล์สไลซ์ที่ใช้ได้ (สไลซ์เพลทนี้ในแผนการพิมพ์แล้วตรวจ) เริ่มได้แค่แบบเริ่มเอง")}</div>`
+        : '<div class="small warn">还没有可用的切片文件（打印方案里切片并复核），只能手动开始</div>')) : "";
     return `<div class="job job-${j.status}${j.priority ? " urgent" : ""}" data-jid="${j.id}">
       ${prodHead(j)}
       <div class="jbig">${j.material ? `<span class="mat-badge" data-notr>${esc(j.material)}</span>` : ""} ${h.colorTxt(j.color)}
         <b class="qty">× ${j.remaining ?? j.qty}</b>${j.qty_done ? `<span class="small muted"> / 共 ${j.qty}，已打 ${j.qty_done}</span>` : ""} ${kind}</div>
-      ${amsLine(j.colours)}
+      ${plateLine(j)}
+      ${amsLine(j.plate ? j.plate.colours : j.colours)}
+      ${j.plate && !j.plate.multicolor && j.plate.colour && j.plate.colour !== j.color ? `<div class="small">${Z("这一盘用", "เพลทนี้ใช้สี")} ${h.colorTxt(j.plate.colour)}</div>` : ""}
       ${j.custom_note ? `<div class="note-flag" data-notr>✎ ${esc(j.custom_note)}</div>` : ""}
       ${j.buyer_note ? `<div class="small" data-notr>💬 ${esc(j.buyer_note)}</div>` : ""}
       ${j.note && j.kind !== "order" ? `<div class="small muted" data-notr>${esc(j.note)}</div>` : ""}
@@ -80,9 +100,10 @@
     const st = lane.status || {};
     const mine = r.sent && st.state === "printing";
     return `<div class="run" data-rid="${r.id}">
-      <div class="row between"><b>正在打的这一盘 · ${r.count} 个</b>${mine ? h.stChip(st, lane.status_zh) : `<span class="pill pst-printing">${r.sent ? "已发送" : "手动开始"}</span>`}</div>
+      <div class="row between"><b>正在打的这一盘 · ${r.plate_id ? Z(`${r.count} 套零件`, `ชิ้นส่วน ${r.count} ชุด`) : `${r.count} 个`}</b>${mine ? h.stChip(st, lane.status_zh) : `<span class="pill pst-printing">${r.sent ? "已发送" : "手动开始"}</span>`}</div>
       ${mine ? `<div class="bar"><div style="width:${Number(st.progress) || 0}%"></div></div>` : ""}
       ${prodHead({ sku: r.sku, name: r.name, product: r.product })}
+      ${r.plate_id ? `<div class="small plate-line">🧩 <b>${plateName({ no: r.plate_no, total: r.plate_total, name: r.plate_name })}</b></div>` : ""}
       <div class="jbig">${r.material ? `<span class="mat-badge" data-notr>${esc(r.material)}</span>` : ""} ${h.colorTxt(r.color)} <b class="qty">× ${r.count}</b> <span class="small muted">开始 ${h.short(r.started_at)} · 约 ${h.num(r.hours, 1)}h · ${h.num(r.grams, 0)}g</span></div>
       <div class="small">${r.jobs.map((j) => `<div>· ${j.order_no ? `订单 <span class="mono" data-notr>${esc(j.order_no)}</span>` : esc(j.kind_zh || "")} × ${j.run_qty}
         ${j.custom_note ? `<span class="note-inline" data-notr>✎ ${esc(j.custom_note)}</span>` : ""}</div>`).join("")}
@@ -111,26 +132,31 @@
   }
 
   // ---- 开始打印对话框 ----
-  async function startDialog(jid, printer) {
+  async function startDialog(jid, printer, plate) {
     let o;
-    try { o = await api(`/api/jobs/${jid}/send-options` + (printer != null ? `?printer=${printer}` : "")); } catch (e) { toast(e.message, true); return; }
+    const qs = [printer != null ? `printer=${printer}` : "", plate ? `plate=${encodeURIComponent(plate)}` : ""].filter(Boolean).join("&");
+    try { o = await api(`/api/jobs/${jid}/send-options` + (qs ? "?" + qs : "")); } catch (e) { toast(e.message, true); return; }
+    const pv = o.plate;      // v2.52：几盘的方案里的这一盘
     const lane = (BOARD.lanes || []).find((l) => l.index === o.printer) || {};
     const connected = lane.conn && lane.conn !== "none" && !["offline", "none"].includes((lane.status || {}).state);
     const busyPr = ["printing", "paused"].includes((lane.status || {}).state);
     const sg = o.suggestion;
     const j = o.job;
-    const el = modal(`<div class="row between"><h3>开始打印 · <span class="mono" data-notr>${esc(j.sku)}</span> ${H().colorTxt(j.color)}</h3><button class="mini" data-mclose>关闭</button></div>
+    const el = modal(`<div class="row between"><h3>开始打印 · <span class="mono" data-notr>${esc(j.sku)}</span> ${H().colorTxt(j.color)}${pv ? ` · ${plateName(pv)}` : ""}</h3><button class="mini" data-mclose>关闭</button></div>
       <div class="form2">
         <label>打印机<select id="sd-printer">${(CFG.printers || []).map((p, i) => `<option value="${i}" ${i === o.printer ? "selected" : ""} data-notr>${esc((p.code ? p.code + " · " : "") + p.name)}${p.enabled === false ? "（停用）" : ""}</option>`).join("")}</select></label>
-        <div class="small">${H().stChip(lane.status, lane.status_zh)}<br>这台打印机一盘最多约 <b>${o.capacity}</b> 个</div>
+        <div class="small">${H().stChip(lane.status, lane.status_zh)}${pv ? "" : `<br>这台打印机一盘最多约 <b>${o.capacity}</b> 个`}</div>
       </div>
-      <div class="sd-box"><b>这一盘打几个</b>
+      ${pv ? `<div class="sd-box"><b>${Z("这一盘", "เพลทนี้")}：${plateName(pv)}</b> · ${Z(`一盘出 ${pv.sets} 套`, `เพลทละ ${pv.sets} ชุด`)}
+        ${plateLine({ plate: pv, plates: o.plates })}
+        <input type="radio" name="sd-mode" value="order" checked hidden><input id="sd-n" type="hidden" value="${pv.sets}"></div>`
+      : `<div class="sd-box"><b>这一盘打几个</b>
         <label class="row"><input type="radio" name="sd-mode" value="order" checked> 按订单：<b>${sg.order_qty}</b> 个</label>
         <label class="row"><input type="radio" name="sd-mode" value="full"> 满盘：<b>${o.capacity}</b> 个（多出来的进成品库存）</label>
         ${sg.extra_stock ? `<label class="row"><input type="radio" name="sd-mode" value="ai"> 建议：<b>${sg.count}</b> 个（订单 ${sg.order_qty} + 备货 ${sg.extra_stock}）</label>` : ""}
         <label class="row"><input type="radio" name="sd-mode" value="custom"> 指定：<input id="sd-n" type="number" min="1" max="${o.capacity}" value="${sg.order_qty}" style="width:80px"> 个</label>
         <div class="small muted">${esc(sg.why)}</div>
-      </div>
+      </div>`}
       ${o.merge.length ? `<div class="sd-box"><b>一起拼这一盘的其他任务</b>（同产品同颜色，按发货先后排）
         <div class="small">· 这个任务 #${j.id}：${o.remaining} 个 ${j.custom_note ? `<span class="note-inline" data-notr>✎ ${esc(j.custom_note)}</span>` : ""}</div>
         ${o.merge.map((m) => `<label class="row small"><input type="checkbox" data-merge="${m.id}" checked> 任务 #${m.id} ${m.order_no ? `订单 <span class="mono" data-notr>${esc(m.order_no)}</span>` : esc(m.kind === "stock" ? "备货" : "")} × ${m.remaining}
@@ -191,7 +217,7 @@
       el.dataset.fileId = f ? f.id : (draft ? draft.id : "");
     };
     el.onchange = (e) => {   // 用 onchange（不是 addEventListener），关掉弹窗后不会残留
-      if (e.target.id === "sd-printer") { closeModal(); startDialog(jid, e.target.value); return; }
+      if (e.target.id === "sd-printer") { closeModal(); startDialog(jid, e.target.value, pv ? pv.plate_id : null); return; }
       if (e.target.id === "sd-n") $('input[name="sd-mode"][value="custom"]', el).checked = true;
       updFile();
     };
@@ -202,6 +228,7 @@
       const review = {};
       $$("[data-ri]", el).forEach((x) => (review[x.dataset.ri] = x.checked));
       const body = { printer: +$("#sd-printer", el).value, count: count(), merge_ids: $$("[data-merge]:checked", el).map((x) => +x.dataset.merge),
+        plate: pv ? pv.plate_id : null,
         send, file_id: el.dataset.fileId || null,
         confirm: { bed_clear: $("#sd-clear", el).checked, review, material: $("#sd-mat-ok", el).checked, tray_override: !!($("#sd-tray-ok", el) || {}).checked } };
       if (!body.confirm.material) { toast("请先确认打印机里装的材料和颜色是对的", true); return; }
@@ -215,7 +242,7 @@
           } else throw err;
         }
         closeModal();
-        toast((send ? "已发送，打印机开始打印" : "已开始（手动）") + `：这一盘 ${r.count} 个` + (r.extra ? `，多 ${r.extra} 个进库存` : "") + (r.note ? "。" + r.note : "") + (r.warning ? "。提醒：" + r.warning : ""), !!r.note, 8000);
+        toast((send ? "已发送，打印机开始打印" : "已开始（手动）") + (r.plate ? `：${Z("盘", "เพลท")} ${r.plate.no}/${r.plate.total}` : `：这一盘 ${r.count} 个`) + (r.extra ? `，多 ${r.extra} 个进库存` : "") + (r.note ? "。" + r.note : "") + (r.warning ? "。提醒：" + r.warning : ""), !!r.note, 8000);
         loadBoard();
       });
     };
@@ -240,7 +267,7 @@
     if (!t) return;
     const d = t.dataset;
     try {
-      if (d.start) return startDialog(+d.start);
+      if (d.start) return startDialog(+d.start, null, d.plate || null);
       if (d.rfail) return failDialog(+d.rfail);
       if (d.ticket) { window.open(`/print/jobs?ids=${d.ticket}`, "_blank"); return; }
       if (d.rdone) {

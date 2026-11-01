@@ -14,7 +14,7 @@
 多色：每盘最多 4 个 AMS 槽；按零件分色 = 每个零件选一个槽；款式（例如 白款 / 黑款）= 配色方案（槽 → 颜色）。
 拓竹 / MakerWorld 涂色的 3MF 原样保留，只读它用几种颜色、每种用多少（文件里有 slice_info 时）；改涂色请在 Bambu Studio 里改好再上传。
 
-★ 对外（modules.public("model")）：get_plan / colours_for / usage / job_colours / run_colours
+★ 对外（modules.public("model")）：get_plan / colours_for / usage / job_colours / run_colours / job_plates / plate_info
 """
 import math
 import os
@@ -701,6 +701,57 @@ def job_colours(product_id, sku, colour=""):
     return [{"colour": c["colour"], "material": c["material"], "grams": round(c["grams"] + c.get("purge_g", 0), 1)} for c in u["colours"]]
 
 
+def _plan_for_sku(p, sku):
+    """(规格键, 方案)：这个 SKU 用哪份方案（规格自己的 > 主模型的）；都没保存过 → (规格, None)。"""
+    from core import specmodel
+    spec = specmodel.spec_of_sku(p, sku)
+    plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
+    key = spec if spec in plans else ("" if "" in plans else None)
+    if key is None:
+        return spec, None
+    plan = plans.get(key) or {}
+    return key, (plan if plan.get("plates") else None)
+
+
+def job_plates(product_id, sku, colour=""):
+    """v2.52 生产：一件成品要打几盘。方案有两盘以上（不是自动默认的一盘）时返回每一盘：
+    [{plate_id, no, total, name, sets, printer, spec, grams, hours, colours: [{colour, material, grams}], multicolor}]
+    grams / hours / colours 都是「打一次这一盘」的用量（含冲刷废料）。一盘的方案 / 没有方案 → []（生产照旧按整件打）。"""
+    try:
+        p = store.load(product_id)
+    except (FileNotFoundError, OSError, ValueError):
+        return []
+    spec, plan = _plan_for_sku(p, sku)
+    if not plan or plan.get("default") or len(plan.get("plates") or []) < 2:
+        return []
+    if not colour:
+        colour = next(((v.get("opt1_zh") or "") for v in p.get("variants") or [] if (v.get("sku") or "").upper() == (sku or "").upper()), "")
+    cfg = load_config()
+    plates = plan["plates"]
+    out = []
+    for i, pl in enumerate(plates):
+        u = plate_usage(p, plan, pl, colour, cfg)
+        tot = sum(c["grams"] for c in u["colours"]) or 0
+        cols = [{"colour": c["colour"], "material": c["material"],
+                 "grams": round(c["grams"] + (u["purge_g"] * c["grams"] / tot if tot else 0), 1)} for c in u["colours"]]
+        out.append({"plate_id": pl["id"], "no": i + 1, "total": len(plates), "name": pl.get("name") or "",
+                    "sets": max(1, int(pl.get("sets") or 1)), "printer": pl.get("printer") or "", "spec": spec,
+                    "grams": round(u["grams"] + u["purge_g"], 1), "hours": u["hours"], "colours": cols,
+                    "multicolor": len({c["colour"] for c in cols if c["colour"]}) > 1})
+    return out
+
+
+def plate_info(p, spec, plate_id):
+    """切片文件记着是哪一盘：{no, total, name}（方案里已经没有这一盘 → None）。"""
+    plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
+    plan = plans.get(spec or "") or {}
+    plates = plan.get("plates") or []
+    for i, pl in enumerate(plates):
+        if pl.get("id") == plate_id:
+            return {"no": i + 1, "total": len(plates), "name": pl.get("name") or ""}
+    return None
+
+
 def ams_line(cols, lang="zh"):
     """「AMS 槽 1 白 PLA · 槽 2 黑 PLA」"""
     if lang == "th":
@@ -903,5 +954,6 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
     pname = names[printer_idx] if 0 <= printer_idx < len(names) else plate["printer"]
     f = print_files.add(res["kept"], fname.replace(".3mf", ".gcode.3mf"), pid, pname, "", int(plate.get("sets") or 1), "",
                         "按打印方案（摆好的盘）切片" + (f"，{ams_line(usage(p, spec, colour)['colours'])}" if multi else ""), user,
-                        fils[0]["material"], res.get("grams"), res.get("hours"), move=True, source="plan", spec=spec)
+                        fils[0]["material"], res.get("grams"), res.get("hours"), move=True, source="plan", spec=spec,
+                        plate_id=plate_id)        # v2.52：记下是哪一盘（几盘的方案生产时每盘用自己的文件）
     return {"sliced": sliced, "file": f}
