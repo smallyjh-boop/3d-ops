@@ -9,7 +9,8 @@ from . import ledger
 
 DOC_KINDS = {"purchase": ("采购入库", "RK", 1), "return": ("退回入库", "TH", 1), "issue": ("领用出库", "LY", -1),
              "scrap": ("报废", "BF", -1), "adjust": ("调整", "TZ", 0), "stocktake": ("盘点", "PD", 0),
-             "ship": ("订单出库", "CK", -1)}          # v2.35：订单发货时自动开（成品 + 纸箱 + 包材），见 modules/inv/shipout.py
+             "ship": ("订单出库", "CK", -1),
+             "po_return": ("采购退货", "TG", -1)}     # v2.51：退货给供应商（只能从采购单开，见 purchase.return_goods）          # v2.35：订单发货时自动开（成品 + 纸箱 + 包材），见 modules/inv/shipout.py
 
 
 def _no(c, kind):
@@ -142,6 +143,9 @@ def void(doc_id, user=""):
     if (d["ref"] or "").startswith("po:"):       # v2.39：采购单的到货入库单作废 → 采购单的已到数量、状态、财务记录一起退回
         from . import purchase
         purchase.on_receipt_void(d, sum(abs(m["a"] or 0) for m in mv), user)
+    elif (d["ref"] or "").startswith("poret:"):  # v2.51：采购退货单作废 → 采购单的已退数量退回
+        from . import purchase
+        purchase.on_return_void(d, user)
     db.audit(user, "库存·作废单据", d["no"], "")
     return get(d["id"])
 

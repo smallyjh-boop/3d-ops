@@ -5,6 +5,8 @@
   sort_key(货位编号)                      货位排序（A2 在 A10 前面）
   human(货位编号, lang)                   A1-02-03 → A区 1号货架 第2层 第3位
   order_out(订单id)                       这个订单的出库单（发货时扣的成品、纸箱、包材），没有返回 None
+  assign(物品id, 货位编号, user)            把物品放到货位（v2.51 采购到货时顺便放）
+  suggest_loc(分类)                       给这个分类的物品推荐一个空格（没有返回 None）
 """
 from . import locations
 
@@ -28,3 +30,11 @@ def human(code, lang="zh"):
 def order_out(order_id):
     from . import shipout
     return shipout.summary(order_id)
+
+
+def assign(item_id, code, user=""):
+    return locations.assign(item_id, code, user)
+
+
+def suggest_loc(category):
+    return locations.suggest(category)
