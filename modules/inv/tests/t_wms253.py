@@ -267,6 +267,9 @@ materials.spool_action(k1, "load", "t", "P1S-09", "B1")
 c.execute("DELETE FROM inv_spool_loc WHERE spool_id IN (SELECT id FROM spools WHERE material='PETG')")
 pe = flows._item_of(c, "PETG", "红色")
 c.execute("DELETE FROM inv_loc_qty WHERE item_id=?", (pe,)); c.execute("UPDATE inv_items SET location=NULL WHERE id=?", (pe,))   # v2.52 时没放货位
+_oloc = L.get_loc("R1-01-01")
+c.execute("INSERT INTO inv_loc_qty(item_id, loc_id, qty, updated_at) VALUES(?,?,?,?)", (pe, _oloc["id"], 777.0, 1.0))    # v2.52 放在别处的一笔
+nlog0 = c.execute("SELECT COUNT(*) FROM inv_loc_log WHERE kind='migrate'").fetchone()[0]
 c.commit()
 config.save_config({"inv_loc_v253": False})
 n1 = flows.migrate()
@@ -274,6 +277,28 @@ n2 = flows.migrate()
 config.save_config({"inv_loc_v253": False})
 n3 = flows.migrate()
 ok(n1 == 2 and n2 == 0 and n3 == 0, f"migration idempotent {n1} {n2} {n3}")
+bak = c.execute("SELECT qty FROM inv_loc_qty_bak253 WHERE item_id=? AND loc_id=?", (pe, _oloc["id"])).fetchone()
+ok(bak and bak[0] == 777.0, "migration: overwritten inv_loc_qty row backed up first")
+lg = c.execute("SELECT * FROM inv_loc_log WHERE kind='migrate' AND item_id=?", (pe,)).fetchall()
+ok(len(lg) >= 1 and any(x["from_loc"] == "R1-01-01" and abs(x["qty"] - 777.0) < 1e-6 for x in lg), f"migration: inv_loc_log row (kind migrate) per change {len(lg)}")
+nl = c.execute("SELECT COUNT(*) FROM inv_loc_log WHERE kind='migrate'").fetchone()[0]
+config.save_config({"inv_loc_v253": False}); flows.migrate()
+ok(c.execute("SELECT COUNT(*) FROM inv_loc_log WHERE kind='migrate'").fetchone()[0] == nl and c.execute("SELECT qty FROM inv_loc_qty_bak253 WHERE item_id=? AND loc_id=?", (pe, _oloc["id"])).fetchone()[0] == 777.0, "migration: log/backup idempotent")
+# ---- 老安装升级：没明确选过 inv_qc_on → 质检区默认关 + 一次性提示；明确选过的不动
+import json as _json
+_raw = _json.load(open(config.CONFIG_PATH, encoding="utf-8")); _had = _raw.pop("inv_qc_on", None); _raw["inv_loc_v253"] = False   # 老安装的配置文件里没有这个键
+_json.dump(_raw, open(config.CONFIG_PATH, "w", encoding="utf-8"), ensure_ascii=False)
+flows.migrate()
+cf = config.load_config()
+ok(cf["inv_qc_on"] is False and cf.get("inv_qc_hint253") is True, "upgrade: existing install -> inv_qc_on defaults OFF + one-time hint")
+mj = C.get("/api/inv/meta").get_json()
+ok(mj.get("qc_hint") is True, "meta carries qc_hint for owner")
+C.post("/api/inv/qc/hint", json={"enable": True})
+cf = config.load_config()
+ok(cf["inv_qc_on"] is True and not cf.get("inv_qc_hint253") and C.get("/api/inv/meta").get_json().get("qc_hint") is False, "hint: enable QC / dismissed for good")
+config.save_config({"inv_qc_on": False, "inv_loc_v253": False}); flows.migrate()
+ok(config.load_config()["inv_qc_on"] is False and not config.load_config().get("inv_qc_hint253"), "explicit setting is never touched by migration")
+config.save_config({"inv_qc_on": _had if _had is not None else True})
 ok(sp_loc(k1) == f"{p1}-02-05" and sp_loc(k2) is None, f"loaded -> printer slot (B1), others -> 待上架 {sp_loc(k1)} {sp_loc(k2)}")
 after_other = {(r[0], r[1]): r[2] for r in c.execute("SELECT item_id, loc_id, qty FROM inv_loc_qty WHERE item_id NOT IN (SELECT id FROM inv_items WHERE category='filament')")}
 ok(before_other == after_other, "other items' location quantities untouched")

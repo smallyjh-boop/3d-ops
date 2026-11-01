@@ -300,8 +300,8 @@ def _set_spool(c, s, iid, old, new, kind, user=""):
                  s["code"] or "")
 
 
-def write_qty(c, iid, key):
-    """耗材物品在每个货位上的数 = 这个货位上的料卷剩的克数。"""
+def write_qty(c, iid, key, log_kind="", user=""):
+    """耗材物品在每个货位上的数 = 这个货位上的料卷剩的克数。log_kind 给了（迁移用）就给每个改动的货位写一条 inv_loc_log。"""
     if not iid:
         return
     sums = {}
@@ -312,6 +312,10 @@ def write_qty(c, iid, key):
     for lid in set(old) | set(sums):
         if abs(old.get(lid, 0) - sums.get(lid, 0)) > 1e-6:
             wms._set(c, iid, lid, sums.get(lid, 0.0))
+            if log_kind:
+                dq = sums.get(lid, 0.0) - old.get(lid, 0)
+                lc = (_loc_by_id(c, lid) or {}).get("code") or str(lid)
+                wms._log(c, iid, "" if dq > 0 else lc, lc if dq > 0 else "", abs(dq), log_kind, user, "v2.53 料卷货位迁移")
     it = c.execute("SELECT location FROM inv_items WHERE id=?", (iid,)).fetchone()
     if it and not it["location"] and sums:
         store = [(q, _loc_by_id(c, lid)) for lid, q in sums.items()]
@@ -783,12 +787,39 @@ def value_report(slow_days=None):
 
 
 # ---------------- 迁移 ----------------
+def _backup_qty(c, iid):
+    """迁移要重写这个耗材物品各货位的数量之前，先把它现有的 inv_loc_qty 行备份进 inv_loc_qty_bak253（每个 物品×货位 只存第一次的，重复跑不覆盖）。"""
+    c.execute("CREATE TABLE IF NOT EXISTS inv_loc_qty_bak253 (item_id INTEGER, loc_id INTEGER, qty REAL, updated_at REAL, backed_at REAL, PRIMARY KEY(item_id, loc_id))")
+    c.execute("INSERT OR IGNORE INTO inv_loc_qty_bak253(item_id, loc_id, qty, updated_at, backed_at) "
+              "SELECT item_id, loc_id, qty, updated_at, ? FROM inv_loc_qty WHERE item_id=?", (_now(), int(iid)))
+
+
+def _qc_default_for_existing(c):
+    """升级的老安装：设置里没明确选过 inv_qc_on 的，质检区默认关（否则升级后每个打印出来的成品都进待检区、算不可售，库存推送变 0）。
+    新安装（还没有任何物品）照默认开。关掉的同时记一个一次性提示（仓库页提醒可以开质检）。"""
+    import json as _json
+    import os as _os
+    from core import config as _cfg
+    try:
+        raw = {}
+        if _os.path.exists(_cfg.CONFIG_PATH):
+            with open(_cfg.CONFIG_PATH, "r", encoding="utf-8") as f:
+                raw = _json.load(f)
+        if "inv_qc_on" in raw:
+            return
+        if c.execute("SELECT 1 FROM inv_items LIMIT 1").fetchone():
+            save_config({"inv_qc_on": False, "inv_qc_hint253": True})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def migrate(c=None):
     """v2.52 → v2.53（只做一次，再跑也不会重复）：在机上的料卷 → 那台打印机 · 槽；其它的 → 耗材物品原来放的货位（v2.52 放过的），
     没放过的 → 待上架。其它物品的货位数量（inv_loc_qty）不动。成品备货的目标数量不动（还在生产模块的 stock 表）。"""
     c = c or db.conn()
     if load_config().get("inv_loc_v253"):
         return 0
+    _qc_default_for_existing(c)
     n = 0
     if _has_spools(c):
         if load_config().get("printers"):
@@ -814,7 +845,8 @@ def migrate(c=None):
         for k in keys:
             iid = _item_of(c, *k)
             if iid:
-                write_qty(c, iid, k)
+                _backup_qty(c, iid)
+                write_qty(c, iid, k, "migrate", "系统")
     c.commit()
     save_config({"inv_loc_v253": True})
     if n:

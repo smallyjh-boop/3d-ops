@@ -128,7 +128,7 @@ for i in range(100, 130):
 add(200, status="later", score=1, ago=1)
 add(201, excluded="宗教", ago=60)
 add(202, status="ignored", ago=60)
-C.post("/api/cur/pool/settings", json={"auto": True, "cap": 20, "low_score": 0})
+C.post("/api/cur/pool/settings", json={"auto": True, "cap": 20, "low_score": 40})
 ok(pool.settings()["cap"] == 20 and N.post("/api/cur/pool/settings", json={"cap": 1}).status_code == 403, "settings editable by owner only")
 ok(C.post("/api/cur/pool/settings", json={"cap": "x"}).status_code in (400, 500), "bad number rejected")
 cdb.put("pool_last", 0)
@@ -136,6 +136,26 @@ res = pool.auto_clean()
 left = cc.execute("SELECT COUNT(*) FROM cur_candidates").fetchone()[0]
 ok(res and res["by_class"]["excl"] == 1 and res["by_class"]["ignored"] == 1 and left == 20, f"auto-clean ran rules + cap ({left} left) {res}")
 ok(cc.execute("SELECT 1 FROM cur_candidates WHERE skey='s:200'").fetchone() and not cc.execute("SELECT 1 FROM cur_candidates WHERE skey='s:100'").fetchone(), "cap drops low-score first, keeps 稍后看")
+ok(not cc.execute("SELECT 1 FROM cur_gone WHERE skey='s:100'").fetchone() and cc.execute("SELECT 1 FROM cur_trash WHERE skey='s:100' AND reason='cap'").fetchone(), "cap-only cleanup: in recycle bin, NOT written to cur_gone (can come back)")
+ok(cc.execute("SELECT 1 FROM cur_gone WHERE skey='s:202'").fetchone(), "ignored ones cleaned still keep their fingerprint")
+# 第一天池子很大：从没看过、分数不低的新发现不会因为上限被清
+cc.execute("DELETE FROM cur_candidates"); cc.execute("DELETE FROM cur_trash"); cc.execute("DELETE FROM cur_gone"); cc.commit()
+for i in range(300, 330):
+    add(i, score=60 + i - 300, ago=1)                  # 30 个从没看过、分数 >= 40
+for i in range(330, 335):
+    add(i, score=60, ago=1, seen=NOW - DAY)            # 5 个已看过没处理
+add(335, status="ignored", ago=1)
+add(336, score=5, ago=1)                               # 从没看过但分数很低
+ok(pool.enforce_cap(20) == 7 and cc.execute("SELECT COUNT(*) FROM cur_candidates").fetchone()[0] == 30, "over-cap: only seen / ignored / low-score removed; never-seen good ones stay")
+ok(not cc.execute("SELECT 1 FROM cur_candidates WHERE skey IN ('s:330','s:335','s:336')").fetchone() and cc.execute("SELECT COUNT(*) FROM cur_candidates WHERE skey BETWEEN 's:300' AND 's:329'").fetchone()[0] == 30, "the 30 new candidates all survive")
+ok([r[0] for r in cc.execute("SELECT skey FROM cur_gone")] == ["s:335"], "only the ignored one got a fingerprint")
+# 重新采集已有的稍后看（低于 junk 分）：作者 / 数据不清空
+add(400, status="later", score=3, ago=1, author="keepme", metrics={"likes": "9"}, title="Later model unique 400")
+cc.execute("UPDATE cur_candidates SET url='https://makerworld.com/en/models/400-later' WHERE skey='s:400'"); cc.commit()
+cc.execute("UPDATE cur_candidates SET skey=? WHERE skey='s:400'", (sites.source_key("https://makerworld.com/en/models/400-later"),)); cc.commit()
+cand.upsert([{"url": "https://makerworld.com/en/models/400-later", "title": "Later model unique 400", "author": "keepme", "metrics": {"likes": "9"}, "thumb": "https://t/a.jpg"}])
+rl = cc.execute("SELECT author, metrics, status FROM cur_candidates WHERE skey=?", (sites.source_key("https://makerworld.com/en/models/400-later"),)).fetchone()
+ok(rl and rl["author"] == "keepme" and json.loads(rl["metrics"]).get("likes") == "9" and rl["status"] == "later", "re-collect of existing 稍后看 below junk score keeps author / metrics")
 ok(pool.auto_clean() is None, "auto-clean runs once a day")
 C.post("/api/cur/pool/settings", json={"auto": False}); cdb.put("pool_last", 0)
 ok(pool.auto_clean() is None, "auto-clean off")

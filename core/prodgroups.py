@@ -153,6 +153,37 @@ def tags():
     return [{"id": r["id"], "name": r["name"]} for r in db.conn().execute("SELECT id, name FROM product_groups ORDER BY sort, name")]
 
 
+def _backup_groups(c):
+    """迁移前把所有旧分组的完整成员 {分组名: [产品编号]} 存进 goods_meta（k='groups_backup253'）。只存一次（重复跑不覆盖第一次的完整备份），
+    万一迁移丢了手动成员，可以从这里恢复。"""
+    if c.execute("SELECT 1 FROM goods_meta WHERE k='groups_backup253'").fetchone():
+        return
+    bk = {}
+    names = {r["id"]: (r["name"] or "").strip() for r in c.execute("SELECT id, name FROM product_groups")}
+    for item in store.list_products():
+        try:
+            p = store.load(item["id"])
+        except Exception:  # noqa: BLE001
+            continue
+        for gid in p.get("groups") or []:
+            if gid in names:
+                bk.setdefault(names[gid], []).append(p["id"])
+    for nm in names.values():
+        bk.setdefault(nm, [])
+    c.execute("INSERT OR IGNORE INTO goods_meta(k, v) VALUES('groups_backup253', ?)", (json.dumps(bk, ensure_ascii=False),))
+    c.commit()
+
+
+def groups_backup():
+    """迁移前的旧分组备份：{分组名: [产品编号]}（没备份过 = {}）。"""
+    init()
+    r = db.conn().execute("SELECT v FROM goods_meta WHERE k='groups_backup253'").fetchone()
+    try:
+        return json.loads(r["v"]) if r else {}
+    except ValueError:
+        return {}
+
+
 # ---------------- 迁移（可以重复跑：没有要搬的就什么也不做） ----------------
 def migrate(force=False):
     """旧的手动分组 → 新的：已上传 / 热销 / 滞销 现在是自动的（丢掉手动成员，分组删除）；准备上架 / 待上传 → 「要上传」标记；
@@ -163,6 +194,7 @@ def migrate(force=False):
     c = db.conn()
     if not force and c.execute("SELECT 1 FROM goods_meta WHERE k='migrated253'").fetchone():
         return {}
+    _backup_groups(c)
     plan = {}
     for g in [dict(r) for r in c.execute("SELECT id, name FROM product_groups")]:
         nm = (g["name"] or "").strip()

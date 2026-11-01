@@ -31,6 +31,8 @@ FIXED_ONLY = ("shipping",)
 CHANGE_PP = 0.005                    # 费率项变化超过 0.5 个百分点 → 提醒
 WINDOWS = (30, 90)
 SHOPEE_REMIND_DAYS = 7
+MAX_PCT = 0.8                        # 实际算出来的百分比费率上限（超过 = 数据有问题，忽略）
+MAX_FIXED = 500.0                    # 每件固定费用上限（泰铢）
 UNKNOWN_CAT = "-"
 SHOP_LEVEL = "*"
 PLATFORMS = ("lazada", "shopee")
@@ -523,6 +525,32 @@ def default_shop(platform):
     return sh[0] if sh else ""
 
 
+def rate_ok(pct, fixed):
+    """算出来的实际费率是否可信：0 ≤ 百分比 ≤ 80%，0 ≤ 每件固定费用 ≤ 500 泰铢，且不是 NaN。"""
+    try:
+        pct, fixed = float(pct or 0), float(fixed or 0)
+    except (TypeError, ValueError):
+        return False
+    if pct != pct or fixed != fixed:
+        return False
+    return 0 <= pct <= MAX_PCT and 0 <= fixed <= MAX_FIXED
+
+
+def bad_snaps():
+    """样本够用、但费率异常（会被 resolve 忽略）的快照：[{platform, shop, category, win, pct, fixed}]，给待办警告用。"""
+    from .config import load_config
+    try:
+        L = _load()
+        n_min = min_orders(load_config())
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for (plat, shop, cat, win), s in L["snaps"].items():
+        if s["orders"] >= n_min and (s["pct"] or s["fixed"]) and not rate_ok(s["pct"], s["fixed"]):
+            out.append({"platform": plat, "shop": shop, "category": cat, "win": win, "pct": s["pct"], "fixed": s["fixed"]})
+    return out
+
+
 def resolve(platform=None, shop=None, category=None, cfg=None):
     """某平台 / 店铺 / 类目的费率。shop 不给 = 平台第一个启用的店铺；没有真实数据 → 默认值。永远返回一个可用的费率。"""
     from .config import load_config
@@ -542,11 +570,19 @@ def resolve(platform=None, shop=None, category=None, cfg=None):
             for win in WINDOWS:
                 s = L["snaps"].get((platform, shop_try, ck, win))
                 if s and s["orders"] >= n_min and (s["pct"] or s["fixed"]):
+                    if not rate_ok(s["pct"], s["fixed"]):     # 结算数据异常（负数 / 超过 80% / 固定费用离谱）→ 忽略这条，往下走，最后用默认值
+                        continue
                     return _pack(platform, shop_try, cat, s["items"], "actual", level, s["orders"], win, s["updated_at"], s["pct"], s["fixed"])
     d = L["defaults"].get((platform, cat)) if cat else None
     level = "category_default"
     if d is None:
         d, level = platform_default(cfg, platform), "default"
+    try:
+        d = float(d)
+        if not 0 <= d <= MAX_PCT:
+            d = min(max(d, 0.0), MAX_PCT) if d == d else 0.0
+    except (TypeError, ValueError):
+        d = 0.0
     return _pack(platform, shop, cat, {"default": {"pct": float(d), "fixed": 0.0}}, "default", level, 0, 0, None)
 
 
@@ -571,7 +607,13 @@ def breakdown(rate, price):
 
 def price_for(cost, markup, rate):
     """成本加价后的含费用售价（未取整）：(成本×(1+加价)+每件固定) ÷ (1−百分比)。"""
-    return (cost * (1 + markup) + rate["fixed"]) / (1 - rate["pct"])
+    try:
+        pct = min(max(float(rate.get("pct") or 0), 0.0), MAX_PCT)
+        fixed = min(max(float(rate.get("fixed") or 0), 0.0), MAX_FIXED)
+        v = (float(cost) * (1 + float(markup)) + fixed) / (1 - pct)
+        return v if math.isfinite(v) else 0.0
+    except Exception:  # noqa: BLE001  坏数据不能让整个定价崩掉
+        return 0.0
 
 
 def estimate_order_fee(cfg, platform, shop, items, revenue):
@@ -616,52 +658,171 @@ def below_cost(cfg, product, platform, shop, live_prices=None):
     return out
 
 
-def affected_products(cfg, platform, shop, limit=500):
-    """按当前费率，哪些产品的利润（加价率）低于最低要求：[{id, name, variants:[…], below_cost}]。"""
+def affected_products(cfg, platform, shop, limit=None):
+    """按当前费率，哪些产品的利润（加价率）低于最低要求：[{id, name, variants:[…], below_cost}]。看全部产品（limit 只给调用方想截断时用）。"""
     from . import store, pricing
     out = []
     mm = float(cfg.get("min_markup") or 0)
-    for it in store.list_products()[:limit]:
+    items = store.list_products()
+    if limit:
+        items = items[:limit]
+    for it in items:
         try:
             p = store.load(it["id"])
+            if not p.get("variants"):
+                continue
             rows = pricing.price_product(cfg, p, platform=platform, shop=shop)
         except Exception:  # noqa: BLE001
             continue
         bad = []
-        for v, pr in zip(p.get("variants") or [], rows):
+        for i, (v, pr) in enumerate(zip(p.get("variants") or [], rows)):
             if pr["cost"]["total"] > 0 and pr.get("actual_markup") is not None and pr["actual_markup"] < mm - 1e-9 and not pr.get("warning", "").startswith("缺少"):
-                bad.append({"sku": v.get("sku") or "", "price": pr["final_price"], "suggested": pr["suggested_price"], "markup": pr["actual_markup"],
+                bad.append({"idx": i, "sku": v.get("sku") or "", "price": pr["final_price"], "suggested": pr["suggested_price"], "markup": pr["actual_markup"],
                             "manual": v.get("manual_price") not in (None, "", 0), "profit": pr["profit"]})
         if bad:
             out.append({"id": p["id"], "name": p.get("name_zh") or p["id"], "variants": bad, "below_cost": any(b["profit"] < 0 for b in bad)})
     return out
 
 
-def recalc_suggested(cfg, platform, shop, ids=None, user=""):
-    """「按新费率重算建议价」：受影响产品里，手动定价低于最低加价率的变体清掉手动价（回到建议价），并打「要改价」标记，方便重新推送。返回 {products, variants}。"""
-    from . import store, prodgroups
+def _listed_platforms(p, online):
+    """这个产品挂在哪些平台（上架记录 / 在线商品）。"""
+    from . import listing
+    out = set()
+    for pf in PLATFORMS:
+        try:
+            if (listing.status_of(p, pf).get("status") or "none") not in ("none", ""):
+                out.add(pf)
+        except Exception:  # noqa: BLE001
+            pass
+    for o in online.get(p["id"], []) or []:
+        if o.get("platform") in PLATFORMS and o.get("status") not in ("deleted", "inactive"):
+            out.add(o["platform"])
+    return out
+
+
+def _online_map():
+    try:
+        from . import modules as _mods
+        pub = _mods.public("listing")
+        return pub.online_shops() if pub else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def recalc_plan(cfg, platform, shop, ids=None):
+    """「按新费率重算建议价」会改什么（确认框和真正执行用同一份）：
+    只看有手动价、且在这个店铺的新费率下加价率低于最低要求的变体。手动价是所有平台共用的一个数：
+    产品只挂在这个平台 → 清掉手动价（回到建议价，可撤销）；还挂在别的平台 → 不动手动价，只标「要改价」让人自己定。"""
+    from . import store
     aff = affected_products(cfg, platform, shop)
     if ids:
         aff = [a for a in aff if a["id"] in set(ids)]
-    nv, done = 0, []
+    online = _online_map()
+    out = []
     for a in aff:
+        man = [b for b in a["variants"] if b["manual"]]
+        if not man:
+            continue
+        try:
+            p = store.load(a["id"])
+        except (FileNotFoundError, ValueError):
+            continue
+        others = sorted(_listed_platforms(p, online) - {platform})
+        out.append({"id": a["id"], "name": a["name"], "action": "mark" if others else "clear", "also_on": others,
+                    "variants": [{"idx": b["idx"], "sku": b["sku"], "manual_price": (p["variants"][b["idx"]] or {}).get("manual_price"),
+                                  "suggested": b["suggested"], "markup": b["markup"]} for b in man]})
+    return out
+
+
+def _init_recalc_log():
+    db.conn().execute("CREATE TABLE IF NOT EXISTS fee_recalc_log (id INTEGER PRIMARY KEY AUTOINCREMENT, batch TEXT, pid TEXT, idx INTEGER, sku TEXT, "
+                      "old_price REAL, platform TEXT, shop TEXT, who TEXT, at REAL, undone REAL)")
+
+
+def recalc_suggested(cfg, platform, shop, ids=None, user=""):
+    """「按新费率重算建议价」：见 recalc_plan。清手动价前存 manual_price_prev（+谁 / 何时）、写 fee_recalc_log 和审计，整批可撤销。
+    返回 {products, variants, cleared, marked, batch, ids}。"""
+    from . import store, prodgroups
+    init()
+    _init_recalc_log()
+    plan = recalc_plan(cfg, platform, shop, ids)
+    batch = f"rc{int(time.time() * 1000)}"
+    now = time.time()
+    nv, cleared, marked = 0, [], []
+    c = db.conn()
+    for a in plan:
+        if a["action"] == "mark":
+            marked.append(a["id"])
+            continue
         p = store.load(a["id"])
-        skus = {b["sku"] for b in a["variants"] if b["manual"]}
         changed = False
-        for v in p.get("variants") or []:
-            if v.get("sku") in skus and v.get("manual_price") not in (None, "", 0):
-                v["manual_price"] = None
-                nv += 1
-                changed = True
+        for b in a["variants"]:
+            v = p["variants"][b["idx"]]
+            if v.get("manual_price") in (None, "", 0):
+                continue
+            v["manual_price_prev"] = v["manual_price"]
+            v["manual_price_prev_by"] = user
+            v["manual_price_prev_at"] = now
+            v["manual_price_prev_batch"] = batch
+            c.execute("INSERT INTO fee_recalc_log(batch, pid, idx, sku, old_price, platform, shop, who, at) VALUES(?,?,?,?,?,?,?,?,?)",
+                      (batch, a["id"], b["idx"], v.get("sku") or "", float(v["manual_price"]), platform, shop or "", user, now))
+            v["manual_price"] = None
+            nv += 1
+            changed = True
         if changed:
             store.save(p)
-        done.append(a["id"])
+            cleared.append(a["id"])
+    c.commit()
+    done = cleared + marked
+    if nv or marked:
+        db.audit(user, "财务·按新费率重算建议价", f"{platform}/{shop or '全部'}", f"批次 {batch}：清手动价 {nv} 个变体（{len(cleared)} 产品），只标要改价 {len(marked)} 产品")
     try:
-        prodgroups.set_mark(done, "price", True, note="平台费率调整，已按新费率重算建议价", user=user, scope="wb")
+        prodgroups.set_mark(done, "price", True, note="平台费率调整" + ("，手动价已清（可在财务·平台费率撤销）" if cleared else "，手动价是各平台共用的，请自己确认新价"), user=user, scope="wb")
     except Exception:  # noqa: BLE001
         pass
     ack_events(platform, shop)
-    return {"products": len(done), "variants": nv, "ids": done}
+    return {"products": len(done), "variants": nv, "cleared": cleared, "marked": marked, "batch": batch if nv else "", "ids": done}
+
+
+def recalc_undo(batch, user=""):
+    """撤销一批「重算建议价」：把 manual_price_prev 放回 manual_price（这个变体现在没有手动价才放回，已经被人重新定价的不覆盖）。"""
+    from . import store
+    init()
+    _init_recalc_log()
+    c = db.conn()
+    rows = [dict(r) for r in c.execute("SELECT * FROM fee_recalc_log WHERE batch=? AND undone IS NULL", (batch,))]
+    n, skipped = 0, 0
+    for r in rows:
+        try:
+            p = store.load(r["pid"])
+            v = p["variants"][r["idx"]]
+        except (FileNotFoundError, ValueError, IndexError, KeyError):
+            skipped += 1
+            continue
+        if v.get("manual_price") in (None, "", 0):
+            v["manual_price"] = v.get("manual_price_prev") if v.get("manual_price_prev") not in (None, "") else r["old_price"]
+            n += 1
+        else:
+            skipped += 1
+        for k in ("manual_price_prev", "manual_price_prev_by", "manual_price_prev_at", "manual_price_prev_batch"):
+            v.pop(k, None)
+        store.save(p)
+        c.execute("UPDATE fee_recalc_log SET undone=? WHERE id=?", (time.time(), r["id"]))
+    c.commit()
+    if rows:
+        db.audit(user, "财务·撤销重算建议价", batch, f"恢复 {n} 个变体手动价，跳过 {skipped}")
+    return {"restored": n, "skipped": skipped}
+
+
+def recalc_batches(limit=5):
+    """最近还没撤销的重算批次（页面上显示「撤销」）。"""
+    init()
+    _init_recalc_log()
+    out = []
+    for r in db.conn().execute("SELECT batch, platform, shop, who AS by, MAX(at) at, COUNT(*) n, COUNT(DISTINCT pid) products FROM fee_recalc_log WHERE undone IS NULL "
+                               "GROUP BY batch ORDER BY at DESC LIMIT ?", (limit,)):
+        out.append(dict(r))
+    return out
 
 
 # ---------------- 页面数据 ----------------
@@ -729,6 +890,21 @@ def todo(add):
                 th=("รายงานการชำระเงิน Shopee ไม่ได้นำเข้าเกิน 7 วัน อัตราค่าธรรมเนียมอาจไม่ตรง" if st["last_import"] else
                     "ยังไม่เคยนำเข้ารายงานการชำระเงิน Shopee ตอนนี้ใช้ค่าธรรมเนียมเริ่มต้น",
                     "ไปที่ Shopee Seller Centre → รายได้ของฉัน → โอนแล้ว ดาวน์โหลดรายงานรายได้ แล้วนำเข้าที่「การเงิน → กระทบยอดแพลตฟอร์ม」"))
+    # 1b) 结算算出来的费率异常（负数 / 超过 80% / 固定费用离谱）：已忽略、用默认值，提醒老板查数据
+    bad = bad_snaps()
+    if bad:
+        by = {}
+        for b in bad:
+            by.setdefault((b["platform"], b["shop"]), []).append(b)
+        for (plat, shop), bs in by.items():
+            nm = "Shopee" if plat == "shopee" else "Lazada"
+            ex = bs[0]
+            add(f"fee_bad:{plat}:{shop}:{int(max(x['pct'] * 1000 for x in bs))}", "财务", "warn",
+                f"{nm} 结算算出来的费率不正常（{shop or '全部店铺'}），已先用默认费率",
+                f"例如 {ex['pct'] * 100:.1f}% + 每件 {ex['fixed']:.1f} 泰铢（正常应在 0~{MAX_PCT * 100:.0f}%）。可能是结算报表导错 / 退款冲回，请检查「财务 → 平台费率」和导入的报表。",
+                tab="fin_fees", roles="owner",
+                th=(f"อัตราค่าธรรมเนียม {nm} จากการชำระเงินผิดปกติ ({shop or 'ทุกร้าน'}) ใช้ค่าเริ่มต้นไปก่อน",
+                    f"เช่น {ex['pct'] * 100:.1f}% + {ex['fixed']:.1f} บาท/ชิ้น (ปกติควรอยู่ที่ 0~{MAX_PCT * 100:.0f}%) อาจนำเข้ารายงานผิดหรือมีการคืนเงิน โปรดตรวจสอบที่「การเงิน → อัตราค่าธรรมเนียมแพลตฟอร์ม」"))
     # 2) 费率变了：列出受影响产品
     groups = {}
     for e in events("open"):

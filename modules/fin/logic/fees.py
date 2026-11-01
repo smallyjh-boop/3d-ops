@@ -27,7 +27,7 @@ def page(platform=""):
             a = feerates.affected_products(cfg, e["platform"], e["shop"])
             aff[k] = {"n": len(a), "names": [x["name"] for x in a[:8]], "below_cost": sum(1 for x in a if x["below_cost"]), "ids": [x["id"] for x in a]}
     names = {n: feerates.fee_name_label(n) for r in rows for it in r["items"] for n in (it.get("names") or [])}
-    return {"fee_names": names, "min_orders": feerates.min_orders(cfg), "kpis": kp, "rows": rows, "trend": feerates.trend(), "events": events, "affected": aff,
+    return {"fee_names": names, "min_orders": feerates.min_orders(cfg), "kpis": kp, "rows": rows, "trend": feerates.trend(), "events": events, "affected": aff, "recalc_batches": feerates.recalc_batches(),
             "defaults": {"platform": {p: feerates.platform_default(cfg, p) for p in feerates.PLATFORMS}, "categories": cat_defaults},
             "shopee": feerates.import_status("shopee"), "categories": category_options(),
             "items": {k: feerates.label_of(k) for k in feerates.ITEMS},

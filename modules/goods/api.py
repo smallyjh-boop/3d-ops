@@ -100,9 +100,22 @@ def cached_rows():
     return rows
 
 
+def _strip_for_role(rows):
+    """生产角色看不到售价（sku_price / price_sig 等）：每次请求按角色去掉，缓存里的保持原样。其他角色不变。"""
+    u = auth.current_user() or {}
+    return auth.strip_prices(rows, u) if u.get("role") == "production" else rows
+
+
+def _strip_lib(res):
+    u = auth.current_user() or {}
+    if u.get("role") != "production":
+        return res
+    return dict(res, items=auth.strip_prices(res.get("items") or [], u))
+
+
 @bp.get("/api/products")
 def products():
-    return jsonify(_rows(request.args.get("inbox") or ""))
+    return jsonify(_strip_for_role(_rows(request.args.get("inbox") or "")))
 
 
 _LIB_CACHE = {}
@@ -117,13 +130,13 @@ def goods_library():
     key = (store.REV[0], request.args.get("inbox") or "all")
     hit = _LIB_CACHE.get("v")
     if hit and hit[0] == key and time.time() - hit[1] < 3 and not request.args.get("fresh"):
-        return jsonify(hit[2])
+        return jsonify(_strip_lib(hit[2]))
     allr = _rows("all")
     rows = [i for i in allr if not i.get("inbox")]
     res = {"items": rows, "inbox": len(allr) - len(rows), "summary": _g.summary(rows),
            "views": prodgroups.views("goods"), "tags": prodgroups.tags(), "settings": prodgroups.settings()}
-    _LIB_CACHE["v"] = (key, time.time(), res)
-    return jsonify(res)
+    _LIB_CACHE["v"] = (key, time.time(), res)      # 缓存里存未去价的；每次请求按角色去掉（生产角色看不到售价）
+    return jsonify(_strip_lib(res))
 
 
 @bp.post("/api/products/new")

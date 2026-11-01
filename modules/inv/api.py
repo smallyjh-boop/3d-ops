@@ -30,7 +30,18 @@ def inv_meta():
     return jsonify({"ok": True, "categories": inv.categories(), "units": inv.UNITS,
                     "kinds": {k: v[0] for k, v in inv.KINDS.items()}, "doc_kinds": {k: v[0] for k, v in inv.DOC_KINDS.items()},
                     "overview": inv.overview(), "alerts": _views().alerts(), "perms": _perms(),
-                    "printers": [p.get("code") or p.get("name") for p in (load_config().get("printers") or [])]})
+                    "printers": [p.get("code") or p.get("name") for p in (load_config().get("printers") or [])],
+                    "qc_hint": bool(load_config().get("inv_qc_hint253")) and not load_config().get("inv_qc_on", True) and auth.is_owner()})
+
+
+@bp.post("/api/inv/qc/hint")
+def inv_qc_hint():
+    """升级后的一次性提示：{enable: true} = 现在就开质检（成品先进待检区）；否则只是知道了。"""
+    if not auth.is_owner():
+        return err("只有老板能改", 403)
+    b = request.get_json(silent=True) or {}
+    save_config({"inv_qc_hint253": False, **({"inv_qc_on": True} if b.get("enable") else {})})
+    return jsonify({"ok": True})
 
 
 @bp.get("/api/inv/items")

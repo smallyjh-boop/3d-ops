@@ -38,8 +38,10 @@
     $$('#inv-views [data-iv="expense"]').forEach((b) => b.classList.toggle("hidden", !seeMoney));
     if (VIEW === "expense" && !seeMoney) VIEW = "items";
     const al = META.alerts || [];
-    $("#inv-alerts").innerHTML = al.length ? `<div class="warnbox small"><b>低于补货线</b>：` +
-      al.map((a) => `<span class="chip" data-notr>${esc(TH() && a.name_th ? a.name_th : a.name_zh)} ${num(a.qty, 1)}/${num(a.reorder_point, 1)} ${esc(uLab(a.unit))}</span>`).join(" ") + "</div>" : "";
+    const qcHint = META.qc_hint ? `<div class="warnbox small" id="inv-qchint">${TH() ? "ตอนอัปเกรดได้ปิดการตรวจคุณภาพไว้ (สินค้าที่พิมพ์เสร็จเข้าชั้นวางทันที) ถ้าต้องการให้เข้า「โซนรอตรวจ」ก่อน เปิดได้เลย" : "升级时把「质检区」先关掉了（打印出来的成品直接上架、可售）。想让成品先进待检区、合格再上架，可以现在开启。"}
+      <button class="mini primary" data-qchint="1">${TH() ? "เปิดการตรวจคุณภาพ" : "开启质检"}</button> <button class="mini" data-qchint="0">${TH() ? "รับทราบ" : "知道了"}</button></div>` : "";
+    $("#inv-alerts").innerHTML = qcHint + (al.length ? `<div class="warnbox small"><b>低于补货线</b>：` +
+      al.map((a) => `<span class="chip" data-notr>${esc(TH() && a.name_th ? a.name_th : a.name_zh)} ${num(a.qty, 1)}/${num(a.reorder_point, 1)} ${esc(uLab(a.unit))}</span>`).join(" ") + "</div>" : "");
     if (VIEW === "locations" || VIEW === "stocktake") { const go = VIEW === "locations" ? "inv_locations" : "inv_stocktake"; VIEW = "items"; return goTab(go); }  // v2.52：搬成自己的页面
     if (VIEW === "items" || VIEW === "catalog") return renderItems();
     if (VIEW === "boxes") return renderBoxes().catch((e) => toast(e.message, true));
@@ -296,6 +298,8 @@
     if (bm) return busy(bm, async () => { await api(`/api/inv/boxes/${encodeURIComponent(bm.dataset.boxmk)}/item`, { method: "POST" }); toast(TH() ? "สร้างแล้ว" : "已建档"); renderBoxes(); });
     if (e.target.id === "inv-new-item") return itemModal(null).catch((er) => toast(er.message, true));
     if (e.target.id === "inv-reload") return load();
+    const qh = e.target.closest && e.target.closest("[data-qchint]");
+    if (qh) return busy(qh, async () => { await api("/api/inv/qc/hint", { json: { enable: qh.dataset.qchint === "1" } }); load(); });
     if (e.target.id === "inv-presets") return busy(e.target, async () => { const r = await api("/api/inv/presets", { method: "POST" }); toast(TH() ? `เพิ่ม ${r.added} รายการ` : `新建了 ${r.added} 个常用物品`); load(); });
   });
   function openStocktake(id) { if (window.INVST) INVST.open(id); }

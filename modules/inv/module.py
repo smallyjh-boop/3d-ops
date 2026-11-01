@@ -57,7 +57,7 @@ MODULE = {
         ("订单发货出库", [
             ("inv_ship_out", "订单变成「已发货」时自动出库：扣「用库存发」的成品、这单用的纸箱、下面规则里的包材（每单一张出库单）", "bool")])],
     "config_defaults": {"inv_loc_auto": True, "inv_loc_layer_bottom": True, "inv_ship_out": True, "inv_loc_idle_days": 90, "inv_loc_max_spread": 3,
-                        "inv_qc_on": True, "inv_returns_zone": True, "inv_pack_station": "", "inv_slow_days": 60, "inv_spool_tare_g": 250,
+                        "inv_qc_on": True, "inv_qc_hint253": False, "inv_returns_zone": True, "inv_pack_station": "", "inv_slow_days": 60, "inv_spool_tare_g": 250,
                         "inv_spool_low_g": 150, "inv_spool_expire_days": 365, "inv_spool_dry_days": 0},
     "ui": {"inline": True, "html": "page.html", "eager_js": ["inventory.js", "locations.js", "wms.js", "stocktake.js", "zones.js"], "css": ["page.css"],
            "page_js": [], "boot_js": []},
