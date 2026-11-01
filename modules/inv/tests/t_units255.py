@@ -194,8 +194,8 @@ ok(abs(item(fw["id"])["qty"] - (q2 - 150)) < 1e-6, "issue in grams still works")
 # ---------- 盘点：数卷 ----------
 st = inv.stocktake_start("filament", "t")
 ln = next(l for l in st["lines"] if l["item_id"] == fw["id"])
-sysr = ln["units"]["rolls"]
-ok(ln["units"]["text_zh"].startswith(f"{sysr} 卷"), "stocktake line shows roll count")
+sysr = ln["shelf_rolls"]          # v2.55.0：盘点账面 = 整卷 + 开封卷（在机上的不算）
+ok(ln["units"]["text_zh"].startswith(f"{ln['units']['rolls']} 卷"), "stocktake line shows roll count")
 inv.stocktake_save(st["id"], {str(ln["id"]): {"rolls": sysr + 1}}, "t")
 s2 = inv.doc(st["id"])
 l2 = next(l for l in s2["lines"] if l["item_id"] == fw["id"])
@@ -205,11 +205,11 @@ inv.stocktake_confirm(st["id"], "t")
 ok(abs(item(fw["id"])["qty"] - (q3 + 1000)) < 1e-6 and len(spools_of("PLA", "白色")) == rolls3 + 1, "confirm: one new sealed spool created")
 st = inv.stocktake_start("filament", "t")
 ln = next(l for l in st["lines"] if l["item_id"] == fw["id"])
-sysr = ln["units"]["rolls"]
+sysr = ln["shelf_rolls"]
 inv.stocktake_save(st["id"], {str(ln["id"]): {"rolls": sysr - 1}}, "t")
 q4 = item(fw["id"])["qty"]
 inv.stocktake_confirm(st["id"], "t")
-ok(row_of(fw["id"])["units"]["rolls"] == sysr - 1 and abs(item(fw["id"])["qty"] - (q4 - 1000)) < 1e-6, "count rolls: one roll missing -> one roll gone (sealed first)")
+ok(units.shelf_rolls(units.spool_stats()[("PLA", "白色")]) == sysr - 1 and abs(item(fw["id"])["qty"] - (q4 - 1000)) < 1e-6, "count rolls: one roll missing -> one roll gone (sealed first)")
 st = inv.stocktake_start("filament", "t")
 lid = next(l for l in st["lines"] if l["item_id"] == fw["id"])["id"]
 try:

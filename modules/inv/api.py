@@ -4,6 +4,22 @@ from flask import Blueprint
 from web.common import *  # noqa: F401,F403
 from core import inventory as inv
 
+def _ni(v, d, lo=1, hi=10 ** 9):
+    """安全的整数参数：不是数字用默认值，超出范围夹到边界（以前 int("abc") 直接 500）。"""
+    try:
+        return max(lo, min(hi, int(float(v))))
+    except (TypeError, ValueError, OverflowError):
+        return d
+
+
+def _nf(v, d=0.0):
+    try:
+        x = float(v)
+        return x if x == x and abs(x) != float("inf") else d
+    except (TypeError, ValueError):
+        return d
+
+
 bp = Blueprint("m_inv", __name__)
 
 
@@ -53,7 +69,7 @@ def inv_items():
         if sort in views.MONEY_SORTS and not (_perms().get("inv.pay") or _perms().get("inv.in")):
             sort = ""
         r = views.listing_page(a.get("view"), a.get("category") or "", (a.get("q") or "").strip(), a.get("zone") or "", (a.get("loc") or "").strip(),
-                               sort, a.get("dir") == "desc", a.get("page") or 1, int(a.get("size") or 50))
+                               sort, a.get("dir") == "desc", _ni(a.get("page"), 1), _ni(a.get("size"), 50, 1, 200))
         return jsonify({"ok": True, **r, "counts": views.counts_sql(), "zones": views.zone_options()})
     if a.get("view"):            # v2.32：库存 / 物品资料 / 没库存 / 已停用
         from modules.inv import views
@@ -118,7 +134,7 @@ def inv_presets():
 def inv_moves():
     a = request.args
     return jsonify({"ok": True, "moves": inv.moves(a.get("item_id"), a.get("kind") or None, a.get("days") or None,
-                                                   min(int(a.get("limit") or 300), 2000), a.get("doc_id"))})
+                                                   _ni(a.get("limit"), 300, 1, 2000), a.get("doc_id"))})
 
 
 @bp.get("/api/inv/docs")
@@ -234,7 +250,7 @@ def inv_supplier_save():
 @bp.get("/api/v1/finance/events")
 def v1_finance_events():
     a = request.args
-    return jsonify({"ok": True, "events": inv.finance_events(float(a.get("since") or 0), min(int(a.get("limit") or 1000), 5000),
+    return jsonify({"ok": True, "events": inv.finance_events(_nf(a.get("since")), _ni(a.get("limit"), 1000, 1, 5000),
                                                              a.get("kind") or "")})
 
 
@@ -331,7 +347,7 @@ def inv_loc_codes():
 @bp.get("/api/inv/loc/suggest")
 def inv_loc_suggest():
     from modules.inv import locviews
-    return _ok(lambda: {"locations": locviews.suggest(request.args.get("q") or "", min(int(request.args.get("limit") or 30), 100))})
+    return _ok(lambda: {"locations": locviews.suggest(request.args.get("q") or "", _ni(request.args.get("limit"), 30, 1, 100))})
 
 
 @bp.get("/api/inv/loc/summary")
@@ -530,8 +546,8 @@ def inv_wms_pending():
 def inv_wms_recommend():
     from modules.inv import wms
     a = request.args
-    return _ok(lambda: {"plan": wms.recommend(int(a.get("item_id") or 0), a.get("qty") or None),
-                        **wms.item_locations(int(a.get("item_id") or 0))})
+    return _ok(lambda: {"plan": wms.recommend(_ni(a.get("item_id"), 0, 0), a.get("qty") or None),
+                        **wms.item_locations(_ni(a.get("item_id"), 0, 0))})
 
 
 @bp.post("/api/inv/wms/putaway")

@@ -185,6 +185,7 @@
     await meta();
     DET = await api("/api/fleet/printers/" + encodeURIComponent(OPEN));
     OPEN = DET.printer.id;
+    if (DET.stale_label) toast(Z("这个编码已换给别的打印机，请重新打印标签", "รหัสนี้ถูกย้ายให้เครื่องอื่นแล้ว กรุณาพิมพ์ป้ายใหม่"), true);
     if (own() && DET.printer.dedicated_po !== undefined) await prodOrders();
     drawerEl().querySelector(".fl-din").innerHTML = drawerHtml(DET);
   }

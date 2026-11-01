@@ -430,9 +430,23 @@ def index_of(printers, key):
     for i, p in enumerate(printers):          # v2.55：改过编码的打印机，以前印的二维码标签（旧编码）还能找到它
         if s.upper() in [str(x).upper() for x in (p.get("old_codes") or [])]:
             return i
+    for i, p in enumerate(printers):          # v2.55.0：编码换给别的打印机、后来又空出来的旧编码（stale_codes）
+        if s.upper() in [str(x).upper() for x in (p.get("stale_codes") or [])]:
+            return i
     if s.isdigit() and int(s) < len(printers):
         return int(s)
     return None
+
+
+def stale_label(printers, key):
+    """用编码（不是稳定 id）扫到的，这个编码以前是别的打印机的、后来换给了现在这台 → True（旧标签印的是旧机器，要重新打印）。"""
+    s = str(key or "").strip().upper()
+    if not s or any(p.get("id") == str(key).strip() for p in printers):
+        return False
+    owner = next((p for p in printers if str(p.get("code") or "").upper() == s), None)
+    if not owner:
+        return False
+    return any(s in [str(x).upper() for x in (p.get("stale_codes") or [])] and p is not owner for p in printers)
 
 
 def next_codes(name, n, printers, width=3):

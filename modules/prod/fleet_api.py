@@ -254,7 +254,9 @@ def fleet_printer_get(key):
     cfg, prs, i = _find(key)
     if i is None:
         return err("打印机不存在")
-    return jsonify(_detail(cfg, prs, i))
+    d = _detail(cfg, prs, i)
+    d["stale_label"] = fleet.stale_label(prs, key)         # v2.55.0：用旧标签的编码扫到的，但这个编码已经换给别的打印机了
+    return jsonify(d)
 
 
 def _apply_fields(p, b, cfg, errs):
@@ -266,7 +268,6 @@ def _apply_fields(p, b, cfg, errs):
         elif code:
             was = p.get("code")
             p["code"] = code
-            fleetcodes.remember_old(p, was)
     if b.get("name"):
         name = fleet.known_model(b["name"], cfg) or str(b["name"]).strip()[:40]
         if name != p.get("name"):
@@ -344,6 +345,9 @@ def fleet_printer_save(key):
         old = [dict(x) for x in prs]
         prs[i] = p
         ren = [(old[i].get("code"), p.get("code"))] if old[i].get("code") != p.get("code") else None
+        if ren:
+            fleetcodes.migrate_po_refs()                 # v2.55.0：和批量重新编号同一套：生产单先换成稳定 id、旧编码记下来
+            fleetcodes.note_code_changes(old, prs)
         cfg = _save(cfg, prs, renames=ren)
         sug = fleetcodes.suggest_after_move([old[i]], [cfg["printers"][i]], cfg) if "code" not in b or old[i].get("code") == p.get("code") else []
     from core import printers as printers_mod
@@ -877,13 +881,16 @@ def _renumber(b, apply):
         for p in prs:
             r = ch.get(p.get("id"))
             if r:
-                was = p.get("code")
                 p["code"] = r["new"]
-                fleetcodes.remember_old(p, was)
                 pairs.append((r["old"], r["new"]))
+        info = fleetcodes.note_code_changes(old, prs)
         cfg = _save(cfg, prs, renames=pairs)
         db.audit(_uname(), "批量重新编号打印机", f"{len(ch)} 台", ";".join(f"{r['old']}>{r['new']}" for r in list(ch.values())[:30])[:300])
-        return jsonify(dict(out, ok=True, n=len(ch), ids=list(ch.keys())))
+        by_id = {p.get("id"): p for p in cfg["printers"]}
+        return jsonify(dict(out, ok=True, n=len(ch), ids=list(ch.keys()),
+                            # v2.55.0：旧标签会指到别的机器的（编码互换 / 复用）：必须重新打印；其余改了编码的也建议重印（新标签二维码是稳定 id）
+                            relabel=[dict(x, name=(by_id.get(x["id"]) or {}).get("name", "")) for x in info["relabel"]],
+                            relabel_ids=sorted({x["id"] for x in info["relabel"]})))
 
 
 @bp.post("/api/fleet/codes/renumber")
@@ -911,7 +918,7 @@ def fleet_labels():
     th = request.args.get("lang") == "th"
     cards = []
     for p in sel[:2000]:
-        url = f"{base}/?printer={p.get('code')}#printers"
+        url = f"{base}/?printer={p.get('id') or p.get('code')}#printers"      # v2.55.0：二维码装稳定 id（改编码不用重印；牌子上的大字还是编码）
         loc = " · ".join(x for x in (p.get("group"), p.get("location")) if x)
         cards.append(f"""<div class="lb"><div class="qr">{qr.svg(url, 24)}</div><div class="t"><div class="code">{h(p.get('code') or '')}</div>
 <div class="nt">{h(p.get('name') or '')}</div>{f'<div class="nt"><b>{h(loc)}</b></div>' if loc else ''}</div></div>""")

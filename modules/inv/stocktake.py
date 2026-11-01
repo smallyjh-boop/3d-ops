@@ -79,8 +79,8 @@ def count(doc_id, code, counts, user="", complete=True):
         if not isinstance(v, dict) and flows.spool_item(c, r["id"]):
             raise ValueError(f"{r['code']} 是按卷管的耗材：要数卷数或者称重，不能直接填克数")
         if isinstance(v, dict):                  # v2.55：耗材数卷 {rolls: n} / 称重 {weigh: [{code, gross}]}
-            here = (lst.get((r["material"], r["color"])) or {}).get(loc["id"]) or {"rolls": 0, "grams": 0.0}
-            q, ex = inv.resolve_count(dict(r), v, wms.loc_qty(c, r["id"], loc["id"]), here["rolls"])
+            here = (lst.get((r["material"], r["color"])) or {}).get(loc["id"]) or {"rolls": 0, "grams": 0.0, "loaded": 0, "shelf": 0}
+            q, ex = inv.resolve_count(dict(r), v, wms.loc_qty(c, r["id"], loc["id"]), here["shelf"])     # 账面卷数 = 架子上的（在机上的拿不走，不算）
             if q is None:
                 continue
             got[r["id"]] = q
@@ -144,6 +144,12 @@ def summary(doc_id):
     if not d:
         raise ValueError("没有这张盘点单")
     items = {r["id"]: r for r in c.execute("SELECT id, code, name_zh, name_th, unit, avg_cost, category, material, color FROM inv_items")}
+    bylocs = {}
+    for r in c.execute("SELECT item_id, extra FROM inv_doc_lines WHERE doc_id=? AND extra LIKE '%by_loc%'", (d["id"],)):
+        try:
+            bylocs[r["item_id"]] = (json.loads(r["extra"]) or {}).get("by_loc") or {}
+        except ValueError:
+            pass
     locs = []
     lst = units.loc_stats(c)
     for r in c.execute("SELECT * FROM inv_loc_count_locs WHERE doc_id=?", (d["id"],)):
@@ -157,8 +163,11 @@ def summary(doc_id):
                    "book": book, "counted": x["counted"], "diff": None if x["counted"] is None else round(x["counted"] - book, 6),
                    "amount": None if x["counted"] is None else round((x["counted"] - book) * float(it["avg_cost"] or 0), 2)}
             if it["category"] == "filament":                   # v2.55：耗材这个货位上账面几卷（可以数卷、可以称重）
-                here = (lst.get((it["material"], it["color"])) or {}).get(r["loc_id"]) or {"rolls": 0, "grams": 0.0}
-                row.update(fil=True, material=it["material"], color=it["color"], book_rolls=here["rolls"],
+                here = (lst.get((it["material"], it["color"])) or {}).get(r["loc_id"]) or {"rolls": 0, "grams": 0.0, "loaded": 0, "shelf": 0}
+                was = (bylocs.get(x["item_id"]) or {}).get(str(r["loc_id"]))
+                if was and d["status"] == "draft" and int(was[1]) != here["shelf"]:      # 填数以后这个货位的账面变了
+                    row["sys_changed"] = {"was": int(was[1]), "now": here["shelf"]}
+                row.update(fil=True, material=it["material"], color=it["color"], book_rolls=here["shelf"], book_loaded=here["loaded"],
                            book_text_zh=units.loc_text(it["material"], here["rolls"], book)[0], book_text_th=units.loc_text(it["material"], here["rolls"], book)[1])
             rows.append(row)
         rows.sort(key=lambda x: x["code"])
@@ -176,6 +185,38 @@ def summary(doc_id):
     return d
 
 
+def _confirm_loc_rolls(c, it, ex, d, user):
+    """按货位数卷的确认（v2.55.0）：每个数过的货位，按「确认这一刻这个货位架子上的卷数」算多 / 少几卷。
+    少了：只拿这个货位上的那几卷（先整卷，再剩得少的），在机上的不动；多了：新建的料卷直接放进数的这个货位（不进待上架）。"""
+    import logging
+    from core import materials
+    changed = False
+    for lid_s, (cnt, sys0) in (ex.get("by_loc") or {}).items():
+        lid = int(lid_s)
+        loc = c.execute("SELECT code FROM inv_locations WHERE id=?", (lid,)).fetchone()
+        rows = c.execute("SELECT s.code FROM spools s JOIN inv_spool_loc l ON l.spool_id=s.id WHERE l.loc_id=? AND s.material=? AND s.color=? "
+                         "AND s.status IN ('sealed','open') AND (s.status='sealed' OR s.remaining_g>0) "
+                         "ORDER BY CASE s.status WHEN 'sealed' THEN 0 ELSE 1 END, CASE s.status WHEN 'open' THEN s.remaining_g ELSE 0 END, s.id",
+                         (lid, it["material"], it["color"])).fetchall()
+        cur = len(rows)
+        delta = int(cnt) - cur
+        if int(sys0) != cur and not ex.get("warn"):
+            ex["warn"] = {"was": int(sys0), "now": cur, "done": True}
+        if delta < 0:
+            materials.take_rolls(it["material"], it["color"], 0, [r["code"] for r in rows[:-delta]], user, f"盘点 {d['no']} {loc['code']} 少")
+            changed = True
+        elif delta > 0:
+            codes = materials.receive(it["material"], it["color"], delta, units.roll_g_of(it), "", None, user,
+                                      reason=f"盘点 {d['no']} {loc['code']} 多 {delta} 卷")
+            changed = True
+            for cd in codes:
+                try:
+                    flows.spool_put(cd, loc["code"], user)
+                except Exception as e:  # noqa: BLE001  放不进去（停用 / 打印机槽位）就留在待上架
+                    logging.getLogger("3dops").warning("盘点多出来的 %s 没能放进 %s：%s", cd, loc["code"], e)
+    return changed
+
+
 def confirm(doc_id, user=""):
     """确认：库存按实盘调整（盘点单原来的逻辑），数过的货位上的数改成数到的数。"""
     c = db.conn()
@@ -191,7 +232,7 @@ def confirm(doc_id, user=""):
     ids = {r["item_id"] for r in rows}
     moded = {r[0] for r in c.execute("SELECT item_id FROM inv_doc_lines WHERE doc_id=? AND extra LIKE '%\"mode\"%'", (d["id"],))}
     with wms.quiet(ids - moded):                 # v2.55：按卷数 / 称重盘的耗材，货位上的数由料卷自己跟（不用 quiet）
-        out = inv.stocktake_confirm(d["id"], user)
+        out = inv.stocktake_confirm(d["id"], user, loc_hook=_confirm_loc_rolls)
     code_of = {r["id"]: r["code"] for r in c.execute("SELECT id, code FROM inv_locations")}
     ids -= moded
     rows = [r for r in rows if r["item_id"] not in moded]

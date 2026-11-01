@@ -102,7 +102,7 @@ def post_config():
                 if prev:
                     # v2.54：v2.54 的字段（id、分组、位置、用途、专用生产单、暂停、单台覆盖）这里不改，原样保留；
                     # 模板字段和读出来时一样 = 没改 → 继续跟随机型模板，改了才算这台的单独设置
-                    for kk in ("id", "group", "location", "role", "dedicated_po", "paused", "ovr", "_eff", "old_codes"):
+                    for kk in ("id", "group", "location", "role", "dedicated_po", "paused", "ovr", "_eff", "old_codes", "stale_codes"):
                         if kk in prev:
                             clean[-1][kk] = prev[kk]
                     if prev.get("name") != clean[-1]["name"]:
@@ -117,6 +117,10 @@ def post_config():
             if busy:
                 return err("这些打印机还有正在打印的任务，不能删除：" + "、".join(busy) + "（先在生产看板里点「打完」或「失败」）")
             remap_old = old_pr
+            if any(o.get("id") and (o.get("code") or "") != next((c_.get("code") for c_ in clean if c_.get("id") == o.get("id")), o.get("code")) for o in old_pr):
+                from core import fleetcodes             # v2.55.0：和单台修改 / 批量重新编号同一套
+                fleetcodes.migrate_po_refs()
+                fleetcodes.note_code_changes(old_pr, clean)
             cfg[k] = clean
             continue
         if k == "color_table":

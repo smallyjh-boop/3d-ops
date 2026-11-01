@@ -327,9 +327,12 @@ def take_rolls(material, color, count=0, codes=None, user="", reason="领用"):
         if len(pool) < n:
             raise ValueError(f"{m} {col} 在库的只有 {len(pool)} 卷（在机上的要先下机），不够出 {n} 卷")
         rows = pool[:n]
+    if len({r["id"] for r in rows}) != len(rows):
+        raise ValueError("同一卷写了两次")
     now = time.time()
     total = sum(max(0.0, r["remaining_g"] or 0) for r in rows)
     ids = [r["id"] for r in rows]
+    prev = [{"code": r["code"], "status": r["status"], "remaining_g": max(0.0, float(r["remaining_g"] or 0))} for r in rows]
     for r in rows:
         c.execute("UPDATE spools SET remaining_g=0, status='empty', printer=NULL, slot=NULL, emptied_at=?, updated_at=? WHERE id=?",
                   (now, now, r["id"]))
@@ -338,6 +341,79 @@ def take_rolls(material, color, count=0, codes=None, user="", reason="领用"):
         _logrow(c, k, -total / 1000.0, f"{reason} {len(rows)} 卷（{'、'.join(r['code'] for r in rows)}）", user)
     c.commit()
     _notify(ids[:1], "empty", user)          # 同一个颜色，同步一次就够
+    return {"codes": [r["code"] for r in rows], "grams": round(total, 1), "prev": prev}
+
+
+def check_take(material, color, codes):
+    """出库前检查这几卷能不能拿（料号颜色对、没用完、不在机上、没重复），不改任何东西。有问题抛 ValueError。"""
+    m, col = _key(material, color)
+    c = db.conn()
+    seen = set()
+    for cd in codes or []:
+        r = c.execute("SELECT * FROM spools WHERE code=? OR id=?", (str(cd).upper(), int(cd) if str(cd).isdigit() else -1)).fetchone()
+        if not r or (r["material"], r["color"]) != (m, col):
+            raise ValueError(f"{cd} 不是 {m} {col} 的料卷")
+        if r["status"] == "empty":
+            raise ValueError(f"{r['code']} 已经用完了")
+        if r["status"] == "loaded":
+            raise ValueError(f"{r['code']} 还在 {r['printer']} 上，先下机")
+        if r["id"] in seen:
+            raise ValueError(f"{r['code']} 写了两次")
+        seen.add(r["id"])
+
+
+def restore_rolls(material, color, prev, user="", reason="作废"):
+    """把 take_rolls 拿走的几卷原样放回去（prev = take_rolls 返回的 prev：编号、原状态、原剩余克数）。这几卷必须还是「用完」状态。"""
+    m, col = _key(material, color)
+    k = (m, col)
+    c = db.conn()
+    rows = []
+    for p in prev or []:
+        r = c.execute("SELECT * FROM spools WHERE code=?", (str(p.get("code")).upper(),)).fetchone()
+        if not r or (r["material"], r["color"]) != k:
+            raise ValueError(f"{p.get('code')} 找不到了")
+        if r["status"] != "empty":
+            raise ValueError(f"{r['code']} 已经又在用了，放不回去")
+        rows.append((r, p))
+    now = time.time()
+    total = 0.0
+    for r, p in rows:
+        c.execute("UPDATE spools SET remaining_g=?, status=?, printer=NULL, slot=NULL, emptied_at=NULL, updated_at=? WHERE id=?",
+                  (float(p["remaining_g"]), p["status"], now, r["id"]))
+        total += float(p["remaining_g"])
+    _sync(c, k)
+    if total > 0:
+        _logrow(c, k, total / 1000.0, f"{reason} {len(rows)} 卷（{'、'.join(r['code'] for r, _p in rows)}）", user)
+    c.commit()
+    if rows:
+        _notify([rows[0][0]["id"]], "restore", user)
+    return {"codes": [r["code"] for r, _p in rows], "grams": round(total, 1)}
+
+
+def discard_rolls(material, color, codes, user="", reason="作废入库"):
+    """作废入库：把当时新建的那几卷记用完（必须还没动过：整卷没用、不在机上）。库存减去它们的克数。"""
+    m, col = _key(material, color)
+    k = (m, col)
+    c = db.conn()
+    rows = []
+    for cd in codes or []:
+        r = c.execute("SELECT * FROM spools WHERE code=?", (str(cd).upper(),)).fetchone()
+        if not r or (r["material"], r["color"]) != k:
+            raise ValueError(f"{cd} 找不到了")
+        if r["status"] not in ("sealed", "open") or float(r["remaining_g"] or 0) < float(r["net_g"] or 0) - 0.5:
+            raise ValueError(f"{r['code']} 已经用过了（{r['status']}，剩 {float(r['remaining_g'] or 0):g} 克）")
+        rows.append(r)
+    now = time.time()
+    total = sum(float(r["remaining_g"] or 0) for r in rows)
+    for r in rows:
+        c.execute("UPDATE spools SET remaining_g=0, status='empty', printer=NULL, slot=NULL, emptied_at=?, updated_at=?, note=? WHERE id=?",
+                  (now, now, ((r["note"] or "") + " 入库已作废").strip(), r["id"]))
+    _sync(c, k)
+    if total > 0:
+        _logrow(c, k, -total / 1000.0, f"{reason} {len(rows)} 卷（{'、'.join(r['code'] for r in rows)}）", user)
+    c.commit()
+    if rows:
+        _notify([rows[0]["id"]], "empty", user)
     return {"codes": [r["code"] for r in rows], "grams": round(total, 1)}
 
 

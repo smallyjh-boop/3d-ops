@@ -175,7 +175,16 @@
         MODAL.close();
         toast(Z(`已改 ${r.n} 台的编码`, `เปลี่ยนรหัส ${r.n} เครื่องแล้ว`));
         if (after) after(r);
-        if (r.n && confirm(Z("编码改了，要重新打印这些打印机的标签吗？", "เปลี่ยนรหัสแล้ว ต้องการพิมพ์ป้ายของเครื่องเหล่านี้ใหม่หรือไม่?")))
+        if (r.relabel && r.relabel.length) {
+          // v2.55.0：编码互换 / 复用：这些机器以前印的标签会指到别的机器，必须重新打印
+          const ids = r.relabel_ids || r.relabel.map((x) => x.id);
+          const mm = MODAL.open(`<h3>🏷 ${esc(Z("这些机器要重新打印标签", "เครื่องเหล่านี้ต้องพิมพ์ป้ายใหม่"))}</h3>
+            <p class="small bad">${esc(Z("下面这些机器以前的编码已经换给别的打印机了，旧标签扫出来会是别的机器，请重新打印并换掉。", "รหัสเดิมของเครื่องเหล่านี้ถูกย้ายให้เครื่องอื่นแล้ว สแกนป้ายเก่าจะได้เครื่องอื่น กรุณาพิมพ์ป้ายใหม่และเปลี่ยนแทน"))}</p>
+            <div class="tbl-scroll" style="max-height:40vh"><table class="grid small"><thead><tr><th>${esc(Z("机器", "เครื่อง"))}</th><th>${esc(Z("旧编码", "รหัสเดิม"))}</th><th>${esc(Z("现在是", "ตอนนี้เป็นของ"))}</th></tr></thead><tbody>
+            ${r.relabel.map((x) => `<tr><td class="mono" data-notr><b>${esc(x.code)}</b> ${esc(x.name || "")}</td><td class="mono" data-notr>${esc(x.old)}</td><td class="mono" data-notr>${esc(x.now_of)}</td></tr>`).join("")}</tbody></table></div>
+            <div class="row gap"><button class="primary" data-lb>${esc(Z("打印这些标签", "พิมพ์ป้ายเหล่านี้"))}</button><button data-mclose>${esc(Z("以后再说", "ไว้ทีหลัง"))}</button></div>`);
+          mm.querySelector("[data-lb]").onclick = () => window.open(`/print/fleet-labels?lang=${LANG()}&ids=` + encodeURIComponent(ids.join(",")), "_blank");
+        } else if (r.n && confirm(Z("编码改了，要重新打印这些打印机的标签吗？", "เปลี่ยนรหัสแล้ว ต้องการพิมพ์ป้ายของเครื่องเหล่านี้ใหม่หรือไม่?")))
           window.open(`/print/fleet-labels?lang=${LANG()}&ids=` + encodeURIComponent(r.ids.join(",")), "_blank");
       } catch (er) { toast(er.message, true); }
     });

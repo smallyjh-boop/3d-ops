@@ -238,7 +238,10 @@ def listing_page(view="stock", category="", q="", zone="", loc="", sort="", desc
     total = c.execute(f"SELECT COUNT(*) {frm} WHERE {where}", args).fetchone()[0]
     size = size if size in (50, 100, 200) else 50
     pages = max(1, -(-total // size))
-    page = max(1, min(int(page or 1), pages))
+    try:
+        page = max(1, min(int(page or 1), pages))
+    except (TypeError, ValueError):
+        page = 1
     order = ITEM_SORTS.get(sort) or "i.category, i.code"
     if desc and sort in ITEM_SORTS:
         order = ", ".join(f"{p.strip()} DESC" for p in _split_order(order))

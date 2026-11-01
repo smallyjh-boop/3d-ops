@@ -324,6 +324,62 @@ ok(r["renumber_suggest"] == [ids[1]], f"bulk location change prompts too {r}")
 r = C.post("/api/fleet/bulk", json={"ids": [ids[2]], "action": "role", "value": "any"}).get_json()
 ok(r["renumber_suggest"] == [], "unrelated bulk action: no prompt")
 
+# ================= 9b 复审（v2.55.0）：每处改编码走同一套 + 互换 / 复用不让旧标签悄悄指错 + 二维码装稳定 id =================
+import json as _json
+calls = {"po": 0}
+_orig_mig = fc.migrate_po_refs
+def _mig():
+    calls["po"] += 1
+    return _orig_mig()
+fc.migrate_po_refs = _mig
+pa_, pb_ = prs()[0], prs()[1]
+xa, xb = pa_["code"], pb_["code"]
+# 单台改编码：生产单引用先迁移、旧编码记下来
+r = C.post("/api/fleet/printers/" + pa_["id"], json={"code": "ZZ-9"}).get_json()
+ok(calls["po"] == 1 and "ZZ-9" == byid(pa_["id"])["code"] and xa in byid(pa_["id"])["old_codes"], f"single code change: PO refs migrated + old code remembered ({calls})")
+# 复用：另一台改成 A 之前的编码 → A 的旧编码里这个码不能再认（否则旧标签悄悄开错机器），记进 stale_codes
+r = C.post("/api/fleet/printers/" + pb_["id"], json={"code": xa})
+ok(r.status_code == 200 and byid(pb_["id"])["code"] == xa, f"reuse of a freed code allowed {r.get_json() if r.status_code != 200 else ''}")
+ok(xa not in byid(pa_["id"]).get("old_codes", []) and xa in byid(pa_["id"]).get("stale_codes", []), "old code now owned by another printer dropped from old_codes (kept as stale)")
+ok(xb in byid(pb_["id"]).get("old_codes", []), "the other printer remembers its own previous code")
+ok(fleet.index_of(prs(), xa) == prs().index(byid(pb_["id"])), "current code wins when scanning")
+d = C.get("/api/fleet/printers/" + xa).get_json()
+ok(d.get("stale_label") is True and d["printer"]["id"] == pb_["id"], "scanning the reassigned old code -> stale_label warning")
+ok(C.get("/api/fleet/printers/" + pb_["id"]).get_json().get("stale_label") is False, "scanning by stable id -> no warning")
+ok(C.get("/api/fleet/printers/" + xb).get_json().get("stale_label") is False, "scanning a still-valid old code -> no warning")
+# 设置页保存同一行改编码也走这一套
+cfgp = [dict(x) for x in prs()]
+rows_ = [{"code": (("SET-1" if x["id"] == pa_["id"] else x["code"])), "name": x["name"], "g_per_h": x.get("g_per_h", 20), "enabled": True,
+          "tech": x.get("tech"), "nozzle": x.get("nozzle")} for x in cfgp]
+n0 = calls["po"]
+r = C.post("/api/config", json={"printers": rows_})
+ok(r.status_code == 200 and calls["po"] == n0 + 1 and byid(pa_["id"])["code"] == "SET-1" and "ZZ-9" in byid(pa_["id"])["old_codes"],
+   f"settings page rename: same helper (PO migrate + remember_old) {r.status_code} {byid(pa_['id']).get('old_codes')}")
+# 互换（直接用 helper）：两台旧标签都会指到对方 → relabel 列出来
+o_ = [dict(x) for x in prs()]
+n_ = [dict(x) for x in prs()]
+n_[0]["code"], n_[1]["code"] = o_[1]["code"], o_[0]["code"]
+info = fc.note_code_changes(o_, n_)
+ok({x["id"] for x in info["relabel"]} == {n_[0]["id"], n_[1]["id"]} and all(x["old"] and x["now_of"] for x in info["relabel"]), f"swap -> both need reprint {info['relabel']}")
+ok(o_[0]["code"] not in n_[0].get("old_codes", []) and o_[0]["code"] in n_[0].get("stale_codes", []), "swap: old codes colliding with the other printer are dropped from old_codes")
+save_config({"printers": n_})
+d = C.get("/api/fleet/printers/" + o_[0]["code"]).get_json()
+ok(d["stale_label"] is True and d["printer"]["id"] == n_[1]["id"], "after swap, scanning the old label code -> warning (opens the new owner)")
+# 批量重新编号接口带 relabel 字段
+r = C.post("/api/fleet/codes/renumber", json={"ids": ids, "apply": True}).get_json()
+ok("relabel" in r and "relabel_ids" in r, "renumber result carries relabel list")
+fc.migrate_po_refs = _orig_mig
+# 二维码装稳定 id（牌子上大字还是编码），扫码两种都认
+from modules.inv import qr as _qr
+seen = []
+_osvg = _qr.svg
+_qr.svg = lambda url, *a, **k: (seen.append(url), _osvg(url, *a, **k))[1]
+html = C.get("/print/fleet-labels?ids=" + ",".join(ids)).get_data(as_text=True)
+_qr.svg = _osvg
+ok(len(seen) == 3 and all(f"?printer={byid(i)['id']}#" in u for i, u in zip(ids, seen)), f"label QR encodes the stable id {seen[:1]}")
+ok(all(byid(i)["code"] in html for i in ids), "label still prints the readable code")
+ok(fleet.index_of(prs(), byid(ids[0])["id"]) == fleet.index_of(prs(), byid(ids[0])["code"]), "scan accepts both id and code")
+
 # ================= 10 审计 + 最终一致性 =================
 ok(all(fleet.CODE_RE.match(c) for c in codes()) and len({c.upper() for c in codes()}) == len(codes()), f"all codes valid and unique {codes()}")
 ok(db.conn().execute("SELECT COUNT(*) n FROM audit WHERE action='批量重新编号打印机'").fetchone()["n"] >= 1, "renumber audited")

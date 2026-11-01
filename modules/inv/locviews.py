@@ -239,6 +239,27 @@ def _loc_query(a, c):
     return where, wargs
 
 
+def _roll_low(c):
+    """{物品id: 真的低于补货线没有}：只算补货线按「卷」的耗材（用真实卷数，和库存表同一个算法）；别的物品按克数比，不在这里。"""
+    from core.inventory import ledger, units
+    try:
+        rr = [ledger.item_row(r) for r in c.execute("SELECT * FROM inv_items WHERE active=1 AND reorder_unit='roll' AND reorder_point IS NOT NULL")]
+    except Exception:  # noqa: BLE001  老库没有补货单位这一列
+        return {}
+    if not rr:
+        return {}
+    units.decorate(rr, c)
+    return {it["id"]: bool(units.below(it)) for it in rr}
+
+
+def _is_low(item_id, qty, rp, stocked, roll_low):
+    if rp is None or item_id not in stocked:
+        return False
+    if item_id in roll_low:
+        return roll_low[item_id]
+    return float(qty or 0) <= float(rp)
+
+
 def _enrich_locs(c, rows):
     """给一页货位补上里面的商品（最多 40 个，按数量大的在前）、图片、数量文字、状态。"""
     from . import wms
@@ -249,12 +270,12 @@ def _enrich_locs(c, rows):
         ph = ",".join("?" * len(ids))
         seen = set()
         for r in c.execute(f"SELECT q.loc_id, q.item_id, q.qty, i.code, i.name_zh, i.name_th, i.unit, i.category, i.color, i.material, i.qty total, "
-                           f"i.reorder_point, i.location FROM inv_loc_qty q JOIN inv_items i ON i.id=q.item_id "
+                           f"i.reorder_point, i.location, i.reorder_unit, i.reorder_value, i.roll_g FROM inv_loc_qty q JOIN inv_items i ON i.id=q.item_id "
                            f"WHERE q.loc_id IN ({ph}) AND q.qty>1e-9 AND i.active=1 ORDER BY q.qty DESC, i.code", ids):
             seen.add((r["loc_id"], r["item_id"]))
             by[r["loc_id"]].append(r)
         cmap = {r["code"]: r["id"] for r in rows}
-        zero = c.execute(f"SELECT id item_id, code, name_zh, name_th, unit, category, color, material, qty total, reorder_point, location FROM inv_items "
+        zero = c.execute(f"SELECT id item_id, code, name_zh, name_th, unit, category, color, material, qty total, reorder_point, location, reorder_unit, reorder_value, roll_g FROM inv_items "
                          f"WHERE active=1 AND location IN ({','.join('?' * len(codes))})", codes).fetchall() if codes else []
         for r in zero:
             lid = cmap.get(r["location"])
@@ -269,6 +290,7 @@ def _enrich_locs(c, rows):
     zs, _wn, _d = wms.zinfo(c)
     out = []
     qc = qtytext.Ctx(c)
+    roll_low = _roll_low(c)
     for r in rows:
         its = []
         for x in by.get(r["id"], [])[:40]:
@@ -278,7 +300,7 @@ def _enrich_locs(c, rows):
             rp = xd.get("reorder_point")
             tt = qtytext.both(float(xd.get("total") or 0), b["unit"], xd, qc)
             b.update(qty=round(q, 6), total=round(float(xd.get("total") or 0), 6), primary=xd.get("location") == r["code"],
-                     low=bool(rp is not None and float(xd.get("total") or 0) <= rp and xd["item_id"] in stocked), total_text=tt["qty_text"],
+                     low=_is_low(xd["item_id"], xd.get("total"), rp, stocked, roll_low), total_text=tt["qty_text"],
                      total_text_th=tt["qty_text_th"], **qtytext.both(q, b["unit"], xd, qc, r["id"]))
             its.append(b)
         tot = float(r["tot"] or 0)
@@ -389,7 +411,9 @@ def _item_where(a, c):
     elif flag == "noloc":
         w.append("COALESCE(p.n,0)=0")
     elif flag == "low":
-        w.append("i.reorder_point IS NOT NULL AND i.qty<=i.reorder_point")
+        rl = _roll_low(c)       # 按卷的补货线用真实卷数，不用克数
+        w.append("i.reorder_point IS NOT NULL AND ((COALESCE(i.reorder_unit,'')!='roll' AND i.qty<=i.reorder_point)"
+                 + (f" OR i.id IN ({','.join(str(int(k)) for k, v in rl.items() if v)})" if any(rl.values()) else "") + ")")
     has = a.get("has") or ""
     if has == "empty":
         w.append("i.qty<=1e-9")
@@ -436,6 +460,7 @@ def _enrich_items(c, rows, spread):
         stocked = {r[0] for r in c.execute(f"SELECT DISTINCT item_id FROM inv_moves WHERE item_id IN ({','.join('?' * len(ids))})", ids)}
     out = []
     qc = qtytext.Ctx(c)
+    roll_low = _roll_low(c)
     for r in rows:
         ds = sorted(dist.get(r["id"], []), key=lambda x: (0 if x["ztype"] == "pick" else 1, locations.sort_key(x["code"])))
         unit = r["unit"] or ""
@@ -450,7 +475,7 @@ def _enrich_items(c, rows, spread):
             flags.append("unplaced")
         if int(r["nloc"]) == 0:
             flags.append("noloc")
-        low = bool(r["reorder_point"] is not None and qty <= float(r["reorder_point"]) and r["id"] in stocked)
+        low = _is_low(r["id"], qty, r["reorder_point"], stocked, roll_low)
         if low:
             flags.append("low")
         d = _brief(r)

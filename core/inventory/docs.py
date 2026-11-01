@@ -104,8 +104,18 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
         if rolled and qty < 0:                           # 整卷出库：够不够卷（在机上的不算，先下机）先看清楚，别开了单再报错
             so_rolls[it["id"]] = so_rolls.get(it["id"], 0) + ln["rolls"]
             st = units.spool_stats().get((it["material"], it["color"])) or {"sealed": 0, "open": 0}
-            if ln.get("spools"):
-                pass
+            if ln.get("spools"):                         # v2.55.0：指定了哪几卷 → 开单前全部查清楚（料号颜色、用完 / 在机上、卷数对得上、没重复）
+                sp = [str(x).strip() for x in (ln["spools"] if isinstance(ln["spools"], (list, tuple)) else [ln["spools"]]) if str(x).strip()]
+                if len(sp) != ln["rolls"]:
+                    raise ValueError(f"第 {i + 1} 行：写了 {ln['rolls']} 卷，但指定的料卷编号有 {len(sp)} 个")
+                if len({x.upper() for x in sp}) != len(sp):
+                    raise ValueError(f"第 {i + 1} 行：料卷编号有重复")
+                from .. import materials
+                try:
+                    materials.check_take(it["material"], it["color"], sp)
+                except ValueError as e:
+                    raise ValueError(f"第 {i + 1} 行：{e}")
+                ln = dict(ln, spools=sp)
             elif so_rolls[it["id"]] > st["sealed"] + st["open"]:
                 raise ValueError(f"第 {i + 1} 行：{it['name_zh']} 在库的只有 {st['sealed'] + st['open']} 卷（在机上的要先下机），不够出 {so_rolls[it['id']]} 卷")
         uc = ln.get("unit_cost")
@@ -132,18 +142,47 @@ def create(kind, lines, note="", user="", printer="", ref="", move_kind=None, al
                                    json.dumps({k: ln.get(k) for k in ("rolls", "net_g", "brand", "po_line", "opened") if ln.get(k)}))).lastrowid)
     c.commit()
     label = DOC_KINDS[kind][0]
-    for (it, qty, uc, lnote, ln), lid in zip(clean, line_ids):
-        res = _apply(c, it, ln.get("move_kind") or move_kind or kind, qty, uc, doc_id, user,
-                     f"{label} {no}" + (f"：{lnote or note}" if (lnote or note) else ""), printer,
-                     {k: ln.get(k) for k in ("rolls", "net_g", "brand", "opened", "spools")})
-        if res.get("codes"):                           # 每卷的编号记在这一行里（标签、追溯用）；整卷出库的克数以实际那几卷为准
-            ex = {k: ln.get(k) for k in ("rolls", "net_g", "brand", "po_line", "opened") if ln.get(k)}
-            ex["spools"] = res["codes"]
-            c.execute("UPDATE inv_doc_lines SET qty=?, extra=? WHERE id=?", (res["grams"], json.dumps(ex), lid))
+    done = []                                           # v2.55.0：已经生效的行；中途哪一行失败 → 前面的全部冲回，单据标作废，不留「已完成但没生效」的单
+    try:
+        for (it, qty, uc, lnote, ln), lid in zip(clean, line_ids):
+            res = _apply(c, it, ln.get("move_kind") or move_kind or kind, qty, uc, doc_id, user,
+                         f"{label} {no}" + (f"：{lnote or note}" if (lnote or note) else ""), printer,
+                         {k: ln.get(k) for k in ("rolls", "net_g", "brand", "opened", "spools")})
+            done.append((it, qty, uc, ln, lid, res))
+            if res.get("codes"):                       # 每卷的编号记在这一行里（标签、追溯用）；整卷出库的克数以实际那几卷为准
+                ex = {k: ln.get(k) for k in ("rolls", "net_g", "brand", "po_line", "opened") if ln.get(k)}
+                ex["spools"] = res["codes"]
+                if res.get("prev"):
+                    ex["prev"] = res["prev"]           # 每卷拿走前的状态和剩余克数，作废时原样放回
+                c.execute("UPDATE inv_doc_lines SET qty=?, extra=? WHERE id=?", (res["grams"], json.dumps(ex), lid))
+    except Exception as e:  # noqa: BLE001
+        _rollback_applied(c, done, kind, doc_id, no, user)
+        c.execute("UPDATE inv_docs SET status='void', void_by=?, void_at=?, note=? WHERE id=?",
+                  (user, ledger._now(), (str(note or "") + f" [开单失败已回滚：{e}]")[:500], doc_id))
+        c.commit()
+        raise
     _set_amount(c, doc_id)
     c.commit()
     db.audit(user, f"库存·{label}", no, f"{len(clean)} 行")
     return get(doc_id)
+
+
+def _rollback_applied(c, done, kind, doc_id, no, user):
+    """开单中途失败：把已经生效的行冲回（整卷的按卷放回 / 作废，其他按数量反向）。"""
+    for it, qty, uc, ln, lid, res in reversed(done):
+        try:
+            if res.get("codes") and it["category"] == "filament":
+                from .. import materials
+                with materials.context(kind=kind, doc_id=doc_id):
+                    if qty > 0:
+                        materials.discard_rolls(it["material"], it["color"], res["codes"], user, f"开单失败回滚 {no}")
+                    elif res.get("prev"):
+                        materials.restore_rolls(it["material"], it["color"], res["prev"], user, f"开单失败回滚 {no}")
+            else:
+                _apply(c, it, kind, -qty, uc, doc_id, user, f"开单失败回滚 {no}")
+        except Exception as e2:  # noqa: BLE001  回滚本身失败：记下来，别吞掉原来的错误
+            import logging
+            logging.getLogger("3dops").error("单据 %s 回滚失败：%s", no, e2)
 
 
 def _set_amount(c, doc_id):
@@ -162,14 +201,56 @@ def void(doc_id, user=""):
     if d["kind"] == "stocktake":
         raise ValueError("盘点单不能作废，数不对再开一张调整单")
     mv = c.execute("SELECT item_id, kind, SUM(qty) q, SUM(amount) a FROM inv_moves WHERE doc_id=? GROUP BY item_id, kind", (d["id"],)).fetchall()
+    # v2.55.0：按卷的行（有料卷编号）要精确冲回：入库的那几卷记用完、出库的那几卷原样放回；先全部查清楚能不能冲，不能就整张不动
+    rolled_lines = []
+    for ln in c.execute("SELECT l.*, i.category, i.material, i.color, i.name_zh FROM inv_doc_lines l JOIN inv_items i ON i.id=l.item_id WHERE l.doc_id=?", (d["id"],)):
+        try:
+            ex = json.loads(ln["extra"] or "null") or {}
+        except ValueError:
+            ex = {}
+        if ln["category"] != "filament" or not ex.get("spools"):
+            continue
+        if ln["qty"] > 0:
+            for cd in ex["spools"]:
+                sp = c.execute("SELECT status, remaining_g, net_g FROM spools WHERE code=?", (cd,)).fetchone()
+                if not sp or sp["status"] not in ("sealed", "open") or float(sp["remaining_g"] or 0) < float(sp["net_g"] or 0) - 0.5:
+                    raise ValueError(f"{ln['name_zh']} 入库的 {cd} 已经用过 / 上机 / 用完了，不能作废。先处理那一卷（或开调整单）")
+        else:
+            if not ex.get("prev"):
+                raise ValueError(f"{ln['name_zh']} 是旧版本开的整卷出库，没有记下每卷原来的状态，不能作废。请开「退回入库」单把这几卷放回来")
+            for p_ in ex["prev"]:
+                sp = c.execute("SELECT status FROM spools WHERE code=?", (p_["code"],)).fetchone()
+                if not sp or sp["status"] != "empty":
+                    raise ValueError(f"{ln['name_zh']} 出库的 {p_['code']} 已经不是「用完」状态，不能作废")
+        rolled_lines.append((ln, ex))
     c.execute("UPDATE inv_docs SET status='void', void_by=?, void_at=? WHERE id=?", (user, ledger._now(), d["id"]))
     c.commit()
+    rolled = {}                                         # 物品 → 已经按卷冲回的克数（带正负）
+    for ln, ex in rolled_lines:
+        from .. import materials
+        am = abs(sum(m_["a"] or 0 for m_ in mv if m_["item_id"] == ln["item_id"]))
+        qsum = abs(sum(m_["q"] or 0 for m_ in mv if m_["item_id"] == ln["item_id"])) or 1
+        with materials.context(kind=d["kind"], doc_id=d["id"], **({"unit_cost": am / qsum} if am else {})):
+            if ln["qty"] > 0:
+                r = materials.discard_rolls(ln["material"], ln["color"], ex["spools"], user, f"作废 {d['no']}")
+                rolled[ln["item_id"]] = rolled.get(ln["item_id"], 0.0) + r["grams"]
+            else:
+                r = materials.restore_rolls(ln["material"], ln["color"], ex["prev"], user, f"作废 {d['no']}")
+                rolled[ln["item_id"]] = rolled.get(ln["item_id"], 0.0) - r["grams"]
     for m in mv:
         it = ledger.get_item(m["item_id"])
-        if not m["q"]:
+        q = m["q"] or 0
+        if not q:
             continue
+        r = rolled.get(m["item_id"], 0.0)
+        if r and q * r > 0:                              # 这部分已经按卷冲回了，只冲剩下的（同一单里还有按克的行）
+            cut = min(abs(q), abs(r)) * (1 if q > 0 else -1)
+            rolled[m["item_id"]] = r - cut
+            q -= cut
+            if abs(q) < 1e-6:
+                continue
         uc = (m["a"] / m["q"]) if m["q"] else None
-        _apply(c, it, m["kind"], -m["q"], uc if m["q"] < 0 else uc, d["id"], user, f"作废 {d['no']}")
+        _apply(c, it, m["kind"], -q, uc, d["id"], user, f"作废 {d['no']}")
     c.commit()
     if (d["ref"] or "").startswith("po:"):       # v2.39：采购单的到货入库单作废 → 采购单的已到数量、状态、财务记录一起退回
         from . import purchase
@@ -223,9 +304,9 @@ def resolve_count(it, v, book_g=None, book_rolls=None, tare=None):
         return (None if v in (None, "") else _num(v)), None
     if it["category"] != "filament":
         raise ValueError("只有耗材能按卷数 / 称重盘点")
-    stats = units.spool_stats().get((it["material"], it["color"])) or {"rolls": 0, "grams": 0.0}
+    stats = units.spool_stats().get((it["material"], it["color"])) or {"rolls": 0, "grams": 0.0, "sealed": 0, "open": 0}
     bg = float(it["qty"] or 0) if book_g is None else float(book_g)
-    br = stats["rolls"] if book_rolls is None else book_rolls
+    br = units.shelf_rolls(stats) if book_rolls is None else book_rolls     # v2.55.0：账面卷数不含在机上的（盘点数的是架子上的）
     if "rolls" in v:
         if v["rolls"] in (None, ""):
             return None, None
@@ -285,7 +366,7 @@ def stocktake_save(doc_id, counts, user=""):
     return get(d["id"])
 
 
-def stocktake_confirm(doc_id, user=""):
+def stocktake_confirm(doc_id, user="", loc_hook=None):
     """确认盘点：填了实盘数的行，按「实盘数 − 现在的账面数」调整（盘点期间有出入库也算对）；没填的跳过。"""
     c = db.conn()
     d = c.execute("SELECT * FROM inv_docs WHERE id=?", (int(doc_id),)).fetchone()
@@ -304,9 +385,10 @@ def stocktake_confirm(doc_id, user=""):
         q0 = float(it["qty"] or 0)
         diff = float(ln["counted"]) - q0
         if it["category"] == "filament" and ex.get("mode"):
-            if _confirm_fil(c, it, ex, d, user):
+            if _confirm_fil(c, it, ex, d, user, loc_hook):
                 n += 1
-            c.execute("UPDATE inv_doc_lines SET qty=? WHERE id=?", (float(ledger.get_item(it["id"])["qty"] or 0) - q0, ln["id"]))
+            c.execute("UPDATE inv_doc_lines SET qty=?, extra=? WHERE id=?",
+                      (float(ledger.get_item(it["id"])["qty"] or 0) - q0, json.dumps(ex), ln["id"]))
             continue
         c.execute("UPDATE inv_doc_lines SET qty=? WHERE id=?", (diff, ln["id"]))
         if abs(diff) < (0.5 if it["category"] == "filament" else 1e-6):
@@ -329,18 +411,39 @@ def stocktake_confirm(doc_id, user=""):
     return get(d["id"])
 
 
-def _confirm_fil(c, it, ex, d, user):
-    """耗材按卷数 / 称重盘点的确认：多出来的卷建成新料卷（带编号标签），少了的卷记用完；称重的把那几卷剩余克数改成净重。返回有没有差异。"""
+def _pick_shelf(c, it, n):
+    """从架子上（整卷 + 开封，不含在机上）按「先整卷、再剩得少的」挑 n 卷的编号。"""
+    rows = c.execute("SELECT code FROM spools WHERE material=? AND color=? AND status IN ('sealed','open') AND (status='sealed' OR remaining_g>0) "
+                     "ORDER BY CASE status WHEN 'sealed' THEN 0 ELSE 1 END, CASE status WHEN 'open' THEN remaining_g ELSE 0 END, id",
+                     (it["material"], it["color"])).fetchall()
+    return [r["code"] for r in rows[:n]]
+
+
+def _confirm_fil(c, it, ex, d, user, loc_hook=None):
+    """耗材按卷数 / 称重盘点的确认：多出来的卷建成新料卷（带编号标签），少了的卷记用完；称重的把那几卷剩余克数改成净重。返回有没有差异。
+    v2.55.0：卷数差异按「确认这一刻」架子上的卷数重算（盘点期间有出入库也对），变了的写进 ex["warn"]；在机上的不算少；
+    按货位盘的（ex.by_loc）交给库存模块的 loc_hook，只动数的那个货位。"""
     from .. import materials
     c.commit()
     changed = False
     with materials.context(kind="adjust", doc_id=d["id"]):
         if ex["mode"] == "rolls":
-            delta = int(ex.get("delta_rolls", int(ex.get("rolls", 0)) - int(ex.get("sys_rolls", 0))))
+            if ex.get("by_loc") and loc_hook:
+                return bool(loc_hook(c, it, ex, d, user))
+            cur = units.shelf_rolls(units.spool_stats().get((it["material"], it["color"])))
+            if ex.get("by_loc"):
+                delta = int(ex.get("delta_rolls", 0))
+            else:
+                delta = int(ex.get("rolls", 0)) - cur
+                if int(ex.get("sys_rolls", cur)) != cur:
+                    ex["warn"] = {"was": int(ex.get("sys_rolls")), "now": cur, "done": True}      # 盘点期间账面变了，已按现在的算
             if delta > 0:
                 materials.receive(it["material"], it["color"], delta, units.roll_g_of(it), "", None, user, reason=f"盘点 {d['no']} 多 {delta} 卷")
                 changed = True
             elif delta < 0:
+                have = len(_pick_shelf(c, it, 10 ** 6))
+                if have < -delta:
+                    raise ValueError(f"{it['name_zh']} 架子上只有 {have} 卷，没法再少 {-delta} 卷（在机上的要先下机）")
                 materials.take_rolls(it["material"], it["color"], -delta, None, user, f"盘点 {d['no']} 少")
                 changed = True
         elif ex["mode"] == "weigh":
@@ -375,6 +478,12 @@ def get(doc_id):
             x["counted_rolls"] = ex.get("rolls") if ex.get("mode") == "rolls" else None
         if x.get("category") == "filament":
             x["units"] = _line_units(c, x["item_id"])
+            if x["units"]:
+                x["shelf_rolls"] = x["units"]["sealed"] + x["units"]["open"]       # v2.55.0：盘点的账面卷数（不含在机上的）
+            x["warn"] = ex.get("warn") or None
+            if d["kind"] == "stocktake" and d["status"] == "draft" and ex.get("mode") == "rolls" and x.get("shelf_rolls") is not None \
+                    and ex.get("sys_rolls") is not None and int(ex["sys_rolls"]) != x["shelf_rolls"]:
+                x["warn"] = {"was": int(ex["sys_rolls"]), "now": x["shelf_rolls"], "done": False}
         if d["kind"] == "stocktake" and x["counted"] is not None and d["status"] == "draft":
             x["diff"] = round(float(x["counted"]) - float(x["now_qty"] or 0), 3)
         out["lines"].append(x)

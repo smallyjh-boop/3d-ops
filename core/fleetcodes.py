@@ -340,6 +340,45 @@ def remember_old(p, old):
         p["old_codes"] = ([old] + hist)[:5]
 
 
+def note_code_changes(old, new):
+    """v2.55.0 每一处改编码（单台修改 / 设置页保存 / 批量重新编号）都走这里：新旧两个列表按稳定 id 对，
+    改了编码的 → 旧编码记进 old_codes（以前印的标签还能找到）；旧编码现在已经是别的打印机的当前编码（互换 / 复用）→
+    不能再当旧标签认（会悄悄打开错的机器），改记进 stale_codes，扫到时提示「这个编码已换给别的打印机，请重新打印标签」。
+    原地修改 new。返回 {changed: [id], relabel: [{id, code, old, now_of}]}：relabel = 旧标签会指到别的机器、必须重新打印的。"""
+    oid = {p.get("id"): p for p in old if p.get("id")}
+    changed = []
+    for p in new:
+        o = oid.get(p.get("id"))
+        if o and (o.get("code") or "") != (p.get("code") or ""):
+            remember_old(p, o.get("code"))
+            changed.append(p.get("id"))
+    cur = {}
+    for p in new:
+        if p.get("code"):
+            cur.setdefault(str(p["code"]).upper(), p)
+    relabel = []
+    for p in new:
+        mine = str(p.get("code") or "").upper()
+        keep, stale = [], [x for x in (p.get("stale_codes") or []) if str(x).upper() != mine]
+        for x in p.get("old_codes") or []:
+            u = str(x).upper()
+            if u == mine:
+                continue
+            owner = cur.get(u)
+            if owner is not None and owner is not p:
+                if x not in stale:
+                    stale.append(x)
+                if p.get("id") in changed:
+                    relabel.append({"id": p.get("id"), "code": p.get("code"), "old": x, "now_of": owner.get("code")})
+            else:
+                keep.append(x)
+        if keep or p.get("old_codes"):
+            p["old_codes"] = keep
+        if stale or p.get("stale_codes"):
+            p["stale_codes"] = stale[:10]
+    return {"changed": changed, "relabel": relabel}
+
+
 # ---------------- 改位置 / 分组时：编码里带着旧的 → 建议重新编号 ----------------
 def embeds(p_old, cfg, need=("group", "loc")):
     """这台打印机现在的编码是不是按规则、用旧的分组 / 位置拼出来的，并且规则里有 need 里的积木（分组 / 位置）？"""

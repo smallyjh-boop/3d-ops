@@ -249,8 +249,9 @@ def loc_stats(c=None):
     for r in rows:
         if not _live(r):
             continue
-        d = out.setdefault((r["material"], r["color"]), {}).setdefault(r["loc_id"], {"rolls": 0, "grams": 0.0})
+        d = out.setdefault((r["material"], r["color"]), {}).setdefault(r["loc_id"], {"rolls": 0, "grams": 0.0, "loaded": 0, "shelf": 0})
         d["rolls"] += 1
+        d["loaded" if r["status"] == "loaded" else "shelf"] += 1       # v2.55.0：盘点只数货架上的（在机上的拿不走，单独写）
         d["grams"] += max(0.0, float(r["remaining_g"] or 0))
     return out
 
@@ -263,6 +264,11 @@ def loc_text(material, rolls, grams, cfg=None):
 
 
 # ---------------- 盘点 ----------------
+def shelf_rolls(st):
+    """盘点用的账面卷数 = 整卷 + 开封卷（不含在机上的：盘点数的是架子上的，在机上的单独看）。"""
+    return int((st or {}).get("sealed", 0)) + int((st or {}).get("open", 0))
+
+
 def rolls_to_grams(it, counted_rolls, book_g, book_rolls):
     """数了几卷 → 折成克：账面克数 + (数到的卷数 − 账面卷数) × 每卷净重。"""
     return max(0.0, float(book_g) + (float(counted_rolls) - float(book_rolls)) * roll_g_of(it))
