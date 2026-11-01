@@ -1192,7 +1192,8 @@ def print_plan_edit_abandon(pid):
 @bp.post("/api/products/<pid>/print-plan/edit/upload")
 def print_plan_edit_upload(pid):
     """网页上传框：软件里改好保存的 3MF 拖回来（登录的人自己的会话）。"""
-    sid = request.args.get("sid") or request.form.get("sid") or ""
+    request.max_content_length = _es().MAX_UPLOAD          # 项目文件可能比全局上限（60 MB）大
+    sid = request.args.get("sid") or ""
     s, bad = _own_session(sid)
     if bad:
         return bad
@@ -1211,7 +1212,9 @@ def print_plan_edit_confirm(pid):
     b = request.get_json(force=True) or {}
     me, _d = _udisp()
     try:
-        pl = _es().confirm_plate(pid, (b.get("spec") or "").strip(), str(b.get("plate_id") or ""), me)
+        pl = _es().confirm_plate(pid, (b.get("spec") or "").strip(), str(b.get("plate_id") or ""), me, auth.is_owner())
+    except PermissionError as e:
+        return err(str(e), 403)
     except (ValueError, FileNotFoundError) as e:
         return err(str(e))
     return jsonify({"ok": True, "confirmed": pl.get("confirmed")})
@@ -1244,6 +1247,7 @@ def slicer_edit_file(sid):
 
 @bp.post("/api/slicer-edit/<sid>/upload")
 def slicer_edit_upload(sid):
+    request.max_content_length = _es().MAX_UPLOAD
     f = request.files.get("file")
     data = f.read() if f else request.get_data()
     try:

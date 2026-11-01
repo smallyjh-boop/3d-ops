@@ -42,7 +42,8 @@ NEW_COLS = (("status", "TEXT DEFAULT 'draft'"), ("version", "INTEGER DEFAULT 1")
             ("actual_grams", "REAL"), ("actual_hours", "REAL"), ("photo", "TEXT"),
             ("spec", "TEXT DEFAULT ''"),          # v2.22：这个文件是哪个规格的（规格有自己的模型时；空 = 主模型）
             ("plate_id", "TEXT DEFAULT ''"),      # v2.52：打印方案里的哪一盘（几盘的方案每盘一个文件；空 = 整件）
-            ("scale", "REAL"))                    # v2.53.1：「按主模型缩放 N%」的规格的文件按几 % 切的（空 = 不缩放）
+            ("scale", "REAL"),                    # v2.53.1：「按主模型缩放 N%」的规格的文件按几 % 切的（空 = 不缩放）
+            ("plate_sig", "TEXT"))                # v2.56：按打印方案切的文件切的时候这一盘的签名（摆盘 / 主文件变了就不能用）
 
 
 def init():

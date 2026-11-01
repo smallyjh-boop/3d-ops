@@ -40,7 +40,8 @@
       · <a href="/api/products/${enc(S.pid)}/print-plan/edit/master?spec=${enc(S.spec)}&plate=${enc(pl.id)}">⬇ ${Z("下载主文件", "ดาวน์โหลดไฟล์หลัก")}</a>
       <span class="muted">${Z(`（切片直接用它；历史 ${st.history || 1} 个）`, `(สไลซ์ใช้ไฟล์นี้; ประวัติ ${st.history || 1})`)}</span></span>`;
     h += `</div>`;
-    if (conf.length) h += `<div class="se-conf"><b>⚠ ${Z("需要确认（切片软件里改过，确认前不能切片）", "ต้องยืนยัน (แก้ในโปรแกรมสไลซ์ ยืนยันก่อนจึงสไลซ์ได้)")}</b><ul>${conf.map((c) => `<li>${esc(TH() ? c.th : c.zh)}</li>`).join("")}</ul>
+    if (conf.length) h += `<div class="se-conf"><b>⚠ ${Z("需要确认（切片软件里改过，确认前不能切片）", "ต้องยืนยัน (แก้ในโปรแกรมสไลซ์ ยืนยันก่อนจึงสไลซ์ได้)")}</b><ul>${conf.map((c) => `<li>${c.kind === "machine" ? "🔒 " : ""}${esc(TH() ? c.th : c.zh)}</li>`).join("")}</ul>
+      ${conf.some((c) => c.kind === "machine") ? `<div class="small muted">🔒 ${Z("机型 / 喷嘴 / 热床板 / AMS 关系到打印机安全，只有老板能确认", "รุ่นเครื่อง / หัวฉีด / แผ่นฐาน / AMS เกี่ยวกับความปลอดภัยของเครื่อง เฉพาะเจ้าของยืนยันได้")}</div>` : ""}
       <button class="mini" data-se="confirm" data-plate="${pl.id}">✓ ${Z("我看过了，确认没问题", "ตรวจแล้ว ยืนยันว่าไม่มีปัญหา")}</button></div>`;
     else if (st.confirmed) h += `<div class="small muted">✓ ${Z("已确认", "ยืนยันแล้ว")} · <span data-notr>${esc(st.confirmed.by || "")}</span> ${fmtTime(st.confirmed.at)}</div>`;
     return h;

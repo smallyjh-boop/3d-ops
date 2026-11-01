@@ -28,3 +28,4 @@
   通过 / 不通过清单（中泰文）上报（POST /api/desktop/selftest/report，存最近 20 次）；设置 → 组件与插件 的桌面客户端卡片显示「最近一次自检」。
   接口：POST /api/desktop/selftest/start|report、GET /api/desktop/selftest/log；不用登录（带密钥）/api/desktop/st/<id>/file|upload。
   测试 modules/desk/tests/t_slicerdesk256.py。
+- （系统 v2.56.0）复审修复：客户端只往服务器的 /api/slicer-edit/、/api/desktop/st/ 地址下载 / 上传（不接受绝对地址）；自检上传单独 300 MB 上限。测试 t_slicerdesk256。

@@ -1133,11 +1133,14 @@ def _file_for_count(j, idx, count, file_id=None, user="", plate=None):
             raise ValueError(f"{plate_text(plate)} 不能用这个文件（不是这一盘的切片文件）")
         return f
     if plate:
-        f = print_files.find(j["product_id"], j["sku"], pname, j["color"] or "", plate_id=plate["plate_id"])
-        if f:
-            return f
         from . import modules
         pp = modules.public("model")
+        f = print_files.find(j["product_id"], j["sku"], pname, j["color"] or "", plate_id=plate["plate_id"])
+        # v2.56：这一盘有「需要确认」→ 不发（抛错）；文件是摆盘 / 主文件变之前切的 → 不用，重新切
+        if f and pp and hasattr(pp, "plate_file_check") and not pp.plate_file_check(j["product_id"], plate["spec"], plate["plate_id"], f):
+            f = None
+        if f:
+            return f
         if not pp:
             raise ValueError(f"{plate_text(plate)}还没有切片文件。请在产品的「打印方案」里切这一盘，或者手动开始")
         return pp.slice_plate(j["product_id"], plate["spec"], plate["plate_id"], j["color"] or "", idx, user)["file"]

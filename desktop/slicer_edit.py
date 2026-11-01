@@ -249,6 +249,14 @@ def split_screen(pid, title_part="3D", timeout=15):
         return False, f"分屏失败：{e}"
 
 
+ALLOWED_PREFIX = ("/api/slicer-edit/", "/api/desktop/st/")
+
+
+def allowed_path(p):
+    p = str(p or "")
+    return p.startswith(ALLOWED_PREFIX) and "://" not in p and ".." not in p and "\\" not in p
+
+
 # ---------------- 一次编辑 ----------------
 class EditJob:
     """一次编辑会话在这台电脑上的状态：文件、软件进程、监视线程、同步记录。"""
@@ -270,7 +278,10 @@ class EditJob:
         self.watcher = None
 
     def url(self, p):
-        return p if p.startswith("http") else self.server + p
+        """只接受服务器上的编辑 / 自检地址（相对路径），不接受绝对地址（网页里的脚本不能让客户端把文件传到别处）。"""
+        if not allowed_path(p):
+            raise ValueError("地址不对 / ที่อยู่ไม่ถูกต้อง")
+        return self.server + p
 
     def download(self):
         get = self._get

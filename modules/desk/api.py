@@ -126,6 +126,8 @@ def desktop_selftest_file(sid):
 @bp.post("/api/desktop/st/<sid>/upload")
 def desktop_selftest_upload(sid):
     from modules.desk import selftest
+    from modules.model import editsession
+    request.max_content_length = editsession.MAX_UPLOAD
     f = request.files.get("file")
     try:
         return jsonify({"ok": True, "check": selftest.upload(sid, request.args.get("t"), f.read() if f else request.get_data())})

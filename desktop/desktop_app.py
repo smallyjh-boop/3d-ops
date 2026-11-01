@@ -281,8 +281,8 @@ class Api:
         """info = 网页开始编辑拿到的 {sid, app, download, upload, filename, folder}。"""
         import slicer_edit
         info = dict(info or {})
-        if not str(info.get("download") or "").startswith(("/api/slicer-edit/", "/api/desktop/st/")):
-            return {"status": "error", "error": "地址不对"}
+        if not (slicer_edit.allowed_path(info.get("download")) and slicer_edit.allowed_path(info.get("upload"))):
+            return {"status": "error", "error": "地址不对 / ที่อยู่ไม่ถูกต้อง"}
         old = JOBS.get(str(info.get("sid")))
         if old:
             old.stop("replaced")

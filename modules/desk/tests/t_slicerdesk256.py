@@ -91,13 +91,22 @@ job.stop("done")
 ok(job.state["status"] == "done" and not job.poll_once(), "stopped: no more uploads")
 job2 = se.EditJob({"sid": "se2", "app": "orca", "download": "/x", "upload": "/y"}, "http://nas", {"bambu": {"path": "x"}}, home=HOME)
 ok(job2.start(watch=False)["status"] == "no_app" and "OrcaSlicer" in job2.state["error"], "software not installed -> no_app")
-job3 = se.EditJob({"sid": "se3", "app": "bambu", "download": "/d", "upload": "/u"}, "http://nas", {"bambu": {"path": "x"}}, home=HOME,
+job3 = se.EditJob({"sid": "se3", "app": "bambu", "download": "/api/slicer-edit/se3/file?t=a", "upload": "/api/slicer-edit/se3/upload?t=b"}, "http://nas", {"bambu": {"path": "x"}}, home=HOME,
                   get=lambda url, timeout=0: R(200, good.getvalue()),
                   post=lambda url, data=None, headers=None, timeout=0: R(403, j={"error": "这次编辑已经结束（完成 / 放弃）"}),
                   popen=lambda args, **kw: type("P", (), {"pid": 1})(), clock=lambda: clock[0])
 job3.start(watch=False)
 os.utime(job3.path, (3000, 3000)); clock[0] = 2000; job3.poll_once(); clock[0] = 2003; job3.poll_once()
 ok(job3.state["status"] == "ended" and "结束" in job3.state["error"], "server says session ended -> stop watching")
+# 复审：客户端只把文件传回服务器上的编辑 / 自检地址
+ok(se.allowed_path("/api/slicer-edit/x/upload?t=1") and se.allowed_path("/api/desktop/st/x/upload?t=1"), "allowed upload paths")
+ok(not se.allowed_path("http://evil/api/slicer-edit/x") and not se.allowed_path("/api/products/x") and not se.allowed_path("/api/slicer-edit/../x")
+   and not se.allowed_path(None), "absolute / other / traversal paths refused")
+bad = se.EditJob({"sid": "s9", "app": "bambu", "download": "/api/slicer-edit/s9/file", "upload": "https://evil.example/up"}, "http://nas", {})
+try:
+    bad.url(bad.info["upload"]); ok(False, "url() refuses absolute upload address")
+except ValueError:
+    ok(True, "url() refuses absolute upload address")
 
 # ---------- 自检（服务器端） ----------
 r = cn.post("/api/desktop/selftest/start", json={"apps": ["bambu", "orca"]})
@@ -145,6 +154,7 @@ dk = importlib.import_module("desktop_app")
 info = dk.Api().info()
 ok(info["edit"] and set(info["slicers"]) == {"bambu", "orca"}, "info() reports slicers")
 ok(dk.Api().edit_in_slicer({"download": "/etc/passwd"})["status"] == "error", "edit_in_slicer only server edit urls")
+ok(dk.Api().edit_in_slicer({"download": "/api/slicer-edit/a/file", "upload": "https://evil.example/u"})["status"] == "error", "edit_in_slicer refuses foreign upload url")
 ok(dk.Api().edit_status("nope")["status"] == "none" and dk.Api().edit_stop("nope")["status"] == "none", "status / stop unknown")
 ok(dk.Api().selftest_checks(det, {}, None)[0]["key"] == "bambu.installed", "selftest_checks exposed to the page")
 sys.exit(1 if E_ else 0)

@@ -32,6 +32,12 @@ from core.config import DATA_DIR, load_config
 from . import slicerproj as sp
 
 LOCK_TTL = 2 * 3600
+ENDED = "这次编辑已经结束（完成 / 放弃 / 超过 2 小时），请在网页上重新点「编辑」/ การแก้ไขนี้สิ้นสุดแล้ว กรุณากด «แก้ไข» ในเว็บอีกครั้ง"
+MAX_UNZIP = int(1.5 * 1024 ** 3)       # 解压后总大小上限（防 zip 炸弹）
+MAX_RATIO = 400                        # 单个文件压缩比上限（大于 20 MB 的才查）
+MACHINE = "machine"                    # 确认项类别：机型 / 喷嘴 / 热床板 / 没有 AMS —— 只有老板能确认
+MATERIAL = "material"                  # 材料 / 耗材配置 —— 有权限的人都能确认
+GENERAL = "general"
 HISTORY_MAX = 10
 MAX_UPLOAD = 300 * 1048576
 DIR = os.path.join(DATA_DIR, "slicer_edit")
@@ -126,7 +132,7 @@ def _plan_and_plate(p, spec, plate_id):
         raise ValueError("这个规格是「按主模型缩放」的：请编辑主模型的打印方案 / แผนนี้ย่อขยายตามโมเดลหลัก กรุณาแก้ที่โมเดลหลัก")
     plate = next((x for x in plan["plates"] if x["id"] == plate_id), None)
     if not plate:
-        raise ValueError("没有这一盘（刷新一下）")
+        raise ValueError("没有这一盘（刷新一下）/ ไม่มีถาดนี้ (รีเฟรชหน้า)")
     return plan, plate
 
 
@@ -151,13 +157,17 @@ def start(pid, spec, plate_id, colour="", app="", user="", display="", now=None)
         mp = master_path(pid, spec, plate)
         m = plate.get("master") or {}
         notes = []
-        if mp and m.get("app") == app:                # 已经有这个软件保存的主文件：接着改它（软件里的设置全保留）
+        derived = bool(plate.get("master_of"))
+        if derived and mp:                            # 从别的盘的项目文件分出来的盘：按方案重新生成这一盘（不能拷整份多盘文件）
+            notes.append({"zh": "这一盘是从另一盘的项目文件里分出来的：按方案重新生成编辑文件（另一盘的设置不带过来）",
+                          "th": "ถาดนี้แยกมาจากไฟล์โปรเจกต์ของอีกถาด: สร้างไฟล์แก้ไขใหม่ตามแผน"})
+        if mp and m.get("app") == app and not derived:  # 已经有这个软件保存的主文件：接着改它（软件里的设置全保留）
             shutil.copyfile(mp, out)
             base = copy.deepcopy(plate)
             from_master = True
             written = {it["uid"]: sp.item_cis(pid, p, it) for it in base.get("items") or []}
         else:
-            if mp:
+            if mp and not derived:
                 notes.append({"zh": f"主文件是 {sp.APPS.get(m.get('app'), '')} 保存的，换成 {sp.APPS[app]} 编辑会按方案重新生成（原来软件里的特别设置不带过去）",
                               "th": f"ไฟล์หลักบันทึกด้วย {sp.APPS.get(m.get('app'), '')} เปลี่ยนเป็น {sp.APPS[app]} จะสร้างใหม่ตามแผน (การตั้งค่าพิเศษเดิมไม่ติดไปด้วย)"})
             r = sp.build_project(pid, spec, plate_id, colour, app, out, p=p)
@@ -166,13 +176,14 @@ def start(pid, spec, plate_id, colour="", app="", user="", display="", now=None)
             notes += r["notes"]
             from_master = False
         hexes = sp.plate_hexes(plan, base, colour)
-        before = {"plate": copy.deepcopy(plate), "plate_ids": [x["id"] for x in plan["plates"]], "stored": spec in (p.get("print_plans") or {})}
+        before = {"plate": copy.deepcopy(plate), "plate_ids": [x["id"] for x in plan["plates"]], "stored": spec in (p.get("print_plans") or {}),
+                  "derived": [copy.deepcopy(x) for x in plan["plates"] if x.get("master_of") == plate_id]}
         fname = re.sub(r'[\\/:*?"<>|\s]+', "_", f"{pid}{'_' + spec if spec else ''}_{plate_id}_{'BambuStudio' if app == 'bambu' else 'Orca'}.3mf")
         s = {"id": sid, "pid": pid, "spec": spec, "plate": plate_id, "colour": colour or "", "app": app, "user": user,
              "display": display or user, "started": now, "touched": now, "status": "open", "token": secrets.token_urlsafe(24),
              "dl": secrets.token_urlsafe(18), "base": base, "written": written, "before": before, "hexes": {str(k): v for k, v in hexes.items()},
              "from_master": from_master, "notes": notes, "filename": fname, "syncs": 0, "last_sync": None,
-             "gen_sha": _sha_file(out), "plate_no": int(m.get("plate_no") or 1) if from_master else 1}
+             "gen_sha": _sha_file(out), "plate_no": 1, "plate_sig": _psig(plate)}
         d[sid] = s
         _save(d)
     return {"session": _public(s), "download": f"/api/slicer-edit/{sid}/file?t={s['dl']}",
@@ -193,7 +204,7 @@ def take_download(sid, tok):
         d = _load()
         s = d.get(str(sid))
         if not s or s.get("status") != "open" or not tok or not secrets.compare_digest(str(s.get("dl") or ""), str(tok)):
-            raise PermissionError("下载地址过期了，请在网页上重新点「编辑」")
+            raise PermissionError("下载地址过期了，请在网页上重新点「编辑」/ ลิงก์ดาวน์โหลดหมดอายุ กรุณากด «แก้ไข» ในเว็บอีกครั้ง")
         s["dl"] = ""
         s["touched"] = time.time()
         _save(d)
@@ -203,9 +214,9 @@ def take_download(sid, tok):
 def check_token(sid, tok):
     s = get(sid)
     if not s or not tok or not secrets.compare_digest(str(s.get("token") or ""), str(tok)):
-        raise PermissionError("编辑会话不对或已结束")
+        raise PermissionError("编辑会话不对或已结束 / เซสชันแก้ไขไม่ถูกต้องหรือสิ้นสุดแล้ว")
     if s.get("status") != "open":
-        raise PermissionError("这次编辑已经结束（完成 / 放弃 / 超过 2 小时），请在网页上重新点「编辑」")
+        raise PermissionError(ENDED)
     return s
 
 
@@ -214,9 +225,9 @@ def finish(sid, user="", owner=False):
         d = _load()
         s = d.get(str(sid))
         if not s:
-            raise ValueError("没有这个编辑会话")
+            raise ValueError("没有这个编辑会话 / ไม่มีเซสชันแก้ไขนี้")
         if s.get("user") != user and not owner:
-            raise PermissionError("只有开始编辑的人（或老板）能结束这次编辑")
+            raise PermissionError("只有开始编辑的人（或老板）能结束这次编辑 / เฉพาะคนที่เริ่มแก้ไข (หรือเจ้าของ) จึงจบการแก้ไขได้")
         if s.get("status") == "open":
             s["status"] = "done"
             s["touched"] = time.time()
@@ -231,9 +242,9 @@ def abandon(sid, user="", owner=False):
         d = _load()
         s = d.get(str(sid))
         if not s:
-            raise ValueError("没有这个编辑会话")
+            raise ValueError("没有这个编辑会话 / ไม่มีเซสชันแก้ไขนี้")
         if s.get("user") != user and not owner:
-            raise PermissionError("只有开始编辑的人（或老板）能放弃这次编辑")
+            raise PermissionError("只有开始编辑的人（或老板）能放弃这次编辑 / เฉพาะคนที่เริ่มแก้ไข (หรือเจ้าของ) จึงยกเลิกได้")
         if s.get("status") == "open" and s.get("syncs"):
             p = store.load(s["pid"])
             plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
@@ -244,7 +255,8 @@ def abandon(sid, user="", owner=False):
                 plan = plans[s["spec"]]
                 keep = set(b["plate_ids"])
                 plan["plates"] = [copy.deepcopy(b["plate"]) if x["id"] == s["plate"] else x for x in plan["plates"]
-                                  if x["id"] in keep or x.get("edit_session") != sid]
+                                  if x.get("master_of") != s["plate"] and (x["id"] in keep or x.get("edit_session") != sid)]
+                plan["plates"] += [copy.deepcopy(x) for x in b.get("derived") or []]
                 plan["updated_at"] = time.time()
             p["print_plans"] = plans
             pp._refresh_variants(p, s["spec"], pp.get_plan(p, s["spec"]))
@@ -257,8 +269,34 @@ def abandon(sid, user="", owner=False):
 
 
 # ---------------- 主文件 ----------------
+def _psig(pl):
+    from . import printplan as pp
+    return pp._sig({k: v for k, v in (pl or {}).items() if k not in pp.MASTER_KEYS})
+
+
+def _referenced(pid, spec, plate_id):
+    """这一盘的主文件目录里还被引用的文件：方案里所有盘的主文件 + 历史、打开中的会话开始前的那份。"""
+    keep = set()
+    try:
+        p = store.load(pid)
+    except FileNotFoundError:
+        return keep
+    plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
+    for pl in ((plans.get(spec) or {}).get("plates") or []):
+        if (pl.get("master_of") or pl.get("id")) != plate_id:
+            continue
+        m = pl.get("master") or {}
+        keep |= {m.get("file")} | {h.get("file") for h in m.get("history") or []}
+    for s in _load().values():
+        if s.get("status") == "open" and s["pid"] == pid and s["spec"] == spec:
+            m = ((s.get("before") or {}).get("plate") or {}).get("master") or {}
+            keep |= {m.get("file")} | {h.get("file") for h in m.get("history") or []}
+    keep.discard(None)
+    return keep
+
+
 def _store_master(pid, spec, plate_id, data, info, user):
-    """原样存为这一盘的主文件（保留最近 HISTORY_MAX 个版本）。返回主文件记录（不含 history）。"""
+    """原样存为这一盘的主文件（保留最近 HISTORY_MAX 个版本；方案 / 打开中的会话还在用的不删）。返回主文件记录（不含 history）。"""
     d = _master_dir(pid, spec, plate_id)
     os.makedirs(d, exist_ok=True)
     sha = hashlib.sha256(data).hexdigest()
@@ -266,8 +304,9 @@ def _store_master(pid, spec, plate_id, data, info, user):
     with open(os.path.join(d, name + ".part"), "wb") as f:
         f.write(data)
     os.replace(os.path.join(d, name + ".part"), os.path.join(d, name))
+    keep = _referenced(pid, spec, plate_id) | {name}
     files = sorted(x for x in os.listdir(d) if x.endswith(".3mf"))
-    for old in files[:-HISTORY_MAX]:
+    for old in [x for x in files[:-HISTORY_MAX] if x not in keep]:
         try:
             os.remove(os.path.join(d, old))
         except OSError:
@@ -290,12 +329,27 @@ def valid_project(data):
         raise ValueError("文件是空的或太大 / ไฟล์ว่างหรือใหญ่เกินไป")
     try:
         z = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as e:
+        raise ValueError("不是完整的 3MF 项目文件（软件还没保存完？）/ ไม่ใช่ไฟล์โปรเจกต์ 3MF ที่สมบูรณ์") from e
+    zip_guard(z)                                   # 先查大小 / 压缩比，再解压校验
+    try:
         if z.testzip() is not None:
             raise zipfile.BadZipFile("crc")
         if not any(n.lower() == "3d/3dmodel.model" for n in z.namelist()):
             raise ValueError
     except (zipfile.BadZipFile, ValueError) as e:
         raise ValueError("不是完整的 3MF 项目文件（软件还没保存完？）/ ไม่ใช่ไฟล์โปรเจกต์ 3MF ที่สมบูรณ์") from e
+
+
+def zip_guard(z):
+    """防 zip 炸弹：解压后总大小 ≤ 1.5 GB，大文件的压缩比 ≤ 400。"""
+    tot = 0
+    for i in z.infolist():
+        tot += i.file_size
+        if i.file_size > 20 * 1048576 and i.file_size > MAX_RATIO * max(1, i.compress_size):
+            raise ValueError(f"文件里「{i.filename[:60]}」压缩比异常，不收 / ไฟล์ผิดปกติ (อัตราการบีบอัดสูงเกินไป)")
+    if tot > MAX_UNZIP:
+        raise ValueError("文件解压后太大（超过 1.5 GB）/ ไฟล์ใหญ่เกินไปเมื่อแตกไฟล์")
 
 
 def _app_from(application, fallback):
@@ -313,6 +367,10 @@ def upload(sid, tok, data, now=None):
     s = check_token(sid, tok)
     valid_project(data)
     with _lock:
+        cur0 = _load().get(sid)
+        if not cur0 or cur0.get("status") != "open":     # 拿到锁之前别人完成 / 放弃了
+            raise PermissionError(ENDED)
+        s = cur0
         rp = sp.read_project(data)
         if not rp["objects"]:
             raise ValueError("文件里没有零件 / ไม่มีชิ้นงานในไฟล์")
@@ -323,6 +381,7 @@ def upload(sid, tok, data, now=None):
         cur["last_sync"] = now or time.time()
         cur["touched"] = cur["last_sync"]
         cur["plate_no"] = 1
+        cur["plate_sig"] = res.pop("_sig", cur.get("plate_sig"))
         d[sid] = cur
         _save(d)
     res["session"] = _public(cur)
@@ -345,14 +404,22 @@ def sync(s, data, rp, cfg=None):
     plan = copy.deepcopy(plan)
     plan.pop("default", None)
     plate = next(x for x in plan["plates"] if x["id"] == plate_id)
+    if s.get("plate_sig") and _psig(plate) != s["plate_sig"]:     # 编辑期间这一盘在网页上被改过：不覆盖
+        raise ValueError(f"这一盘在网页上被改过了（{plan.get('updated_by') or ''}），这次回传没有同步：请在浮条上「放弃」后重新编辑"
+                         " / ถาดนี้ถูกแก้ในเว็บระหว่างแก้ไข ไม่ได้ซิงก์: กด «ยกเลิก» แล้วแก้ไขใหม่")
+    # 以前从这一盘的项目文件分出来的盘（软件里的第 2、3… 盘）：这次按文件重新对应，同一个盘号沿用原来的盘 id，不重复加
+    old_derived = {int((x.get("master") or {}).get("plate_no") or 0): x["id"] for x in plan["plates"] if x.get("master_of") == plate_id}
+    plan["plates"] = [x for x in plan["plates"] if x.get("master_of") != plate_id]
+    plate.pop("master_of", None)
+    plate.pop("edit_session", None)
     base = s["base"]
     by_uid = {it["uid"]: it for it in base.get("items") or []}
     lib_ids = {e.get("id") for e in p.get("model_lib") or []}
     info = dict(rp, app=_app_from(rp.get("application"), s.get("app")))
     changes, confirm = [], []
 
-    def need(zh, th):
-        confirm.append({"zh": zh, "th": th})
+    def need(zh, th, kind=GENERAL):
+        confirm.append({"zh": zh, "th": th, "kind": kind})
 
     seen, per_plate, added_files = set(), {}, []
     written = s.get("written") or {}
@@ -484,7 +551,7 @@ def sync(s, data, rp, cfg=None):
                 ns[k] = o[k]
         if f.get("type") and recipes.same_material(f["type"], o.get("material") or "PLA") == "diff" and i < len(old_slots):
             need(f"槽 {i + 1} 在软件里换成了 {mat}（原来是 {o.get('material')}）：确认材料、温度、AMS 里装的料",
-                 f"ช่อง {i + 1} ถูกเปลี่ยนเป็น {mat} ในโปรแกรม (เดิม {o.get('material')}): ตรวจวัสดุ อุณหภูมิ และเส้นใน AMS")
+                 f"ช่อง {i + 1} ถูกเปลี่ยนเป็น {mat} ในโปรแกรม (เดิม {o.get('material')}): ตรวจวัสดุ อุณหภูมิ และเส้นใน AMS", MATERIAL)
         want = (s.get("hexes") or {}).get(str(i + 1))
         if f.get("hex") and want and f["hex"].upper() != want.upper():
             ns["hex"] = f["hex"].upper()
@@ -511,7 +578,7 @@ def sync(s, data, rp, cfg=None):
             ft = op.filament_type(idx, f["profile"])
             if ft and recipes.same_material(ft, f.get("type") or slots[i]["material"]) == "diff":
                 need(f"槽 {i + 1} 的耗材配置「{f['profile']}」是 {ft}，材料写的是 {f.get('type')}：温度可能不对",
-                     f"โปรไฟล์ช่อง {i + 1}「{f['profile']}」เป็น {ft} แต่วัสดุคือ {f.get('type')}: อุณหภูมิอาจไม่ถูก")
+                     f"โปรไฟล์ช่อง {i + 1}「{f['profile']}」เป็น {ft} แต่วัสดุคือ {f.get('type')}: อุณหภูมิอาจไม่ถูก", MATERIAL)
     # 组装盘
     new_plates = []
     for no in sorted(per_plate):
@@ -524,7 +591,9 @@ def sync(s, data, rp, cfg=None):
             tgt = plate
         else:
             tgt = {k: copy.deepcopy(v) for k, v in plate.items() if k not in ("items", "sliced", "master", "confirm", "confirmed")}
-            tgt["id"] = f"p{pp._free_plate_id({'plates': plan['plates'] + new_plates})}"
+            tgt["id"] = old_derived.get(no) or f"p{pp._free_plate_id({'plates': plan['plates'] + new_plates})}"
+            while tgt["id"] in {x["id"] for x in plan["plates"] + new_plates}:
+                tgt["id"] = f"p{pp._free_plate_id({'plates': plan['plates'] + new_plates + [{'id': tgt['id']}]})}"
             tgt["name"] = ""
             tgt["edit_session"] = s["id"]
             new_plates.append(tgt)
@@ -545,18 +614,18 @@ def sync(s, data, rp, cfg=None):
         fm = slicecheck.model_of_profile(rp["printer_profile"], cfg)
         if not fm:
             need(f"认不出软件里选的打印机「{rp['printer_profile']}」是哪个机型，这一盘是「{plate.get('printer')}」",
-                 f"ไม่รู้จักเครื่องพิมพ์「{rp['printer_profile']}」ที่เลือกในโปรแกรม ถาดนี้คือ「{plate.get('printer')}」")
+                 f"ไม่รู้จักเครื่องพิมพ์「{rp['printer_profile']}」ที่เลือกในโปรแกรม ถาดนี้คือ「{plate.get('printer')}」", MACHINE)
         elif slicecheck._norm(fm) != slicecheck._norm(plate.get("printer")):
             need(f"软件里选的打印机是「{fm}」，这一盘是「{plate.get('printer')}」：切出来的文件不能发到这台机型",
-                 f"เครื่องพิมพ์ในโปรแกรมคือ「{fm}」แต่ถาดนี้คือ「{plate.get('printer')}」: ไฟล์ที่สไลซ์ส่งไปเครื่องรุ่นนี้ไม่ได้")
+                 f"เครื่องพิมพ์ในโปรแกรมคือ「{fm}」แต่ถาดนี้คือ「{plate.get('printer')}」: ไฟล์ที่สไลซ์ส่งไปเครื่องรุ่นนี้ไม่ได้", MACHINE)
     else:
-        need("文件里没有打印机配置（不是软件保存的完整项目？）", "ไม่มีโปรไฟล์เครื่องพิมพ์ในไฟล์ (ไม่ใช่โปรเจกต์ที่โปรแกรมบันทึก?)")
+        need("文件里没有打印机配置（不是软件保存的完整项目？）", "ไม่มีโปรไฟล์เครื่องพิมพ์ในไฟล์ (ไม่ใช่โปรเจกต์ที่โปรแกรมบันทึก?)", MACHINE)
     want_nz = float(tpl.get("nozzle") or 0.4)
     if rp.get("nozzle") and abs(float(rp["nozzle"]) - want_nz) > 0.01:
-        need(f"软件里是 {rp['nozzle']:g} mm 喷嘴，这台机型设置的是 {want_nz:g} mm", f"ในโปรแกรมใช้หัวฉีด {rp['nozzle']:g} มม. แต่รุ่นนี้ตั้งไว้ {want_nz:g} มม.")
+        need(f"软件里是 {rp['nozzle']:g} mm 喷嘴，这台机型设置的是 {want_nz:g} mm", f"ในโปรแกรมใช้หัวฉีด {rp['nozzle']:g} มม. แต่รุ่นนี้ตั้งไว้ {want_nz:g} มม.", MACHINE)
     if tpl.get("plate") and rp.get("bed_type") and slicecheck._norm(tpl["plate"]) != slicecheck._norm(rp["bed_type"]):
         need(f"软件里选的热床板是「{rp['bed_type']}」，打印机现在装的是「{tpl['plate']}」",
-             f"แผ่นฐานในโปรแกรมคือ「{rp['bed_type']}」แต่เครื่องใส่「{tpl['plate']}」")
+             f"แผ่นฐานในโปรแกรมคือ「{rp['bed_type']}」แต่เครื่องใส่「{tpl['plate']}」", MACHINE)
     # 热床范围 / 废料口（按软件里零件真实的外形）
     bed = pp.bed_of(plate.get("printer"), cfg)
     excl = pp.exclude_of(plate.get("printer"))
@@ -572,7 +641,7 @@ def sync(s, data, rp, cfg=None):
     multi = len(used) > 1 or rp.get("painted")
     pr = next((m for m in pp.printer_models(cfg) if m["name"] == plate.get("printer")), {})
     if multi and pr.get("multicolor") is False:
-        need("这一盘是多色的，这台机型没有 AMS", "ถาดนี้หลายสี แต่เครื่องรุ่นนี้ไม่มี AMS")
+        need("这一盘是多色的，这台机型没有 AMS", "ถาดนี้หลายสี แต่เครื่องรุ่นนี้ไม่มี AMS", MACHINE)
     # 主文件
     m = _store_master(pid, spec, plate_id, data, info, user)
     hist = [{k: (plate.get("master") or {}).get(k) for k in ("file", "sha", "saved_at", "by", "app_ver")}] if plate.get("master") else []
@@ -603,13 +672,16 @@ def sync(s, data, rp, cfg=None):
     pp._mirror_recipe(p, spec, cleaned, user)
     pp._refresh_variants(p, spec, cleaned)
     store.save(p)
+    # 主文件变了：这一盘（和分出来的盘）以前按方案切的文件作废，生产不会拿旧文件发打印
+    for pid_ in [plate_id] + [t["id"] for t in new_plates] + [v for v in old_derived.values() if v not in {t["id"] for t in new_plates}]:
+        pp.retire_plate_files(pid, spec, pid_, user, "切片软件回传了新的主文件")
     from core import db
     db.audit(user, f"在 {sp.APPS.get(info['app'], '')} 里编辑打印方案（回传同步）", pid,
              f"{spec or '主模型'} {plate_id}：{len(rp['objects'])} 个零件" + (f"，需要确认 {len(confirm)} 项" if confirm else ""))
     out_plate = next(x for x in cleaned["plates"] if x["id"] == plate_id)
     return {"plate": out_plate, "new_plates": [t["id"] for t in new_plates], "confirm": confirm,
             "changes": [{"zh": a, "th": b, "detail": str(c)} for a, b, c in changes], "deleted": len(gone), "added_files": added_files,
-            "master": {k: v for k, v in m.items() if k != "history"}}
+            "master": {k: v for k, v in m.items() if k != "history"}, "_sig": _psig(out_plate)}
 
 
 def sp_tol():
@@ -617,15 +689,18 @@ def sp_tol():
 
 
 # ---------------- 需要确认 ----------------
-def confirm_plate(pid, spec, plate_id, user=""):
+def confirm_plate(pid, spec, plate_id, user="", owner=True):
     p = store.load(pid)
     plans = p.get("print_plans") or {}
     plan = plans.get((spec or "").strip())
     if not plan:
-        raise ValueError("没有这个打印方案")
+        raise ValueError("没有这个打印方案 / ไม่มีแผนการพิมพ์นี้")
     pl = next((x for x in plan.get("plates") or [] if x["id"] == plate_id), None)
     if not pl:
-        raise ValueError("没有这一盘")
+        raise ValueError("没有这一盘 / ไม่มีถาดนี้")
+    if any(c.get("kind") == MACHINE for c in pl.get("confirm") or []) and not owner:
+        raise PermissionError("机型 / 喷嘴 / 热床板 / AMS 这类问题关系到打印机安全，只有老板能确认"
+                              " / เรื่องรุ่นเครื่อง หัวฉีด แผ่นฐาน AMS เกี่ยวกับความปลอดภัยของเครื่อง เฉพาะเจ้าของยืนยันได้")
     if pl.get("confirm"):
         pl["confirmed"] = {"by": user, "at": time.time(), "what": [c["zh"] for c in pl["confirm"]]}
         pl["confirm"] = []
@@ -636,8 +711,29 @@ def confirm_plate(pid, spec, plate_id, user=""):
 
 
 # ---------------- 切主文件 ----------------
-def slice_master(cfg, path, plate_no=1, material="PLA", timeout=900, keep_to=None):
-    """直接用 OrcaSlicer 切主文件（不加载我们的配置，用文件里软件保存的全部设置）。失败抛 SliceError。"""
+def recolour(src, dst, colours):
+    """主文件按款式换颜色（同材料只换颜色）：改 project_settings 的 filament_colour，其它原样。"""
+    with zipfile.ZipFile(src) as zi, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zo:
+        for i in zi.infolist():
+            data = zi.read(i.filename)
+            if i.filename == "Metadata/project_settings.config":
+                try:
+                    ps = json.loads(data)
+                    cols = list(ps.get("filament_colour") or [])
+                    for k, c in enumerate(colours or []):
+                        if c and k < len(cols):
+                            cols[k] = c
+                    ps["filament_colour"] = cols
+                    data = json.dumps(ps, ensure_ascii=False, indent=4).encode()
+                except ValueError:
+                    pass
+            zo.writestr(i, data)
+    return dst
+
+
+def slice_master(cfg, path, plate_no=1, material="PLA", timeout=900, keep_to=None, colours=None):
+    """直接用 OrcaSlicer 切主文件（不加载我们的配置，用文件里软件保存的全部设置）。失败抛 SliceError。
+    colours：按款式每个槽的颜色（同材料只换颜色）。"""
     import subprocess
     import tempfile
     from core import slicer
@@ -647,7 +743,10 @@ def slice_master(cfg, path, plate_no=1, material="PLA", timeout=900, keep_to=Non
     d = tempfile.mkdtemp(prefix="master_")
     try:
         src = os.path.join(d, "master.3mf")
-        shutil.copyfile(path, src)
+        if colours:
+            recolour(path, src, colours)
+        else:
+            shutil.copyfile(path, src)
         cmd = [exe, "--slice", str(int(plate_no or 1)), "--allow-newer-file", "--outputdir", d, "--export-3mf", "result.gcode.3mf", src]
         try:
             r = subprocess.run(cmd, cwd=d, capture_output=True, timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))

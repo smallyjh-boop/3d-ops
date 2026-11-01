@@ -508,9 +508,11 @@ def read_project(data):
     """软件保存的 3MF → {application, app_ver, objects: [{name, uid, extruder, plate, world, lin, ov, settings,
     parts: [{name, src, extruder, subtype, world, lin, ov, settings}]}], filaments: [{slot, type, hex, profile}], painted, ...}"""
     z = zipfile.ZipFile(io.BytesIO(data))
+    from .editsession import zip_guard
+    zip_guard(z)                                     # 防 zip 炸弹：不无限解压
     root = next((n for n in z.namelist() if n.lower() == "3d/3dmodel.model"), None)
     if not root:
-        raise ValueError("不是切片软件的项目文件（没有 3D/3dmodel.model）")
+        raise ValueError("不是切片软件的项目文件（没有 3D/3dmodel.model）/ ไม่ใช่ไฟล์โปรเจกต์ของโปรแกรมสไลซ์")
     rbuf = z.read(root)
     app_m = re.search(rb'<metadata name="Application">([^<]*)</metadata>', rbuf)
     app_s = app_m.group(1).decode("utf-8", "ignore") if app_m else ""

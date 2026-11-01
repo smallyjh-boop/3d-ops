@@ -889,7 +889,10 @@ def save_plan(pid, spec, data, user=""):
         if pl["manual"] and not ck["ok"]:
             raise ValueError(f"第 {plan['plates'].index(pl) + 1} 盘：" + "，".join(ck["problems"]) + "（红色的零件挪一挪，或点「自动排列」）")
         old = next((x for x in (prev.get("plates") or []) if x.get("id") == pl["id"]), None)
-        _keep_master(pl, old)
+        _check_lock(pid, spec, pl, old, user)
+        dropped = _keep_master(pl, old)
+        if dropped:
+            _master_dropped(pid, spec, pl, old, user)
         _check_mat_params(p, pl, old)
         if old and old.get("sliced") and (_sig(old) != _sig(pl) or (old.get("params") or {}) != (pl.get("params") or {})):
             pl.pop("sliced", None)                  # 改了摆盘 / 颜色 / 参数：以前的切片结果不能用了
@@ -907,16 +910,77 @@ def save_plan(pid, spec, data, user=""):
     return {"plan": plan, "checks": checks}
 
 
-MASTER_KEYS = ("master", "confirm", "confirmed", "master_of")
+MASTER_KEYS = ("master", "confirm", "confirmed", "master_of", "edit_session")
 
 
 def _keep_master(pl, old):
     """v2.56（T36）：网页保存方案时，这一盘的摆盘 / 槽 / 参数没变 → 保留切片软件保存的主文件和「需要确认」；
-    在网页里改了 → 主文件不再用（历史版本还在），按网页的方案切片。"""
-    if not old or not old.get("master"):
-        return
+    在网页里改了 → 主文件不再用（历史版本还在），按网页的方案切片。返回 True = 主文件这次被丢掉了。"""
+    if not old:
+        return False
+    if not old.get("master"):
+        if old.get("confirm"):                 # 主文件以前就丢了，留下的材料类确认项照样带着
+            pl["confirm"] = old["confirm"]
+        return False
     if _sig({k: v for k, v in old.items() if k not in MASTER_KEYS}) == _sig(pl):
         pl.update({k: old[k] for k in MASTER_KEYS if k in old})
+        return False
+    return True
+
+
+def _check_lock(pid, spec, pl, old, user):
+    """v2.56：别人正在切片软件里编辑这一盘，网页上不能改它（改了的话软件回传会覆盖 / 对不上）。"""
+    from . import editsession
+    for s_ in editsession.open_for(pid, spec, pl["id"]):
+        if s_.get("user") != user and (not old or _sig({k: v for k, v in old.items() if k not in MASTER_KEYS}) != _sig(pl)):
+            raise ValueError(f"{s_.get('display') or s_.get('user')} 正在 {editsession.sp.APPS.get(s_.get('app'), '')} 里编辑这一盘，"
+                             f"等他完成后再在网页上改 / {s_.get('display') or s_.get('user')} กำลังแก้ไขถาดนี้ในโปรแกรม รอให้เสร็จก่อนแล้วค่อยแก้ในเว็บ")
+
+
+def _master_dropped(pid, spec, pl, old, user):
+    """网页上改了摆盘、主文件不再用：没确认的问题记进操作日志（材料类的留在盘上，换材料的事实还在），旧的方案切片文件作废。"""
+    from core import db
+    conf = old.get("confirm") or []
+    if conf:
+        db.audit(user, "网页改了摆盘：切片软件主文件不再用，未确认的问题", pid,
+                 f"{spec or '主模型'} {pl['id']}：" + "；".join(c.get("zh", "") for c in conf)[:400])
+    keep = [c for c in conf if c.get("kind") == "material"]
+    if keep:
+        pl["confirm"] = keep
+    retire_plate_files(pid, spec, pl["id"], user, "网页改了摆盘，主文件不再用")
+
+
+def retire_plate_files(pid, spec, plate_id, user="", why=""):
+    """这一盘以前按方案切的文件作废（active=0），生产不会再拿旧文件发打印。返回作废了几个。"""
+    from core import db
+    c = db.conn()
+    ids = [r[0] for r in c.execute("SELECT id FROM print_files WHERE product_id=? AND COALESCE(plate_id,'')=? AND COALESCE(spec,'')=? "
+                                   "AND COALESCE(source,'')='plan' AND active=1", (pid, plate_id, (spec or "").strip()))]
+    if ids:
+        c.execute(f"UPDATE print_files SET active=0 WHERE id IN ({','.join('?' * len(ids))})", ids)
+        c.commit()
+        db.audit(user, "打印方案切片文件作废", pid, f"{spec or '主模型'} {plate_id}：#{', #'.join(map(str, ids))}（{why}）")
+    return len(ids)
+
+
+def plate_file_check(product_id, spec, plate_id, f):
+    """v2.56：生产要用某一盘的切片文件前核对：这一盘有「需要确认」没确认 → 抛错；文件记的签名和这一盘现在的不一样
+    （摆盘 / 主文件变了）→ 返回 False（不能用，要重新切）。旧文件没记签名：盘有主文件时不能用，其它照旧能用。"""
+    try:
+        p = store.load(product_id)
+    except FileNotFoundError:
+        return True
+    plan = get_plan(p, spec)
+    pl = next((x for x in plan.get("plates") or [] if x["id"] == plate_id), None)
+    if not pl:
+        return True
+    if pl.get("confirm"):
+        raise ValueError("这一盘有需要确认的问题（切片软件里改过）：" + "；".join(c["zh"] for c in pl["confirm"]) +
+                         "。请先在打印方案里确认 / ถาดนี้มีเรื่องต้องยืนยัน (แก้ในโปรแกรมสไลซ์) กรุณายืนยันในแผนการพิมพ์ก่อน")
+    sig = (f or {}).get("plate_sig")
+    if sig:
+        return sig == plate_sig(pl)
+    return not pl.get("master")
 
 
 def _check_mat_params(p, pl, old):
@@ -1505,19 +1569,24 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
     if not plate:
         raise ValueError("没有这一盘（刷新一下）")
     if plate.get("confirm"):                 # v2.56（T36）：切片软件回传后核对出的问题没确认，不切
-        raise ValueError("这一盘有需要确认的问题（切片软件里改过）：" + "；".join(c["zh"] for c in plate["confirm"]) + "。请先在这一盘上点「确认」")
+        raise ValueError("这一盘有需要确认的问题（切片软件里改过）：" + "；".join(c["zh"] for c in plate["confirm"]) +
+                         "。请先在这一盘上点「确认」/ ถาดนี้มีเรื่องต้องยืนยัน (แก้ในโปรแกรมสไลซ์) กรุณากด «ยืนยัน» ที่ถาดนี้ก่อน")
     names = [x.get("name") for x in cfg.get("printers") or []]
     if printer_idx is None:
         printer_idx = names.index(plate["printer"]) if plate["printer"] in names else 0
     from . import editsession
     mpath = editsession.master_path(pid, spec, plate)
+    if plate.get("master") and not mpath:      # 主文件记着但文件没了：不能悄悄改按方案切（软件里的设置会丢）
+        raise ValueError("这一盘的主文件（切片软件保存的项目）找不到了：请在切片软件里重新编辑保存，或在网页上改一下摆盘后保存（改按方案切）"
+                         " / ไม่พบไฟล์หลักของถาดนี้ กรุณาแก้ไขในโปรแกรมแล้วบันทึกใหม่")
     res, master_note = None, []
     if mpath:                                # v2.56：有软件保存的主文件 → 直接切它（软件里的全部设置都用上）
         import tempfile
         keep = tempfile.NamedTemporaryFile(suffix=".gcode.3mf", delete=False).name
         mat0 = (plate["slots"][0].get("material") if plate.get("slots") else "") or "PLA"
         try:
-            res = editsession.slice_master(cfg, mpath, (plate.get("master") or {}).get("plate_no") or 1, mat0, keep_to=keep)
+            res = editsession.slice_master(cfg, mpath, (plate.get("master") or {}).get("plate_no") or 1, mat0, keep_to=keep,
+                                           colours=_master_colours(plan, plate, colour, cfg) if colour else None)
             cols = colours_for(plan, plate, colour)
             fils = [{"material": s.get("material") or "PLA"} for s in plate["slots"]]
             multi = len({cols.get(s["slot"]) for s in plate["slots"]}) > 1
@@ -1598,17 +1667,29 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
     p["print_plans"] = plans
     store.save(p)
     pname = names[printer_idx] if 0 <= printer_idx < len(names) else plate["printer"]
-    f = print_files.add(res["kept"], fname.replace(".3mf", ".gcode.3mf"), pid, pname, "", int(plate.get("sets") or 1), "",
+    f = print_files.add(res["kept"], fname.replace(".3mf", ".gcode.3mf"), pid, pname, "", int(plate.get("sets") or 1),
+                        colour if mpath else "",           # v2.56：主文件按款式换了颜色切的 → 记颜色
                         "按打印方案（摆好的盘）切片" + (f"，{ams_line(usage(p, spec, colour)['colours'])}" if multi else ""), user,
                         fils[0]["material"], res.get("grams"), res.get("hours"), move=True, source="plan", spec=spec,
                         plate_id=plate_id,        # v2.52：记下是哪一盘（几盘的方案生产时每盘用自己的文件）
                         scale=round(float(plan["scale"]), 1) if plan.get("follow") and plan.get("scale") else None)  # v2.53.1：缩放比例
+    from core import db as _db
+    _db.conn().execute("UPDATE print_files SET plate_sig=? WHERE id=?", (plate_sig(plate), f["id"]))   # v2.56：切的时候这一盘的签名
+    _db.conn().commit()
+    f = print_files.get(f["id"])
     f = print_files.ensure_params(f)          # v2.53.1：马上读切片参数（机型 / 喷嘴），排单 / 开始打印才认得出这个文件能用
     warns = pre_warns + (res.get("warnings") or [])
     if warns:
         from core import db
         db.audit(user, "打印方案切片：耗材配置和材料不一致等，已自动调整", pid, f"{spec or '主模型'} {plate_id}：" + "；".join(w["zh"] for w in warns))
     return {"sliced": sliced, "file": f, "warnings": warns}
+
+
+def _master_colours(plan, plate, colour, cfg):
+    """主文件按款式切：每个槽这个款式的颜色（同材料只换颜色），[#RRGGBB]。"""
+    from . import slicerproj
+    hx = slicerproj.plate_hexes(plan, plate, colour, cfg)
+    return [hx.get(s["slot"]) or "" for s in plate.get("slots") or []]
 
 
 def slice_warnings(p, plate, rc):

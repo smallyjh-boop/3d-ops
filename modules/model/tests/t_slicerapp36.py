@@ -488,6 +488,141 @@ it2 = plan["plates"][1]["items"][0]
 ok(0 < it2["x"] < 256, f"plate 2 item position relative to its own plate {it2['x']}")
 ok(C.post(f"/api/products/{PID}/print-plan/edit/finish", json={"sid": S2["session"]["id"]}).status_code == 200, "finish kit session")
 
+# ================= 审查修复（v2.56 复审） =================
+from core import print_files, production
+plan = pp.get_plan(store.load(PID), "")
+ok(len(plan["plates"]) == 2 and plan["plates"][1].get("master_of") == "p1", "precondition: p2 derived from p1's project")
+P2 = plan["plates"][1]["id"]
+# 必修 1：同一会话里同一个多盘文件存好几次，不会把第 2 盘加好几遍；盘 id 不变
+r = C.post(f"/api/products/{PID}/print-plan/edit/start", json={"spec": "", "plate_id": "p1", "app": "orca"})
+S3 = r.get_json()
+ok(r.status_code == 200 and S3["session"]["from_master"], "edit p1 again: continues from its master file")
+D3 = ANON.get(S3["download"]).data
+for k in range(3):
+    rr = ANON.post(S3["upload"], data=D3)
+plan = pp.get_plan(store.load(PID), "")
+ok(rr.status_code == 200 and len(plan["plates"]) == 2 and plan["plates"][1]["id"] == P2, f"3 uploads of a 2-plate file -> still 2 plates, same id {[x['id'] for x in plan['plates']]}")
+ok(C.post(f"/api/products/{PID}/print-plan/edit/finish", json={"sid": S3["session"]["id"]}).status_code == 200, "finish S3")
+# 必修 2：编辑分出来的盘（p2）：按方案重新生成这一盘，回传不会被第 1 盘覆盖、不会把零件当新模型
+nlib = len(store.load(PID).get("model_lib") or [])
+p2_uids = sorted(it["uid"] for it in plan["plates"][1]["items"])
+r = C.post(f"/api/products/{PID}/print-plan/edit/start", json={"spec": "", "plate_id": P2, "app": "orca"})
+S4 = r.get_json()
+ok(r.status_code == 200 and not S4["session"]["from_master"] and any("分出来" in n["zh"] for n in S4["session"]["notes"]), "derived plate: regenerated from plan, with note")
+D4 = ANON.get(S4["download"]).data
+ok(sorted(o["uid"] for o in sp.read_project(D4)["objects"]) == p2_uids, "derived plate edit file has only its own parts")
+rr = ANON.post(S4["upload"], data=D4)
+plan = pp.get_plan(store.load(PID), "")
+p2 = next(x for x in plan["plates"] if x["id"] == P2)
+ok(rr.status_code == 200 and sorted(it["uid"] for it in p2["items"]) == p2_uids and len(plan["plates"]) == 2, f"p2 synced to itself {rr.get_json().get('error')}")
+ok(len(store.load(PID).get("model_lib") or []) == nlib, "no part mistaken for a new model")
+ok(not p2.get("master_of") and p2["master"]["plate_no"] == 1 and es.master_path(PID, "", p2), "p2 now has its own master")
+C.post(f"/api/products/{PID}/print-plan/edit/finish", json={"sid": S4["session"]["id"]})
+# 必修 3：主文件变了，旧的（已复核的）切片文件作废，生产不会再用；有需要确认时生产拒绝
+if ORCA:
+    rs = C.post(f"/api/products/{PID}/print-plan/slice", json={"spec": "", "plate_id": "p1"})
+    fid = rs.get_json().get("file_id")
+    f1 = print_files.get(fid)
+    ok(rs.status_code == 200 and f1["plate_sig"] == pp.plate_sig(pp.get_plan(store.load(PID), "")["plates"][0]), "plan file records plate signature")
+    db.conn().execute("UPDATE print_files SET status='reviewed' WHERE id=?", (fid,)); db.conn().commit()
+    ok(pp.plate_file_check(PID, "", "p1", print_files.get(fid)) is True, "fresh reviewed file usable")
+    r = C.post(f"/api/products/{PID}/print-plan/edit/start", json={"spec": "", "plate_id": "p1", "app": "orca"})
+    S5 = r.get_json()
+    D5 = ANON.get(S5["download"]).data
+    D5b = edit(D5, fn_ms=lambda m_: m_.replace("</config>", '<!-- saved again --></config>'))     # 内容变了（新的主文件），摆盘不变
+    ANON.post(S5["upload"], data=D5b)
+    ok(print_files.get(fid)["active"] == 0, "new master -> old plan file set inactive")
+    db.conn().execute("UPDATE print_files SET active=1 WHERE id=?", (fid,)); db.conn().commit()
+    ok(pp.plate_file_check(PID, "", "p1", print_files.get(fid)) is False, "stale signature -> file not usable even if active")
+    plan = pp.get_plan(store.load(PID), "")
+    found = print_files.find(PID, "", "Bambu Lab P1S", "", plate_id="p1")
+    ok(found is None or found["id"] != fid or not pp.plate_file_check(PID, "", "p1", found), "production lookup skips stale file")
+    # 主文件按款式换颜色切：颜色记在文件上
+    rs = C.post(f"/api/products/{PID}/print-plan/slice", json={"spec": "", "plate_id": "p1", "colour": "红色"})
+    fj = print_files.get(rs.get_json().get("file_id") or 0) or {}
+    ok(rs.status_code == 200 and fj.get("color") == "红色", f"master sliced for a colour records the colour {fj.get('color')} {rs.get_json().get('error', '')[:200]}")
+    tmpc = os.path.join(WORK, "rc.3mf")
+    es.recolour(es.master_path(PID, "", plan["plates"][0]), tmpc, ["#D62F2F", ""])
+    pc = json.loads(zipfile.ZipFile(tmpc).read("Metadata/project_settings.config"))["filament_colour"]
+    ok(pc[0] == "#D62F2F" and pc[1].upper() != "#D62F2F", f"recolour only changes filament_colour {pc}")
+    C.post(f"/api/products/{PID}/print-plan/edit/finish", json={"sid": S5["session"]["id"]})
+# 有需要确认 → 生产找文件时拒绝
+p = store.load(PID)
+p["print_plans"][""]["plates"][0]["confirm"] = [{"zh": "测试", "th": "ทดสอบ", "kind": "general"}]
+store.save(p)
+try:
+    pp.plate_file_check(PID, "", "p1", {"plate_sig": "x"})
+    ok(False, "confirm pending -> production refuses")
+except ValueError as e:
+    ok("需要确认" in str(e) and "ยืนยัน" in str(e), "confirm pending -> production refuses (zh + th)")
+# 建议 8：机型类确认只有老板能确认，材料类有权限的人都能确认
+p = store.load(PID)
+p["print_plans"][""]["plates"][0]["confirm"] = [{"zh": "喷嘴不对", "th": "หัวฉีดไม่ตรง", "kind": "machine"}]
+store.save(p)
+r = PC.post(f"/api/products/{PID}/print-plan/edit/confirm", json={"spec": "", "plate_id": "p1"})
+ok(r.status_code == 403 and "老板" in r.get_json()["error"], "machine-type confirm: production staff refused")
+ok(C.post(f"/api/products/{PID}/print-plan/edit/confirm", json={"spec": "", "plate_id": "p1"}).status_code == 200, "owner can confirm machine-type")
+p = store.load(PID)
+p["print_plans"][""]["plates"][0]["confirm"] = [{"zh": "槽 1 换成 PETG", "th": "ช่อง 1 เป็น PETG", "kind": "material"}]
+store.save(p)
+ok(PC.post(f"/api/products/{PID}/print-plan/edit/confirm", json={"spec": "", "plate_id": "p1"}).status_code == 200, "material confirm: staff can confirm")
+# 建议 6：网页改了摆盘丢主文件：未确认项进操作日志，材料类留在盘上，旧切片文件作废
+p = store.load(PID)
+pl0 = p["print_plans"][""]["plates"][0]
+pl0["confirm"] = [{"zh": "槽 1 换成 PETG", "th": "x", "kind": "material"}, {"zh": "超出热床", "th": "x", "kind": "general"}]
+store.save(p)
+web = C.get(f"/api/products/{PID}/print-plan").get_json()["plan"]
+web["plates"][0]["layer_height"] = 0.16
+r = C.post(f"/api/products/{PID}/print-plan", json={"spec": "", "plan": web})
+pl0 = pp.get_plan(store.load(PID), "")["plates"][0]
+ok(r.status_code == 200 and not pl0.get("master") and [c["kind"] for c in pl0.get("confirm") or []] == ["material"], f"web layout change drops master, keeps material confirm {r.get_json().get('error')}")
+au = db.conn().execute("SELECT detail FROM audit WHERE action LIKE '%主文件不再用%' ORDER BY id DESC LIMIT 1").fetchone()
+ok(au and "超出热床" in au[0], "dropped confirm items written to audit log")
+# 建议 4：主文件记着但文件没了：不悄悄按方案切
+p = store.load(PID)
+p2_ = next(x for x in p["print_plans"][""]["plates"] if x["id"] == P2)
+mpth = es.master_path(PID, "", p2_)
+os.rename(mpth, mpth + ".gone")
+rs = C.post(f"/api/products/{PID}/print-plan/slice", json={"spec": "", "plate_id": P2})
+ok(rs.status_code == 400 and "找不到" in rs.get_json()["error"], "missing master file -> error, no silent plan slicing")
+os.rename(mpth + ".gone", mpth)
+ok(p2_["master"]["file"] in es._referenced(PID, "", P2), "files referenced by plan are protected from history cleanup")
+# 建议 7：别人在软件里编辑时网页不能改这一盘；同一个人编辑期间网页改了这一盘 → 回传拒绝不覆盖
+r = PC.post(f"/api/products/{PID}/print-plan/edit/start", json={"spec": "", "plate_id": P2, "app": "orca"})
+S6 = r.get_json()
+web = C.get(f"/api/products/{PID}/print-plan").get_json()["plan"]
+wp = next(x for x in web["plates"] if x["id"] == P2)
+wp["layer_height"] = 0.16
+r = C.post(f"/api/products/{PID}/print-plan", json={"spec": "", "plan": web})
+ok(r.status_code == 400 and "Pong" in r.get_json()["error"] and "/" in r.get_json()["error"], f"boss cannot change the plate pong is editing {r.get_json().get('error', '')[:80]}")
+D6 = ANON.get(S6["download"]).data
+web = PC.get(f"/api/products/{PID}/print-plan").get_json()["plan"]
+wp = next(x for x in web["plates"] if x["id"] == P2)
+wp["layer_height"] = 0.16
+ok(PC.post(f"/api/products/{PID}/print-plan", json={"spec": "", "plan": web}).status_code == 200, "editor himself may change the plate in web")
+r = ANON.post(S6["upload"], data=D6)
+ok(r.status_code == 400 and "网页上被改过" in r.get_json()["error"], "upload after web change of the same plate refused (no overwrite)")
+# 建议 9：结束以后的上传（拿锁后再查状态）
+PC.post(f"/api/products/{PID}/print-plan/edit/abandon", json={"sid": S6["session"]["id"]})
+ok(ANON.post(S6["upload"], data=D6).status_code == 403, "upload after end refused")
+# 建议 1：上传上限比全局 60 MB 大（不是 413）
+big = b"x" * (70 * 1048576)
+r = C.post(f"/api/products/{PID}/print-plan/edit/start", json={"spec": "", "plate_id": P2, "app": "orca"})
+S7 = r.get_json()
+r = ANON.post(S7["upload"], data=big)
+ok(r.status_code == 400, f"70 MB upload reaches the check (not 413) {r.status_code}")
+del big
+# 建议 2：zip 炸弹
+bo = io.BytesIO()
+with zipfile.ZipFile(bo, "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("3D/3dmodel.model", "<model/>")
+    z.writestr("3D/bomb.model", b"\0" * (60 * 1048576))
+r = ANON.post(S7["upload"], data=bo.getvalue())
+ok(r.status_code == 400 and "压缩比" in r.get_json()["error"], f"zip bomb rejected {r.status_code} {r.get_json()}")
+C.post(f"/api/products/{PID}/print-plan/edit/finish", json={"sid": S7["session"]["id"]})
+# 建议 10：服务器错误提示有泰文
+ok(" / " in es.ENDED and "สิ้นสุด" in es.ENDED, "server errors have Thai")
+
 # 按主模型缩放的规格不能编辑
 ok(not os.path.exists(os.path.join(APP, "result.json")), "no result.json left in repo")
 shutil.rmtree(WORK, ignore_errors=True)
