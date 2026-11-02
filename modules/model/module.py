@@ -21,6 +21,7 @@ MODULE = {
     # 打印方案、展示模型：生产员工也要用（排盘、看颜色）；合并成模型 = 换 3D 模型，要「换模型」权限
     "production_allow": [("GET", r"^/api/products/[^/]+/(print-plan|display)(/[\w.-]+)*$"),
                          ("GET", r"^/api/products/[^/]+/model-status$"),
+                         ("GET", r"^/api/products/[^/]+/physical$"), ("POST", r"^/api/products/[^/]+/physical(/slice)?$"),
                          ("POST", r"^/api/products/[^/]+/print-plan(/(footprint|check|kit|slice|slice-all|fill|merge|copy|from-display|op|orients))?$"),
                          ("POST", r"^/api/products/[^/]+/display(/(ai|auto-select|auto-assemble|settle|explode|copy))?$"),
                          ("POST", r"^/api/products/[^/]+/spec-scale$"),

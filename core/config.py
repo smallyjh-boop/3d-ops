@@ -26,7 +26,8 @@ DEFAULT_CONFIG = {
     "hours_per_day_each": 8.0,           # 每台每天平均打印小时（开机率），越高摊到每件的固定成本越低
     "failure_rate": 0.05,                # 失败重打的比例
     "packaging_per_item": 10.0,          # 每件包材（泰铢）
-    "packaging_weight_g": 50,            # 包材重量（克），算包裹重量用
+    "packaging_weight_g": 50,            # 包材重量（克），没选纸箱时算包裹重量用（快递袋等）
+    "filler_weight_g": 20,               # v2.55.1：选了纸箱时的填充物重量（克）；包裹重量 = 净重 × 件数 + 纸箱 + 填充物
     # ---------- 定价 ----------
     "platform_fee_rate": 0.20,           # 平台扣点占位值（Lazada），请到卖家后台核实后修改
     "shopee_fee_rate": 0.0,              # Shopee 扣点，0 = 和 Lazada 一样

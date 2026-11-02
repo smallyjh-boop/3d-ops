@@ -1580,6 +1580,7 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
         raise ValueError("这一盘的主文件（切片软件保存的项目）找不到了：请在切片软件里重新编辑保存，或在网页上改一下摆盘后保存（改按方案切）"
                          " / ไม่พบไฟล์หลักของถาดนี้ กรุณาแก้ไขในโปรแกรมแล้วบันทึกใหม่")
     res, master_note = None, []
+    nosup = None                             # v2.55.1：不含支撑、不含冲刷的克数（算成品净重用）；主文件切的不知道支撑，留空
     if mpath:                                # v2.56：有软件保存的主文件 → 直接切它（软件里的全部设置都用上）
         import tempfile
         keep = tempfile.NamedTemporaryFile(suffix=".gcode.3mf", delete=False).name
@@ -1635,6 +1636,7 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
                                     arrange=False, filaments=fils if len(fils) > 1 else None,
                                     filament_name=None if len(fils) > 1 else (recipes.filament_for(rc, pname0) or None),
                                     filament_overrides=fo1, keep_settings=per_part)
+            nosup = _nosup_grams(cfg, path, printer_idx, fils, over, rc, pname0, fo1, per_part, res)
         finally:
             try:
                 os.remove(path)
@@ -1653,6 +1655,8 @@ def slice_plate(pid, spec, plate_id, colour="", printer_idx=None, user=""):
               [{"slot": 1, "grams": res.get("grams") or 0}],
               "purge_g": round(float(res.get("purge_g") or 0), 2), "changes": int(res.get("changes") or 0),
               "hours": res.get("hours"), "grams": res.get("grams"), "at": time.time(), "colour": colour}
+    if nosup is not None:
+        sliced["nosup_g"] = round(nosup, 2)       # v2.55.1：这一盘不含支撑、不含冲刷的克数（算成品净重用）
     p = store.load(pid)
     plans = p.get("print_plans") if isinstance(p.get("print_plans"), dict) else {}
     if (plans.get(spec) or {}).get("follow"):          # 按主模型缩放的规格：结果记在 sliced_by（带摆盘签名）
@@ -1690,6 +1694,31 @@ def _master_colours(plan, plate, colour, cfg):
     from . import slicerproj
     hx = slicerproj.plate_hexes(plan, plate, colour, cfg)
     return [hx.get(s["slot"]) or "" for s in plate.get("slots") or []]
+
+
+def _net_of(res):
+    """切片结果的「净」克数：各耗材克数合计 − 换色冲刷。"""
+    fil = res.get("filaments") or []
+    tot = sum(float(f.get("grams") or 0) for f in fil) if fil else float(res.get("grams") or 0)
+    return max(0.0, tot - float(res.get("purge_g") or 0))
+
+
+def _nosup_grams(cfg, path, printer_idx, fils, over, rc, pname0, fo1, per_part, res):
+    """v2.55.1 成品净重要扣支撑：这一盘开了支撑 → 关掉支撑同样的参数再切一次，只取克数（不存文件）；
+    没开支撑 → 就是这次切片的净克数。再切失败返回 None（净重退回含支撑的克数，界面上标出来）。"""
+    from core import recipes, slicer
+    if str((over or {}).get("enable_support", "0")) != "1":
+        return _net_of(res)
+    o2 = {k: v for k, v in (over or {}).items() if not k.startswith("support_")}
+    o2["enable_support"] = "0"
+    try:
+        r2 = slicer.orca_slice(cfg, path, printer_idx, fils[0]["material"], overrides=o2, keep_to=None, copies=1, orient=False,
+                               arrange=False, filaments=fils if len(fils) > 1 else None,
+                               filament_name=None if len(fils) > 1 else (recipes.filament_for(rc, pname0) or None),
+                               filament_overrides=fo1, keep_settings=per_part)
+    except (slicer.SliceError, OSError, ValueError):
+        return None
+    return _net_of(r2)
 
 
 def slice_warnings(p, plate, rc):
@@ -1805,6 +1834,11 @@ def slice_all(pid, user="", specs=None):
                             filled[s] = _fill_from(pid, s, "", user)
             except (ValueError, OSError) as e:
                 prog["errors"].append({"spec": k, "plate": "", "no": 0, "error": f"填克数没成功：{e}"})
+        try:                        # v2.55.1：切完按方案算每个规格的成品净重（实物数据，待确认）
+            from . import physical as _phys
+            _phys.update_net(pid, None, user)
+        except Exception as e:  # noqa: BLE001  算净重失败不影响切片结果
+            prog["errors"].append({"spec": "", "plate": "", "no": 0, "error": f"算净重没成功：{e}"})
     finally:
         prog["running"] = False
         prog["current"] = ""

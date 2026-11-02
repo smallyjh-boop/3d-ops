@@ -3,6 +3,7 @@
 尺寸（宽 × 长 × 高，厘米）按泰国常见的邮政纸箱规格。每个产品在编辑页选一种（product["pack_box"]），
 订单发货时默认用订单里最大的那个，打包页可以改；发货出库时扣这个纸箱的库存。
 纸箱在库存里是「包材」物品，编码 BOX-<规格>（例如 BOX-2A），第一次用到时自动建档。
+每个纸箱带空箱重量 weight_g（v2.55.1，算包裹重量）。
 对外：catalog()  get(code)  item_code(code)  ensure_item(code)  fit(长, 宽, 高)  biggest(codes)
 """
 from .. import db
@@ -13,6 +14,9 @@ BOXES = [
     ("CD", 15, 15, 15), ("B", 17, 25, 9), ("2B", 17, 25, 18), ("C", 20, 30, 11), ("C+9", 20, 30, 20), ("D", 22, 35, 14),
     ("D+11", 22, 35, 25), ("E", 24, 40, 17), ("F", 30, 45, 20), ("G", 31, 36, 26), ("H", 40, 45, 34), ("I", 45, 55, 40),
 ]
+# v2.55.1：空纸箱重量（克，单层瓦楞纸的大概值，算包裹重量用；以后实称了可以改这里）
+BOX_WEIGHT = {"00": 20, "0": 25, "0+4": 35, "AA": 30, "A": 35, "2A": 55, "CD": 60, "B": 65, "2B": 100, "C": 110, "C+9": 150,
+              "D": 160, "D+11": 230, "E": 230, "F": 320, "G": 330, "H": 550, "I": 800}
 NONE = "none"          # 产品 / 订单：不用纸箱（例如用快递袋，快递袋按「每单 / 每件」规则扣）
 
 
@@ -22,7 +26,7 @@ def _fmt(x):
 
 def _row(code, w, l, h):
     size = f"{_fmt(w)}×{_fmt(l)}×{_fmt(h)}"
-    return {"code": code, "w": w, "l": l, "h": h, "vol": w * l * h, "size": size,
+    return {"code": code, "w": w, "l": l, "h": h, "vol": w * l * h, "size": size, "weight_g": BOX_WEIGHT.get(code, 0),
             "zh": f"{code}（{size} cm）", "th": f"เบอร์ {code} ({size} ซม.)", "item_code": item_code(code)}
 
 

@@ -319,8 +319,9 @@ def mark_failed_run(job, reason, note, user):
     c.commit()
 
 
-def submit_result(job_id, ok, issues=None, note="", grams=None, hours=None, dest="", photos=None, user=""):
-    """员工填「试打结果」。ok → 文件自动试打验证、实际克数 / 时长写回款式（成本更新）、按去向处理这批成品；失败 → 记原因、文件退回草稿。"""
+def submit_result(job_id, ok, issues=None, note="", grams=None, hours=None, dest="", photos=None, user="", weighed=None):
+    """员工填「试打结果」。ok → 文件自动试打验证、实际克数 / 时长写回款式（成本更新）、按去向处理这批成品；失败 → 记原因、文件退回草稿。
+    v2.55.1 weighed：一件成品（去掉支撑后）实称的克数 → 这个规格的成品净重（实物数据，src=weighed）。"""
     from . import production
     c = db.conn()
     j = production._job(c, job_id)
@@ -334,9 +335,11 @@ def submit_result(job_id, ok, issues=None, note="", grams=None, hours=None, dest
     issues = [str(x) for x in (issues or []) if str(x).strip()]
     num = (lambda v: float(v) if v not in (None, "") else None)
     try:
-        grams, hours = num(grams), num(hours)
+        grams, hours, weighed = num(grams), num(hours), num(weighed)
     except (TypeError, ValueError):
-        raise ValueError("克数 / 时长要填数字")
+        raise ValueError("克数 / 时长 / 称重要填数字")
+    if weighed is not None and weighed <= 0:
+        raise ValueError("称重要填大于 0 的克数")
     if ok and dest not in DESTS:
         raise ValueError("请选择这批成品的去向：合格入库 / 当样品 / 报废")
     if ok and dest == "stock" and not _single_plate(t):
@@ -348,6 +351,8 @@ def submit_result(job_id, ok, issues=None, note="", grams=None, hours=None, dest
         if f:
             print_files.verify(f["id"], True, user, grams, hours, note or "试打合格", photo_names[0] if photo_names else None)
         applied = _write_back(t, grams, hours) if (grams or hours) else []
+        if weighed:
+            _write_weighed(t, weighed, user)
         qty = int(t.get("qty") or 1)
         if dest == "stock":
             production.stock_add(t["sku"], qty, f"备货打印 试打合格入库 试打#{t['id']}", user, t["product_id"], j["name"], j["color"])
@@ -392,6 +397,18 @@ def _write_back(t, grams, hours):
     if pp and hasattr(pp, "apply_actual"):
         return pp.apply_actual(t["product_id"], t["spec"], t["plate_id"], grams, hours, t.get("sku") or "")
     return []
+
+
+def _write_weighed(t, grams, user):
+    """试打成品实称的重量 → 这个规格的成品净重（实称，人填的 = 已确认）。成本 / 扣库存不用它（还是用变体克数）。"""
+    from . import physical, store
+    p = store.load(t["product_id"])
+    spec = (t.get("spec") or "").strip()
+    if spec not in physical.spec_keys(p):
+        spec = physical.spec_keys(p)[0]
+    physical.set_item(p, spec, "net", grams, "weighed", user, ok=True)
+    store.save(p)
+    db.audit(user, "试打称重", t["product_id"], f"{spec or '默认'} 成品净重 {grams:g} g")
 
 
 def save_photo(job_id, fileobj):

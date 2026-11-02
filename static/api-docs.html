@@ -114,7 +114,8 @@ th{background:#f9fafb}
 
 <h2><span class="m get">GET</span>/api/v1/skus　产品 SKU 列表</h2>
 <p>所有产品变体的 SKU、颜色、克数、打印时长。v2.9.1 起还返回：材质、售价（最终价 / 建议价 / 最低价）、单件成本拆分 <code>unit_cost</code>、
-预估包裹重量 <code>est_package_weight_g</code>（克数 + 包材重量）、包裹尺寸、Lazada / Shopee 类目、导出时间。
+预估包裹重量 <code>est_package_weight_g</code>（v2.55.1 起按规格的实物数据：净重 + 纸箱 + 填充物；没有净重时 = 克数 + 包材重量）、包裹尺寸
+（v2.55.1 起每个规格自己的；<code>physical_confirmed</code> = 尺寸 / 净重 / 包裹尺寸 / 包裹重量都已人工确认）、Lazada / Shopee 类目、导出时间。
 参数 <code>since</code>（Unix 秒）：只返回之后改过的产品。</p>
 <p>每条都有 <code>product_id</code>（产品编号，如 <code>3DP0012</code>）和 <code>updated_at</code>（产品最后修改时间，Unix 秒；改资料、改上架状态都会变）。
 v2.12.1 起多 <code>variant</code>（规格中文名，和 <code>spec</code> 一样；没有规格为空）。v2.12 起多返回：<code>product_code</code>（和 <code>product_id</code> 一样）、<code>draft</code>（选品 / 采集建的、还没填颜色的草稿为 true）、

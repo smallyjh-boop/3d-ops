@@ -987,7 +987,7 @@ def trial_result(jid):
         issues, photos = fm.get("issues") or [], []
     try:
         return jsonify(trial.submit_result(jid, str(fm.get("ok")) in ("1", "true", "True"), issues, fm.get("note") or "", fm.get("grams"),
-                                           fm.get("hours"), fm.get("dest") or "", photos, _uname()))
+                                           fm.get("hours"), fm.get("dest") or "", photos, _uname(), fm.get("weighed")))
     except ValueError as e:
         return err(str(e))
 

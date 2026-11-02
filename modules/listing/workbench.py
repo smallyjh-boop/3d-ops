@@ -5,6 +5,8 @@ issues(pid, platform)   上架检查的红色 / 黄色项，每条带 fix：
                           confirm_cat AI 选的类目要确认 → fix(pid, "confirm_cat")（同时给出类目名）
                           confirm_attr AI 填的属性要确认 → fix(pid, "confirm_attr")（同时给出属性名和值）
                           confirm_pkg 包裹尺寸是估算的 → fix(pid, "confirm_pkg")（同时给出尺寸）
+                          confirm_phys v2.55.1 实物数据（尺寸 / 净重 / 包裹尺寸 / 包裹重量）没确认 → 原地看、改（set_phys）、确认；
+                                      confirm_phys_batch(ids) 批量确认（有红色问题 / 缺值的跳过）
                           edit        要人工改（打开编辑页）
 fix(pid, action, user)  原地修
 ai_fill(ids, platform, user)  选类目、填属性、补空着的文案（后台任务，进任务中心）
@@ -28,6 +30,8 @@ def _fix_of(text):
         return "confirm_cat"
     if "AI 不确定，请确认" in text:
         return "confirm_attr"
+    if "实物数据" in text:
+        return "confirm_phys"
     if "包裹尺寸是 AI 估算的" in text:
         return "confirm_pkg"
     if "上传图床" in text:
@@ -54,10 +58,22 @@ def issues(pid, platform="lazada"):
         "check_attrs": [{"key": k, "label": labels.get(k, k), "value": a.get("value")}
                         for k, a in (p.get("attributes") or {}).items() if a.get("status") == "check"],
         "package": p.get("package") or {},
+        "physical": _phys_rows(p),
     }
 
 
-def fix(pid, action, user=""):
+def _phys_rows(p):
+    from core import physical
+    out = []
+    for s, r in physical.rows(p).items():
+        out.append({"spec": s, "ok": r["ok"], "missing": r["missing"], "box": r["box"], "qty": r["qty"],
+                    "checks": r["checks"], **{f: {k: r[f][k] for k in ("v", "src", "ok", "by", "at")} for f in physical.FIELDS}})
+    return out
+
+
+def fix(pid, action, user="", data=None):
+    from core import physical
+    data = data or {}
     p = store.load(pid)
     if action == "confirm_cat":
         if not (p.get("category") or {}).get("id"):
@@ -73,11 +89,48 @@ def fix(pid, action, user=""):
                 a["status"] = "manual"
     elif action == "confirm_pkg":
         p["package_status"] = "manual"
+    elif action == "confirm_phys":          # 一个产品（或一个规格）的实物数据全部确认
+        keys = physical.spec_keys(p)
+        specs = [data["spec"]] if data.get("spec") is not None and data.get("spec") in keys else keys
+        for s in specs:
+            physical.confirm(p, s, data.get("fields"), user)
+    elif action == "set_phys":              # 原地改一项（人工写入 = 已确认）
+        spec = (data.get("spec") or "").strip()
+        if spec not in physical.spec_keys(p):
+            raise ValueError("没有这个规格（刷新一下）")
+        physical.set_item(p, spec, data.get("field"), data.get("value"), "manual", user, ok=True)
     else:
         raise ValueError("不支持的操作")
     store.save(p)
     db.audit(user, "上架工作台确认", pid, action)
     return issues(pid)
+
+
+def confirm_phys_batch(ids, user=""):
+    """批量确认实物数据：每个规格 4 项都有值、没有红色问题的才确认；其它跳过并说明原因。"""
+    from core import physical
+    done, skipped = [], []
+    for pid in ids:
+        try:
+            p = store.load(pid)
+        except FileNotFoundError:
+            skipped.append({"id": pid, "reason": "产品不存在"})
+            continue
+        bad = []
+        for s, r in physical.rows(p).items():
+            empty = [physical.FIELD_ZH[f] for f in physical.FIELDS if r[f]["v"] in (None, 0, [])]
+            reds = [c["zh"] for c in r["checks"] if c["level"] == "red"]
+            if empty or reds:
+                bad.append(f"{s or '默认'}：" + "；".join((["没有" + "、".join(empty)] if empty else []) + reds))
+                continue
+            physical.confirm(p, s, None, user)
+        store.save(p)
+        if bad:
+            skipped.append({"id": pid, "reason": " / ".join(bad)})
+        else:
+            done.append(pid)
+    db.audit(user, "上架工作台批量确认实物数据", f"{len(done)} 个", ", ".join(done)[:300])
+    return {"ok": True, "done": done, "skipped": skipped}
 
 
 def _fill_one(cfg, p, platform):
